@@ -94,6 +94,15 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 
 界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID。
 
+## 打包
+
+```powershell
+scripts\build-frontend.ps1     # 前端产物
+scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
+```
+
+产物是绿色包：`secs-sim.exe` + `web/` + `start.cmd`，双击即用（无需安装 JVM）。
+
 ## 三条铁律
 
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
@@ -109,5 +118,5 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md)
 - [配置格式 Schema v4](docs/schema-v4.md)

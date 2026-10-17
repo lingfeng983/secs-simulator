@@ -1,4 +1,4 @@
-# 构建 React 前端。默认用 PATH 里的 node/pnpm；DSH 环境可用 DSH_NODE / DSH_PNPM 覆盖。
+﻿# 构建 React 前端。默认用 PATH 里的 node/pnpm；DSH 环境可用 DSH_NODE / DSH_PNPM 覆盖。
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 

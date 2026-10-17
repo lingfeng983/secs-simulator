@@ -4,6 +4,9 @@ target/
 *.jar
 *.war
 
+# ---- packaging ----
+package/
+
 # ---- native / runtime images ----
 runtime/
 *.aot
