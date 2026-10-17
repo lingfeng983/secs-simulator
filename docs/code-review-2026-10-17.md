@@ -94,10 +94,19 @@
 
 ### D. 下轮评审补课
 
-1. `secs-core`（领域模型/曲线/编译器，79 个测试但无深评）：✅ 深评完成（2 高 / 4 中 / 7 低），修复进行中。
-2. `secs-json`（解析健壮性：嵌套深度、大数字、转义）：✅ 深评完成（2 高 / 8 中 / 9 低），修复进行中。
-3. `secs-protocol` 抽查升级为定点深评（HSMS 帧长度字段、SECS-II 解码边界）：✅ 深评完成（2 高 / 5 中 / 4 低），修复进行中。
-4. `secs-cli` 端到端测试宿主与 `scripts/`、`packaging/` PowerShell 脚本健壮性：未开始。
+> ⚠️ **深评报告可信度警示**：三个深评 agent 的报告中大量符号名/行号系臆造（如 core 的 `lastFireMs`/`StpTask`/`AsciiIdentifier`、json 的 `escapeJsonString`/`stpParseToJson`/`enum Hello` 在原代码中均不存在），但部分 bug 描述本身真实。所有条目均经 grep/Read 独立取证后修复，"核实不存在"项已回退或不修。
+
+1. `secs-core`：✅ 全部完成。深评 2 高 4 中 7 低 → 真实修复 5 项：`GraphValueSource` 双 volatile 字段并发写花（塌缩为单 volatile 不可变 Snapshot 原子发布）、`Trigger.Periodic` jitter 跨窗口永久丢事件（k 扫描区间按 ±jitter 放宽）、`TemplateGraph.evaluateRange` 物化整窗改懒迭代、`Expression` 解析深度上限 64 层（与 json/protocol 统一）、`collectGlobalSvids` first-wins 语义 javadoc 显式化。`EventSchedule.between()` 物化经论证为理论风险（调用方有界）→ javadoc 写明契约。测试 79 → 86。
+2. `secs-json`：✅ 全部完成。深评 2 高 8 中 9 低 → 修复：`\uXXXX` 有符号解析致乱码（重写为无符号 char + 代理配对）、非法转义/孤立代理静默吞数据（一律抛 `JsonHubParseException` 带位置）、控制字符不转义（`escape(unescape(s))==s` 不变量）、嵌套深度 64 层、剥 UTF-8 BOM、异常消息 snippet 截断 256 字符、`get(String...)` 叶子 CCE、`parse(null)` 显式 NPE、pretty printer 去全局串行化锁。**已接受 risk**：宽松数字语法（`1e5` 拒、大整数 double 精度损失 >2^53）、duplicate key 保序保留——javadoc 注明 + 测试锁定。测试 0 → 110。
+3. `secs-protocol`：✅ 全部完成。深评 2 高 5 中 4 低 → 修复 8 项（`supportSType` 误调 `supportPType` 致合法控制消息被 REJECT、`deviceId` 掩码 0x7F00 丢高位、`Secs2Ascii` 控制字符 JSON 转义、SECS-II 嵌套深度 64 层、`BytesPack.get` 先校验后分配、`readToBuffer` T8 覆盖消息内读、`maxMessageBytes` 默认 8MiB 按长度拒绝、短帧日志）；**回退 2 项无据改动**（accept 连接上限、reply deviceId 匹配——无复现证据）。测试 0 → 45。
+4. `secs-cli` 端到端测试宿主与 `scripts/`、`packaging/` PowerShell 健壮性：未开始（优先级低，BOM 检查已随 C5 进 CI）。
+
+**回归修复（8b3fbb0）**：b8402b5 的 protocol 健壮化引入两处回归，由 secs-cli 全量套件暴露（`SessionTraceTest` connect 后整 1000ms 掉线）：
+- `activeCircuit` 的 `circuitCompleted` 在 connect 完成时置位 → 主线程 `wait(1000)` 睡满退出 → finally 提前 `NOT_CONNECTED` 拆连接（短用例不受害，protocol 单模块全绿而 cli 红——**模块测试全绿 ≠ 无回归，跨模块集成测试才是最后防线**）。修复：flag 改名 `circuitClosed`，置位移至连接结束（`completed()` finally / `failed()`）。
+- `readToBuffer` 对消息间隙的首字节读也套 T8 → 空闲 SELECTED 链路 6s 成僵尸（linktest 默认禁用）。修复：T8 只覆盖消息内读，pre-select 静默对端归 T7。
+- 新增回归测试：跨 1000ms tick 长连接、空闲 >T8 链路存活、T7 掉 pre-select 静默对端。
+
+**终态验证**：`mvn -o verify` 335 测试全绿（json 110 / protocol 45 / core 86 / app 16 / api-http 33 / runtime 12 / cli 33）；前端 `tsc --noEmit` + `vite build` 通过。
 
 ---
 
