@@ -88,3 +88,14 @@ input {
 }
 
 .token-panel input { margin-right: 0.5rem; }
+.messages { table-layout: fixed; }
+.messages .body {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+.messages th:nth-child(1) { width: 7rem; }
+.messages th:nth-child(2) { width: 6rem; }
+.messages th:nth-child(3) { width: 4rem; }
+.messages th:nth-child(4) { width: 6rem; }

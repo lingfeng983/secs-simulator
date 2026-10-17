@@ -27,6 +27,17 @@ export interface Health {
   uptimeMs?: number;
 }
 
+/** SSE 推送的报文事件（与后端 MessageEvent 对应）。 */
+export interface WireMessage {
+  sessionId: string;
+  direction: 'in' | 'out';
+  stream: number;
+  function: number;
+  wbit: boolean;
+  body: string;
+  at: number;
+}
+
 export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;

@@ -9,10 +9,16 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.shimizukenta.secssim.app.event.EventBus;
+import com.shimizukenta.secssim.app.event.MessageEvent;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -53,7 +59,10 @@ public final class HttpApiServer implements AutoCloseable {
     private final String token;
     private final ApiContext context;
     private final Path webRoot;
+    private final CopyOnWriteArrayList<BlockingQueue<String>> subscribers = new CopyOnWriteArrayList<>();
     private final Instant startedAt = Instant.now();
+
+    private AutoCloseable eventSubscription;
 
     private HttpApiServer(HttpServer server, ExecutorService executor, String token, ApiContext context,
                           Path webRoot) {
@@ -93,6 +102,22 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public static HttpApiServer start(InetSocketAddress bind, String token, ApiContext context,
                                       Path webRoot) throws IOException {
+        return start(bind, token, context, webRoot, null);
+    }
+
+    /**
+     * 启动服务器，并把报文事件推给 SSE 订阅者。
+     *
+     * @param bind    绑定地址
+     * @param token   访问令牌
+     * @param context 运行时信息
+     * @param webRoot 静态资源根目录，{@code null} 表示不托管
+     * @param bus     事件总线，{@code null} 表示不推报文
+     * @return 已启动的服务器
+     * @throws IOException 绑定失败
+     */
+    public static HttpApiServer start(InetSocketAddress bind, String token, ApiContext context,
+                                      Path webRoot, EventBus bus) throws IOException {
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("token must not be blank");
         }
@@ -107,6 +132,10 @@ public final class HttpApiServer implements AutoCloseable {
 
         HttpApiServer api = new HttpApiServer(http, pool, token, context, normalizeRoot(webRoot));
         http.setExecutor(pool);
+
+        if (bus != null) {
+            api.eventSubscription = bus.subscribe(api::broadcast);
+        }
 
         http.createContext(PATH_HEALTH, api::handleHealth);
         http.createContext(PATH_EVENTS, api::handleEvents);
@@ -132,8 +161,46 @@ public final class HttpApiServer implements AutoCloseable {
         return this.server.getAddress().getPort();
     }
 
+    /**
+     * 把一条报文事件推给所有 SSE 订阅者。
+     *
+     * <p>订阅者队列满了就丢最旧的一帧：界面宁可缺几条，也不能把内存拖爆或阻塞会话。</p>
+     */
+    private void broadcast(MessageEvent event) {
+        if (this.subscribers.isEmpty()) {
+            return;
+        }
+
+        String frame = "event: message\ndata: "
+                + "{\"sessionId\":\"" + json(event.sessionId()) + "\""
+                + ",\"direction\":\"" + json(event.direction()) + "\""
+                + ",\"stream\":" + event.stream()
+                + ",\"function\":" + event.function()
+                + ",\"wbit\":" + event.wbit()
+                + ",\"body\":\"" + json(event.body()) + "\""
+                + ",\"at\":" + event.atMillis()
+                + "}\n\n";
+
+        for (BlockingQueue<String> queue : this.subscribers) {
+            if (!queue.offer(frame)) {
+                queue.poll();
+                queue.offer(frame);
+            }
+        }
+    }
+
     @Override
     public void close() {
+        AutoCloseable subscription = this.eventSubscription;
+        if (subscription != null) {
+            try {
+                subscription.close();
+            } catch (Exception ignore) {
+                /* 关闭阶段的异常无需处理 */
+            }
+            this.eventSubscription = null;
+        }
+
         this.server.stop(0);
         this.executor.shutdownNow();
         try {
@@ -307,20 +374,30 @@ public final class HttpApiServer implements AutoCloseable {
         ex.sendResponseHeaders(200, 0);
 
         Instant deadline = Instant.now().plus(SSE_MAX_LIFETIME);
+        BlockingQueue<String> queue = new LinkedBlockingQueue<>(256);
+        this.subscribers.add(queue);
+
         try (OutputStream out = ex.getResponseBody()) {
             while (Instant.now().isBefore(deadline)) {
-                out.write(("event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n")
-                        .getBytes(StandardCharsets.UTF_8));
-                out.flush();
+                String frame;
                 try {
-                    Thread.sleep(SSE_HEARTBEAT.toMillis());
+                    frame = queue.poll(SSE_HEARTBEAT.toMillis(), TimeUnit.MILLISECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
                 }
+
+                if (frame == null) {
+                    frame = "event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n";
+                }
+
+                out.write(frame.getBytes(StandardCharsets.UTF_8));
+                out.flush();
             }
         } catch (IOException clientGone) {
             /* 客户端断开是常态，静默退出 */
+        } finally {
+            this.subscribers.remove(queue);
         }
     }
 
@@ -361,6 +438,13 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private static String json(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", " ")
+                .replace("\n", " ");
     }
 }

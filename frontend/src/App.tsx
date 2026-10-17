@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createClient, readToken, saveToken, type Health, type SessionSummary } from './api';
+import {
+  createClient,
+  readToken,
+  saveToken,
+  type Health,
+  type SessionSummary,
+  type WireMessage,
+} from './api';
 
 interface LogLine {
   at: string;
@@ -16,6 +23,7 @@ export function App(): JSX.Element {
   const [ceid, setCeid] = useState(2001);
   const [log, setLog] = useState<LogLine[]>([]);
   const [streamState, setStreamState] = useState('未连接');
+  const [messages, setMessages] = useState<WireMessage[]>([]);
   const logRef = useRef<HTMLPreElement | null>(null);
 
   const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
@@ -55,6 +63,14 @@ export function App(): JSX.Element {
     stream.addEventListener('open', () => setStreamState('已连接'));
     stream.addEventListener('heartbeat', (event) => {
       setStreamState(`心跳 ${new Date(Number(event.data)).toLocaleTimeString()}`);
+    });
+    stream.addEventListener('message', (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as WireMessage;
+        setMessages((previous) => [...previous.slice(-199), parsed]);
+      } catch {
+        append('收到无法解析的报文事件');
+      }
     });
     stream.addEventListener('error', () => setStreamState('断开，重连中'));
 
@@ -180,6 +196,46 @@ export function App(): JSX.Element {
               onChange={(event) => setCeid(Number(event.target.value))}
             />
           </label>
+        </section>
+
+        <section>
+          <h2>
+            报文 <button type="button" onClick={() => setMessages([])}>清空</button>
+          </h2>
+          <table className="messages">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>会话</th>
+                <th>方向</th>
+                <th>报文</th>
+                <th>报文体</th>
+              </tr>
+            </thead>
+            <tbody>
+              {messages.map((message, index) => (
+                <tr key={`${message.at}-${index}`}>
+                  <td>{new Date(message.at).toLocaleTimeString()}</td>
+                  <td>{message.sessionId}</td>
+                  <td>{message.direction === 'in' ? '← 收' : '→ 发'}</td>
+                  <td>
+                    S{message.stream}F{message.function}
+                    {message.wbit ? ' W' : ''}
+                  </td>
+                  <td className="body" title={message.body}>
+                    {message.body.length > 120 ? `${message.body.slice(0, 120)}…` : message.body}
+                  </td>
+                </tr>
+              ))}
+              {messages.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    暂无报文（主机连上并收发报文后会出现在这里）
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </section>
 
         <section>
