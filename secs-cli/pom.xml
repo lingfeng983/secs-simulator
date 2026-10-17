@@ -18,7 +18,7 @@
 
   <!-- 原生镜像路径：默认指向构建产物，可被 -Dsecs.smoke.exe=... 覆盖 -->
   <properties>
-    <secs.smoke.exe>${project.build.directory}/secs-smoke.exe</secs.smoke.exe>
+    <secs.smoke.exe>${project.build.directory}/secs-sim.exe</secs.smoke.exe>
   </properties>
 
   <dependencies>
@@ -67,8 +67,8 @@
             <artifactId>native-maven-plugin</artifactId>
             <version>1.1.14</version>
             <configuration>
-              <imageName>secs-smoke</imageName>
-              <mainClass>com.shimizukenta.secssim.cli.NativeSmoke</mainClass>
+              <imageName>secs-sim</imageName>
+              <mainClass>com.shimizukenta.secssim.runtime.Main</mainClass>
               <buildArgs>
                 <buildArg>-H:+ReportExceptionStackTraces</buildArg>
                 <buildArg>-Dfile.encoding=UTF-8</buildArg>
