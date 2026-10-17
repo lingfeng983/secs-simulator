@@ -228,13 +228,13 @@ class HsmsSsIntegrationTest {
     }
 
     @Test
-    @DisplayName("T8 covers the first read: a silent peer is timed out, not hung")
-    void t8TimeoutTerminatesSilentPeerConnection() throws IOException {
+    @DisplayName("T7 drops a silent pre-select peer (T8 must not police inter-message idle)")
+    void silentPreSelectPeerIsDroppedByT7() throws IOException {
         int port = freePort();
 
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
         config.socketAddress(new InetSocketAddress("127.0.0.1", port));
-        config.timeout().t8(0.5F);
+        config.timeout().t7(1F);
         openPassive(config);
 
         try ( Socket client = new Socket("127.0.0.1", port) ) {
@@ -249,7 +249,121 @@ class HsmsSsIntegrationTest {
                 }
             }, 8000L);
 
-            awaitLog(log -> isThrowable(log, HsmsSsTimeoutT8Exception.class), 5000L);
+            awaitLog(log -> isThrowable(log, HsmsSsTimeoutT7Exception.class), 5000L);
+        }
+    }
+
+    @Test
+    @DisplayName("a selected session stays alive across the 1000ms circuit-wait tick")
+    void longLivedSessionSurvivesCircuitWaitTick() throws Exception {
+        int port = freePort();
+
+        HsmsSsCommunicatorConfig passiveConfig = new HsmsSsCommunicatorConfig();
+        passiveConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        HsmsSsCommunicator passive = openPassive(passiveConfig);
+
+        HsmsSsCommunicatorConfig activeConfig = new HsmsSsCommunicatorConfig();
+        activeConfig.protocol(HsmsSsProtocol.ACTIVE);
+        activeConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        activeConfig.timeout().t3(10F);
+        activeConfig.timeout().t6(3F);
+        activeConfig.timeout().t5(1F);
+        activeConfig.timeout().t8(30F);
+        HsmsSsCommunicator active = HsmsSsCommunicator.newInstance(activeConfig);
+        communicators.add(active);
+        active.addSecsLogListener(logs::add);
+        active.open();
+
+        List<SecsMessage> received = new CopyOnWriteArrayList<>();
+        passive.addSecsMessageReceiveListener(msg -> {
+            received.add(msg);
+            try {
+                passive.send(msg, 1, 2, false, Secs2.ascii("PONG"));
+            }
+            catch ( Exception ignore ) {
+            }
+        });
+
+        try {
+            active.openAndWaitUntilCommunicating();
+
+            /* three transactions, each separated by more than the 1000ms
+             * circuit-wait tick: the circuit loop must stay parked until the
+             * connection really ends */
+            for ( int i = 0; i < 3; ++i ) {
+                Optional<SecsMessage> r = active.send(1, 1, true, Secs2.ascii("PING" + i));
+
+                assertTrue(r.isPresent(), "transaction " + i + " must be answered");
+                assertEquals("PONG", r.get().secs2().getAscii());
+
+                if ( i < 2 ) {
+                    sleep(1200L);
+                }
+            }
+
+            awaitCondition(() -> received.size() >= 3, 5000L);
+            assertTrue(active.isOpen(), "active communicator must still be open");
+        }
+        finally {
+            active.close();
+            passive.close();
+        }
+    }
+
+    @Test
+    @DisplayName("an idle selected link survives beyond T8 (T8 is an inter-character timeout)")
+    void idleSelectedLinkSurvivesBeyondT8() throws Exception {
+        int port = freePort();
+
+        HsmsSsCommunicatorConfig passiveConfig = new HsmsSsCommunicatorConfig();
+        passiveConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        HsmsSsCommunicator passive = openPassive(passiveConfig);
+
+        HsmsSsCommunicatorConfig activeConfig = new HsmsSsCommunicatorConfig();
+        activeConfig.protocol(HsmsSsProtocol.ACTIVE);
+        activeConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        activeConfig.timeout().t3(10F);
+        activeConfig.timeout().t6(3F);
+        activeConfig.timeout().t5(1F);
+        /* T8 stays at its 6s default on both sides */
+        HsmsSsCommunicator active = HsmsSsCommunicator.newInstance(activeConfig);
+        communicators.add(active);
+        active.addSecsLogListener(logs::add);
+        active.open();
+
+        List<SecsMessage> received = new CopyOnWriteArrayList<>();
+        passive.addSecsMessageReceiveListener(msg -> {
+            try {
+                passive.send(msg, 1, 2, false, Secs2.ascii("PONG"));
+            }
+            catch ( Exception ignore ) {
+            }
+        });
+
+        try {
+            active.openAndWaitUntilCommunicating();
+
+            final long tryConnectsBefore = countLog(logs,
+                    l -> "HSMS-SS Try-Connect".equals(l.subject()));
+
+            /* idle for longer than T8: no message is in flight, so the
+             * inter-character timeout must not fire */
+            sleep(7500L);
+
+            Optional<SecsMessage> r = active.send(1, 1, true, Secs2.ascii("PING"));
+            assertTrue(r.isPresent(), "the idle link must still carry transactions");
+            assertEquals("PONG", r.get().secs2().getAscii());
+
+            /* and it must be the SAME connection: no T8, no reconnect */
+            assertTrue(logs.stream().noneMatch(l -> isThrowable(l, HsmsSsTimeoutT8Exception.class)),
+                    "T8 must not fire while the link is idle between messages");
+            assertEquals(tryConnectsBefore, countLog(logs,
+                    l -> "HSMS-SS Try-Connect".equals(l.subject())),
+                    "the connection must not have been re-established");
+        }
+        finally {
+            active.close();
+            passive.close();
         }
     }
 

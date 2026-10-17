@@ -60,7 +60,7 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 			
 			final SocketAddress socketAddr = hsmsSsConfig().socketAddress().getSocketAddress();
 			
-			final AtomicBoolean circuitCompleted = new AtomicBoolean(false);
+			final AtomicBoolean circuitClosed = new AtomicBoolean(false);
 			
 			try {
 				notifyLog(HsmsSsConnectionLog.tryConnect(socketAddr));
@@ -69,8 +69,6 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 					
 					@Override
 					public void completed(Void none, Void attachment) {
-						
-						circuitCompleted.set(true);
 						
 						SocketAddress local = null;
 						SocketAddress remote = null;
@@ -93,41 +91,47 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 							try {
 								channel.shutdownOutput();
 							}
-							catch (IOException giveup) {
-							}
-							
-							synchronized ( channel ) {
-								channel.notifyAll();
-							}
-							
-							notifyLog(HsmsSsConnectionLog.closed(local, remote));
+						catch (IOException giveup) {
+						}
+						
+						synchronized ( channel ) {
+							circuitClosed.set(true);
+							channel.notifyAll();
+						}
+						
+						notifyLog(HsmsSsConnectionLog.closed(local, remote));
 						}
 					}
 					
 					@Override
 					public void failed(Throwable t, Void attachment) {
 						
-						circuitCompleted.set(true);
-						
 						if ( ! (t instanceof ClosedChannelException) ) {
 							notifyLog(t);
 						}
 						
 						synchronized ( channel ) {
+							circuitClosed.set(true);
 							channel.notifyAll();
 						}
 					}
 				});
 				
-				synchronized ( channel ) {
-					
-					/* Wait until the connect completes, but wake up every second
-					 * to check isClosed(), so that close() never hangs this loop
-					 * even if the notifyAll is missed. */
-					while ( ! circuitCompleted.get() && ! isClosed() ) {
-						channel.wait(1000L);
-					}
+			synchronized ( channel ) {
+				
+				/* Wait until the whole circuit finishes (completionAction returns),
+				 * waking up every second to check isClosed(), so that close()
+				 * never hangs this loop even if the notifyAll is missed.
+				 * 
+				 * NOTE: the flag is set when the connection ENDS, not when the
+				 * connect completes: keying off connect-completion would return
+				 * from here while completionAction is still running the live
+				 * connection, firing NOT_CONNECTED prematurely and tearing the
+				 * connection down (SessionTraceTest +1000ms 掉线回归的根因). */
+				while ( ! circuitClosed.get() && ! isClosed() ) {
+					channel.wait(1000L);
 				}
+			}
 			}
 			finally {
 				notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.NOT_CONNECTED);

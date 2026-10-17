@@ -627,7 +627,13 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 					
 				lenBf.put(emptyBytes);
 				
-				readToBuffer(channel, lenBf);
+				/* the first read of a new message waits for the peer's next
+				 * frame: that is inter-message idle, not an inter-character
+				 * gap, so T8 must not police it (SEMI E37). A pre-select
+				 * silent peer is dropped by T7 instead; close() completes a
+				 * pending read with AsynchronousCloseException, so this
+				 * cannot hang forever. */
+				readToBuffer(channel, lenBf, false);
 				
 				while ( lenBf.hasRemaining() ) {
 					readToBuffer(channel, lenBf);
@@ -719,29 +725,43 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		private int readToBuffer(AsynchronousSocketChannel channel, ByteBuffer buffer)
 				throws HsmsSsDetectTerminateException, HsmsSsTimeoutT8Exception, ExecutionException, InterruptedException {
 			
+			return readToBuffer(channel, buffer, true);
+		}
+		
+		private int readToBuffer(AsynchronousSocketChannel channel, ByteBuffer buffer, boolean detectT8Timeout)
+				throws HsmsSsDetectTerminateException, HsmsSsTimeoutT8Exception, ExecutionException, InterruptedException {
+			
 			final Future<Integer> f = channel.read(buffer);
 			
 			try {
 				
-				/* T8 (inter-character timeout) covers every read of a message,
-				 * including the first bytes of the length field: without this,
-				 * a peer that connects but sends nothing occupies the reading
-				 * thread forever.
-				 * 
-				 * NOTE: the more fundamental T4 coverage requires the
-				 * observableThrowingStream refactoring, and is out of scope. */
-				try {
-					int r = hsmsSsConfig().timeout().t8().future(f).intValue();
+				int r;
+				
+				if ( detectT8Timeout ) {
 					
-					if ( r < 0 ) {
-						throw new HsmsSsDetectTerminateException();
+					/* T8 (inter-character timeout) covers every read of a
+					 * message once the message has started: a peer that
+					 * stalls mid-frame cannot occupy the reading thread
+					 * forever. */
+					try {
+						r = hsmsSsConfig().timeout().t8().future(f).intValue();
+					}
+					catch ( TimeoutException e ) {
+						throw new HsmsSsTimeoutT8Exception(e);
 					}
 					
-					return r;
+				} else {
+					
+					/* inter-message idle: wait indefinitely for the next
+					 * frame (see the call site) */
+					r = f.get().intValue();
 				}
-				catch ( TimeoutException e ) {
-					throw new HsmsSsTimeoutT8Exception(e);
+				
+				if ( r < 0 ) {
+					throw new HsmsSsDetectTerminateException();
 				}
+				
+				return r;
 			}
 			catch ( InterruptedException e ) {
 				f.cancel(true);
