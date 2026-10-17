@@ -37,6 +37,12 @@ public final class HttpApiServer implements AutoCloseable {
     /** 停机路径。 */
     public static final String PATH_SHUTDOWN = "/api/v1/shutdown";
 
+    /** 会话列表路径。 */
+    public static final String PATH_SESSIONS = "/api/v1/sessions";
+
+    /** 会话命令前缀（{@code /api/v1/sessions/{id}/ceid/{ceid}}）。 */
+    public static final String PATH_SESSION_PREFIX = "/api/v1/sessions/";
+
     private static final Duration SSE_HEARTBEAT = Duration.ofSeconds(1L);
     private static final Duration SSE_MAX_LIFETIME = Duration.ofMinutes(30L);
 
@@ -81,6 +87,8 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_HEALTH, api::handleHealth);
         http.createContext(PATH_EVENTS, api::handleEvents);
         http.createContext(PATH_SHUTDOWN, api::handleShutdown);
+        http.createContext(PATH_SESSIONS, api::handleSessions);
+        http.createContext(PATH_SESSION_PREFIX, api::handleSessionCommand);
 
         http.start();
         return api;
@@ -128,6 +136,61 @@ public final class HttpApiServer implements AutoCloseable {
         }
         respond(ex, 200, "{\"ok\":true,\"shuttingDown\":true}");
         this.context.requestShutdown();
+    }
+
+    private void handleSessions(HttpExchange ex) throws IOException {
+        if (!this.authorized(ex)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        respond(ex, 200, "{\"sessions\":" + this.context.sessionsJson() + "}");
+    }
+
+    /**
+     * 会话命令：目前只有"手动触发一个采集事件"。
+     *
+     * <p>用 POST 是因为它会改变设备状态（主机会看到一条 S6F11），不是幂等查询。
+     * </p>
+     */
+    private void handleSessionCommand(HttpExchange ex) throws IOException {
+        if (!this.authorized(ex)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
+        String[] parts = rest.split("/");
+
+        if (parts.length != 3 || !"ceid".equals(parts[1])) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        int ceid;
+        try {
+            ceid = Integer.parseInt(parts[2]);
+        } catch (NumberFormatException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
+            return;
+        }
+
+        TriggerOutcome outcome = this.context.triggerCeid(parts[0], ceid);
+
+        switch (outcome) {
+            case OK -> respond(ex, 202, "{\"ok\":true}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
+            case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+        }
     }
 
     private void handleEvents(HttpExchange ex) throws IOException {

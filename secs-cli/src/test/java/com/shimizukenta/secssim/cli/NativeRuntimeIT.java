@@ -127,6 +127,21 @@ class NativeRuntimeIT {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertTrue(health.body().contains("\"sessions\":1"), health.body());
 
+            /* 会话列表：真实运行时的 sessionsJson 组装 */
+            HttpResponse<String> sessions = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/sessions"))
+                            .header("Authorization", "Bearer " + token)
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            assertEquals(200, sessions.statusCode(), sessions.body());
+            assertTrue(sessions.body().contains("\"id\":\"demo\""), sessions.body());
+            assertTrue(sessions.body().contains("\"state\":\"OPEN\""), sessions.body());
+            assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
+
+            /* 没有主机在线时触发应得到 409（设备状态），而不是 500（服务器错误） */
+            assertEquals(409, trigger(hsnsBase(httpPort), token).statusCode(),
+                    "无主机会话时触发 S6F11 应返回 409");
+
             HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
             config.protocol(HsmsSsProtocol.ACTIVE);
             config.socketAddress(new InetSocketAddress("127.0.0.1", hsmsPort));
@@ -148,6 +163,10 @@ class NativeRuntimeIT {
 
                 assertTrue(temperature >= 0.0 && temperature <= 400.0, "温度越界: " + temperature);
                 assertEquals(1, unitId, "UNIT_ID 应为 CH1");
+
+                /* 主机在线时，API 触发的 S6F11 才能真正发出去 */
+                assertEquals(202, trigger(hsnsBase(httpPort), token).statusCode(),
+                        "主机在线时触发 S6F11 应为 202");
             }
 
             client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
@@ -160,6 +179,20 @@ class NativeRuntimeIT {
         } finally {
             process.destroyForcibly();
         }
+    }
+
+    private static String hsnsBase(int httpPort) {
+        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/demo/ceid/2001";
+    }
+
+    private static HttpResponse<String> trigger(String url, String token) throws Exception {
+        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+                .send(HttpRequest.newBuilder(URI.create(url))
+                                .header("Authorization", "Bearer " + token)
+                                .timeout(Duration.ofSeconds(10))
+                                .POST(HttpRequest.BodyPublishers.noBody())
+                                .build(),
+                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
     private static void assertSseStreams(int httpPort, String token, HttpClient client) throws Exception {

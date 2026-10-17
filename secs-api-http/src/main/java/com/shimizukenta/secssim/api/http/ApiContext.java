@@ -34,4 +34,24 @@ public interface ApiContext {
      * 请求优雅停机。
      */
     void requestShutdown();
+
+    /**
+     * 会话列表的 JSON 数组（由运行时组装，HTTP 层只做转发）。
+     *
+     * @return JSON 数组文本
+     */
+    default String sessionsJson() {
+        return "[]";
+    }
+
+    /**
+     * 手动触发一个采集事件。
+     *
+     * @param sessionId 会话标识
+     * @param ceid      CEID
+     * @return 结果
+     */
+    default TriggerOutcome triggerCeid(String sessionId, int ceid) {
+        return TriggerOutcome.UNKNOWN_SESSION;
+    }
 }

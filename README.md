@@ -69,7 +69,9 @@ HTTP API（v1）：
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | `GET /api/v1/health` | 否 | 存活、版本、形态、UTF-8 回归结果、会话数 |
-| `GET /api/v1/events` | 是 | SSE 事件流（当前为心跳，M3 起推实时值） |
+| `GET /api/v1/events` | 是 | SSE 事件流（当前为心跳，M8 起推实时值） |
+| `GET /api/v1/sessions` | 是 | 会话列表（状态 / 设备 / 单元数 / 计数器） |
+| `POST /api/v1/sessions/{id}/ceid/{ceid}` | 是 | 手动触发一次 S6F11（202 / 404 / 409） |
 | `GET /api/v1/shutdown` | 是 | 优雅停机 |
 
 鉴权用 `Authorization: Bearer <token>`；浏览器 `EventSource` 无法设置请求头，可改用 `?token=`。
@@ -88,5 +90,5 @@ HTTP API（v1）：
 - [ADR 0003 · 曲线必须是纯函数](docs/adr/0003-pure-curves.md)
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md)
 - [配置格式 Schema v4](docs/schema-v4.md)
