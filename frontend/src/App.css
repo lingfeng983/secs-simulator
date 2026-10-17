@@ -17,8 +17,9 @@
   }
 }
 
-body {
-  margin: 0;
+.app {
+  margin: 0 auto;
+  max-width: 1100px;
   padding: 1.5rem;
   font: 14px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   color: var(--fg);
@@ -38,25 +39,12 @@ header {
 h1 { font-size: 1.2rem; margin: 0; }
 h2 { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
 
-#health {
-  display: flex;
-  gap: 0.5rem 1rem;
-  margin: 0;
-  color: var(--muted);
-}
-
-#health dt { font-weight: 600; }
-#health dd { margin: 0 1rem 0 0; }
+.health { display: flex; gap: 0.5rem 1rem; margin: 0; color: var(--muted); }
+.health dt { font-weight: 600; }
+.health dd { margin: 0 1rem 0 0; }
 
 table { border-collapse: collapse; width: 100%; }
-
-th, td {
-  text-align: left;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-
+th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { color: var(--muted); font-weight: 600; }
 
 button {
@@ -67,7 +55,6 @@ button {
   padding: 0.15rem 0.6rem;
   cursor: pointer;
 }
-
 button:hover { border-color: var(--accent); }
 
 input {
@@ -80,8 +67,9 @@ input {
 }
 
 .hint { color: var(--muted); }
+.ceid { display: inline-flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; color: var(--muted); }
 
-#log {
+.log {
   height: 22rem;
   overflow: auto;
   margin: 0;
@@ -92,9 +80,11 @@ input {
   white-space: pre-wrap;
 }
 
-#token-panel {
+.token-panel {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
 }
+
+.token-panel input { margin-right: 0.5rem; }

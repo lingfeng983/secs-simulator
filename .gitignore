@@ -16,7 +16,9 @@ runtime/
 *.swp
 
 # ---- frontend ----
+frontend/node_modules/
 node_modules/
+frontend/dist/
 dist/
 .pnpm-store/
 

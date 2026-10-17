@@ -51,8 +51,9 @@ secs-sim --mode=integrated --demo-session --hsms-port 5000
 # 从配置文件装载设备（格式见 docs/schema-v4.md）
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
-# 同时托管内置的零依赖前端：浏览器直接打开 READY 行里的 http 地址
-secs-sim --mode=integrated --demo-session --web-root web
+# 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
+scripts\build-frontend.ps1
+secs-sim --mode=integrated --demo-session --web-root frontend/dist
 
 # 服务端：对外绑定，交由 systemd 托管
 secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN
@@ -79,6 +80,17 @@ HTTP API（v1）：
 
 鉴权用 `Authorization: Bearer <token>`；浏览器 `EventSource` 无法设置请求头，可改用 `?token=`。
 
+## 前端
+
+前端是独立的 Vite + React + TypeScript 工程（`frontend/`），构建后由后端同源托管：
+
+```powershell
+scripts\build-frontend.ps1                 # 产出 frontend/dist
+secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打开
+```
+
+开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
+
 ## 三条铁律
 
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
@@ -94,5 +106,5 @@ HTTP API（v1）：
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md)
 - [配置格式 Schema v4](docs/schema-v4.md)
