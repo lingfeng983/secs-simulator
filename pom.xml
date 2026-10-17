@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.shimizukenta</groupId>
+  <artifactId>secs-simulator-parent</artifactId>
+  <version>2.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>SECS Simulator (parent)</name>
+  <description>SECS/GEM multi-unit simulator: one engine, two runtime shapes (integrated / server)</description>
+  <url>https://github.com/kenta-shimizu/secs-simulator</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <modules>
+    <module>secs-json</module>
+    <module>secs-protocol</module>
+    <module>secs-core</module>
+    <module>secs-app</module>
+    <module>secs-api-http</module>
+    <module>secs-runtime</module>
+    <module>secs-cli</module>
+    <module>secs-dist</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <maven.compiler.release>25</maven.compiler.release>
+    <junit.version>5.11.4</junit.version>
+    <archunit.version>1.5.1</archunit.version>
+    <asm.version>9.11</asm.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-json</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-protocol</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-core</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-app</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-api-http</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-runtime</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-cli</artifactId><version>${project.version}</version></dependency>
+
+      <dependency>
+        <groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version><scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId><artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version><scope>test</scope>
+      </dependency>
+      <!-- ArchUnit 用 ASM 解析 class 文件；JDK 25 的 major 69 需要新版本 ASM，否则会静默跳过所有类 -->
+      <dependency>
+        <groupId>org.ow2.asm</groupId><artifactId>asm</artifactId>
+        <version>${asm.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <encoding>UTF-8</encoding>
+            <compilerArgs><arg>-Xlint:none</arg></compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.2</version>
+          <configuration>
+            <argLine>-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8</argLine>
+            <useModulePath>false</useModulePath>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.2</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

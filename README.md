@@ -1,90 +1,48 @@
 # secs-simulator
 
-![image](https://kenta-shimizu.github.io/secs-simulator/swing.png)
+SECS/GEM 多单元（multi-unit）设备模拟器。
 
-This is SEMI-SECS-Simulator Java application.
+**一套内核、两种形态**：既可单机一体化运行，也可作为 Linux 服务端供远程客户端访问；
+两种形态共用同一份内核、同一套 HTTP/WebSocket API、同一份前端。
 
-## Get Application, How to use
+---
 
-[github.io](https://kenta-shimizu.github.io/secs-simulator/index.html).  
-This application is free of charge.
+## 模块
 
-## Related repositories
- 
- - [secs4java8](https://github.com/kenta-shimizu/secs4java8)
- - [json4java8](https://github.com/kenta-shimizu/json4java8)
+| 模块 | 职责 | 依赖约束 |
+|---|---|---|
+| `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |
+| `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |
+| `secs-core` | 领域模型、曲线、模板 DAG、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |
+| `secs-app` | 应用服务：会话、配置、模板注册表、预览、审计 | core + json |
+| `secs-api-http` | REST + WebSocket + 二进制曲线流 | app + json + `com.sun.net.httpserver` |
+| `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER 两种形态 | 以上全部 |
+| `secs-cli` | headless 命令行与自测 | runtime |
+| `secs-dist` | 打包：jlink 镜像、AOT 缓存、native-image | runtime + cli |
 
-## Extend SML
+依赖方向由 `ArchitectureTest` 强制，越界即构建失败。
 
-SML is from [PEER Group](https://www.peergroup.com/expertise/resources/secs-message-language/)
+## 构建
 
-### Now
+需要 JDK 25（推荐 GraalVM 25，附带的 `native-image` 用于后续原生打包）。
 
-- &lt;NOW[16]&gt;
+```powershell
+$env:JAVA_HOME = 'E:\Java\graalvm-jdk-25.0.4+7.1'
+mvn -B verify
+```
 
-  ```java
-  DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuuMMddHHmmssSS");
-  LocalDateTime.now().format(dtf);
-  ```
+或直接跑里程碑验收脚本：
 
-- &lt;NOW[12]&gt;
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/accept-M0.ps1
+```
 
-  ```java
-  DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuMMddHHmmss");
-  LocalDateTime.now().format(dtf);
-  ```
+## 两条铁律
 
-  See also [s2f18.sml](/src/sml-template/host/s2f18.sml), [s2f31.sml](/src/sml-template/host/s2f31.sml)
+1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
+2. **禁止 `--enable-preview`**。预览特性会把 class 文件绑死到具体 JDK，且与 native-image 不兼容。
 
-### Auto number
+## 文档
 
-Using `AtomicLong#incrementAndGet`
-
-- &lt;U4AUTO&gt;
-- &lt;U8AUTO&gt;
-- &lt;I4AUTO&gt;
-- &lt;I8AUTO&gt;
-
-  See also [s2f33-delete-all.sml](/src/sml-template/host/s2f33-delete-all.sml), [s2f35-example.sml](/src/sml-template/host/s2f35-example.sml)
-
-
-## Auto-replies
-
-### Auto-reply
-
-Auto-reply conditions.
-
-- `AbstractSecsSimulatorConfig#autoReply#booleanValue == true`
-- Received primary message has wbit.
-- Received primary message Function-number is odd number.
-- Has only ONE added SML to reply.
-
-### Auto-reply-S9Fy
-
-Auto-Reply-S9Fy conditions.
-
-- `AbstractSecsSimulatorConfig#autoReplyS9Fy#booleanValue == true`
-
-#### Auto-Reply-S9F1
-
-Reply if received message device-id is not valid.
-
-#### Auto-Reply-S9F3
-
-Reply if has no added SML to reply Stream-number.
-
-#### Auto-Reply-S9F5
-
-Reply if has no added SML to reply Function-number.
-
-#### Auto-Reply-S9F9
-
-Reply if T3-Timeout.
-
-### Auto-reply-SxF0
-
-Auto-Reply-SxF0 conditions.
-
-- `AbstractSecsSimulatorConfig#autoReplySxF0#booleanValue == true`
-- Received primary message has wbit.
-- Has no added SML to reply (e.g. if received "S1F1 W", not added "S1F2")
+- 架构决策记录：[docs/adr](docs/adr)
+- 技术方案（技术选型、里程碑、风险）见仓库内 `docs/`。

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.shimizukenta</groupId>
+    <artifactId>secs-simulator-parent</artifactId>
+    <version>2.0.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>secs-cli</artifactId>
+  <packaging>jar</packaging>
+  <name>SECS Simulator CLI</name>
+  <description>Headless command line and self-test harness</description>
+
+  <!-- 原生镜像路径：默认指向构建产物，可被 -Dsecs.smoke.exe=... 覆盖 -->
+  <properties>
+    <secs.smoke.exe>${project.build.directory}/secs-smoke.exe</secs.smoke.exe>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.shimizukenta</groupId>
+      <artifactId>secs-runtime</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all,-missing-explicit-ctor</arg>
+            <arg>-Werror</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <secs.smoke.exe>${secs.smoke.exe}</secs.smoke.exe>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- 只有显式 -Pnative 才构建原生镜像，避免日常 verify 变慢 -->
+    <profile>
+      <id>native</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <version>1.1.14</version>
+            <configuration>
+              <imageName>secs-smoke</imageName>
+              <mainClass>com.shimizukenta.secssim.cli.NativeSmoke</mainClass>
+              <buildArgs>
+                <buildArg>-H:+ReportExceptionStackTraces</buildArg>
+                <buildArg>-Dfile.encoding=UTF-8</buildArg>
+                <buildArg>-Os</buildArg>
+              </buildArgs>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-native</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>compile-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>
