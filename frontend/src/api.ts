@@ -6,6 +6,7 @@ export interface Counters {
   skipped?: number;
   wbitDropped?: number;
   traceWbitDropped?: number;
+  terminalMessages?: number;
   traceFrames?: number;
   activeTraces?: number;
   hostReports?: number;

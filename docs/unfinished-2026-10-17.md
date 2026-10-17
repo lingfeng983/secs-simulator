@@ -2,8 +2,8 @@
 
 基线：`master @ 5179263`，工作树干净。
 
-验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**347 个测试全绿**
-（json 110 / protocol 45 / core 86 / app 21 / api-http 33 / runtime 12 / cli 40）。
+验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**349 个测试全绿**
+（json 110 / protocol 45 / core 86 / app 21 / api-http 33 / runtime 12 / cli 42）。
 
 本清单分三类：
 
@@ -23,6 +23,7 @@
 | S1F3 空列表返回空，自动发现型主机拿不到变量 | ✅ 已修 | `replyS1F4` 空列表按 E5 返回全部 SVID；新增 `SessionS1F3Test#emptyS1F3ReturnsAllSvids` |
 | S6F11 永远不带 W 位，主机要 ACK 时无法满足 | ✅ 已修 | `events.s6f11Wbit` 可配置；W 位发送走单线程队列等待 S6F12，不阻塞 100ms 事件心跳；新增 `SessionS6F11Test#s6f11WbitWaitsForS6f12` |
 | S6F1 永远不带 W 位，主机要 S6F2 时无法满足 | ✅ 已修 | `events.s6f1Wbit` 可配置；S6F1 等待 S6F2 走独立单线程队列，不阻塞 Trace 采样；新增 `SessionTraceTest#s6f1WbitWaitsForS6f2` |
+| 主机发 S10F3 终端消息没有应答 | ✅ 已修 | 新增 `handleTerminalDisplay`：保存最近 20 条、回 S10F4；格式非法回 `MessageWillNotBeDisplayed`；新增 `SessionTerminalMessageTest` |
 
 验证命令：
 
@@ -36,7 +37,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 ## 1. P1：协议能力
 
 - [ ] **S5F1 报警**：未实现，只有 `templates/sml/equip/s5f1-example.sml` 样例。需要先定义 ALCD/ALID、去抖与恢复语义。
-- [ ] **S10F3 终端消息**：未实现，只有样例。需要队列、显示时长与 S10F4 ACK。
+- [x] **S10F3 终端消息**：已实现 S10F3 → S10F4，保存最近 20 条；格式非法回 `MessageWillNotBeDisplayed`。终端消息面板/查询 API 仍可补。
 - [x] **S6F11 的 W 位 + S6F12**：已支持 `events.s6f11Wbit`；开启后异步等待 S6F12，队列满计入 `wbitDropped`。S6F12 的 ACKC6 业务处理（非 0 时告警/重试）仍可补。
 - [x] **S6F1 的 W 位 + S6F2**：已支持 `events.s6f1Wbit`；开启后异步等待 S6F2，队列满计入 `traceWbitDropped`。S6F2 的 ACKC6 业务处理仍可补。
 - [x] **未知 Stream/Function 的 S9Fx**：已实现 S9F3/S9F5；S9 自身不再回 S9。S9F1/7/9/11 仍按具体错误类型细分时可补。
@@ -91,6 +92,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 5. 已知接受风险
 
+- 协议层 `Gem.s10f4`（以及 `s10fx`）用 `comm.send(10, func, ...)` 发新的 Primary，而不是对 S10F3 的 Reply；会话侧已显式 `send(primary, 10, 4, ...)` 规避。协议层冻结，未改源。
 - JSON 数字：`1e5` 被拒；> 2^53 的整数走 double 会丢精度；重复 key 保序保留。
 - `secs-protocol` 的 accept 连接上限、reply deviceId 匹配两项回退，无复现证据。
 - SSE 写超时是“看门狗 + 断开”的缓解，不是 JDK API 级别的真正写超时。
@@ -102,7 +104,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] S6F11 W 位 + S6F12；
 - [x] S6F1 W 位 + S6F2。
 - [x] 未知 Stream/Function 的 S9F3/S9F5 应答；S9F1/7/9/11 的错误分类用例仍可补。
-- [ ] S5F1 / S10F3。
+- [x] S10F3 / S10F4；
+- [ ] S5F1 / S5F2。
 - [ ] OnCondition / AfterEvent。
 - [ ] 多会话、配置热重载、运行时创建/关闭会话。
 - [x] 打包后的 `start.cmd` 路径自检（`-CheckOnly`）；解压后真正拉起进程的全链路冒烟仍建议补进 CI。
@@ -116,7 +119,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
 3. 决定 SERVER 模式：实现 HTTPS + 账号/角色，或把 RuntimeMode/README 的承诺降级为“明文 + 单 token，仅限内网/反代”。
-4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位均已完成；下一步补 S5F1/S10F3。
+4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4 已完成；下一步补 S5F1/S5F2。
 
 **M11：协议能力**
 5. S5F1 / S10F3：先定 ALCD/ALID/去抖、终端消息队列与 ACK。
@@ -135,10 +138,11 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 8. 已确认完成，不要重复做
 
-- M0–M9-c 主体功能；347 个测试全绿。
+- M0–M9-c 主体功能；349 个测试全绿。
 - S1F1/F2、S1F3/F4（含空列表=全部）、**S1F11/F12**、S1F13–F18、S2F17/F18、S2F23/F24、S2F31/F32。
 - 未知 Stream/Function 的 S9F3/S9F5 应答。
 - S6F11 / S6F1 可选 W 位 + 异步等待 S6F12 / S6F2。
+- S10F3 终端消息 + S10F4 ACK。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。

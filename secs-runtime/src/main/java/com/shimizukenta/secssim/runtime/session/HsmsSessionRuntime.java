@@ -2,7 +2,9 @@ package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
@@ -22,6 +24,7 @@ import com.shimizukenta.secs.SecsMessage;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicator;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
+import com.shimizukenta.secs.gem.ACKC10;
 import com.shimizukenta.secs.gem.COMMACK;
 import com.shimizukenta.secs.gem.OFLACK;
 import com.shimizukenta.secs.gem.ONLACK;
@@ -67,6 +70,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private static final long EVENT_TICK_MS = 100L;
     private static final long RATE_WINDOW_MS = 1_000L;
     private static final int DEFAULT_MAX_EVENTS_PER_SEC = 50;
+    /** 终端消息只保留最近 N 条；再老的现场也不需要回看。 */
+    private static final int MAX_TERMINAL_MESSAGES = 20;
     /** S6F11 等 ACK 的队列上限：主机不答 S6F12 时不能无限堆积。 */
     private static final int S6F11_ACK_QUEUE = 256;
 
@@ -87,6 +92,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong skipped = new AtomicLong();
     private final AtomicLong wbitDropped = new AtomicLong();
     private final AtomicLong traceWbitDropped = new AtomicLong();
+    private final AtomicLong terminalReceived = new AtomicLong();
+    private final Deque<TerminalMessage> terminalMessages = new ArrayDeque<>();
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -527,6 +534,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 "skipped", this.skipped.get(),
                 "wbitDropped", this.wbitDropped.get(),
                 "traceWbitDropped", this.traceWbitDropped.get(),
+                "terminalMessages", this.terminalReceived.get(),
                 "traceFrames", this.traceFrames.get(),
                 "activeTraces", (long) this.traces.activeCount(),
                 "hostReports", (long) this.hostReports.reportCount(),
@@ -681,6 +689,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     handleEnableEventReport(primary);
                     return;
                 }
+                case 1003 -> {
+                    handleTerminalDisplay(primary);
+                    return;
+                }
                 default -> {
                     /* 其余报文交给 S9Fx 统一回答 */
                 }
@@ -722,6 +734,72 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     private static boolean isKnownStream(int stream) {
         return stream == 1 || stream == 2 || stream == 5 || stream == 6 || stream == 10;
+    }
+
+    /**
+     * S10F3：主机发来一条终端消息。
+     *
+     * <p>E5 的结构是 {@code <L[2] <B TID> <A TEXT>>}。设备只负责“接收并显示”，
+     * 因此保存最近 {@value #MAX_TERMINAL_MESSAGES} 条并回 S10F4；格式不对回
+     * {@code MessageWillNotBeDisplayed}，而不是静默丢弃。</p>
+     */
+    private void handleTerminalDisplay(SecsMessage primary) {
+        ACKC10 ack = ACKC10.AcceptedForDisplay;
+
+        try {
+            Secs2 body = primary.secs2();
+            if (body.size() < 2) {
+                throw new IllegalArgumentException("S10F3 需要 TID + TEXT");
+            }
+
+            int tid = body.get(0).getByte(0) & 0xFF;
+            String text = body.get(1).getAscii();
+
+            synchronized (this.terminalMessages) {
+                this.terminalMessages.addLast(new TerminalMessage(tid, text, System.currentTimeMillis()));
+                while (this.terminalMessages.size() > MAX_TERMINAL_MESSAGES) {
+                    this.terminalMessages.removeFirst();
+                }
+            }
+            this.terminalReceived.incrementAndGet();
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            ack = ACKC10.MessageWillNotBeDisplayed;
+            Log.error("会话 " + this.spec.id() + " 处理 S10F3 失败", e);
+        }
+
+        try {
+            /*
+             * 不用 gem().s10f4：协议层 s10fx 用的是 comm.send(10, 4, ...)，
+             * 发的是新的 Primary，而不是对 S10F3 的 Reply，主机会一直等 T3。
+             * 这里显式用 primary 构造 Secondary。
+             */
+            this.communicator.send(primary, 10, 4, false, ack.secs2());
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            Log.error("会话 " + this.spec.id() + " 回复 S10F4 失败", e);
+        }
+    }
+
+    /**
+     * 最近收到的终端消息（新→旧）。
+     *
+     * @return 不可变快照
+     */
+    public List<TerminalMessage> terminalMessages() {
+        synchronized (this.terminalMessages) {
+            return List.copyOf(this.terminalMessages);
+        }
+    }
+
+    /**
+     * 一条终端消息。
+     *
+     * @param tid      终端 ID
+     * @param text     文本
+     * @param atMillis 收到时的墙钟毫秒
+     */
+    public record TerminalMessage(int tid, String text, long atMillis) {
     }
 
     /**
