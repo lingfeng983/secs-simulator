@@ -194,9 +194,10 @@ class SessionTraceTest {
         List<SecsMessage> drain() throws InterruptedException {
             List<SecsMessage> frames = new ArrayList<>();
             SecsMessage message;
-            /* 时钟是手动精确推进的，唯一的异步环节是 socket 投递：全量套件负载下
-             * 300ms 偶发等不到帧（已复现过一次"expected 2 but was 0"），放宽到 2s。 */
-            while ((message = this.s6f1.poll(2_000L, TimeUnit.MILLISECONDS)) != null) {
+            /* 时钟是手动精确推进的，唯一的异步环节是 socket 投递，300ms 静默
+             * 即视为收干。曾因误把 activeCircuit 回归（连接 +1000ms 猝死丢帧）
+             * 当成负载抖动而放宽到 2s，根因修复后恢复原值。 */
+            while ((message = this.s6f1.poll(300L, TimeUnit.MILLISECONDS)) != null) {
                 frames.add(message);
             }
             return frames;
