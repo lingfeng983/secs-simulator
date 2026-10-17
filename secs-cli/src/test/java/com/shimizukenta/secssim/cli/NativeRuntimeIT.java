@@ -96,6 +96,72 @@ class NativeRuntimeIT {
         }
     }
 
+    @Test
+    void nativeSessionAnswersS1F3FromValueEngine() throws Exception {
+        String exe = System.getProperty("secs.smoke.exe", "");
+        assumeTrue(!exe.isBlank(), "skip: -Dsecs.smoke.exe not set");
+        Path exePath = Path.of(exe);
+        assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
+
+        int hsmsPort = freePort();
+        Path workDir = Files.createTempDirectory("secs-sim-demo-");
+        Process process = new ProcessBuilder(
+                exePath.toString(),
+                "--mode=probe",
+                "--demo-session",
+                "--hsms-port", Integer.toString(hsmsPort),
+                "--work-dir", workDir.toString())
+                .redirectErrorStream(true)
+                .start();
+
+        try {
+            String ready = awaitReady(process);
+            int httpPort = intToken(ready, "http=");
+            String token = textToken(ready, "token=");
+            assertTrue(ready.contains("sessions=1"), "演示会话未创建: " + ready);
+
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+            HttpResponse<String> health = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            assertTrue(health.body().contains("\"sessions\":1"), health.body());
+
+            HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
+            config.protocol(HsmsSsProtocol.ACTIVE);
+            config.socketAddress(new InetSocketAddress("127.0.0.1", hsmsPort));
+            config.deviceId(10);
+
+            try (SecsCommunicator comm = HsmsSsCommunicator.open(config)) {
+                comm.openAndWaitUntilCommunicating();
+
+                var builder = com.shimizukenta.secs.secs2.Secs2.getBuilder();
+                Optional<SecsMessage> reply = comm.send(1, 3, true,
+                        builder.list(builder.uint4(1001L), builder.uint4(1090L)));
+                assertTrue(reply.isPresent(), "native 会话没有应答 S1F3");
+                assertEquals(2, reply.get().secs2().size());
+
+                double temperature = com.shimizukenta.secssim.runtime.session.Secs2Read
+                        .asDouble(reply.get().secs2().get(0));
+                int unitId = com.shimizukenta.secssim.runtime.session.Secs2Read
+                        .asInt(reply.get().secs2().get(1));
+
+                assertTrue(temperature >= 0.0 && temperature <= 400.0, "温度越界: " + temperature);
+                assertEquals(1, unitId, "UNIT_ID 应为 CH1");
+            }
+
+            client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
+                            .header("Authorization", "Bearer " + token)
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.discarding());
+
+            assertTrue(process.waitFor(15, TimeUnit.SECONDS), "native 进程没有退出");
+            assertEquals(0, process.exitValue());
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
     private static void assertSseStreams(int httpPort, String token, HttpClient client) throws Exception {
         HttpResponse<InputStream> sse = client.send(
                 HttpRequest.newBuilder(URI.create(
