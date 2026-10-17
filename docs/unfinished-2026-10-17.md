@@ -2,8 +2,8 @@
 
 基线：`master @ 5179263`，工作树干净。
 
-验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**364 个测试全绿**
-（json 110 / protocol 45 / core 90 / app 25 / api-http 36 / runtime 12 / cli 46）。
+验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**369 个测试全绿**
+（json 110 / protocol 45 / core 90 / app 25 / api-http 36 / runtime 17 / cli 46）。
 
 本清单分三类：
 
@@ -27,6 +27,7 @@
 | 没有报警上报能力 | ✅ 已修 | 新增 `emitAlarm` → S5F1（W 位等 S5F2）；HTTP `POST /sessions/{id}/alarm/{alid}`；前端报警置位/清除；新增 `SessionAlarmTest` 与 HTTP 路由用例 |
 | 只有 at/periodic，不能按条件触发 | ✅ 已修 | 新增 `Trigger.OnCondition` + `ConditionDebouncer`；表达式支持比较运算；每 tick 求值 `t` / `svid.<id>`；新增 `SessionOnConditionTest` |
 | 生产路径无法使用模板 DAG | ✅ 已修 | Schema v5 增加 `templates`；`TemplateConfig.build` 生成 `TemplateGraph`；`Main` 用 `GraphValueSource`；新增 `SessionConfigJsonTest#templateConfigBuildsGraph` 与 `ConfigDrivenSessionTest#schemaV5TemplatesDriveS1F3` |
+| SERVER 模式只能明文 HTTP | ✅ 部分修复 | 新增 `--tls-keystore` / `--tls-password`，`HttpApiServer` 支持 `HttpsServer`；server 模式强制显式 `--token`；新增 `TlsServerTest`。账号/角色鉴权仍未做 |
 | 不能表达“A 之后 N 秒发 B” | ✅ 已修 | 新增 `Trigger.AfterEvent` + 延迟队列；源计划成功后才入队；配置校验源计划存在/无环；新增 `SessionAfterEventTest` |
 
 验证命令：
@@ -123,7 +124,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 **M10：清 P0 + 安全边界**
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
-3. 决定 SERVER 模式：实现 HTTPS + 账号/角色，或把 RuntimeMode/README 的承诺降级为“明文 + 单 token，仅限内网/反代”。
+3. SERVER TLS 已实现（`--tls-keystore`）；下一步是账号/角色鉴权，或继续使用单 token + 反向代理。
 4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；下一步进入 SERVER 安全边界与前端模板编辑器。
 
 **M11：协议能力**
@@ -143,7 +144,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 8. 已确认完成，不要重复做
 
-- M0–M9-c 主体功能；364 个测试全绿。
+- M0–M9-c 主体功能；369 个测试全绿。
 - S1F1/F2、S1F3/F4（含空列表=全部）、**S1F11/F12**、S1F13–F18、S2F17/F18、S2F23/F24、S2F31/F32。
 - 未知 Stream/Function 的 S9F3/S9F5 应答。
 - S6F11 / S6F1 可选 W 位 + 异步等待 S6F12 / S6F2。
@@ -152,6 +153,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - OnCondition 条件触发（含比较运算与去抖）。
 - AfterEvent 事件链（延迟队列 + 环校验）。
 - Schema v5 模板 DAG / 曲线进配置（`TemplateConfig` + `GraphValueSource`）。
+- SERVER 模式 TLS（PKCS#12 keystore）+ 强制显式 token。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。

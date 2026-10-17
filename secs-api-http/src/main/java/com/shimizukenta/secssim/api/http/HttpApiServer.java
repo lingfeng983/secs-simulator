@@ -32,11 +32,15 @@ import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
 import com.shimizukenta.secssim.app.log.Log;
 
+import javax.net.ssl.SSLContext;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 
 /**
- * 极简 HTTP API：健康检查、会话、曲线预览、SSE 报文流、静态前端、优雅停机。
+ * 极简 HTTP/HTTPS API：健康检查、会话、曲线预览、SSE 报文流、静态前端、优雅停机。
  *
  * <p>只依赖 JDK 自带 {@code com.sun.net.httpserver}，不引入 Web 框架：
  * 这个后端的 API 面积很小，而框架会把原生镜像从 13MB 撑到 100MB 以上。
@@ -184,11 +188,35 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public static HttpApiServer start(InetSocketAddress bind, String token, ApiContext context,
                                       Path webRoot, EventBus bus) throws IOException {
+        return start(bind, token, context, webRoot, bus, null);
+    }
+
+    /**
+     * 启动服务器，可选用 TLS。
+     *
+     * @param bind       绑定地址
+     * @param token      访问令牌
+     * @param context    运行时信息
+     * @param webRoot    静态资源根目录，{@code null} 表示不托管
+     * @param bus        事件总线，{@code null} 表示不推报文
+     * @param sslContext TLS 上下文；{@code null} 表示明文 HTTP
+     * @return 已启动的服务器
+     * @throws IOException 绑定失败
+     */
+    public static HttpApiServer start(InetSocketAddress bind, String token, ApiContext context,
+                                      Path webRoot, EventBus bus, SSLContext sslContext) throws IOException {
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("token must not be blank");
         }
 
-        HttpServer http = HttpServer.create(bind, 64);
+        HttpServer http;
+        if (sslContext == null) {
+            http = HttpServer.create(bind, 64);
+        } else {
+            HttpsServer https = HttpsServer.create(bind, 64);
+            https.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+            http = https;
+        }
 
         AtomicInteger reqSeq = new AtomicInteger();
         ExecutorService pool = Executors.newFixedThreadPool(REQUEST_THREADS, runnable -> {

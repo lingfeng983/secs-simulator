@@ -23,11 +23,14 @@ import java.util.Set;
  * @param configFile  配置文件路径，{@code null} 表示不用配置
  * @param webRoot     静态前端目录，{@code null} 表示只提供 API
  * @param workDir     工作目录（配置、日志、模板）
+ * @param tlsKeystore PKCS#12 keystore，{@code null} 表示明文 HTTP
+ * @param tlsPassword keystore 密码
  * @param help        是否只打印帮助
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
                              int hsmsPort, int deviceId, boolean demoSession,
-                             Path configFile, Path webRoot, Path workDir, boolean help) {
+                             Path configFile, Path webRoot, Path workDir,
+                             Path tlsKeystore, String tlsPassword, boolean help) {
 
     /**
      * 校验并创建。
@@ -42,6 +45,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
      * @param configFile  配置文件
      * @param webRoot     静态前端目录
      * @param workDir     工作目录
+     * @param tlsKeystore PKCS#12 keystore
+     * @param tlsPassword keystore 密码
      * @param help        帮助标记
      */
     public RuntimeOptions {
@@ -93,7 +98,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
         }
 
         Set<String> known = Set.of("mode", "bind", "port", "token", "hsms-port",
-                "device-id", "demo-session", "config", "web-root", "work-dir", "help");
+                "device-id", "demo-session", "config", "web-root", "work-dir",
+                "tls-keystore", "tls-password", "help");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -113,6 +119,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                 values.containsKey("config") ? Path.of(values.get("config")) : null,
                 values.containsKey("web-root") ? Path.of(values.get("web-root")) : null,
                 Path.of(values.getOrDefault("work-dir", defaultWorkDir())),
+                values.containsKey("tls-keystore") ? Path.of(values.get("tls-keystore")) : null,
+                values.getOrDefault("tls-password", ""),
                 Boolean.parseBoolean(values.getOrDefault("help", "false")));
     }
 
@@ -132,9 +140,11 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                   --hsms-port <n>                   SECS 端口，默认 5000
                   --device-id <n>                   SECS device-id，默认 10
                   --demo-session                    开一个两腔体演示会话（应答 S1F1 / S1F3）
-                  --config <path>                   从 Schema v4 JSON 装载设备与会话配置
+                  --config <path>                   从 Schema v5 JSON 装载设备与会话配置（v4 兼容）
                   --web-root <dir>                  托管静态前端（与 API 同源，浏览器直接打开）
                   --work-dir <path>                 工作目录
+                  --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
+                  --tls-password <s>                keystore 密码（默认空）
                   --help                            打印本帮助
 
                 启动后会向 stdout 打印一行 READY，供桌面壳与测试脚本握手。

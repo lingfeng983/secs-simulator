@@ -7,8 +7,8 @@ package com.shimizukenta.secssim.runtime;
  * </p>
  * <ul>
  *   <li>{@link #INTEGRATED}：桌面一体化。随壳启动，只绑回环，一次性 token，单用户。</li>
- *   <li>{@link #SERVER}：Linux 服务端。对外绑定；当前为明文 HTTP + 单 Bearer token，
- *        TLS 与账号鉴权尚未实现（见 docs/unfinished-2026-10-17.md）。</li>
+ *   <li>{@link #SERVER}：Linux 服务端。对外绑定；提供 {@code --tls-keystore} 时走 HTTPS，
+ *        否则仍是明文 HTTP。账号/角色鉴权尚未实现，目前只有单 Bearer token。</li>
  *   <li>{@link #PROBE}：能力探针。在目标机器上验证 SECS 端口与异步 I/O 是否可用。</li>
  * </ul>
  */

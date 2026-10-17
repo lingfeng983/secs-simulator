@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.concurrent.CountDownLatch;
 
+import javax.net.ssl.SSLContext;
+
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -82,6 +84,21 @@ public final class Main {
             return 0;
         }
 
+        if (options.mode() == RuntimeMode.SERVER && options.token().isBlank()) {
+            Log.error("server 模式必须显式提供 --token（不能每次启动随机生成，否则所有客户端都会掉线）", null);
+            return 2;
+        }
+
+        SSLContext tls = null;
+        if (options.tlsKeystore() != null) {
+            try {
+                tls = TlsSupport.load(options.tlsKeystore(), options.tlsPassword());
+            } catch (Exception e) {
+                Log.error("加载 TLS keystore 失败: " + options.tlsKeystore(), e);
+                return 2;
+            }
+        }
+
         String token = options.token().isBlank() ? newToken() : options.token();
         boolean utf8Ok = utf8RoundTrip(options.workDir());
         CountDownLatch stopped = new CountDownLatch(1);
@@ -117,7 +134,7 @@ public final class Main {
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), token, context,
-                options.webRoot(), bus);
+                options.webRoot(), bus, tls);
 
         Runtime.getRuntime().addShutdownHook(new Thread(stopped::countDown, "shutdown-hook"));
 
@@ -125,6 +142,7 @@ public final class Main {
                 + " http=" + api.port()
                 + " token=" + token
                 + " utf8=" + utf8Ok
+                + " tls=" + (tls != null)
                 + " sessions=" + sessions.list().size()
                 + ((probe == null && !options.demoSession()) ? "" : " hsms=" + options.hsmsPort())
                 + " work=" + options.workDir());

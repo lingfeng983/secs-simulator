@@ -55,8 +55,16 @@ secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 scripts\build-frontend.ps1
 secs-sim --mode=integrated --demo-session --web-root frontend/dist
 
-# 服务端：对外绑定（当前为明文 HTTP + 单 token，建议置于 TLS 反向代理后）
+# 服务端：对外绑定，--token 必填；提供 keystore 时走 HTTPS
+secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN `
+    --tls-keystore ./server.p12 --tls-password $env:SECS_TLS_PASSWORD
+
+# 没有 --tls-keystore 时仍是明文 HTTP，建议置于 TLS 反向代理后
 secs-sim --mode=server --bind 0.0.0.0 --port 8080 --token $env:SECS_TOKEN
+
+# keystore 示例：
+# keytool -genkeypair -alias secs-sim -keyalg RSA -storetype PKCS12 `
+#   -keystore server.p12 -storepass changeit -dname CN=your-host -validity 3650
 
 # 能力探针：开 HSMS 被动端口应答 S1F1，用于现场排障与 CI
 secs-sim --mode=probe --hsms-port 5000
@@ -82,6 +90,7 @@ HTTP API（v1）：
 | `POST /api/v1/shutdown` | 是 | 优雅停机 |
 
 鉴权只用 `Authorization: Bearer <token>`。URL 里不再接受长期 token：
+若启动时给了 `--tls-keystore`，上述 `http://` 地址应换成 `https://`（自签证书需客户端信任）。
 `EventSource` 不能设置请求头，所以浏览器先 `POST /api/v1/ticket` 换一张
 30 秒、一次性的票据再连 SSE。打包脚本打开的界面地址形如
 `http://127.0.0.1:<port>/#token=<token>`，token 放在 hash 里，不会发给服务端。
