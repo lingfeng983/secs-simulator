@@ -207,7 +207,7 @@ public class JsonHubBuilder {
 				return number((Number)v);
 			}
 			
-			throw new JsonHubBuildException("build failed \"" + v.toString() + "\"");
+			throw new JsonHubBuildException("build failed \"" + JsonStringCoder.snippet(v.toString()) + "\"");
 		}
 	}
 	

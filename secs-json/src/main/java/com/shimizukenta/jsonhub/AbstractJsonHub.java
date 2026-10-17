@@ -106,12 +106,12 @@ abstract public class AbstractJsonHub implements JsonHub, Serializable {
 	
 	@Override
 	public boolean containsKey(CharSequence name) {
-		throw new JsonHubUnsupportedOperationException(type() + " not support #containsKey(\"" + name + "\")");
+		throw new JsonHubUnsupportedOperationException(type() + " not support #containsKey(\"" + JsonStringCoder.snippet(name.toString()) + "\")");
 	}
 	
 	@Override
 	public JsonHub get(CharSequence name) {
-		throw new JsonHubUnsupportedOperationException(type() + "not support #get(\"" + name + "\")");
+		throw new JsonHubUnsupportedOperationException(type() + "not support #get(\"" + JsonStringCoder.snippet(name.toString()) + "\")");
 	}
 	
 	@Override

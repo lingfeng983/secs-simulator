@@ -39,10 +39,21 @@ public class JsonObjectPair implements Serializable {
 		return v;
 	}
 	
+	/**
+	 * Returns {@code true} if {@code o} is a JsonObjectPair with the same
+	 * {@link #name()} and {@link #value()}.
+	 * 
+	 * <p>
+	 * Comparison is based on the getters, consistent with
+	 * {@link ObjectJsonHub#equals(Object)}.<br />
+	 * </p>
+	 * 
+	 */
 	@Override
 	public boolean equals(Object o) {
 		if ((o != null) && (o instanceof JsonObjectPair)) {
-			return ((JsonObjectPair) o).name().equals(name());
+			JsonObjectPair p = (JsonObjectPair) o;
+			return name().equals(p.name()) && value().equals(p.value());
 		} else {
 			return false;
 		}
@@ -50,7 +61,7 @@ public class JsonObjectPair implements Serializable {
 	
 	@Override
 	public int hashCode() {
-		return name().hashCode();
+		return Objects.hash(name(), value());
 	}
 	
 	@Override

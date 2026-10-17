@@ -14,6 +14,19 @@ import java.util.OptionalLong;
  * <p>
  * Instances of this class are immutable.
  * </p>
+ * <p>
+ * Number-String is parsed as follows.<br />
+ * A value without {@code '.'} is parsed as a signed 64-bit
+ * {@code long}; a value out of the {@code long} range is rejected.<br />
+ * A value with {@code '.'} is parsed as an IEEE-754 binary64
+ * {@code double}; exponent-notation is accepted only together with
+ * {@code '.'} (e.g. {@code "1.5e3"}), so {@code "1e5"} without
+ * {@code '.'} is rejected.<br />
+ * Integers routed through {@code double} keep at most 53 bits of
+ * significand precision.<br />
+ * Non-finite values ({@code NaN}, {@code Infinity}) are not
+ * representable in JSON and are rejected.<br />
+ * </p>
  * 
  * @author kenta-shimizu
  *
@@ -40,13 +53,31 @@ public class NumberJsonHub extends AbstractJsonHub {
 		catch ( NumberFormatException e ) {
 			throw new JsonHubNumberFormatException(e.getMessage());
 		}
+		
+		validateFinite(this.num);
 	}
 	
 	protected NumberJsonHub(Number num) {
 		super();
 		
 		this.num = Objects.requireNonNull(num);
+		
+		validateFinite(this.num);
+		
 		this.str = this.num.toString();
+	}
+	
+	private static void validateFinite(Number num) {
+		
+		if ( (num instanceof Double) || (num instanceof Float) ) {
+			
+			double d = num.doubleValue();
+			
+			if ( Double.isNaN(d) || Double.isInfinite(d) ) {
+				
+				throw new JsonHubNumberFormatException("not finite NUMBER: " + num);
+			}
+		}
 	}
 	
 	@Override

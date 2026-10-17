@@ -82,18 +82,16 @@ public abstract class AbstractJsonHubPrettyPrinter implements JsonHubPrettyPrint
 	@Override
 	public String print(JsonHub v) {
 		
-		synchronized ( this ) {
+		/* not synchronized: all state is method-local, config getters are internally synchronized */
+		try (
+				StringWriter sw = new StringWriter();
+				) {
 			
-			try (
-					StringWriter sw = new StringWriter();
-					) {
-				
-				print(v, sw);
-				return sw.toString();
-			}
-			catch ( IOException notHappen ) {
-				throw new RuntimeException(notHappen);
-			}
+			print(v, sw);
+			return sw.toString();
+		}
+		catch ( IOException notHappen ) {
+			throw new RuntimeException(notHappen);
 		}
 	}
 	

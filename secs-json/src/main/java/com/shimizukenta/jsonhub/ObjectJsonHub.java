@@ -23,6 +23,11 @@ import java.util.stream.Stream;
  * <p>
  * Instances of this class are immutable.
  * </p>
+ * <p>
+ * Pairs with duplicate names are all preserved in insertion order;
+ * {@link #get(CharSequence)} and {@link #getOrDefault(CharSequence)}
+ * return the value of the first matching pair.<br />
+ * </p>
  * 
  * @author kenta-shimizu
  *
@@ -108,7 +113,7 @@ public class ObjectJsonHub extends AbstractJsonHub {
 		return get(new LinkedList<>(Arrays.asList(names)));
 	}
 	
-	private ObjectJsonHub get(LinkedList<String> ll) {
+	private JsonHub get(LinkedList<String> ll) {
 		
 		if ( ll.isEmpty() ) {
 			
@@ -124,7 +129,15 @@ public class ObjectJsonHub extends AbstractJsonHub {
 				return null;
 			}
 			
-			return ((ObjectJsonHub)x).get(ll);
+			if ( x instanceof ObjectJsonHub ) {
+				
+				return ((ObjectJsonHub)x).get(ll);
+				
+			} else {
+				
+				/* leaf value: return it if last, otherwise path not found */
+				return ll.isEmpty() ? x : null;
+			}
 		}
 	}
 	

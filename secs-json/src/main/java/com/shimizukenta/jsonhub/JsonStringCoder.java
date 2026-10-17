@@ -1,9 +1,5 @@
 package com.shimizukenta.jsonhub;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-
 /**
  * This class is JSON-String to escape or unescape.
  * 
@@ -31,6 +27,29 @@ public class JsonStringCoder {
 	 */
 	public static JsonStringCoder getInstance() {
 		return SingletonHolder.inst;
+	}
+	
+	/**
+	 * Returns snippet of {@code s} for exception messages.
+	 * 
+	 * <p>
+	 * The full content is truncated to at most 256 characters
+	 * (an ellipsis is appended when truncated),
+	 * so that exception messages stay bounded even for huge inputs.
+	 * </p>
+	 * 
+	 * @param s String, {@code null} is not accepted
+	 * @return snippet of {@code s}, at most 256 characters
+	 */
+	static String snippet(String s) {
+		
+		String v = s.trim();
+		
+		if ( v.length() > 256 ) {
+			return v.substring(0, 253) + "...";
+		}
+		
+		return v;
 	}
 	
 	
@@ -86,40 +105,80 @@ public class JsonStringCoder {
 	 * <p>
 	 * Not Accept {@code null}.<br />
 	 * </p>
+	 * <p>
+	 * Characters in {@code 0x00} to {@code 0x1F} are escaped as
+	 * {@code \b}, {@code \t}, {@code \n}, {@code \f}, {@code \r} when a
+	 * short-escape exists, and as {@code U+00XX} otherwise.<br />
+	 * Characters in {@code 0x7F} and above are passed through as-is
+	 * (encoded in UTF-8 by the String).<br />
+	 * </p>
+	 * <p>
+	 * Invariant: {@code unescape(escape(s)) == s} for any unescaped
+	 * JSON-String {@code s} without unpaired surrogates.<br />
+	 * </p>
 	 * 
 	 * @param cs unescaped-JSON-Stirng
 	 * @return escaped-JSON-String
+	 * @throws JsonHubBuildException if {@code cs} contains an unpaired surrogate
 	 */
 	public String escape(CharSequence cs) {
 		
 		String v = cs.toString();
 		
-		try (
-				ByteArrayOutputStream strm = new ByteArrayOutputStream();
-				) {
+		StringBuilder sb = new StringBuilder(v.length() + 16);
+		
+		for (int i = 0, len = v.length(); i < len; ++i) {
 			
-			byte[] bb = v.getBytes(StandardCharsets.UTF_8);
+			char c = v.charAt(i);
 			
-			for (byte b : bb) {
+			if ( Character.isHighSurrogate(c) ) {
 				
-				Byte x = EscapeSets.escape(b);
-				
-				if ( x == null ) {
+				if ( (i + 1) < len && Character.isLowSurrogate(v.charAt(i + 1)) ) {
 					
-					strm.write(b);
+					sb.append(c);
+					sb.append(v.charAt(i + 1));
+					++i;
+					continue;
 					
 				} else {
 					
-					strm.write(BACKSLASH);
-					strm.write(x.byteValue());
+					throw new JsonHubBuildException("escape failed: unpaired high-surrogate. index: " + i);
 				}
 			}
 			
-			return new String(strm.toByteArray(), StandardCharsets.UTF_8);
+			if ( Character.isLowSurrogate(c) ) {
+				
+				throw new JsonHubBuildException("escape failed: unpaired low-surrogate. index: " + i);
+			}
+			
+			if ( c < 0x80 ) {
+				
+				Byte x = EscapeSets.escape((byte) c);
+				
+				if ( x == null ) {
+					
+					if ( c < 0x20 ) {
+						
+						appendUnicodeEscape(sb, c);
+						
+					} else {
+						
+						sb.append(c);
+					}
+					
+				} else {
+					
+					sb.append((char) BACKSLASH);
+					sb.append((char) x.byteValue());
+				}
+				
+			} else {
+				
+				sb.append(c);
+			}
 		}
-		catch ( IOException notHappen ) {
-			throw new RuntimeException(notHappen);
-		}
+		
+		return sb.toString();
 	}
 	
 	/**
@@ -128,88 +187,179 @@ public class JsonStringCoder {
 	 * <p>
 	 * Not Accept {@code null}.<br />
 	 * </p>
+	 * <p>
+	 * Supported escape sequences are {@code \b}, {@code \t}, {@code \n},
+	 * {@code \f}, {@code \r}, {@code \"}, {@code \/}, {@code \\} and
+	 * {@code U+XXXX}. A {@code U+XXXX} high-surrogate must be followed by a
+	 * {@code U+XXXX} low-surrogate (or a raw low-surrogate character); they
+	 * are combined into one supplementary code point.<br />
+	 * </p>
+	 * <p>
+	 * Invariant: {@code escape(unescape(s)) == s} for any escaped
+	 * JSON-String {@code s} in canonical form, i.e. as returned by
+	 * {@link #escape(CharSequence)}.<br />
+	 * </p>
 	 * 
 	 * @param cs escaped-JSON-String
 	 * @return unescaped-JSON-String
+	 * @throws JsonHubParseException if {@code cs} contains an illegal escape
+	 * sequence, a truncated {@code U+XXXX} sequence, non-hexadecimal digits
+	 * or an unpaired surrogate; the message contains the index
 	 */
 	public String unescape(CharSequence cs) {
 		
 		String v = cs.toString();
 		
-		try (
-				ByteArrayOutputStream strm = new ByteArrayOutputStream();
-				) {
+		StringBuilder sb = new StringBuilder(v.length());
+		
+		int pendingHigh = -1;
+		int pendingHighIndex = -1;
+		
+		for (int i = 0, len = v.length(); i < len; ++i) {
 			
-			byte[] bb = v.getBytes(StandardCharsets.UTF_8);
+			char c = v.charAt(i);
 			
-			for (int i = 0, len = bb.length; i < len; ++i) {
+			if ( c == (char) BACKSLASH ) {
 				
-				byte b = bb[i];
+				++i;
 				
-				if ( b == BACKSLASH ) {
+				if ( i >= len ) {
 					
-					++i;
+					throw new JsonHubParseException("unescape failed: not found escape-character. index: " + (i - 1));
+				}
+				
+				char c2 = v.charAt(i);
+				
+				if ( c2 == (char) UNICODE ) {
 					
-					byte b2 = bb[i];
+					if ( (i + 4) >= len ) {
+						
+						throw new JsonHubParseException("unescape failed: not found 4 hexadecimal-digits after \\u. index: " + i);
+					}
 					
-					if ( b2 == UNICODE ) {
+					int code = parseHex4(v, i + 1);
+					
+					i += 4;
+					
+					if ( Character.isHighSurrogate((char) code) ) {
 						
-						byte[] xx = unescapeUnicode(new byte[]{bb[i + 1], bb[i + 2], bb[i + 3], bb[i + 4]});
+						if ( pendingHigh >= 0 ) {
+							
+							throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
+						}
 						
-						strm.write(xx);
+						pendingHigh = code;
+						pendingHighIndex = i - 5;
 						
-						i += 4;
+					} else if ( Character.isLowSurrogate((char) code) ) {
+						
+						if ( pendingHigh < 0 ) {
+							
+							throw new JsonHubParseException("unescape failed: unpaired low-surrogate. index: " + (i - 5));
+						}
+						
+						sb.append(Character.toChars(Character.toCodePoint((char) pendingHigh, (char) code)));
+						pendingHigh = -1;
+						pendingHighIndex = -1;
 						
 					} else {
 						
-						Byte x = EscapeSets.unescape(b2);
-						
-						if ( x != null ) {
-							strm.write(x.byteValue());
+						if ( pendingHigh >= 0 ) {
+							
+							throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
 						}
+						
+						sb.append((char) code);
 					}
+					
+				} else if ( c2 < 0x80 ) {
+					
+					Byte x = EscapeSets.unescape((byte) c2);
+					
+					if ( x == null ) {
+						
+						throw new JsonHubParseException("unescape failed: illegal escape-sequence \\" + c2 + ". index: " + i);
+					}
+					
+					if ( pendingHigh >= 0 ) {
+						
+						throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
+					}
+					
+					sb.append((char) x.byteValue());
 					
 				} else {
 					
-					strm.write(b);
+					throw new JsonHubParseException("unescape failed: illegal escape-sequence \\" + c2 + ". index: " + i);
 				}
+				
+			} else if ( Character.isHighSurrogate(c) ) {
+				
+				if ( pendingHigh >= 0 ) {
+					
+					throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
+				}
+				
+				pendingHigh = c;
+				pendingHighIndex = i;
+				
+			} else if ( Character.isLowSurrogate(c) ) {
+				
+				if ( pendingHigh < 0 ) {
+					
+					throw new JsonHubParseException("unescape failed: unpaired low-surrogate. index: " + i);
+				}
+				
+				sb.append(Character.toChars(Character.toCodePoint((char) pendingHigh, c)));
+				pendingHigh = -1;
+				pendingHighIndex = -1;
+				
+			} else {
+				
+				if ( pendingHigh >= 0 ) {
+					
+					throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
+				}
+				
+				sb.append(c);
+			}
+		}
+		
+		if ( pendingHigh >= 0 ) {
+			
+			throw new JsonHubParseException("unescape failed: unpaired high-surrogate. index: " + pendingHighIndex);
+		}
+		
+		return sb.toString();
+	}
+	
+	private static void appendUnicodeEscape(StringBuilder sb, char c) {
+		
+		sb.append((char) BACKSLASH);
+		sb.append((char) UNICODE);
+		sb.append('0');
+		sb.append('0');
+		sb.append(Character.toUpperCase(Character.forDigit((c >> 4) & 0xF, 16)));
+		sb.append(Character.toUpperCase(Character.forDigit(c & 0xF, 16)));
+	}
+	
+	private static int parseHex4(String s, int fromIndex) {
+		
+		int code = 0;
+		
+		for (int i = fromIndex, n = fromIndex + 4; i < n; ++i) {
+			
+			int d = Character.digit(s.charAt(i), 16);
+			
+			if ( d < 0 ) {
+				
+				throw new JsonHubParseException("unescape failed: not hexadecimal-digit '" + s.charAt(i) + "'. index: " + i);
 			}
 			
-			return new String(strm.toByteArray(), StandardCharsets.UTF_8);
+			code = (code << 4) | d;
 		}
-		catch ( IOException notHappen ) {
-			throw new RuntimeException(notHappen);
-		}
-		catch ( IndexOutOfBoundsException e ) {
-			throw new JsonHubIndexOutOfBoundsException("unescape failed \"" + cs.toString() + "\"");
-		}
+		
+		return code;
 	}
-	
-	private static byte[] unescapeUnicode(byte[] bb) {
-		
-		String s1 = new String(new byte[]{bb[0], bb[1]}, StandardCharsets.UTF_8);
-		String s2 = new String(new byte[]{bb[2], bb[3]}, StandardCharsets.UTF_8);
-		
-		byte b = decodeXXtoByte(s1);
-		
-		if ( b == 0x00 ) {
-			
-			return new byte[] {decodeXXtoByte(s2)};
-			
-		} else {
-			
-			return new byte[] {b, decodeXXtoByte(s2)};
-		}
-	}
-	
-	private static byte decodeXXtoByte(String s) {
-		
-		try {
-			return Byte.parseByte(s, 16);
-		}
-		catch ( NumberFormatException e ) {
-			throw new JsonHubNumberFormatException(s);
-		}
-	}
-	
+
 }

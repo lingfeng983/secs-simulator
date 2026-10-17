@@ -6,6 +6,7 @@ import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * This class is parser, from JSON-String to JsonHub instance.
@@ -21,6 +22,17 @@ import java.util.List;
  */
 public class JsonHubJsonParser {
 
+	/**
+	 * Maximum nesting depth of JSON containers (ARRAY or OBJECT).
+	 * 
+	 * <p>
+	 * The outermost container is depth 0, so up to 65 nested containers
+	 * are accepted; deeper input is rejected with
+	 * {@link JsonHubParseException} instead of {@link StackOverflowError}.<br />
+	 * </p>
+	 */
+	private static final int MAX_NESTING_DEPTH = 64;
+	
 	private JsonHubJsonParser() {
 		/* Nothing */
 	}
@@ -47,6 +59,7 @@ public class JsonHubJsonParser {
 	 * 
 	 * <p>
 	 * Not accept {@code null}.<br />
+	 * A single leading UTF-8 BOM (U+FEFF) is silently skipped.<br />
 	 * </p>
 	 * 
 	 * @param cs JSON-String
@@ -55,18 +68,26 @@ public class JsonHubJsonParser {
 	 */
 	public AbstractJsonHub parse(CharSequence cs) {
 		
+		Objects.requireNonNull(cs, "parse: nonNull CharSequence required");
+		
+		String s = cs.toString();
+		
+		if ( (! s.isEmpty()) && (s.charAt(0) == '\uFEFF') ) {
+			
+			/* skip one leading BOM */
+			s = s.substring(1);
+		}
+		
+		if ( s.trim().isEmpty() ) {
+			throw new JsonHubParseException("JSON is empty");
+		}
+		
 		try {
-			
-			String s = cs.toString();
-			
-			if ( s.trim().isEmpty() ) {
-				throw new JsonHubParseException("JSON is empty");
-			}
 			
 			return fromJson(s);
 		}
 		catch ( JsonHubIndexOutOfBoundsException | JsonHubNumberFormatException e ) {
-			throw new JsonHubParseException(e);
+			throw new JsonHubParseException("parse failed \"" + JsonStringCoder.snippet(s) + "\"", e);
 		}
 	}
 	
@@ -79,6 +100,8 @@ public class JsonHubJsonParser {
 	 * @throws IOException
 	 */
 	public AbstractJsonHub parse(Reader reader) throws IOException {
+		
+		Objects.requireNonNull(reader, "parse: nonNull Reader required");
 		
 		try (
 				CharArrayWriter writer = new CharArrayWriter();
@@ -135,11 +158,11 @@ public class JsonHubJsonParser {
 			
 		} else if ( JsonStructuralChar.ARRAY_BIGIN.match(r.c) ) {
 			
-			vr = fromJsonArrayValue(str, r.index);
+			vr = fromJsonArrayValue(str, r.index, 0);
 			
 		} else if ( JsonStructuralChar.OBJECT_BIGIN.match(r.c) ) {
 			
-			vr = fromJsonObjectValue(str, r.index);
+			vr = fromJsonObjectValue(str, r.index, 0);
 			
 		} else {
 			
@@ -151,7 +174,7 @@ public class JsonHubJsonParser {
 				
 			} else {
 				
-				throw new JsonHubParseException("Value is not Single \"" + str + "\"");
+				throw new JsonHubParseException("Value is not Single \"" + JsonStringCoder.snippet(str) + "\"");
 			}
 		}
 		
@@ -161,7 +184,7 @@ public class JsonHubJsonParser {
 			
 		} else {
 			
-			throw new JsonHubParseException("Value is not Single \"" + str + "\"");
+			throw new JsonHubParseException("Value is not Single \"" + JsonStringCoder.snippet(str) + "\"");
 		}
 	}
 	
@@ -215,9 +238,14 @@ public class JsonHubJsonParser {
 	
 	private static JsonString fromJsonString(String str) {
 		String s = str.trim();
-		return JsonString.escaped(s.substring(1, (s.length() - 1)));
+		JsonString js = JsonString.escaped(s.substring(1, (s.length() - 1)));
+		
+		/* fail-fast: validates escape-sequences and surrogates at parse-time */
+		js.unescaped();
+		
+		return js;
 	}
-	
+
 	private static SeekValueResult fromJsonStringValue(String str, int fromIndex) {
 		
 		int endIndex = seekEndIndexOfString(str, fromIndex);
@@ -227,8 +255,13 @@ public class JsonHubJsonParser {
 						fromJsonString(str.substring(fromIndex, endIndex)))
 				, endIndex);
 	}
-	
-	private static SeekValueResult fromJsonArrayValue(String str, int fromIndex) {
+
+	private static SeekValueResult fromJsonArrayValue(String str, int fromIndex, int depth) {
+		
+		if ( depth > MAX_NESTING_DEPTH ) {
+			
+			throw new JsonHubParseException("JSON nesting too deep. index: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
+		}
 		
 		final List<AbstractJsonHub> ll = new ArrayList<>();
 		
@@ -260,19 +293,19 @@ public class JsonHubJsonParser {
 					
 				} else if ( JsonStructuralChar.ARRAY_BIGIN.match(r.c) ) {
 					
-					SeekValueResult vr = fromJsonArrayValue(str, r.index);
+					SeekValueResult vr = fromJsonArrayValue(str, r.index, depth + 1);
 					ll.add(vr.value);
 					i = vr.endIndex;
 					
 				} else if ( JsonStructuralChar.OBJECT_BIGIN.match(r.c) ) {
 					
-					SeekValueResult vr = fromJsonObjectValue(str, r.index);
+					SeekValueResult vr = fromJsonObjectValue(str, r.index, depth + 1);
 					ll.add(vr.value);
 					i = vr.endIndex;
 					
 				} else if (JsonStructuralChar.SEPARATOR_NAME.match(r.c) || JsonStructuralChar.SEPARATOR_VALUE.match(r.c)) {
 					
-					throw new JsonHubParseException("Value is empty \"" + str + "\"");
+					throw new JsonHubParseException("Value is empty \"" + JsonStringCoder.snippet(str) + "\"");
 					
 				} else {
 					
@@ -280,7 +313,7 @@ public class JsonHubJsonParser {
 					
 					if ( vr.endIndex < 0 ) {
 						
-						throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + str + "\"");
+						throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + JsonStringCoder.snippet(str) + "\"");
 						
 					} else {
 						
@@ -305,15 +338,20 @@ public class JsonHubJsonParser {
 					
 				} else {
 					
-					throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + str + "\"");
+					throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + JsonStringCoder.snippet(str) + "\"");
 				}
 			}
 		}
 		
-		throw new JsonHubParseException("Not found end-of-ARRAY. fromIndex: " + fromIndex + " \"" + str + "\"");
+		throw new JsonHubParseException("Not found end-of-ARRAY. fromIndex: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
 	}
-	
-	private static SeekValueResult fromJsonObjectValue(String str, int fromIndex) {
+
+	private static SeekValueResult fromJsonObjectValue(String str, int fromIndex, int depth) {
+		
+		if ( depth > MAX_NESTING_DEPTH ) {
+			
+			throw new JsonHubParseException("JSON nesting too deep. index: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
+		}
 		
 		final JsonHubBuilder jhb = JsonHubBuilder.getInstance();
 		
@@ -357,19 +395,19 @@ public class JsonHubJsonParser {
 					
 				} else if ( JsonStructuralChar.ARRAY_BIGIN.match(r.c) ) {
 					
-					SeekValueResult vr = fromJsonArrayValue(str, r.index);
+					SeekValueResult vr = fromJsonArrayValue(str, r.index, depth + 1);
 					pairs.add(jhb.pair(js, vr.value));
 					i = vr.endIndex;
 					
 				} else if ( JsonStructuralChar.OBJECT_BIGIN.match(r.c) ) {
 					
-					SeekValueResult vr = fromJsonObjectValue(str, r.index);
+					SeekValueResult vr = fromJsonObjectValue(str, r.index, depth + 1);
 					pairs.add(jhb.pair(js, vr.value));
 					i = vr.endIndex;
 					
 				} else if (JsonStructuralChar.SEPARATOR_NAME.match(r.c) || JsonStructuralChar.SEPARATOR_VALUE.match(r.c)) {
 					
-					throw new JsonHubParseException("Value is empty. index: " + r.index + " \"" + str + "\"");
+					throw new JsonHubParseException("Value is empty. index: " + r.index + " \"" + JsonStringCoder.snippet(str) + "\"");
 					
 				} else {
 					
@@ -377,7 +415,7 @@ public class JsonHubJsonParser {
 					
 					if ( vr.endIndex < 0 ) {
 						
-						throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + str + "\"");
+						throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + JsonStringCoder.snippet(str) + "\"");
 						
 					} else {
 						
@@ -402,12 +440,12 @@ public class JsonHubJsonParser {
 					
 				} else {
 					
-					throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + str + "\"");
+					throw new JsonHubParseException("Not found end-of-value. index: " + r.index + " \"" + JsonStringCoder.snippet(str) + "\"");
 				}
 			}
 		}
 		
-		throw new JsonHubParseException("Not found end-of-OBJECT. fromIndex: " + fromIndex + " \"" + str + "\"");
+		throw new JsonHubParseException("Not found end-of-OBJECT. fromIndex: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
 	}
 	
 	private static NumberJsonHub fromJsonNumberValue(String str) {
@@ -419,7 +457,7 @@ public class JsonHubJsonParser {
 		if ((r.index >= 0) && JsonStructuralChar.QUOT.match(r.c) ) {
 			return r.index;
 		} else {
-			throw new JsonHubParseException("Not found Quot. fromIndex: " + fromIndex + " \"" + str + "\"");
+			throw new JsonHubParseException("Not found Quot. fromIndex: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
 		}
 	}
 	
@@ -428,7 +466,7 @@ public class JsonHubJsonParser {
 		if ((r.index >= 0) && JsonStructuralChar.SEPARATOR_NAME.match(r.c)) {
 			return r.index;
 		} else {
-			throw new JsonHubParseException("Not found \":\" fromIndex: " + fromIndex + " \"" + str + "\"");
+			throw new JsonHubParseException("Not found \":\" fromIndex: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
 		}
 	}
 	
@@ -443,12 +481,17 @@ public class JsonHubJsonParser {
 				continue;
 			}
 			
+			if ( c < 0x20 ) {
+				
+				throw new JsonHubParseException("Not allowed control-character in STRING. index: " + i + " \"" + JsonStringCoder.snippet(str) + "\"");
+			}
+			
 			if ( JsonStructuralChar.QUOT.match(c) ) {
 				return i + 1;
 			}
 		}
 		
-		throw new JsonHubParseException("Not found end-of-STRING. fromIndex: " + fromIndex + " \"" + str + "\"");
+		throw new JsonHubParseException("Not found end-of-STRING. fromIndex: " + fromIndex + " \"" + JsonStringCoder.snippet(str) + "\"");
 	}
 	
 	

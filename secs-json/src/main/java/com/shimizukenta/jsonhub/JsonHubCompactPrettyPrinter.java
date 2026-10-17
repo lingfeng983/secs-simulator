@@ -37,9 +37,8 @@ public class JsonHubCompactPrettyPrinter extends AbstractJsonHubPrettyPrinter {
 	@Override
 	public void print(JsonHub v, Writer writer) throws IOException {
 		
-		synchronized ( this ) {
-			_print(v, writer);
-		}
+		/* not synchronized: all state is method-local or thread-safe */
+		_print(v, writer);
 	}
 	
 	private void _print(JsonHub v, Writer writer) throws IOException {
