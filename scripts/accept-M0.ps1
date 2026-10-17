@@ -1,4 +1,4 @@
-# M0 验收：多模块骨架 + 分层规则 + 编码基线 + native 风险验证
+﻿# M0 验收：多模块骨架 + 分层规则 + 编码基线 + native 风险验证
 param([switch]$SkipNative)
 
 $ErrorActionPreference = 'Stop'
