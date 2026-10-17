@@ -48,6 +48,7 @@
   "events": {
     "maxPerSec": 20,
     "s6f11Wbit": false,
+    "s6f1Wbit": false,
     "plans": [
       { "id": "start", "ceid": 2001,
         "trigger": { "type": "periodic", "periodMs": 5000, "jitterMs": 200 } },
@@ -68,6 +69,7 @@
 | `globalSvids` / `globalCeids` | 设备级共享项，不属于任何单元；全局 CEID 引用跨单元报告要写 `单元名.报告名` |
 | `globalSvids.min/max` | 可选值域（仅数值型）。不配时默认曲线退化为 0..100 的有界随机游走；BOOLEAN 固定 1，ASCII/BINARY 固定 0 |
 | `events.s6f11Wbit` | 可选，默认 `false`。为 `true` 时 S6F11 带 W 位并等待 S6F12；发送走单线程队列，避免 T3 阻塞事件心跳 |
+| `events.s6f1Wbit` | 可选，默认 `false`。为 `true` 时 S6F1 带 W 位并等待 S6F2；发送走独立单线程队列，不阻塞 Trace 采样 |
 | `reserve` | 禁止占用的号段（默认 1..999 留给标准消息） |
 
 ## 错误定位

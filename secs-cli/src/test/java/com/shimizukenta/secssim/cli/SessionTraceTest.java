@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
@@ -109,6 +110,24 @@ class SessionTraceTest {
     }
 
     @Test
+    void s6f1WbitWaitsForS6f2() throws Exception {
+        try (Fixture f = new Fixture(true)) {
+            f.session.traceWbit(true);
+            assertEquals(0, f.startTrace(7, 1, 1, 1001));
+
+            f.clock.advanceMs(DSPER_MS);
+            f.session.pumpNow();
+
+            awaitTraceFrames(f.session, 1L, 5_000L);
+            SecsMessage frame = f.s6f1.poll(5L, TimeUnit.SECONDS);
+            assertNotNull(frame, "主机应收到 S6F1");
+            assertTrue(frame.wbit(), "开启后 S6F1 必须带 W 位");
+            assertEquals(1L, f.session.traceFramesSent(), "收到 S6F2 后才算发送成功");
+            assertEquals(0L, f.session.counters().get("traceWbitDropped"));
+        }
+    }
+
+    @Test
     void totsmpZeroTerminatesTrace() throws Exception {
         try (Fixture f = new Fixture()) {
             assertEquals(0, f.startTrace(3, 10, 1, 1001));
@@ -135,6 +154,15 @@ class SessionTraceTest {
         }
     }
 
+    private static void awaitTraceFrames(HsmsSessionRuntime session, long expected, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline && session.traceFramesSent() < expected) {
+            Thread.sleep(20L);
+        }
+        assertEquals(expected, session.traceFramesSent(), "收到 S6F2 后才算发送成功");
+    }
+
     /** 一套会话 + 客户端 + 捕获 S6F1 的夹具。 */
     private static final class Fixture implements AutoCloseable {
 
@@ -144,6 +172,10 @@ class SessionTraceTest {
         private final BlockingQueue<SecsMessage> s6f1 = new LinkedBlockingQueue<>();
 
         Fixture() throws Exception {
+            this(false);
+        }
+
+        Fixture(boolean ackS6F1) throws Exception {
             int port = freePort();
             EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
             CompilationResult compiled = EquipmentCompiler.compile(demo);
@@ -161,6 +193,14 @@ class SessionTraceTest {
             this.client.addSecsMessageReceiveListener(message -> {
                 if (message.getStream() == 6 && message.getFunction() == 1) {
                     this.s6f1.add(message);
+                    if (ackS6F1 && message.wbit()) {
+                        try {
+                            this.client.send(message, 6, 2, false,
+                                    Secs2.getBuilder().binary((byte) 0));
+                        } catch (Exception ignored) {
+                            /* 测试由 awaitTraceFrames 的断言兜底 */
+                        }
+                    }
                 }
             });
             this.client.openAndWaitUntilCommunicating();

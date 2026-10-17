@@ -80,9 +80,10 @@ public final class SessionConfigJson {
         EventSchedule schedule = parseEvents(root);
         int maxPerSec = parseMaxPerSec(root);
         boolean s6f11Wbit = parseS6f11Wbit(root);
+        boolean s6f1Wbit = parseS6f1Wbit(root);
 
         SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment);
-        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit);
+        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit);
     }
 
     /**
@@ -276,6 +277,9 @@ public final class SessionConfigJson {
         if (config.s6f11Wbit()) {
             /* 默认 false 不写回，保持旧配置的 JSON 往返稳定 */
             pairs.add(b.pair("s6f11Wbit", true));
+        }
+        if (config.s6f1Wbit()) {
+            pairs.add(b.pair("s6f1Wbit", true));
         }
 
         return b.object(pairs);
@@ -503,6 +507,14 @@ public final class SessionConfigJson {
         }
         JsonHub events = JsonAccess.object(root, "events", ROOT);
         return JsonAccess.bool(events, "s6f11Wbit", false, ROOT + ".events");
+    }
+
+    private static boolean parseS6f1Wbit(JsonHub root) {
+        if (!root.containsKey("events")) {
+            return false;
+        }
+        JsonHub events = JsonAccess.object(root, "events", ROOT);
+        return JsonAccess.bool(events, "s6f1Wbit", false, ROOT + ".events");
     }
 
     private static int parseMaxPerSec(JsonHub root) {

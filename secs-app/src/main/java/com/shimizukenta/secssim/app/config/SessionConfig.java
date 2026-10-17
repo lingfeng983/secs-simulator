@@ -12,9 +12,10 @@ import com.shimizukenta.secssim.core.event.EventSchedule;
  * @param schedule        事件编排
  * @param maxEventsPerSec 设备级每秒最大上报数
  * @param s6f11Wbit        S6F11 是否带 W 位并等待 S6F12（默认 false）
+ * @param s6f1Wbit         S6F1 是否带 W 位并等待 S6F2（默认 false）
  */
 public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
-                            boolean s6f11Wbit) {
+                            boolean s6f11Wbit, boolean s6f1Wbit) {
 
     /** 当前 schema 版本。 */
     public static final int SCHEMA_VERSION = 4;
@@ -27,7 +28,20 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      * @param maxEventsPerSec 限流
      */
     public SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec) {
-        this(spec, schedule, maxEventsPerSec, false);
+        this(spec, schedule, maxEventsPerSec, false, false);
+    }
+
+    /**
+     * 兼容只配置 S6F11 W 位的调用：S6F1 默认不带 W 位。
+     *
+     * @param spec            会话参数
+     * @param schedule        编排
+     * @param maxEventsPerSec 限流
+     * @param s6f11Wbit       S6F11 是否带 W 位
+     */
+    public SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
+                         boolean s6f11Wbit) {
+        this(spec, schedule, maxEventsPerSec, s6f11Wbit, false);
     }
 
     /**
@@ -37,6 +51,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      * @param schedule        编排
      * @param maxEventsPerSec 限流
      * @param s6f11Wbit       S6F11 是否带 W 位
+     * @param s6f1Wbit        S6F1 是否带 W 位
      */
     public SessionConfig {
         if (schedule == null) {

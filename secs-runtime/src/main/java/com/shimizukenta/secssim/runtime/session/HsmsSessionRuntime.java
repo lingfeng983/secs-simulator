@@ -86,6 +86,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong traceFrames = new AtomicLong();
     private final AtomicLong skipped = new AtomicLong();
     private final AtomicLong wbitDropped = new AtomicLong();
+    private final AtomicLong traceWbitDropped = new AtomicLong();
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -95,8 +96,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private volatile RateLimiter limiter = new RateLimiter(DEFAULT_MAX_EVENTS_PER_SEC, RATE_WINDOW_MS);
     private volatile ScheduledExecutorService ticker;
     private volatile boolean s6f11Wbit;
+    private volatile boolean s6f1Wbit;
     /** 单线程串行等 S6F12：W 位发送会阻塞到 T3，不能占用 100ms 事件心跳。 */
     private volatile ExecutorService ackSender;
+    /** 单线程串行等 S6F2：Trace 采样不能被 ACK 阻塞。 */
+    private volatile ExecutorService traceAckSender;
     /**
      * 上次触发事件的时间点。
      *
@@ -151,14 +155,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
         this.traces = new TraceManager(model, this.values, Instant.now());
         this.eventRng = new Rng(spec.seed()).derive("events");
-        this.ackSender = newAckSender(spec.id());
+        this.ackSender = newAckSender("s6f11-ack-" + spec.id());
+        this.traceAckSender = newAckSender("s6f1-ack-" + spec.id());
     }
 
-    private static ExecutorService newAckSender(String sessionId) {
+    private static ExecutorService newAckSender(String threadName) {
         return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(S6F11_ACK_QUEUE),
                 runnable -> {
-                    Thread thread = new Thread(runnable, "s6f11-ack-" + sessionId);
+                    Thread thread = new Thread(runnable, threadName);
                     thread.setDaemon(true);
                     return thread;
                 });
@@ -174,6 +179,18 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public void collectionEventWbit(boolean enabled) {
         this.s6f11Wbit = enabled;
+    }
+
+    /**
+     * 设置 S6F1 是否带 W 位并等待 S6F2。
+     *
+     * <p>与 S6F11 相同的取舍：默认 {@code false}，开启后发送放到独立单线程队列，
+     * 不阻塞 Trace 采样与 100ms 心跳。</p>
+     *
+     * @param enabled 是否启用
+     */
+    public void traceWbit(boolean enabled) {
+        this.s6f1Wbit = enabled;
     }
 
     /**
@@ -428,7 +445,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         this.state.set(SessionState.OPENING);
         if (this.ackSender == null || this.ackSender.isShutdown()) {
-            this.ackSender = newAckSender(this.spec.id());
+            this.ackSender = newAckSender("s6f11-ack-" + this.spec.id());
+        }
+        if (this.traceAckSender == null || this.traceAckSender.isShutdown()) {
+            this.traceAckSender = newAckSender("s6f1-ack-" + this.spec.id());
         }
 
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
@@ -461,6 +481,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         ExecutorService sender = this.ackSender;
         if (sender != null) {
             sender.shutdownNow();
+        }
+        ExecutorService traceSender = this.traceAckSender;
+        if (traceSender != null) {
+            traceSender.shutdownNow();
         }
 
         SecsCommunicator comm = this.communicator;
@@ -502,6 +526,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 "rejected", this.rejected.get(),
                 "skipped", this.skipped.get(),
                 "wbitDropped", this.wbitDropped.get(),
+                "traceWbitDropped", this.traceWbitDropped.get(),
                 "traceFrames", this.traceFrames.get(),
                 "activeTraces", (long) this.traces.activeCount(),
                 "hostReports", (long) this.hostReports.reportCount(),
@@ -883,13 +908,35 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                         Secs2.getBuilder().ascii(frame.stime()),
                         Secs2.getBuilder().list(frame.values()));
 
-                this.communicator.send(6, 1, false, body);
-                this.traceFrames.incrementAndGet();
+                if (this.s6f1Wbit) {
+                    /* W 位会阻塞到 S6F2 或 T3，放到独立队列，Trace 采样照常推进 */
+                    this.traceAckSender.execute(() -> {
+                        try {
+                            this.sendTraceFrame(body, true);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            this.lastError = "等待 S6F2 被中断: TRID " + frame.trid();
+                        } catch (Exception e) {
+                            this.lastError = e.toString();
+                            Log.error("会话 " + this.spec.id() + " 等待 S6F2 失败", e);
+                        }
+                    });
+                } else {
+                    this.sendTraceFrame(body, false);
+                }
+            } catch (RejectedExecutionException e) {
+                this.traceWbitDropped.incrementAndGet();
+                Log.error("会话 " + this.spec.id() + " S6F1 ACK 队列已满", e);
             } catch (Exception e) {
                 this.lastError = e.toString();
                 Log.error("会话 " + this.spec.id() + " 发送 S6F1 失败", e);
             }
         }
+    }
+
+    private void sendTraceFrame(Secs2 body, boolean wbit) throws Exception {
+        this.communicator.send(6, 1, wbit, body);
+        this.traceFrames.incrementAndGet();
     }
 
     /**

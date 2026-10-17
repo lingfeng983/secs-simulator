@@ -173,6 +173,17 @@ class SessionConfigJsonTest {
     }
 
     @Test
+    void s6f1WbitSurvivesRoundTrip() {
+        SessionConfig base = demoConfig();
+        SessionConfig withWbit = new SessionConfig(base.spec(), base.schedule(), base.maxEventsPerSec(),
+                false, true);
+
+        String json = SessionConfigJson.toJson(withWbit);
+        assertTrue(json.contains("\"s6f1Wbit\""), "true 时必须写回 JSON");
+        assertTrue(SessionConfigJson.parse(json).s6f1Wbit());
+    }
+
+    @Test
     void globalSvidRangeRoundTrips() {
         String json = """
                 {"schemaVersion":4,

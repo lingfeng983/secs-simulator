@@ -5,6 +5,7 @@ export interface Counters {
   rejected?: number;
   skipped?: number;
   wbitDropped?: number;
+  traceWbitDropped?: number;
   traceFrames?: number;
   activeTraces?: number;
   hostReports?: number;

@@ -164,6 +164,7 @@ public final class Main {
         runtime.eventBus(bus);
         runtime.enableSchedule(config.schedule(), config.maxEventsPerSec());
         runtime.collectionEventWbit(config.s6f11Wbit());
+        runtime.traceWbit(config.s6f1Wbit());
         runtime.open();
         sessions.register(runtime);
         return 0;
