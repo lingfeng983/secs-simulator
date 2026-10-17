@@ -163,6 +163,46 @@ class SessionConfigJsonTest {
     }
 
     @Test
+    void afterEventTriggerRoundTrips() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1",
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
+                 "events":{"plans":[
+                   {"id":"start","ceid":2001,"trigger":{"type":"at","atMs":1000}},
+                   {"id":"follow","ceid":2003,"trigger":{"type":"afterEvent","sourcePlan":"start","delayMs":500}}
+                 ]}}
+                """;
+
+        SessionConfig parsed = SessionConfigJson.parse(json);
+        Trigger trigger = parsed.schedule().plans().get(1).trigger();
+        assertTrue(trigger instanceof Trigger.AfterEvent, "应为 AfterEvent");
+
+        Trigger.AfterEvent after = (Trigger.AfterEvent) trigger;
+        assertEquals("start", after.sourcePlan());
+        assertEquals(500L, after.delayMs());
+        assertTrue(SessionConfigJson.toJson(parsed).contains("\"afterEvent\""));
+    }
+
+    @Test
+    void afterEventUnknownSourceIsRejected() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1",
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
+                 "events":{"plans":[{"id":"follow","ceid":2003,
+                   "trigger":{"type":"afterEvent","sourcePlan":"missing","delayMs":500}}]}}
+                """;
+
+        ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
+        assertTrue(e.getMessage().contains("不存在的计划"), e.getMessage());
+    }
+
+    @Test
     void onConditionTriggerRoundTrips() {
         String json = """
                 {"schemaVersion":4,

@@ -5,7 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
@@ -301,6 +304,13 @@ public final class SessionConfigJson {
                     b.pair("debounceMs", condition.debounceMs()));
         }
 
+        if (trigger instanceof Trigger.AfterEvent after) {
+            return b.object(
+                    b.pair("type", "afterEvent"),
+                    b.pair("sourcePlan", after.sourcePlan()),
+                    b.pair("delayMs", after.delayMs()));
+        }
+
         Trigger.Periodic periodic = (Trigger.Periodic) trigger;
         return b.object(
                 b.pair("type", "periodic"),
@@ -495,7 +505,44 @@ public final class SessionConfigJson {
                     parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger")));
         }
 
+        validateChains(plans, path);
         return new EventSchedule(plans);
+    }
+
+    /** 校验 AfterEvent 引用存在且无环；区间/条件触发不参与图。 */
+    private static void validateChains(List<EventPlan> plans, String path) {
+        Map<String, EventPlan> byId = new LinkedHashMap<>();
+        for (int i = 0; i < plans.size(); i++) {
+            EventPlan plan = plans.get(i);
+            if (byId.putIfAbsent(plan.id(), plan) != null) {
+                throw new ConfigException(path + ".plans[" + i + "].id", "计划 id 重复: " + plan.id());
+            }
+        }
+
+        Map<String, Integer> state = new HashMap<>();
+        for (String id : byId.keySet()) {
+            visitChain(id, byId, state, path);
+        }
+    }
+
+    private static void visitChain(String id, Map<String, EventPlan> byId, Map<String, Integer> state, String path) {
+        Integer status = state.get(id);
+        if (status != null && status == 1) {
+            throw new ConfigException(path + ".plans", "AfterEvent 存在环: " + id);
+        }
+        if (status != null && status == 2) {
+            return;
+        }
+
+        state.put(id, 1);
+        EventPlan plan = byId.get(id);
+        if (plan.trigger() instanceof Trigger.AfterEvent after) {
+            if (!byId.containsKey(after.sourcePlan())) {
+                throw new ConfigException(path + ".plans", "AfterEvent 引用了不存在的计划: " + after.sourcePlan());
+            }
+            visitChain(after.sourcePlan(), byId, state, path);
+        }
+        state.put(id, 2);
     }
 
     private static Trigger parseTrigger(JsonHub jh, String path) {
@@ -521,7 +568,17 @@ public final class SessionConfigJson {
                 }
                 yield new Trigger.OnCondition(expression, debounceMs);
             }
-            default -> throw new ConfigException(path + ".type", "未知触发类型: " + type + "（可选 at / periodic / onCondition）");
+            case "afterEvent" -> {
+                String sourcePlan = JsonAccess.string(jh, "sourcePlan", path);
+                long delayMs = jh.containsKey("delayMs")
+                        ? JsonAccess.longValue(jh, "delayMs", path) : 0L;
+                if (delayMs < 0L) {
+                    throw new ConfigException(path + ".delayMs", "delayMs 不能为负数");
+                }
+                yield new Trigger.AfterEvent(sourcePlan, delayMs);
+            }
+            default -> throw new ConfigException(path + ".type", "未知触发类型: " + type
+                    + "（可选 at / periodic / onCondition / afterEvent）");
         };
     }
 

@@ -4,10 +4,12 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -105,6 +107,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final Map<Integer, AlarmState> activeAlarms = new ConcurrentHashMap<>();
     private final Map<String, ConditionDebouncer> conditionDebouncers = new ConcurrentHashMap<>();
     private final Set<String> conditionErrorLogged = ConcurrentHashMap.newKeySet();
+    /** AfterEvent 的待触发队列；按计划时刻升序。 */
+    private final PriorityQueue<PendingFire> pendingFires = new PriorityQueue<>(
+            Comparator.comparingLong(PendingFire::atMs).thenComparing(PendingFire::planId));
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -337,6 +342,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         this.conditionDebouncers.clear();
         this.conditionErrorLogged.clear();
+        synchronized (this.pendingFires) {
+            this.pendingFires.clear();
+        }
         for (EventPlan plan : this.schedule.plans()) {
             if (plan.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
@@ -673,6 +681,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 /* 没有主机在线时不要积压事件：上线后从当前时刻重新开始，避免一次涌出几百条 */
                 this.lastFireMs = this.clock.nowMs();
                 this.resetConditions();
+                synchronized (this.pendingFires) {
+                    this.pendingFires.clear();
+                }
                 return;
             }
 
@@ -682,18 +693,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             /* 条件触发必须每个 tick 求值，不能只靠区间查询 */
             this.pumpConditions(now);
 
-            if (now <= from) {
-                return;
-            }
-            this.lastFireMs = now;
-
-            for (Fire fire : this.schedule.between(from, now, this.eventRng)) {
-                if (this.limiter.tryAcquire(now)) {
-                    this.emitCeid(fire.ceid());
-                } else {
-                    this.rejected.incrementAndGet();
+            if (now > from) {
+                this.lastFireMs = now;
+                for (Fire fire : this.schedule.between(from, now, this.eventRng)) {
+                    this.firePlan(fire.planId(), fire.ceid(), fire.atMs(), now);
                 }
             }
+
+            /* AfterEvent 可能在同一 tick 内到期，甚至级联到下一层 */
+            this.pumpPending(now);
         } catch (Exception e) {
             this.lastError = e.toString();
             Log.error("会话 " + this.spec.id() + " 事件上报失败", e);
@@ -733,21 +741,74 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             }
             this.conditionErrorLogged.remove(plan.id());
 
-            if (!debouncer.update(nowMs, active)) {
-                continue;
-            }
-
-            if (this.limiter.tryAcquire(nowMs)) {
-                try {
-                    this.emitCeid(plan.ceid());
-                } catch (Exception e) {
-                    this.lastError = e.toString();
-                    Log.error("会话 " + this.spec.id() + " 条件事件上报失败: plan " + plan.id(), e);
-                }
-            } else {
-                this.rejected.incrementAndGet();
+            if (debouncer.update(nowMs, active)) {
+                this.firePlan(plan.id(), plan.ceid(), nowMs, nowMs);
             }
         }
+    }
+
+    /**
+     * 触发一个计划：限流、发 S6F11、成功后记录 AfterEvent 链。
+     *
+     * <p>所有路径（区间触发 / 条件触发 / 延迟链）都从这里走，
+     * 保证链式事件不会绕过设备级限流。</p>
+     */
+    private void firePlan(String planId, int ceid, long atMs, long nowMs) {
+        if (!this.hostReports.isEnabled(ceid)) {
+            this.skipped.incrementAndGet();
+            return;
+        }
+        if (!this.limiter.tryAcquire(nowMs)) {
+            this.rejected.incrementAndGet();
+            return;
+        }
+
+        try {
+            this.emitCeid(ceid);
+            this.recordFire(planId, atMs);
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            Log.error("会话 " + this.spec.id() + " 计划触发失败: plan " + planId, e);
+        }
+    }
+
+    /** 源计划成功后，把它的 AfterEvent 后继加入延迟队列。 */
+    private void recordFire(String planId, long atMs) {
+        synchronized (this.pendingFires) {
+            for (EventPlan plan : this.schedule.plans()) {
+                if (plan.trigger() instanceof Trigger.AfterEvent after
+                        && after.sourcePlan().equals(planId)) {
+                    this.pendingFires.add(new PendingFire(atMs + after.delayMs(), plan.id(), plan.ceid()));
+                }
+            }
+        }
+    }
+
+    /** 取出到期的延迟事件；允许同一 tick 内级联，但限制跳数防环。 */
+    private void pumpPending(long nowMs) {
+        int guard = 0;
+
+        for (;;) {
+            PendingFire next;
+            synchronized (this.pendingFires) {
+                next = this.pendingFires.peek();
+                if (next == null || next.atMs() > nowMs) {
+                    return;
+                }
+                this.pendingFires.poll();
+            }
+
+            if (++guard > 64) {
+                this.lastError = "AfterEvent 链超过 64 跳，疑似环: " + next.planId();
+                Log.error("会话 " + this.spec.id() + " " + this.lastError, null);
+                return;
+            }
+
+            this.firePlan(next.planId(), next.ceid(), next.atMs(), nowMs);
+        }
+    }
+
+    private record PendingFire(long atMs, String planId, int ceid) {
     }
 
     private double conditionVariable(String name, long nowMs) {

@@ -52,6 +52,10 @@ public final class EventSchedule {
     /**
      * 计算区间内应发生的全部事件，按时间升序。
      *
+     * <p>只覆盖纯时间触发的计划（{@code At} / {@code Periodic}）。
+     * {@code OnCondition} 与 {@code AfterEvent} 的 {@code fireTimes} 返回空，
+     * 由运行时按 tick / 延迟队列处理。</p>
+     *
      * @param fromMs 起始（不含）
      * @param toMs   结束（含）
      * @param rng    噪声源

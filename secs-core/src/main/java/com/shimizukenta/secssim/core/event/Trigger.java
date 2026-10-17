@@ -15,7 +15,7 @@ import com.shimizukenta.secssim.core.template.Expression;
  * 不会重复触发边界上的事件。
  * </p>
  */
-public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.OnCondition {
+public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.OnCondition, Trigger.AfterEvent {
 
     /**
      * 计算区间内应触发的时刻。
@@ -63,6 +63,38 @@ public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.On
             Objects.requireNonNull(expression, "expression");
             if (debounceMs < 0L) {
                 throw new IllegalArgumentException("debounceMs must be >= 0 but was " + debounceMs);
+            }
+        }
+
+        @Override
+        public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId) {
+            return List.of();
+        }
+    }
+
+    /**
+     * 事件链：源计划触发后延迟 {@code delayMs} 再触发本计划。
+     *
+     * <p>与 OnCondition 一样，{@link #fireTimes} 返回空列表：
+     * 它依赖“源事件已经发生”这个运行时事实，无法只凭时间区间算出来。</p>
+     *
+     * @param sourcePlan 源计划标识
+     * @param delayMs    延迟毫秒数（≥ 0）
+     */
+    record AfterEvent(String sourcePlan, long delayMs) implements Trigger {
+
+        /**
+         * 校验并创建。
+         *
+         * @param sourcePlan 源计划标识
+         * @param delayMs    延迟毫秒数
+         */
+        public AfterEvent {
+            if (sourcePlan == null || sourcePlan.isBlank()) {
+                throw new IllegalArgumentException("sourcePlan must not be blank");
+            }
+            if (delayMs < 0L) {
+                throw new IllegalArgumentException("delayMs must be >= 0 but was " + delayMs);
             }
         }
 

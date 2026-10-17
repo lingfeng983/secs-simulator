@@ -64,6 +64,7 @@ class SessionOnConditionTest {
                 }
             });
             client.openAndWaitUntilCommunicating();
+            awaitPeer(session);
 
             values.value = 200.0;
             session.pumpNow();
@@ -94,6 +95,14 @@ class SessionOnConditionTest {
         } finally {
             session.close();
         }
+    }
+
+    private static void awaitPeer(HsmsSessionRuntime session) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 3_000L;
+        while (!session.hasPeer() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10L);
+        }
+        assertTrue(session.hasPeer(), "设备侧应看到主机上线");
     }
 
     private static SecsCommunicator connect(int port) throws Exception {

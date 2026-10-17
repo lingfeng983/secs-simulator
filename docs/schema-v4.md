@@ -55,7 +55,9 @@
       { "id": "once", "ceid": 2101,
         "trigger": { "type": "at", "atMs": 1500 } },
       { "id": "hot", "ceid": 2102,
-        "trigger": { "type": "onCondition", "expression": "svid.1001 > 190", "debounceMs": 1000 } }
+        "trigger": { "type": "onCondition", "expression": "svid.1001 > 190", "debounceMs": 1000 } },
+      { "id": "follow", "ceid": 2103,
+        "trigger": { "type": "afterEvent", "sourcePlan": "hot", "delayMs": 2000 } }
     ]
   }
 }
@@ -72,7 +74,7 @@
 | `globalSvids.min/max` | 可选值域（仅数值型）。不配时默认曲线退化为 0..100 的有界随机游走；BOOLEAN 固定 1，ASCII/BINARY 固定 0 |
 | `events.s6f11Wbit` | 可选，默认 `false`。为 `true` 时 S6F11 带 W 位并等待 S6F12；发送走单线程队列，避免 T3 阻塞事件心跳 |
 | `events.s6f1Wbit` | 可选，默认 `false`。为 `true` 时 S6F1 带 W 位并等待 S6F2；发送走独立单线程队列，不阻塞 Trace 采样 |
-| `events.plans[].trigger.type` | `at` / `periodic` / `onCondition`。`onCondition` 额外字段：`expression`（支持 `t` 与 `svid.<id>`，比较运算返回 0/1）、`debounceMs`（条件连续成立多久才触发，默认 0） |
+| `events.plans[].trigger.type` | `at` / `periodic` / `onCondition` / `afterEvent`。`onCondition` 额外字段：`expression`（支持 `t` 与 `svid.<id>`，比较运算返回 0/1）、`debounceMs`（条件连续成立多久才触发，默认 0）；`afterEvent` 额外字段：`sourcePlan`（源计划 id）、`delayMs`（延迟毫秒，默认 0） |
 | `reserve` | 禁止占用的号段（默认 1..999 留给标准消息） |
 
 ## 错误定位

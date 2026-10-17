@@ -49,4 +49,6 @@ List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId);
 - **已实现（2026-10-18）**：条件触发（`OnCondition`，如"温度 > 190 才报"）。
   运行时每 tick 求值表达式，`ConditionDebouncer` 负责"连续成立 `debounceMs` 才触发一次"；
   主机掉线或事件被禁用时状态清零，重新上线需重新满足去抖时间。
-- **仍暂未实现**：事件链（`AfterEvent`，A 之后 N 秒发 B）。
+- **已实现（2026-10-18）**：事件链（`AfterEvent`，A 之后 N 秒发 B）。
+  源计划成功后把后继放入延迟队列，按计划时刻触发；配置层校验源计划存在且无环，
+  运行时同 tick 最多级联 64 跳防失控。
