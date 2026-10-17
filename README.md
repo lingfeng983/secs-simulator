@@ -76,10 +76,12 @@ HTTP API（v1）：
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
 2. **禁止 `--enable-preview`**。预览特性会把 class 文件绑死到具体 JDK，且与 native-image 不兼容。
 3. **曲线是时间的纯函数**：不允许在曲线内部累加状态（见 [ADR 0003](docs/adr/0003-pure-curves.md)）。
+4. **模板图是纯函数图**：`Template.evaluate` 不得有副作用；一个 SVID 只能有一个生产者（见 [ADR 0004](docs/adr/0004-template-dag.md)）。
 
 ## 文档
 
 - [ADR 0001 · 地基决策](docs/adr/0001-foundation.md)
 - [ADR 0002 · 领域模型与 ID 空间](docs/adr/0002-domain-and-idspace.md)
 - [ADR 0003 · 曲线必须是纯函数](docs/adr/0003-pure-curves.md)
-- [M0 报告](docs/m0-report.md) · [M1 报告](docs/m1-report.md) · [M2 报告](docs/m2-report.md)
+- [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
+- [M0 报告](docs/m0-report.md) · [M1 报告](docs/m1-report.md) · [M2 报告](docs/m2-report.md) · [M3 报告](docs/m3-report.md)
