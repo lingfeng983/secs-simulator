@@ -20,8 +20,15 @@ public final class GraphValueSource implements ValueSource {
     private final TemplateGraph graph;
     private final Rng rng;
 
-    private volatile long cachedAtMs = Long.MIN_VALUE;
-    private volatile Map<Integer, Double> cached = Map.of();
+    /**
+     * 最近一次求值的快照。
+     *
+     * <p>{@code atMs} 与 {@code values} 必须<b>原子</b>一起发布：若拆成两个字段分别写，
+     * 并发求值时会把一个时刻算出的值与另一个时刻的时间戳配在一起，导致某时刻返回错值。
+     * 因此整体作为一个不可变记录、经单个 volatile 引用发布。
+     * </p>
+     */
+    private volatile Snapshot snapshot = new Snapshot(Long.MIN_VALUE, Map.of());
 
     /**
      * 创建值来源。
@@ -50,15 +57,21 @@ public final class GraphValueSource implements ValueSource {
     /**
      * 取某一时刻的全部输出。
      *
+     * <p>只保留<b>最近一个时刻</b>的缓存。并发调用是安全的：即便多个线程同时判为未命中，
+     * 各自也会算出并发布一个自洽的 {@code (atMs, values)} 快照，绝不会返回与所请求时刻
+     * 不符的值；曲线是纯函数，重复计算的代价远低于加锁的代价。
+     * </p>
+     *
      * @param tMs 时刻
-     * @return SVID → 值
+     * @return SVID → 值（与 {@code tMs} 对应）
      */
     public Map<Integer, Double> snapshot(long tMs) {
-        if (tMs != this.cachedAtMs) {
-            this.cached = this.graph.evaluate(tMs, this.rng);
-            this.cachedAtMs = tMs;
+        Snapshot current = this.snapshot;
+        if (current.atMs() != tMs) {
+            current = new Snapshot(tMs, this.graph.evaluate(tMs, this.rng));
+            this.snapshot = current;
         }
-        return this.cached;
+        return current.values();
     }
 
     /**
@@ -68,5 +81,14 @@ public final class GraphValueSource implements ValueSource {
      */
     public TemplateGraph graph() {
         return this.graph;
+    }
+
+    /**
+     * 一次求值快照：时刻与对应取值原子绑定。
+     *
+     * @param atMs   快照时刻
+     * @param values 该时刻的 SVID → 值（不可变）
+     */
+    private record Snapshot(long atMs, Map<Integer, Double> values) {
     }
 }

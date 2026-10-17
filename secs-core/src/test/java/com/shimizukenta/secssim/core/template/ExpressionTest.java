@@ -80,4 +80,23 @@ class ExpressionTest {
         Expression expression = Expression.parse("p.missing + 1");
         assertThrows(ExpressionException.class, () -> expression.evaluate(EMPTY));
     }
+
+    @Test
+    void deeplyNestedParensAreRejectedNotStackOverflow() {
+        String deep = "(".repeat(200) + "1" + ")".repeat(200);
+        ExpressionException e = assertThrows(ExpressionException.class, () -> Expression.parse(deep));
+        assertTrue(e.getMessage().contains("嵌套"), "应提示嵌套过深，实际: " + e.getMessage());
+    }
+
+    @Test
+    void deeplyNestedUnaryIsRejectedNotStackOverflow() {
+        String deep = "-".repeat(200) + "1";
+        assertThrows(ExpressionException.class, () -> Expression.parse(deep));
+    }
+
+    @Test
+    void reasonableNestingStillParses() {
+        String ok = "(".repeat(20) + "1 + 2" + ")".repeat(20);
+        assertEquals(3.0, Expression.parse(ok).evaluate(EMPTY), 1e-9);
+    }
 }

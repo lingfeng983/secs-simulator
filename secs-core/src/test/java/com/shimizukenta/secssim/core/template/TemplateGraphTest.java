@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -145,11 +146,32 @@ class TemplateGraphTest {
                         Map.of("V", 1001), ParameterLayers.empty()))
                 .build();
 
-        List<Map<Integer, Double>> series = graph.evaluateRange(0L, 10_000L, 1_000L, RNG);
+        List<Map<Integer, Double>> series = new ArrayList<>();
+        for (Map<Integer, Double> point : graph.evaluateRange(0L, 10_000L, 1_000L, RNG)) {
+            series.add(point);
+        }
         assertEquals(11, series.size());
         assertEquals(0.0, series.getFirst().get(1001), 1e-9);
         assertEquals(5.0, series.get(5).get(1001), 1e-9);
         assertEquals(10.0, series.getLast().get(1001), 1e-9);
+    }
+
+    @Test
+    void evaluateRangeIsLazyAndDoesNotMaterializeHugeWindow() {
+        TemplateGraph graph = TemplateGraph.builder()
+                .add(new Instance("ramp", new SingleCurveTemplate("ramp", RampCurve.of(0.0, 10.0, 10_000L)),
+                        Map.of("V", 1001), ParameterLayers.empty()))
+                .build();
+
+        // 窗口 1000 亿 ms、步长 1ms：若整体物化将是约 1000 亿个点，必然 OOM。
+        int taken = 0;
+        for (Map<Integer, Double> ignored : graph.evaluateRange(0L, 100_000_000_000L, 1L, RNG)) {
+            taken++;
+            if (taken >= 100) {
+                break;
+            }
+        }
+        assertEquals(100, taken, "只取前 100 个点即应能中止，不应物化整个窗口");
     }
 
     @Test

@@ -176,9 +176,16 @@ public final class Expression {
     /** 递归下降解析器。 */
     private static final class Parser {
 
+        /**
+         * 最大嵌套深度。与 secs-json parser、secs-protocol stpParse 保持一致，
+         * 超出即判为失控/恶意输入，抛 {@link ExpressionException} 而非任其栈溢出。
+         */
+        private static final int MAX_DEPTH = 64;
+
         private final String src;
         private final Set<String> vars = new LinkedHashSet<>();
         private int pos;
+        private int depth;
 
         Parser(String src) {
             this.src = src;
@@ -216,41 +223,61 @@ public final class Expression {
 
         private Node parseUnary() {
             this.skipSpaces();
-            if (this.peek() == '-') {
-                this.pos++;
-                return new Neg(this.parseUnary());
-            }
-            if (this.peek() == '+') {
-                this.pos++;
-                return this.parseUnary();
+            char c = this.peek();
+            if (c == '-' || c == '+') {
+                this.enter();
+                try {
+                    this.pos++;
+                    return c == '-' ? new Neg(this.parseUnary()) : this.parseUnary();
+                } finally {
+                    this.exit();
+                }
             }
             return this.parsePrimary();
         }
 
         private Node parsePrimary() {
-            this.skipSpaces();
-            char c = this.peek();
-
-            if (c == '(') {
-                this.pos++;
-                Node inner = this.parseExpression();
+            this.enter();
+            try {
                 this.skipSpaces();
-                if (this.peek() != ')') {
-                    throw this.error("缺少右括号");
+                char c = this.peek();
+
+                if (c == '(') {
+                    this.pos++;
+                    Node inner = this.parseExpression();
+                    this.skipSpaces();
+                    if (this.peek() != ')') {
+                        throw this.error("缺少右括号");
+                    }
+                    this.pos++;
+                    return inner;
                 }
-                this.pos++;
-                return inner;
-            }
 
-            if (Character.isDigit(c) || c == '.') {
-                return this.parseNumber();
-            }
+                if (Character.isDigit(c) || c == '.') {
+                    return this.parseNumber();
+                }
 
-            if (Character.isLetter(c) || c == '_') {
-                return this.parseIdentifier();
-            }
+                if (Character.isLetter(c) || c == '_') {
+                    return this.parseIdentifier();
+                }
 
-            throw this.error("无法识别的字符 '" + c + "'");
+                throw this.error("无法识别的字符 '" + c + "'");
+            } finally {
+                this.exit();
+            }
+        }
+
+        /** 进入一层递归：超深度即判失控输入，避免栈溢出。 */
+        private void enter() {
+            if (this.depth >= MAX_DEPTH) {
+                throw this.error("表达式嵌套超过 " + MAX_DEPTH + " 层");
+            }
+            this.depth++;
+        }
+
+        /** 退出一层递归。 */
+        private void exit() {
+            this.depth--;
         }
 
         private Node parseNumber() {

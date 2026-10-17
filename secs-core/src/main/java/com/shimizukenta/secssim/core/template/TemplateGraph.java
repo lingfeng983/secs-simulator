@@ -3,10 +3,12 @@ package com.shimizukenta.secssim.core.template;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import com.shimizukenta.secssim.core.curve.Rng;
@@ -147,22 +149,39 @@ public final class TemplateGraph {
     /**
      * 在时间区间上逐点求值（预览批算的基础）。
      *
+     * <p><b>懒迭代</b>：返回 {@link Iterable} 而非物化的列表，调用方按需取用、可随时中止，
+     * 不会因为窗口极大（细步长 + 长时间跨度）而一次性耗尽内存。步长固定，时刻严格递增。
+     * </p>
+     *
      * @param fromMs 起始时刻
      * @param toMs   结束时刻（含）
-     * @param stepMs 步长
+     * @param stepMs 步长（必须 ≥ 1）
      * @param rng    根噪声源
-     * @return 每个时刻一份 SVID → 值
+     * @return 每个时刻一份 SVID → 值（升序，懒生成）
      */
-    public List<Map<Integer, Double>> evaluateRange(long fromMs, long toMs, long stepMs, Rng rng) {
+    public Iterable<Map<Integer, Double>> evaluateRange(long fromMs, long toMs, long stepMs, Rng rng) {
         if (stepMs < 1L) {
             throw new IllegalArgumentException("stepMs must be >= 1");
         }
 
-        List<Map<Integer, Double>> result = new ArrayList<>();
-        for (long t = fromMs; t <= toMs; t += stepMs) {
-            result.add(this.evaluate(t, rng));
-        }
-        return List.copyOf(result);
+        return () -> new Iterator<Map<Integer, Double>>() {
+            private long t = fromMs;
+
+            @Override
+            public boolean hasNext() {
+                return this.t <= toMs;
+            }
+
+            @Override
+            public Map<Integer, Double> next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                long at = this.t;
+                this.t += stepMs;
+                return evaluate(at, rng);
+            }
+        };
     }
 
     /** 求值上下文实现。 */

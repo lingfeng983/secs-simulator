@@ -3,6 +3,7 @@ package com.shimizukenta.secssim.core.event;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -80,5 +81,42 @@ class EventScheduleTest {
     void emptyScheduleProducesNothing() {
         assertTrue(EventSchedule.empty().between(0L, 60_000L, RNG).isEmpty());
         assertEquals(0, EventSchedule.empty().size());
+    }
+
+    @Test
+    void periodicJitterDoesNotDropEventsAcrossTickWindows() {
+        // 复现历史缺陷：跨 tick 累加时，抖动把 at 推过窗口边界而 base 仍在窗外，事件被相邻两窗同时漏掉。
+        long period = 200L;
+        long jitter = 120L; // > period/2，同时压测"重排后仍须保序"的路径
+        String planId = "jit-tick";
+        long span = period * 5_000L; // 约 5000 个周期
+        long tick = 137L; // 与周期不对齐，模拟真实 ticker
+
+        Trigger.Periodic trigger = new Trigger.Periodic(period, jitter);
+
+        // 独立基准：直接按 (planId, k) 派生抖动算出 (0, span] 内所有真实触发时刻。
+        Rng stream = RNG.derive("plan:" + planId);
+        List<Long> truth = new ArrayList<>();
+        for (long k = 1L; k * period <= span + jitter; k++) {
+            long at = k * period + Math.round((stream.uniform01(k) * 2.0 - 1.0) * jitter);
+            if (0L < at && at <= span) {
+                truth.add(at);
+            }
+        }
+        truth.sort(Long::compare);
+
+        // 像运行期那样按 tick 逐窗累加。
+        List<Long> got = new ArrayList<>();
+        for (long prev = 0L; prev < span; prev += tick) {
+            long now = Math.min(prev + tick, span);
+            got.addAll(trigger.fireTimes(prev, now, RNG, planId));
+        }
+        got.sort(Long::compare);
+
+        assertEquals(truth, got, "跨 tick 累加必须与基准完全一致：不丢、不重、保序");
+
+        long approx = span / period;
+        assertTrue(got.size() >= approx / 2 && got.size() <= approx * 3 / 2,
+                "事件数应约等于 t/p，实际 " + got.size());
     }
 }

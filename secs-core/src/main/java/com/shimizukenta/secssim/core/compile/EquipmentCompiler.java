@@ -79,6 +79,16 @@ public final class EquipmentCompiler {
         return new CompilationResult(equipment, this.issues);
     }
 
+    /**
+     * 收集设备级（global）SVID 定义。
+     *
+     * <p><b>first-wins 语义</b>：{@code globalSvidByName} 以 {@code putIfAbsent} 注册，
+     * 因此当多个 global 定义<b>重名</b>时，以先注册的模板为准，后到的同名定义被静默忽略
+     * （既不报错也不覆盖）。这是刻意取舍：名字只是供人引用的别名，真正保证"一个 SVID 只有
+     * 一个生产者"的是 <b>ID 唯一性</b>——重复 ID 会在上方以 {@code DUPLICATE_SVID} 显式报出；
+     * 此外运行期模板图构建也会以单写者规则（{@code DUPLICATE_SVID}）拒绝重复绑定，作为兜底。
+     * </p>
+     */
     private void collectGlobalSvids() {
         IdSpacePolicy policy = this.spec.idSpace();
 
@@ -97,6 +107,7 @@ public final class EquipmentCompiler {
                                 + " 与 " + ResolvedSvid.GLOBAL_OWNER + "." + def.name()));
             }
 
+            // first-wins：按名索引，重名时保留先注册者（ID 重复才在上面报 DUPLICATE_SVID）。
             this.globalSvidByName.putIfAbsent(def.name(), resolved);
         }
     }
