@@ -1,0 +1,110 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '0 21 * * 0'  # 每周日 21:00 UTC（北京时间周一 05:00），跑较慢的原生镜像任务
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端构建与测试 (GraalVM JDK 25)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 缓存 Maven 仓库
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+      - name: 构建并测试
+        run: mvn -B -ntp verify
+
+  frontend:
+    name: 前端类型检查与构建 (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+      - name: 类型检查
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: 构建
+        working-directory: frontend
+        run: npm run build
+
+  ps1-bom:
+    name: PowerShell BOM 检查
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查 .ps1 是否带 UTF-8 BOM
+        shell: pwsh
+        run: ./scripts/check-bom.ps1
+
+  native:
+    name: 原生镜像构建与冒烟 (windows-latest)
+    runs-on: windows-latest
+    needs: backend
+    # 原生镜像构建较慢，仅在定时任务与手动触发时运行，不进每次 push
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 安装 MSVC 生成工具
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: 构建原生镜像（跳过测试，测试已在 backend 任务覆盖）
+        run: mvn -B -ntp -Pnative -pl secs-cli -am -DskipTests package
+      - name: 冒烟：启动并探测就绪与 health
+        shell: pwsh
+        run: |
+          $exe = "secs-cli\target\secs-sim.exe"
+          if (-not (Test-Path $exe)) { throw "native image not found: $exe" }
+          $port = (New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)).LocalEndpoint.Port
+          $log = "$env:TEMP\secs-native-smoke.log"
+          $p = Start-Process -FilePath (Resolve-Path $exe) -ArgumentList '--hsms-port', $port, '--work-dir', $env:TEMP -PassThru -RedirectStandardOutput $log -NoNewWindow
+          try {
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $ready = $false
+            while ($sw.Elapsed.TotalSeconds -lt 60) {
+              if ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'READY ') { $ready = $true; break }
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $ready) { throw "native smoke timeout: READY not printed within 60s" }
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 5
+            if (-not $health.ok) { throw "health check failed" }
+            Write-Host "native smoke OK: READY in $([int]$sw.Elapsed.TotalMilliseconds) ms, uptimeMs=$($health.uptimeMs)"
+          } finally {
+            $p.Kill(); $p.WaitForExit()
+            Remove-Item $log -ErrorAction SilentlyContinue
+          }

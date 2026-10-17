@@ -89,15 +89,15 @@
 2. **安装器**：jpackage MSI 或原生 exe 自解压。
 3. **JVM 模式兜底包**：jlink + jpackage，应对原生镜像跑不起来的机器。
 4. **自动更新**：检查版本 + 下载替换（Tauri updater 或自研）。
-5. **检查清单固化**：新 .ps1 一律带 BOM（M9 又踩了一次 M1 的坑，应进 CI 检查而非靠记忆）。
-6. **CI**：目前全部本地 `mvn verify` + 验收脚本，建议加 GitHub Actions（Windows runner）跑 verify + package 冒烟。
+5. **检查清单固化**（已完成）：`scripts/check-bom.ps1` —— 含非 ASCII 的 `.ps1` 必须带 UTF-8 BOM，CI 每次 push 执行；顺带修复 `scripts/accept-M0.ps1` 历史缺 BOM。另：`@vitejs/plugin-react` 锁定 4.3.4（4.7.0 依赖含 `workspace:*` 协议，npm 无法解析），提交 `frontend/package-lock.json` 支撑 CI 的 `npm ci`。
+6. **CI**（已完成）：`.github/workflows/build.yml` —— backend（GraalVM JDK 25 `mvn verify`）+ frontend（`npm ci` / `tsc --noEmit` / `vite build`）+ ps1-bom；native 镜像构建与启动冒烟仅在每周定时与手动触发时跑（windows-latest + MSVC）。
 
 ### D. 下轮评审补课
 
-1. `secs-core`（领域模型/曲线/编译器，79 个测试但无深评）。
-2. `secs-json`（解析健壮性：嵌套深度、大数字、转义）。
-3. `secs-protocol` 抽查升级为定点深评（HSMS 帧长度字段、SECS-II 解码边界）——虽然是冻结 vendored 代码，但它直接面对网络输入。
-4. `secs-cli` 端到端测试宿主与 `scripts/`、`packaging/` PowerShell 脚本健壮性。
+1. `secs-core`（领域模型/曲线/编译器，79 个测试但无深评）：✅ 深评完成（2 高 / 4 中 / 7 低），修复进行中。
+2. `secs-json`（解析健壮性：嵌套深度、大数字、转义）：✅ 深评完成（2 高 / 8 中 / 9 低），修复进行中。
+3. `secs-protocol` 抽查升级为定点深评（HSMS 帧长度字段、SECS-II 解码边界）：✅ 深评完成（2 高 / 5 中 / 4 低），修复进行中。
+4. `secs-cli` 端到端测试宿主与 `scripts/`、`packaging/` PowerShell 脚本健壮性：未开始。
 
 ---
 
