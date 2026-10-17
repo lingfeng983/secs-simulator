@@ -11,6 +11,7 @@ import com.shimizukenta.secs.gem.AbstractGemConfig;
  * <p>
  * To set device-id, {@link #deviceId(int)}<br />
  * To set is-equip, {@link #isEquip(boolean)}<br />
+ * To set maximum receive-message bytes, {@link #maxMessageBytes(long)}<br />
  * To set timeouts, {@link #timeout()}<br />
  * To set gem config, {@link #gem()}<br />
  * To set log-subject-header, {@link #logSubjectHeader(CharSequence)}
@@ -23,8 +24,11 @@ public abstract class AbstractSecsCommunicatorConfig implements Serializable {
 	
 	private static final long serialVersionUID = -8456991094606676409L;
 	
+	private static final long DEFAULT_MAX_MESSAGE_BYTES = 8L * 1024L * 1024L;
+	
 	private final SecsTimeout timeout = new SecsTimeout();
 	private final NumberProperty deviceId = NumberProperty.newInstance(10);
+	private final NumberProperty maxMessageBytes = NumberProperty.newInstance(DEFAULT_MAX_MESSAGE_BYTES);
 	private final BooleanProperty isEquip = BooleanProperty.newInstance(false);
 	
 	private final AbstractGemConfig gem = new AbstractGemConfig() {
@@ -40,9 +44,12 @@ public abstract class AbstractSecsCommunicatorConfig implements Serializable {
 	/**
 	 * Device-ID setter.
 	 * 
-	 * @param id Device-ID
+	 * @param id Device-ID. value is {@code 0} to {@code 65535}
 	 */
 	public void deviceId(int id) {
+		if ( (id < 0) || (id > 0xFFFF) ) {
+			throw new IllegalArgumentException("deviceId is 0 to 65535");
+		}
 		this.deviceId.set(id);
 	}
 	
@@ -53,6 +60,34 @@ public abstract class AbstractSecsCommunicatorConfig implements Serializable {
 	 */
 	public ReadOnlyNumberProperty deviceId() {
 		return deviceId;
+	}
+	
+	/**
+	 * Maximum receive-message bytes setter.
+	 * 
+	 * <p>
+	 * The receiver refuses a message whose declared length exceeds this value,
+	 * and then the connection is terminated.<br />
+	 * Big data collection, such as GetDigitizedData (S2F31/S2F32),
+	 * may need to raise this value.
+	 * </p>
+	 * 
+	 * @param v maximum receive-message bytes. value is {@code > 0}
+	 */
+	public void maxMessageBytes(long v) {
+		if ( v <= 0L ) {
+			throw new IllegalArgumentException("maxMessageBytes is > 0");
+		}
+		this.maxMessageBytes.set(v);
+	}
+	
+	/**
+	 * Maximum receive-message bytes getter.
+	 * 
+	 * @return maximum receive-message bytes
+	 */
+	public ReadOnlyNumberProperty maxMessageBytes() {
+		return maxMessageBytes;
 	}
 	
 	/**

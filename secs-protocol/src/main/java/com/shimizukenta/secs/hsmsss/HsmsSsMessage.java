@@ -69,7 +69,7 @@ public class HsmsSsMessage extends AbstractSecsMessage {
 	@Override
 	public int deviceId() {
 		if ( dataMessage() ) {
-			return (((int)(head[0]) << 8) & 0x00007F00) | (head[1] & 0x000000FF);
+			return (((int)(head[0]) << 8) & 0x0000FF00) | (head[1] & 0x000000FF);
 		} else {
 			throw new IllegalStateException("HsmsSsMessage is not DataMessage");
 		}

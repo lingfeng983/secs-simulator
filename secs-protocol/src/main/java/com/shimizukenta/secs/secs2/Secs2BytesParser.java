@@ -6,6 +6,17 @@ import java.util.stream.Collectors;
 
 public class Secs2BytesParser {
 	
+	/**
+	 * Maximum nesting depth of SECS-II items.
+	 * 
+	 * <p>
+	 * Kept in sync with the other parsers of this project (64 levels).<br />
+	 * A deeper nesting is refused with {@link Secs2BytesParseException}
+	 * instead of {@link StackOverflowError}.
+	 * </p>
+	 */
+	private static final int MAX_DEPTH = 64;
+	
 	private Secs2BytesParser() {
 	}
 	
@@ -16,14 +27,14 @@ public class Secs2BytesParser {
 	public static Secs2BytesParser getInstance() {
 		return SingletonHolder.inst;
 	}
-	
+
 	public Secs2 parse(List<byte[]> bss) throws Secs2BytesParseException {
 		
 		final BytesPack pack = new BytesPack(bss);
 		
 		if ( pack.hasRemaining() ) {
 			
-			Secs2 ss = stpParse(pack);
+			Secs2 ss = stpParse(pack, 0);
 			
 			if ( pack.hasRemaining() ) {
 				throw new Secs2BytesParseException("not reach end bytes");
@@ -37,7 +48,10 @@ public class Secs2BytesParser {
 		}
 	}
 	
-	private static Secs2 stpParse(BytesPack pack) throws Secs2BytesParseException {
+	/**
+	 * @param depth list-nesting depth. {@code 0} if the item is top-level
+	 */
+	private static Secs2 stpParse(BytesPack pack, int depth) throws Secs2BytesParseException {
 		
 		byte b = pack.get();
 		
@@ -63,10 +77,15 @@ public class Secs2BytesParser {
 		
 		if ( s2i == Secs2Item.LIST ) {
 			
+			if ( depth >= MAX_DEPTH ) {
+				throw new Secs2BytesParseException(
+						"reach maximum nesting depth: " + MAX_DEPTH);
+			}
+			
 			List<Secs2> ll = new ArrayList<>();
 			
 			for (int i = 0 ; i < size ; ++i) {
-				ll.add(stpParse(pack));
+				ll.add(stpParse(pack, depth + 1));
 			}
 			
 			return new Secs2List(ll);
@@ -145,6 +164,16 @@ public class Secs2BytesParser {
 	
 	private static class BytesPack {
 		
+		/**
+		 * Maximum bytes of a single non-list item.
+		 * 
+		 * <p>
+		 * The 3-bytes length encoding declares at most {@code 0xFFFFFF},
+		 * this bound refuses an out-of-range size before allocating.
+		 * </p>
+		 */
+		private static final int MAX_ITEM_SIZE = 16 * 1024 * 1024;
+		
 		private final List<byte[]> bss;
 		private final int mPack;
 		private int mBytes;
@@ -177,6 +206,21 @@ public class Secs2BytesParser {
 			return false;
 		}
 		
+		public long remaining() {
+			
+			if ( iPack > mPack ) {
+				return 0L;
+			}
+			
+			long n = (long)(this.bss.get(iPack).length) - (long)iBytes;
+			
+			for ( int i = iPack + 1 ; i <= mPack ; ++i ) {
+				n += this.bss.get(i).length;
+			}
+			
+			return n;
+		}
+		
 		public byte get() throws Secs2BytesParseException {
 			
 			while ( iPack <= mPack ) {
@@ -202,6 +246,17 @@ public class Secs2BytesParser {
 		}
 		
 		public byte[] get(int size) throws Secs2BytesParseException {
+			
+			/* validate before allocating */
+			if ( (size < 0) || (size > MAX_ITEM_SIZE) ) {
+				throw new Secs2BytesParseException("too big item size: " + size);
+			}
+			
+			if ( size > remaining() ) {
+				throw new Secs2BytesParseException(
+						"not enough bytes: required " + size + ", remaining " + remaining());
+			}
+			
 			byte[] bs = new byte[size];
 			for (int i = 0; i < size; ++i ) {
 				bs[i] = get();

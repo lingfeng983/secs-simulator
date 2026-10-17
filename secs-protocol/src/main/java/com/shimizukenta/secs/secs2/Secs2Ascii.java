@@ -81,7 +81,8 @@ public class Secs2Ascii extends AbstractSecs2 {
 	private static final byte[] LF = new byte[]{BACKSLASH, 0x6E};	/* \\n */
 	private static final byte[] FF = new byte[]{BACKSLASH, 0x66};	/* \\f */
 	private static final byte[] CR = new byte[]{BACKSLASH, 0x72};	/* \\r */
-	
+	private static final byte MAX_SHORT_ESCAPE = 0x1F;
+
 	private static final String escapeJsonString(CharSequence cs) {
 		
 		try (
@@ -120,6 +121,16 @@ public class Secs2Ascii extends AbstractSecs2 {
 					
 					strm.write(BACKSLASH);
 					strm.write(b);
+					
+				} else if (
+						(b >= 0x00)
+						&& (b <= MAX_SHORT_ESCAPE)
+						) {
+					
+				/* other control characters: unicode-escaped (u00XX) */
+				strm.write(BACKSLASH);
+				strm.write(0x75 /* u */);
+				strm.write(String.format("%04X", b).getBytes(StandardCharsets.US_ASCII));
 					
 				} else {
 					

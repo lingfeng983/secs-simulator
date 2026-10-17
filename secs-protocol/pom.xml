@@ -15,4 +15,9 @@
   <packaging>jar</packaging>
   <name>SECS Protocol</name>
   <description>HSMS-SS / SECS-I / SECS-II / SML / GEM message layer (derived from secs4java8)</description>
+
+  <dependencies>
+      <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId></dependency>
+  </dependencies>
+
 </project>

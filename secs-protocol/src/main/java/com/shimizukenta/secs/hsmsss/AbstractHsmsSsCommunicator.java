@@ -52,6 +52,11 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		
 		this.hsmsSsConfig = config;
 		
+		/* fail fast if the config carries an out-of-range device-id (e.g. deserialized) */
+		if ( (config.deviceId().intValue() < 0) || (config.deviceId().intValue() > 0xFFFF) ) {
+			throw new IllegalArgumentException("deviceId is 0 to 65535");
+		}
+		
 		this.hsmsSsConfig.sessionId().addChangeListener(n -> {
 			int v = n.intValue();
 			byte[] bs = new byte[] {
@@ -620,26 +625,40 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 					((Buffer)headBf).clear();
 					bodybss.clear();
 					
-					lenBf.put(emptyBytes);
+				lenBf.put(emptyBytes);
+				
+				readToBuffer(channel, lenBf);
+				
+				while ( lenBf.hasRemaining() ) {
+					readToBuffer(channel, lenBf);
+				}
+				
+				while ( headBf.hasRemaining() ) {
+					readToBuffer(channel, headBf);
+				}
+				
+				((Buffer)lenBf).flip();
+				long len = lenBf.getLong() - 10L;
+				
+				if ( len < 0L ) {
 					
-					readToBuffer(channel, lenBf, false);
+					/* Short frame: the declared length is less than the 10-bytes header.
+					 * Keep scanning for the next frame instead of breaking the connection,
+					 * and log it because a well-formed peer never sends such a frame. */
+					notifyLog(new Secs2Exception("short frame: length=" + (len + 10L)));
+					continue;
+				}
+				
+				if ( len > hsmsSsConfig().maxMessageBytes().longValue() ) {
 					
-					while ( lenBf.hasRemaining() ) {
-						readToBuffer(channel, lenBf);
-					}
-					
-					while ( headBf.hasRemaining() ) {
-						readToBuffer(channel, headBf);
-					}
-					
-					((Buffer)lenBf).flip();
-					long len = lenBf.getLong() - 10L;
-					
-					if ( len < 0L ) {
-						continue;
-					}
-					
-					this.resetLinktesting();
+					/* Refuse before reading the body: a forged huge length would
+					 * exhaust the heap. Terminate the connection, because the
+					 * stream position cannot be re-synchronized. */
+					throw new HsmsSsDetectTerminateException(
+							"too long message: " + len + " bytes");
+				}
+				
+				this.resetLinktesting();
 					
 					while ( len > 0L ) {
 						
@@ -700,40 +719,28 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		private int readToBuffer(AsynchronousSocketChannel channel, ByteBuffer buffer)
 				throws HsmsSsDetectTerminateException, HsmsSsTimeoutT8Exception, ExecutionException, InterruptedException {
 			
-			return readToBuffer(channel, buffer, true);
-		}
-
-		private int readToBuffer(AsynchronousSocketChannel channel, ByteBuffer buffer, boolean detectT8Timeout)
-				throws HsmsSsDetectTerminateException, HsmsSsTimeoutT8Exception, ExecutionException, InterruptedException {
-			
 			final Future<Integer> f = channel.read(buffer);
 			
 			try {
 				
-				if ( detectT8Timeout ) {
-					
-					try {
-						int r = hsmsSsConfig().timeout().t8().future(f).intValue();
-						
-						if ( r < 0 ) {
-							throw new HsmsSsDetectTerminateException();
-						}
-						
-						return r;
-					}
-					catch ( TimeoutException e ) {
-						throw new HsmsSsTimeoutT8Exception(e);
-					}
-						
-				} else {
-					
-					int r = f.get().intValue();
+				/* T8 (inter-character timeout) covers every read of a message,
+				 * including the first bytes of the length field: without this,
+				 * a peer that connects but sends nothing occupies the reading
+				 * thread forever.
+				 * 
+				 * NOTE: the more fundamental T4 coverage requires the
+				 * observableThrowingStream refactoring, and is out of scope. */
+				try {
+					int r = hsmsSsConfig().timeout().t8().future(f).intValue();
 					
 					if ( r < 0 ) {
 						throw new HsmsSsDetectTerminateException();
 					}
 					
 					return r;
+				}
+				catch ( TimeoutException e ) {
+					throw new HsmsSsTimeoutT8Exception(e);
 				}
 			}
 			catch ( InterruptedException e ) {

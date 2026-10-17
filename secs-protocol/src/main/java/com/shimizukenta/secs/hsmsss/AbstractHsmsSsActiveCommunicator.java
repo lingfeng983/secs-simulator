@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.shimizukenta.secs.SecsException;
 
@@ -59,6 +60,8 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 			
 			final SocketAddress socketAddr = hsmsSsConfig().socketAddress().getSocketAddress();
 			
+			final AtomicBoolean circuitCompleted = new AtomicBoolean(false);
+			
 			try {
 				notifyLog(HsmsSsConnectionLog.tryConnect(socketAddr));
 
@@ -66,6 +69,8 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 					
 					@Override
 					public void completed(Void none, Void attachment) {
+						
+						circuitCompleted.set(true);
 						
 						SocketAddress local = null;
 						SocketAddress remote = null;
@@ -102,6 +107,8 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 					@Override
 					public void failed(Throwable t, Void attachment) {
 						
+						circuitCompleted.set(true);
+						
 						if ( ! (t instanceof ClosedChannelException) ) {
 							notifyLog(t);
 						}
@@ -113,7 +120,13 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 				});
 				
 				synchronized ( channel ) {
-					channel.wait();
+					
+					/* Wait until the connect completes, but wake up every second
+					 * to check isClosed(), so that close() never hangs this loop
+					 * even if the notifyAll is missed. */
+					while ( ! circuitCompleted.get() && ! isClosed() ) {
+						channel.wait(1000L);
+					}
 				}
 			}
 			finally {

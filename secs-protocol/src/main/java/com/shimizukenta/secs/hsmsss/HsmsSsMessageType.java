@@ -83,7 +83,7 @@ public enum HsmsSsMessageType {
 	public static boolean supportSType(HsmsSsMessage msg) {
 		byte[] head = msg.header10Bytes();
 		byte s = head[5];
-		return supportPType(s);
+		return supportSType(s);
 	}
 	
 }
