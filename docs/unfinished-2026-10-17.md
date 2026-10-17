@@ -2,8 +2,8 @@
 
 基线：`master @ 5179263`，工作树干净。
 
-验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**362 个测试全绿**
-（json 110 / protocol 45 / core 90 / app 24 / api-http 36 / runtime 12 / cli 45）。
+验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**364 个测试全绿**
+（json 110 / protocol 45 / core 90 / app 25 / api-http 36 / runtime 12 / cli 46）。
 
 本清单分三类：
 
@@ -26,6 +26,7 @@
 | 主机发 S10F3 终端消息没有应答 | ✅ 已修 | 新增 `handleTerminalDisplay`：保存最近 20 条、回 S10F4；格式非法回 `MessageWillNotBeDisplayed`；新增 `SessionTerminalMessageTest` |
 | 没有报警上报能力 | ✅ 已修 | 新增 `emitAlarm` → S5F1（W 位等 S5F2）；HTTP `POST /sessions/{id}/alarm/{alid}`；前端报警置位/清除；新增 `SessionAlarmTest` 与 HTTP 路由用例 |
 | 只有 at/periodic，不能按条件触发 | ✅ 已修 | 新增 `Trigger.OnCondition` + `ConditionDebouncer`；表达式支持比较运算；每 tick 求值 `t` / `svid.<id>`；新增 `SessionOnConditionTest` |
+| 生产路径无法使用模板 DAG | ✅ 已修 | Schema v5 增加 `templates`；`TemplateConfig.build` 生成 `TemplateGraph`；`Main` 用 `GraphValueSource`；新增 `SessionConfigJsonTest#templateConfigBuildsGraph` 与 `ConfigDrivenSessionTest#schemaV5TemplatesDriveS1F3` |
 | 不能表达“A 之后 N 秒发 B” | ✅ 已修 | 新增 `Trigger.AfterEvent` + 延迟队列；源计划成功后才入队；配置校验源计划存在/无环；新增 `SessionAfterEventTest` |
 
 验证命令：
@@ -52,7 +53,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 2. P1：配置与运行时
 
-- [ ] **模板 DAG / 表达式 / 参数分层没有生产入口**：Schema v4 没有 `templates` / `curves` / `params`；`Main` 以 `values=null` 构造会话，永远走 `DefaultCurves`。需要 Schema v5 + 模板注册表 + 图装载器。
+- [x] **模板 DAG / 曲线进配置**：Schema v5 增加 `templates.curves/composites/instances`；`Main` 有模板时构造 `GraphValueSource`，无模板时仍走 `DefaultCurves`。未绑定 SVID 目前返回 0，模板编辑器/预览未做。
 - [ ] **没有内置模板库**：`thermoLoop` / `gasPanel` / `alarmTriplet` 未做。
 - [ ] **单会话**：一个进程只能装一份配置；`SessionManager` 只有 `register` / `closeAll`，没有运行时创建/关闭单个会话。
 - [ ] **无热重载**：配置只在启动时读一次。
@@ -123,7 +124,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
 3. 决定 SERVER 模式：实现 HTTPS + 账号/角色，或把 RuntimeMode/README 的承诺降级为“明文 + 单 token，仅限内网/反代”。
-4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；下一步进入 Schema v5 或 SERVER 安全边界。
+4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；下一步进入 SERVER 安全边界与前端模板编辑器。
 
 **M11：协议能力**
 5. S5F1 / S10F3：先定 ALCD/ALID/去抖、终端消息队列与 ACK。
@@ -131,7 +132,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 7. AfterEvent：把 `lastFireMs` 扩展为“已发生事件集合”。
 
 **M12：配置与前端**
-8. Schema v5：`templates` / `curves` / `params`，把 `TemplateGraph` 接进 `Main`。
+8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；剩下模板编辑器、曲线预览与实例参数 UI。
 9. 配置热重载、多会话、会话生命周期 API。
 10. 二进制预览、uPlot 交互、报文落盘、手动 SML 发送、SVID/CEID 目录、报警/报告面板。
 11. 前端测试与 E2E。
@@ -142,7 +143,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 8. 已确认完成，不要重复做
 
-- M0–M9-c 主体功能；362 个测试全绿。
+- M0–M9-c 主体功能；364 个测试全绿。
 - S1F1/F2、S1F3/F4（含空列表=全部）、**S1F11/F12**、S1F13–F18、S2F17/F18、S2F23/F24、S2F31/F32。
 - 未知 Stream/Function 的 S9F3/S9F5 应答。
 - S6F11 / S6F1 可选 W 位 + 异步等待 S6F12 / S6F2。
@@ -150,6 +151,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - S5F1 报警置位/清除 + S5F2 ACK（HTTP + 前端）。
 - OnCondition 条件触发（含比较运算与去抖）。
 - AfterEvent 事件链（延迟队列 + 环校验）。
+- Schema v5 模板 DAG / 曲线进配置（`TemplateConfig` + `GraphValueSource`）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。

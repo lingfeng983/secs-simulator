@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
+import com.shimizukenta.secssim.core.curve.Rng;
+import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
@@ -95,7 +97,7 @@ class SessionConfigJsonTest {
 
     @Test
     void unsupportedSchemaVersionIsRejected() {
-        String json = SessionConfigJson.toJson(demoConfig()).replace("\"schemaVersion\": 4", "\"schemaVersion\": 3");
+        String json = SessionConfigJson.toJson(demoConfig()).replace("\"schemaVersion\": 5", "\"schemaVersion\": 3");
 
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
         assertEquals("$.schemaVersion", e.path());
@@ -160,6 +162,36 @@ class SessionConfigJsonTest {
 
         SessionConfig parsed = SessionConfigJson.parse(json);
         assertEquals("pri-01", parsed.spec().id());
+    }
+
+    @Test
+    void templateConfigBuildsGraph() {
+        String json = """
+                {"schemaVersion":5,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"},
+                               {"offset":2,"slot":"DERIVED","type":"F4"}],
+                     "reports":[],"ceids":[]}]},
+                 "templates":{
+                   "curves":[{"id":"temp","type":"sine","min":100.0,"max":200.0,"periodMs":1000}],
+                   "composites":[{"id":"derived","outputs":{"V":"in.temp.V * 0.5"}}],
+                   "instances":[
+                     {"id":"temp","template":"temp","svids":{"V":1001}},
+                     {"id":"derived","template":"derived","svids":{"V":1002}}
+                   ]
+                 }}
+                """;
+
+        SessionConfig config = SessionConfigJson.parse(json);
+        CompilationResult compiled = config.compile();
+        assertTrue(compiled.ok(), () -> "配置不合法: " + compiled.issues());
+
+        GraphValueSource source = new GraphValueSource(
+                config.templates().build(compiled.equipment()), new Rng(1L).derive("graph"));
+        assertEquals(150.0, source.valueAt(1001, 0L).orElseThrow(), 1e-9, "sine t=0 应为中点");
+        assertEquals(75.0, source.valueAt(1002, 0L).orElseThrow(), 1e-9, "组合模板应派生");
     }
 
     @Test

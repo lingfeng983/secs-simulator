@@ -21,9 +21,13 @@ import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
+import com.shimizukenta.secssim.core.EngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
+import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.value.GraphValueSource;
+import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
@@ -160,7 +164,19 @@ public final class Main {
                 configured.port() == 0 ? options.hsmsPort() : configured.port(),
                 configured.deviceId(), configured.seed(), configured.equipment());
 
-        HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
+        ValueSource values = null;
+        if (!config.templates().isEmpty()) {
+            try {
+                values = new GraphValueSource(config.templates().build(compiled.equipment()),
+                        new Rng(config.spec().seed()).derive("graph"));
+            } catch (ConfigException e) {
+                Log.error("配置错误: " + e.getMessage());
+                return 3;
+            }
+        }
+
+        HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment(),
+                EngineClock.system(), values);
         runtime.eventBus(bus);
         runtime.enableSchedule(config.schedule(), config.maxEventsPerSec());
         runtime.collectionEventWbit(config.s6f11Wbit());

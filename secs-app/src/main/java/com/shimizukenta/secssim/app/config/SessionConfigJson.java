@@ -15,6 +15,7 @@ import java.util.OptionalInt;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
+import com.shimizukenta.jsonhub.JsonObjectPair;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
@@ -66,9 +67,10 @@ public final class SessionConfigJson {
         }
 
         int schemaVersion = JsonAccess.integer(root, "schemaVersion", ROOT);
-        if (schemaVersion != SessionConfig.SCHEMA_VERSION) {
+        if (schemaVersion < SessionConfig.MIN_SCHEMA_VERSION || schemaVersion > SessionConfig.SCHEMA_VERSION) {
             throw new ConfigException(ROOT + ".schemaVersion",
-                    "不支持的版本: " + schemaVersion + "（本程序支持 " + SessionConfig.SCHEMA_VERSION + "）");
+                    "不支持的版本: " + schemaVersion + "（本程序支持 " + SessionConfig.MIN_SCHEMA_VERSION
+                            + ".." + SessionConfig.SCHEMA_VERSION + "）");
         }
 
         String sessionPath = ROOT + ".session";
@@ -86,9 +88,10 @@ public final class SessionConfigJson {
         int maxPerSec = parseMaxPerSec(root);
         boolean s6f11Wbit = parseS6f11Wbit(root);
         boolean s6f1Wbit = parseS6f1Wbit(root);
+        TemplateConfig templates = TemplateConfigJson.parse(root);
 
         SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment);
-        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit);
+        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, templates);
     }
 
     /**
@@ -126,11 +129,16 @@ public final class SessionConfigJson {
     public static String toJson(SessionConfig config) {
         JsonHubBuilder b = JsonHub.getBuilder();
 
-        JsonHub root = b.object(
-                b.pair("schemaVersion", SessionConfig.SCHEMA_VERSION),
-                b.pair("session", sessionJson(config.spec(), b)),
-                b.pair("equipment", equipmentJson(config.spec().equipment(), b)),
-                b.pair("events", eventsJson(config, b)));
+        List<JsonObjectPair> pairs = new ArrayList<>();
+        pairs.add(b.pair("schemaVersion", SessionConfig.SCHEMA_VERSION));
+        pairs.add(b.pair("session", sessionJson(config.spec(), b)));
+        pairs.add(b.pair("equipment", equipmentJson(config.spec().equipment(), b)));
+        pairs.add(b.pair("events", eventsJson(config, b)));
+        if (!config.templates().isEmpty()) {
+            pairs.add(b.pair("templates", TemplateConfigJson.toJson(config.templates(), b)));
+        }
+
+        JsonHub root = b.object(pairs);
 
         return root.prettyPrint();
     }

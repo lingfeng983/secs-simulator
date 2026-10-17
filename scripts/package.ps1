@@ -35,7 +35,7 @@ Copy-Item $web (Join-Path $stage 'web') -Recurse
 Copy-Item (Join-Path $root 'packaging/start.ps1') $stage
 Copy-Item (Join-Path $root 'packaging/start.cmd') $stage
 Copy-Item (Join-Path $root 'packaging/README.txt') $stage
-Copy-Item (Join-Path $root 'docs/schema-v4.md') (Join-Path $stage 'docs-schema-v4.md')
+Copy-Item (Join-Path $root 'docs/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
 
 # 包根启动脚本自检：M9 曾因 start.ps1 多退一级父目录，双击 start.cmd 直接报 exe 不存在。
 $startCheck = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $stage 'start.ps1') -CheckOnly 2>&1

@@ -25,6 +25,8 @@ import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
+import com.shimizukenta.secssim.core.curve.Rng;
+import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
 
@@ -58,6 +60,67 @@ class ConfigDrivenSessionTest {
               "events": { "maxPerSec": 10, "plans": [] }
             }
             """;
+
+    private static final String TEMPLATE_CONFIG = """
+            {
+              "schemaVersion": 5,
+              "session": { "id": "tpl-1", "passive": true, "bindHost": "127.0.0.1",
+                           "port": 0, "deviceId": 44, "seed": 99 },
+              "equipment": {
+                "name": "TPL-EQ", "idSpace": {},
+                "units": [ { "unitId": 1, "name": "CH1", "injectUnitId": false,
+                  "svids": [
+                    { "offset": 1, "slot": "TEMP", "type": "F4" },
+                    { "offset": 2, "slot": "DERIVED", "type": "F4" }
+                  ],
+                  "reports": [], "ceids": [] } ]
+              },
+              "templates": {
+                "curves": [ { "id": "temp", "type": "sine", "min": 100.0, "max": 200.0, "periodMs": 1000 } ],
+                "composites": [ { "id": "derived", "outputs": { "V": "in.temp.V * 0.5" } } ],
+                "instances": [
+                  { "id": "temp", "template": "temp", "svids": { "V": 1001 } },
+                  { "id": "derived", "template": "derived", "svids": { "V": 1002 } }
+                ]
+              }
+            }
+            """;
+
+    @Test
+    void schemaV5TemplatesDriveS1F3(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("模板-设备.json");
+        Files.writeString(file, TEMPLATE_CONFIG, StandardCharsets.UTF_8);
+
+        SessionConfig config = SessionConfigJson.read(file);
+        CompilationResult compiled = config.compile();
+        assertTrue(compiled.ok(), () -> "配置应能编译: " + compiled.errors());
+
+        int port = freePort();
+        SessionSpec configured = config.spec();
+        SessionSpec spec = new SessionSpec(configured.id(), configured.passive(), configured.bindHost(),
+                port, configured.deviceId(), configured.seed(), configured.equipment());
+
+        GraphValueSource values = new GraphValueSource(
+                config.templates().build(compiled.equipment()),
+                new Rng(config.spec().seed()).derive("graph"));
+        HsmsSessionRuntime session = new HsmsSessionRuntime(
+                spec, compiled.equipment(), new ManualEngineClock(0L), values);
+        session.open();
+
+        try (SecsCommunicator client = connect(port, configured.deviceId())) {
+            client.openAndWaitUntilCommunicating();
+
+            Secs2Builder b = Secs2.getBuilder();
+            Optional<SecsMessage> reply = client.send(1, 3, true, b.list(b.uint4(1001L), b.uint4(1002L)));
+            assertTrue(reply.isPresent(), "S1F3 没有应答");
+
+            Secs2 body = reply.get().secs2();
+            assertEquals(150.0, Secs2Read.asDouble(body.get(0)), 1e-3, "sine t=0 应为中点");
+            assertEquals(75.0, Secs2Read.asDouble(body.get(1)), 1e-3, "组合模板应派生");
+        } finally {
+            session.close();
+        }
+    }
 
     @Test
     void sessionBuiltFromJsonAnswersS1F3(@TempDir Path tempDir) throws Exception {

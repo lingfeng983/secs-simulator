@@ -14,7 +14,7 @@ start.ps1 目前固定用 --demo-session。要装载配置文件，直接用命�
 
     secs-sim.exe --mode=integrated --config 你的设备.json --web-root web
 
-配置格式见 docs-schema-v4.md。
+配置格式见 docs-schema-v5.md（v4 仍兼容）。
 
 界面
 ----
@@ -30,4 +30,4 @@ start.ps1 目前固定用 --demo-session。要装载配置文件，直接用命�
     web/               前端静态资源
     start.ps1/start.cmd
     README.txt
-    docs-schema-v4.md  配置格式说明
+    docs-schema-v5.md  配置格式说明

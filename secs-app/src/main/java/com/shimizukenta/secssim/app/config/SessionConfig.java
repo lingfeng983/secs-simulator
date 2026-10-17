@@ -13,12 +13,16 @@ import com.shimizukenta.secssim.core.event.EventSchedule;
  * @param maxEventsPerSec 设备级每秒最大上报数
  * @param s6f11Wbit        S6F11 是否带 W 位并等待 S6F12（默认 false）
  * @param s6f1Wbit         S6F1 是否带 W 位并等待 S6F2（默认 false）
+ * @param templates        模板/曲线配置（默认空）
  */
 public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
-                            boolean s6f11Wbit, boolean s6f1Wbit) {
+                            boolean s6f11Wbit, boolean s6f1Wbit, TemplateConfig templates) {
 
     /** 当前 schema 版本。 */
-    public static final int SCHEMA_VERSION = 4;
+    public static final int SCHEMA_VERSION = 5;
+
+    /** 兼容读取的最小 schema 版本。 */
+    public static final int MIN_SCHEMA_VERSION = 4;
 
     /**
      * 兼容旧调用的构造：默认 S6F11 不带 W 位。
@@ -28,7 +32,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      * @param maxEventsPerSec 限流
      */
     public SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec) {
-        this(spec, schedule, maxEventsPerSec, false, false);
+        this(spec, schedule, maxEventsPerSec, false, false, TemplateConfig.empty());
     }
 
     /**
@@ -41,7 +45,21 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      */
     public SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
                          boolean s6f11Wbit) {
-        this(spec, schedule, maxEventsPerSec, s6f11Wbit, false);
+        this(spec, schedule, maxEventsPerSec, s6f11Wbit, false, TemplateConfig.empty());
+    }
+
+    /**
+     * 兼容只配置两个 W 位的调用：模板配置为空。
+     *
+     * @param spec            会话参数
+     * @param schedule        编排
+     * @param maxEventsPerSec 限流
+     * @param s6f11Wbit       S6F11 是否带 W 位
+     * @param s6f1Wbit        S6F1 是否带 W 位
+     */
+    public SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
+                         boolean s6f11Wbit, boolean s6f1Wbit) {
+        this(spec, schedule, maxEventsPerSec, s6f11Wbit, s6f1Wbit, TemplateConfig.empty());
     }
 
     /**
@@ -52,10 +70,14 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      * @param maxEventsPerSec 限流
      * @param s6f11Wbit       S6F11 是否带 W 位
      * @param s6f1Wbit        S6F1 是否带 W 位
+     * @param templates        模板/曲线配置
      */
     public SessionConfig {
         if (schedule == null) {
             schedule = EventSchedule.empty();
+        }
+        if (templates == null) {
+            templates = TemplateConfig.empty();
         }
         if (maxEventsPerSec < 1) {
             throw new IllegalArgumentException("maxEventsPerSec must be >= 1 but was " + maxEventsPerSec);

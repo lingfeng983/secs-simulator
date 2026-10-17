@@ -48,7 +48,7 @@ secs-sim --mode=integrated
 # 带一个两腔体演示会话：主机可以连上来问 S1F3
 secs-sim --mode=integrated --demo-session --hsms-port 5000
 
-# 从配置文件装载设备（格式见 docs/schema-v4.md）
+# 从配置文件装载设备（格式见 docs/schema-v5.md）
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
 # 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
@@ -126,4 +126,5 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
+- [配置格式 Schema v5](docs/schema-v5.md)（v4 仍兼容）
 - [配置格式 Schema v4](docs/schema-v4.md)

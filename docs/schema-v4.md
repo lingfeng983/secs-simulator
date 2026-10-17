@@ -1,5 +1,8 @@
 # 配置格式 Schema v4
 
+> **Schema v5 已在 v4 基础上增加 `templates`（曲线/模板 DAG）。**
+> v4 配置仍被接受；需要把 SVID 绑定到曲线时见 [Schema v5](schema-v5.md)。
+
 一份配置描述"一台设备 + 若干单元 + 事件编排"。
 
 ```json
