@@ -9,6 +9,7 @@ import com.shimizukenta.secs.hsmsss.HsmsSsCommunicator;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
 import com.shimizukenta.secs.secs2.Secs2;
+import com.shimizukenta.secssim.app.log.Log;
 
 /**
  * SECS 能力探针：开一个 HSMS-SS 被动端口并应答 S1F1。
@@ -63,7 +64,7 @@ public final class SecsProbe implements AutoCloseable {
                 this.replied = true;
             }
         } catch (Exception e) {
-            System.err.println("S1F2 应答失败: " + e);
+            Log.error("S1F2 应答失败", e);
         }
     }
 
@@ -72,7 +73,7 @@ public final class SecsProbe implements AutoCloseable {
         try {
             this.communicator.close();
         } catch (IOException e) {
-            System.err.println("关闭探针端口失败: " + e);
+            Log.error("关闭探针端口失败", e);
         }
     }
 }

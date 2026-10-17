@@ -1,18 +1,30 @@
 ﻿# 启动打包好的模拟器：拉起进程 -> 读 READY 行 -> 打开浏览器。
 param(
     [string]$Mode = 'integrated',
-    [int]$HsmsPort = 5000
+    [int]$HsmsPort = 5000,
+    [switch]$NoBrowser,
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
-$root = Split-Path $PSScriptRoot -Parent
+# start.ps1 被拷到绿色包根目录，$PSScriptRoot 就是包根；
+# 不要再 -Parent，否则会去上一级找 exe（M9 踩过：双击 start.cmd 直接报 exe 不存在）。
+$root = $PSScriptRoot
 $exe = Join-Path $root 'secs-sim.exe'
 $web = Join-Path $root 'web'
 
 if (-not (Test-Path $exe)) { throw "secs-sim.exe 不存在: $exe" }
 if (-not (Test-Path $web)) { throw "web 目录不存在: $web" }
+
+# 打包与 CI 用：只校验路径，不拉起进程。
+if ($CheckOnly) {
+    Write-Host "root=$root"
+    Write-Host "exe=$exe"
+    Write-Host "web=$web"
+    exit 0
+}
 
 $out = Join-Path $env:TEMP ("secs-sim-" + [guid]::NewGuid().ToString('N') + ".log")
 
@@ -43,7 +55,7 @@ Write-Host "界面地址: $url" -ForegroundColor Green
 Write-Host "SECS 端口: $HsmsPort   日志: $out"
 Write-Host '按 Ctrl+C 结束。'
 
-Start-Process $url
+if (-not $NoBrowser) { Start-Process $url }
 
 try {
     $process.WaitForExit()

@@ -163,6 +163,7 @@ public final class Main {
         HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
         runtime.eventBus(bus);
         runtime.enableSchedule(config.schedule(), config.maxEventsPerSec());
+        runtime.collectionEventWbit(config.s6f11Wbit());
         runtime.open();
         sessions.register(runtime);
         return 0;

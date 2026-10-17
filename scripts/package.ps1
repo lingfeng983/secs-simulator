@@ -37,6 +37,13 @@ Copy-Item (Join-Path $root 'packaging/start.cmd') $stage
 Copy-Item (Join-Path $root 'packaging/README.txt') $stage
 Copy-Item (Join-Path $root 'docs/schema-v4.md') (Join-Path $stage 'docs-schema-v4.md')
 
+# 包根启动脚本自检：M9 曾因 start.ps1 多退一级父目录，双击 start.cmd 直接报 exe 不存在。
+$startCheck = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $stage 'start.ps1') -CheckOnly 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "start.ps1 路径自检失败:`n$($startCheck -join [Environment]::NewLine)"
+}
+Write-Host 'start.ps1 path check OK'
+
 $zip = Join-Path $root "package/secs-sim-$version-win-x64.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $stage -DestinationPath $zip

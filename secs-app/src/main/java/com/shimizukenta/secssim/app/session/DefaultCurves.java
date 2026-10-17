@@ -8,6 +8,7 @@ import com.shimizukenta.secssim.core.curve.ConstantCurve;
 import com.shimizukenta.secssim.core.curve.Curve;
 import com.shimizukenta.secssim.core.curve.RandomWalkCurve;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
 import com.shimizukenta.secssim.core.domain.SvidDef;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.value.ValueStore;
@@ -47,6 +48,17 @@ public final class DefaultCurves {
                 store.bind(svid, curveFor(unit, def));
             }
         }
+
+        /*
+         * 设备级 SVID 不属于任何单元，必须单独绑定。
+         * 漏掉这一段的后果是：配置里声明了 FACILITY_TEMP，S1F3/S6F11 却永远返回 0。
+         */
+        for (GlobalSvidDef def : spec.globalSvids()) {
+            if (!equipment.svids().containsKey(def.id())) {
+                continue;
+            }
+            store.bind(def.id(), curveFor(def));
+        }
     }
 
     private static Curve curveFor(UnitSpec unit, SvidDef def) {
@@ -58,8 +70,28 @@ public final class DefaultCurves {
             return new ConstantCurve(def.type() == com.shimizukenta.secssim.core.domain.ValueType.BOOLEAN ? 1.0 : 0.0);
         }
 
-        double lo = Double.isFinite(def.min()) ? def.min() : 0.0;
-        double hi = Double.isFinite(def.max()) ? def.max() : lo + 100.0;
+        return numericCurve(def.min(), def.max());
+    }
+
+    private static Curve curveFor(GlobalSvidDef def) {
+        if (!def.type().isNumeric()) {
+            return new ConstantCurve(def.type() == com.shimizukenta.secssim.core.domain.ValueType.BOOLEAN ? 1.0 : 0.0);
+        }
+
+        return numericCurve(def.min(), def.max());
+    }
+
+    /**
+     * 数值型默认曲线：在值域内做有界随机游走。
+     *
+     * <p>设备级 SVID 的 schema 里没有槽位定义，值域可选；
+     * 不配时退化为 0..100，避免“声明了变量却永远是 0”。</p>
+     */
+    private static Curve numericCurve(double configuredMin, double configuredMax) {
+        double lo = Double.isFinite(configuredMin) ? configuredMin
+                : (Double.isFinite(configuredMax) ? configuredMax - 100.0 : 0.0);
+        double hi = Double.isFinite(configuredMax) ? configuredMax : lo + 100.0;
+
         if (!(lo < hi)) {
             hi = lo + 1.0;
         }

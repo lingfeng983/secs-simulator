@@ -4,6 +4,7 @@ export interface Counters {
   emitted?: number;
   rejected?: number;
   skipped?: number;
+  wbitDropped?: number;
   traceFrames?: number;
   activeTraces?: number;
   hostReports?: number;

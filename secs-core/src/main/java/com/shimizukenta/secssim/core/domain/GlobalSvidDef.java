@@ -7,11 +7,29 @@ package com.shimizukenta.secssim.core.domain;
  * 它不属于任何单元，但可以被任意单元的报告引用。
  * </p>
  *
+ * <p>{@code min}/{@code max} 是可选值域：不配时默认无界，
+ * 由 {@code DefaultCurves} 退化为 0..100 的有界随机游走。
+ * 设备级变量没有“槽位定义”这一步，值域只能在这里给。
+ * </p>
+ *
  * @param id   绝对 SVID
  * @param name 名称
  * @param type 类型
+ * @param min  值域下界（默认负无穷）
+ * @param max  值域上界（默认正无穷）
  */
-public record GlobalSvidDef(int id, String name, ValueType type) {
+public record GlobalSvidDef(int id, String name, ValueType type, double min, double max) {
+
+    /**
+     * 简化构造：不带值域。
+     *
+     * @param id   绝对 SVID
+     * @param name 名称
+     * @param type 类型
+     */
+    public GlobalSvidDef(int id, String name, ValueType type) {
+        this(id, name, type, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+    }
 
     /**
      * 校验并创建。
@@ -19,6 +37,8 @@ public record GlobalSvidDef(int id, String name, ValueType type) {
      * @param id   绝对 SVID
      * @param name 名称
      * @param type 类型
+     * @param min  值域下界
+     * @param max  值域上界
      */
     public GlobalSvidDef {
         if (id < 1) {
@@ -29,6 +49,9 @@ public record GlobalSvidDef(int id, String name, ValueType type) {
         }
         if (type == null) {
             throw new IllegalArgumentException("global svid type must not be null: " + name);
+        }
+        if (min > max) {
+            throw new IllegalArgumentException("min " + min + " > max " + max + " for global svid " + name);
         }
     }
 }

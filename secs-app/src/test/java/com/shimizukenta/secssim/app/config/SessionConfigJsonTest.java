@@ -17,6 +17,7 @@ import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
 import com.shimizukenta.secssim.core.domain.IdSpacePolicy;
 import com.shimizukenta.secssim.core.domain.ReportDef;
 import com.shimizukenta.secssim.core.domain.SvidDef;
@@ -159,6 +160,38 @@ class SessionConfigJsonTest {
 
         SessionConfig parsed = SessionConfigJson.parse(json);
         assertEquals("pri-01", parsed.spec().id());
+    }
+
+    @Test
+    void s6f11WbitSurvivesRoundTrip() {
+        SessionConfig base = demoConfig();
+        SessionConfig withWbit = new SessionConfig(base.spec(), base.schedule(), base.maxEventsPerSec(), true);
+
+        String json = SessionConfigJson.toJson(withWbit);
+        assertTrue(json.contains("\"s6f11Wbit\""), "true 时必须写回 JSON");
+        assertTrue(SessionConfigJson.parse(json).s6f11Wbit());
+    }
+
+    @Test
+    void globalSvidRangeRoundTrips() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "globalSvids":[{"id":9001,"name":"FACILITY_TEMP","type":"F4","min":18.0,"max":26.0}],
+                   "units":[{"unitId":1,"name":"CH1",
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]}}
+                """;
+
+        SessionConfig parsed = SessionConfigJson.parse(json);
+        GlobalSvidDef global = parsed.spec().equipment().globalSvids().get(0);
+
+        assertEquals(18.0, global.min());
+        assertEquals(26.0, global.max());
+
+        String serialized = SessionConfigJson.toJson(parsed);
+        assertTrue(serialized.contains("\"min\""), "min 必须被写回 JSON");
+        assertTrue(serialized.contains("\"max\""), "max 必须被写回 JSON");
     }
 
     @Test

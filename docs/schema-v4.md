@@ -21,7 +21,7 @@
       "reserve": [[1, 999]]
     },
     "globalSvids": [
-      { "id": 9001, "name": "FACILITY_TEMP", "type": "F4" }
+      { "id": 9001, "name": "FACILITY_TEMP", "type": "F4", "min": 18, "max": 26 }
     ],
     "globalCeids": [
       { "id": 1001, "name": "CONTROL_STATE_CHANGE", "reports": ["CH1.STATUS"] }
@@ -47,6 +47,7 @@
   },
   "events": {
     "maxPerSec": 20,
+    "s6f11Wbit": false,
     "plans": [
       { "id": "start", "ceid": 2001,
         "trigger": { "type": "periodic", "periodMs": 5000, "jitterMs": 200 } },
@@ -65,6 +66,8 @@
 | 单元位置 vs `unitId` | 位置决定号段（1、2、3…），`unitId` 是写给主机看的语义编号，可以跳号 |
 | `injectUnitId` | 为真时，若报告里没有 `UNIT_ID`，组装 S6F11 时会自动加到报告首位 |
 | `globalSvids` / `globalCeids` | 设备级共享项，不属于任何单元；全局 CEID 引用跨单元报告要写 `单元名.报告名` |
+| `globalSvids.min/max` | 可选值域（仅数值型）。不配时默认曲线退化为 0..100 的有界随机游走；BOOLEAN 固定 1，ASCII/BINARY 固定 0 |
+| `events.s6f11Wbit` | 可选，默认 `false`。为 `true` 时 S6F11 带 W 位并等待 S6F12；发送走单线程队列，避免 T3 阻塞事件心跳 |
 | `reserve` | 禁止占用的号段（默认 1..999 留给标准消息） |
 
 ## 错误定位

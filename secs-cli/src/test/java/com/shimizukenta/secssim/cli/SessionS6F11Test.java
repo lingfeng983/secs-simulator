@@ -75,6 +75,42 @@ class SessionS6F11Test {
     }
 
     @Test
+    void s6f11WbitWaitsForS6f12() throws Exception {
+        int port = freePort();
+        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
+        CompilationResult compiled = EquipmentCompiler.compile(demo);
+
+        SessionSpec spec = new SessionSpec("w1", true, "127.0.0.1", port, 10, 424242L, demo);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+        session.collectionEventWbit(true);
+        session.open();
+
+        try (SecsCommunicator client = connect(port)) {
+            CompletableFuture<SecsMessage> received = new CompletableFuture<>();
+            client.addSecsMessageReceiveListener(message -> {
+                if (message.getStream() == 6 && message.getFunction() == 11) {
+                    received.complete(message);
+                    try {
+                        client.send(message, 6, 12, false, Secs2.getBuilder().binary((byte) 0));
+                    } catch (Exception e) {
+                        received.completeExceptionally(e);
+                    }
+                }
+            });
+            client.openAndWaitUntilCommunicating();
+
+            session.emitCeid(2001);
+
+            SecsMessage primary = received.get(10L, TimeUnit.SECONDS);
+            assertTrue(primary.wbit(), "开启后 S6F11 必须带 W 位");
+            awaitEmitted(session, 1L, 5_000L);
+            assertEquals(0L, session.counters().get("wbitDropped"), "队列不应丢帧");
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
     void unitIdIsInjectedWhenReportOmitsIt() throws Exception {
         int port = freePort();
         EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
@@ -133,6 +169,15 @@ class SessionS6F11Test {
         assertEquals(11, message.getFunction());
         assertTrue(!message.wbit(), "本实现默认不带 W 位");
         return message.secs2();
+    }
+
+    private static void awaitEmitted(HsmsSessionRuntime session, long expected, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline && session.emittedCount() < expected) {
+            Thread.sleep(20L);
+        }
+        assertEquals(expected, session.emittedCount(), "收到 S6F12 后才算上报成功");
     }
 
     private static SecsCommunicator connect(int port) throws Exception {

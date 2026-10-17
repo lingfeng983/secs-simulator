@@ -6,8 +6,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,6 +31,7 @@ import com.shimizukenta.secs.secs2.Secs2Builder;
 import com.shimizukenta.secs.secs2.Secs2Exception;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
+import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.DefaultCurves;
 import com.shimizukenta.secssim.app.session.HostReportTable;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
@@ -62,6 +67,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private static final long EVENT_TICK_MS = 100L;
     private static final long RATE_WINDOW_MS = 1_000L;
     private static final int DEFAULT_MAX_EVENTS_PER_SEC = 50;
+    /** S6F11 等 ACK 的队列上限：主机不答 S6F12 时不能无限堆积。 */
+    private static final int S6F11_ACK_QUEUE = 256;
 
     private final SessionSpec spec;
     private final ResolvedEquipment model;
@@ -78,6 +85,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong rejected = new AtomicLong();
     private final AtomicLong traceFrames = new AtomicLong();
     private final AtomicLong skipped = new AtomicLong();
+    private final AtomicLong wbitDropped = new AtomicLong();
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -86,6 +94,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private volatile EventSchedule schedule = EventSchedule.empty();
     private volatile RateLimiter limiter = new RateLimiter(DEFAULT_MAX_EVENTS_PER_SEC, RATE_WINDOW_MS);
     private volatile ScheduledExecutorService ticker;
+    private volatile boolean s6f11Wbit;
+    /** 单线程串行等 S6F12：W 位发送会阻塞到 T3，不能占用 100ms 事件心跳。 */
+    private volatile ExecutorService ackSender;
     /**
      * 上次触发事件的时间点。
      *
@@ -140,6 +151,29 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
         this.traces = new TraceManager(model, this.values, Instant.now());
         this.eventRng = new Rng(spec.seed()).derive("events");
+        this.ackSender = newAckSender(spec.id());
+    }
+
+    private static ExecutorService newAckSender(String sessionId) {
+        return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(S6F11_ACK_QUEUE),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "s6f11-ack-" + sessionId);
+                    thread.setDaemon(true);
+                    return thread;
+                });
+    }
+
+    /**
+     * 设置 S6F11 是否带 W 位并等待 S6F12。
+     *
+     * <p>默认 {@code false}：多数设备不要求主机逐条 ACK，带 W 位会让每次上报
+     * 阻塞到 S6F12 或 T3。开启后发送放到单线程队列，不占用事件心跳。</p>
+     *
+     * @param enabled 是否启用
+     */
+    public void collectionEventWbit(boolean enabled) {
+        this.s6f11Wbit = enabled;
     }
 
     /**
@@ -341,15 +375,43 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             return;
         }
 
+        Secs2 body;
         try {
-            Secs2 body = this.assembler.build(ceid, this.clock.nowMs());
+            body = this.assembler.build(ceid, this.clock.nowMs());
+        } catch (Exception e) {
+            throw new IOException("组装 S6F11 失败: " + ceid, e);
+        }
+
+        if (this.s6f11Wbit) {
+            /* W 位发送会阻塞到 S6F12 或 T3；放到单线程队列，事件心跳照常跑 */
+            try {
+                this.ackSender.execute(() -> {
+                    try {
+                        comm.send(6, 11, true, body);
+                        this.emitted.incrementAndGet();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        this.lastError = "等待 S6F12 被中断: " + ceid;
+                    } catch (Exception e) {
+                        this.lastError = e.toString();
+                        Log.error("会话 " + this.spec.id() + " 等待 S6F12 失败: " + ceid, e);
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                this.wbitDropped.incrementAndGet();
+                throw new IOException("S6F11 ACK 队列已满: " + ceid, e);
+            }
+            return;
+        }
+
+        try {
             comm.send(6, 11, false, body);
             this.emitted.incrementAndGet();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("发送 S6F11 被中断: " + ceid, e);
         } catch (Exception e) {
-            throw new IOException("组装或发送 S6F11 失败: " + ceid, e);
+            throw new IOException("发送 S6F11 失败: " + ceid, e);
         }
     }
 
@@ -365,6 +427,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
 
         this.state.set(SessionState.OPENING);
+        if (this.ackSender == null || this.ackSender.isShutdown()) {
+            this.ackSender = newAckSender(this.spec.id());
+        }
 
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
         config.protocol(this.spec.passive() ? HsmsSsProtocol.PASSIVE : HsmsSsProtocol.ACTIVE);
@@ -393,6 +458,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     @Override
     public void close() {
         this.stopTicker();
+        ExecutorService sender = this.ackSender;
+        if (sender != null) {
+            sender.shutdownNow();
+        }
 
         SecsCommunicator comm = this.communicator;
         if (comm == null) {
@@ -432,6 +501,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 "emitted", this.emitted.get(),
                 "rejected", this.rejected.get(),
                 "skipped", this.skipped.get(),
+                "wbitDropped", this.wbitDropped.get(),
                 "traceFrames", this.traceFrames.get(),
                 "activeTraces", (long) this.traces.activeCount(),
                 "hostReports", (long) this.hostReports.reportCount(),
@@ -493,7 +563,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             }
         } catch (Exception e) {
             this.lastError = e.toString();
-            System.err.println("会话 " + this.spec.id() + " 事件上报失败: " + e);
+            Log.error("会话 " + this.spec.id() + " 事件上报失败", e);
         }
     }
 
@@ -587,14 +657,46 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     return;
                 }
                 default -> {
-                    /* 其余报文不处理 */
+                    /* 其余报文交给 S9Fx 统一回答 */
                 }
+            }
+
+            replyUnsupported(primary);
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            Log.error("会话 " + this.spec.id() + " 处理报文失败", e);
+        }
+    }
+
+    /**
+     * 对无法处理的 Primary 回 S9Fx。
+     *
+     * <p>E5 把“流不认识”和“功能不认识”分成 S9F3 / S9F5。
+     * 不回应的后果比回错更糟：主机侧只会看到 T3 超时，无法区分
+     * “设备不支持”与“设备坏了”。</p>
+     *
+     * <p>S9 本身不再回 S9，避免两端互打形成死循环。</p>
+     */
+    private void replyUnsupported(SecsMessage primary) {
+        int stream = primary.getStream();
+        if (stream == 9) {
+            return;
+        }
+
+        try {
+            if (isKnownStream(stream)) {
+                this.communicator.gem().s9f5(primary);
+            } else {
+                this.communicator.gem().s9f3(primary);
             }
         } catch (Exception e) {
             this.lastError = e.toString();
-            System.err.println("会话 " + this.spec.id() + " 处理报文失败: " + e);
-            e.printStackTrace();
+            Log.error("会话 " + this.spec.id() + " 回复 S9Fx 失败", e);
         }
+    }
+
+    private static boolean isKnownStream(int stream) {
+        return stream == 1 || stream == 2 || stream == 5 || stream == 6 || stream == 10;
     }
 
     /**
@@ -785,20 +887,30 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this.traceFrames.incrementAndGet();
             } catch (Exception e) {
                 this.lastError = e.toString();
-                System.err.println("会话 " + this.spec.id() + " 发送 S6F1 失败: " + e);
+                Log.error("会话 " + this.spec.id() + " 发送 S6F1 失败", e);
             }
         }
     }
 
     /**
      * S1F3 请求一组 SVID，S1F4 必须按<b>同样的顺序与个数</b>返回。
+     *
+     * <p>E5 允许空列表表示“全部 SVID”。自动发现型主机常用它一次拿全，
+     * 这里与 S1F11 的空列表语义保持一致。</p>
      */
     private void replyS1F4(SecsMessage primary) throws Exception {
         long nowMs = this.clock.nowMs();
+        List<Secs2> requested = requestSvids(primary);
         List<Secs2> values = new ArrayList<>();
 
-        for (Secs2 item : requestSvids(primary)) {
-            values.add(this.valueOf(item, nowMs));
+        if (requested.isEmpty()) {
+            for (int svid : this.model.svids().keySet().stream().sorted().toList()) {
+                values.add(this.valueOf(svid, nowMs));
+            }
+        } else {
+            for (Secs2 item : requested) {
+                values.add(this.valueOf(item, nowMs));
+            }
         }
 
         this.communicator.send(primary, 1, 4, false, Secs2.getBuilder().list(values));
@@ -819,7 +931,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     private Secs2 valueOf(Secs2 svidItem, long nowMs) throws Secs2Exception {
-        int svid = Secs2Read.asInt(svidItem);
+        return this.valueOf(Secs2Read.asInt(svidItem), nowMs);
+    }
+
+    private Secs2 valueOf(int svid, long nowMs) {
         ResolvedSvid definition = this.model.svids().get(svid);
 
         if (definition == null) {

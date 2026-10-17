@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,12 @@ import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
+import com.shimizukenta.secssim.core.domain.IdSpacePolicy;
+import com.shimizukenta.secssim.core.domain.SvidDef;
+import com.shimizukenta.secssim.core.domain.UnitId;
+import com.shimizukenta.secssim.core.domain.UnitSpec;
+import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
@@ -126,6 +133,66 @@ class SessionS1F3Test {
 
             assertNotEquals(first, later, 1e-6, "两分钟后同一个 SVID 必须已经变化");
             assertTrue(later >= 0.0 && later <= 400.0, "取值必须落在声明值域内: " + later);
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
+    void emptyS1F3ReturnsAllSvids() throws Exception {
+        int port = freePort();
+        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
+        CompilationResult compiled = EquipmentCompiler.compile(demo);
+
+        SessionSpec spec = new SessionSpec("all", true, "127.0.0.1", port, 10, 424242L, demo);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), EngineClock.manual(0L));
+        session.open();
+
+        try (SecsCommunicator client = connect(port)) {
+            client.openAndWaitUntilCommunicating();
+
+            Optional<SecsMessage> reply = client.send(1, 3, true, Secs2.getBuilder().list());
+            assertTrue(reply.isPresent(), "S1F3 空列表没有应答");
+
+            Secs2 body = reply.get().secs2();
+            assertEquals(compiled.equipment().svids().size(), body.size(),
+                    "E5：空 SVID 列表表示全部变量");
+            assertEquals(session.valueStore().valueAt(1001, 0L).orElseThrow(),
+                    Secs2Read.asDouble(body.get(0)), 1e-3, "首个值应是最小 SVID 的当前值");
+            assertEquals(2, Secs2Read.asInt(body.get(body.size() - 1)),
+                    "最后一个值应是 CH2 的 UNIT_ID");
+        } finally {
+            session.close();
+        }
+    }
+
+    @Test
+    void globalSvidIsServedWithConfiguredBound() throws Exception {
+        int port = freePort();
+        EquipmentSpec equipment = new EquipmentSpec("GLOBAL-01", 10,
+                List.of(new UnitSpec(UnitId.of(1), "CH1",
+                        List.of(new SvidDef(1, "TEMP_PV", ValueType.F4, "C", 2, 0.0, 400.0)),
+                        List.of(), List.of(), false)),
+                List.of(new GlobalSvidDef(9001, "FACILITY_TEMP", ValueType.F4, 18.0, 26.0)),
+                List.of(), IdSpacePolicy.defaults());
+
+        CompilationResult compiled = EquipmentCompiler.compile(equipment);
+        assertTrue(compiled.ok(), () -> "配置不合法: " + compiled.issues());
+
+        SessionSpec spec = new SessionSpec("g1", true, "127.0.0.1", port, 10, 7L, equipment);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), EngineClock.manual(0L));
+        session.open();
+
+        try (SecsCommunicator client = connect(port)) {
+            client.openAndWaitUntilCommunicating();
+
+            Optional<SecsMessage> reply = client.send(1, 3, true,
+                    Secs2.getBuilder().list(Secs2.getBuilder().uint4(9001L)));
+            assertTrue(reply.isPresent(), "S1F3 没有应答");
+
+            double value = Secs2Read.asDouble(reply.get().secs2().get(0));
+            assertTrue(value >= 18.0 && value <= 26.0,
+                    () -> "global SVID 必须使用配置值域，实际 " + value);
         } finally {
             session.close();
         }

@@ -79,9 +79,10 @@ public final class SessionConfigJson {
         EquipmentSpec equipment = parseEquipment(root, deviceId);
         EventSchedule schedule = parseEvents(root);
         int maxPerSec = parseMaxPerSec(root);
+        boolean s6f11Wbit = parseS6f11Wbit(root);
 
         SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment);
-        return new SessionConfig(spec, schedule, maxPerSec);
+        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit);
     }
 
     /**
@@ -157,10 +158,17 @@ public final class SessionConfigJson {
 
         List<JsonHub> globals = new ArrayList<>();
         for (GlobalSvidDef def : equipment.globalSvids()) {
-            globals.add(b.object(
-                    b.pair("id", def.id()),
-                    b.pair("name", def.name()),
-                    b.pair("type", def.type().name())));
+            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
+            pairs.add(b.pair("id", def.id()));
+            pairs.add(b.pair("name", def.name()));
+            pairs.add(b.pair("type", def.type().name()));
+            if (Double.isFinite(def.min())) {
+                pairs.add(b.pair("min", def.min()));
+            }
+            if (Double.isFinite(def.max())) {
+                pairs.add(b.pair("max", def.max()));
+            }
+            globals.add(b.object(pairs));
         }
 
         List<JsonHub> globalCeids = new ArrayList<>();
@@ -262,9 +270,15 @@ public final class SessionConfigJson {
                     b.pair("trigger", triggerJson(plan.trigger(), b))));
         }
 
-        return b.object(
-                b.pair("maxPerSec", config.maxEventsPerSec()),
-                b.pair("plans", b.array(plans)));
+        List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
+        pairs.add(b.pair("maxPerSec", config.maxEventsPerSec()));
+        pairs.add(b.pair("plans", b.array(plans)));
+        if (config.s6f11Wbit()) {
+            /* 默认 false 不写回，保持旧配置的 JSON 往返稳定 */
+            pairs.add(b.pair("s6f11Wbit", true));
+        }
+
+        return b.object(pairs);
     }
 
     private static JsonHub triggerJson(Trigger trigger, JsonHubBuilder b) {
@@ -297,7 +311,9 @@ public final class SessionConfigJson {
                 globalSvids.add(new GlobalSvidDef(
                         JsonAccess.integer(item, "id", itemPath),
                         JsonAccess.string(item, "name", itemPath),
-                        parseType(JsonAccess.string(item, "type", itemPath), itemPath + ".type")));
+                        parseType(JsonAccess.string(item, "type", itemPath), itemPath + ".type"),
+                        JsonAccess.optionalDouble(item, "min", itemPath).orElse(Double.NEGATIVE_INFINITY),
+                        JsonAccess.optionalDouble(item, "max", itemPath).orElse(Double.POSITIVE_INFINITY)));
             }
         }
 
@@ -479,6 +495,14 @@ public final class SessionConfigJson {
                     jh.containsKey("jitterMs") ? JsonAccess.longValue(jh, "jitterMs", path) : 0L);
             default -> throw new ConfigException(path + ".type", "未知触发类型: " + type + "（可选 at / periodic）");
         };
+    }
+
+    private static boolean parseS6f11Wbit(JsonHub root) {
+        if (!root.containsKey("events")) {
+            return false;
+        }
+        JsonHub events = JsonAccess.object(root, "events", ROOT);
+        return JsonAccess.bool(events, "s6f11Wbit", false, ROOT + ".events");
     }
 
     private static int parseMaxPerSec(JsonHub root) {
