@@ -1,0 +1,86 @@
+# 配置格式 Schema v4
+
+一份配置描述"一台设备 + 若干单元 + 事件编排"。
+
+```json
+{
+  "schemaVersion": 4,
+  "session": {
+    "id": "pri-01",
+    "passive": true,
+    "bindHost": "127.0.0.1",
+    "port": 5000,
+    "deviceId": 100,
+    "seed": 20240601
+  },
+  "equipment": {
+    "name": "PRI-01",
+    "idSpace": {
+      "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+      "svidStride": 100, "ceidStride": 100, "reportStride": 100,
+      "reserve": [[1, 999]]
+    },
+    "globalSvids": [
+      { "id": 9001, "name": "FACILITY_TEMP", "type": "F4" }
+    ],
+    "globalCeids": [
+      { "id": 1001, "name": "CONTROL_STATE_CHANGE", "reports": ["CH1.STATUS"] }
+    ],
+    "units": [
+      {
+        "unitId": 1,
+        "name": "CH1",
+        "injectUnitId": true,
+        "svids": [
+          { "offset": 1,  "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400 },
+          { "offset": 2,  "slot": "PRESS",   "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10 },
+          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+        ],
+        "reports": [
+          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] }
+        ],
+        "ceids": [
+          { "offset": 1, "slot": "PROCESS_START", "reports": ["STATUS"] }
+        ]
+      }
+    ]
+  },
+  "events": {
+    "maxPerSec": 20,
+    "plans": [
+      { "id": "start", "ceid": 2001,
+        "trigger": { "type": "periodic", "periodMs": 5000, "jitterMs": 200 } },
+      { "id": "once", "ceid": 2101,
+        "trigger": { "type": "at", "atMs": 1500 } }
+    ]
+  }
+}
+```
+
+## 关键概念
+
+| 概念 | 说明 |
+|---|---|
+| `offset` | 单元内的**段内偏移**。绝对 ID = 段起点 + offset，段起点 = base + (单元位置-1) × stride |
+| 单元位置 vs `unitId` | 位置决定号段（1、2、3…），`unitId` 是写给主机看的语义编号，可以跳号 |
+| `injectUnitId` | 为真时，若报告里没有 `UNIT_ID`，组装 S6F11 时会自动加到报告首位 |
+| `globalSvids` / `globalCeids` | 设备级共享项，不属于任何单元；全局 CEID 引用跨单元报告要写 `单元名.报告名` |
+| `reserve` | 禁止占用的号段（默认 1..999 留给标准消息） |
+
+## 错误定位
+
+解析错误会带字段路径：
+
+```
+配置错误: 未知数据类型: FLOAT（字段: $.equipment.units[0].svids[0].type）
+```
+
+语义错误（重复 ID、段重叠、跨单元引用等）由编译器一次性报全，两者不混在一起：
+**语法错立刻报，语义错批量报。**
+
+## 两条容易踩的坑
+
+1. **BOM**：用记事本或 `Set-Content -Encoding utf8` 保存会带 UTF-8 BOM。
+   解析器会剥掉它，但建议编辑器保存为"UTF-8 无 BOM"。
+2. **段步长**：某单元内最大的 `offset` 必须小于 `stride`，否则相邻单元号段重叠，编译期会报
+   `STRIDE_TOO_SMALL_SVID`。

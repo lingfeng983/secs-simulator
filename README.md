@@ -48,6 +48,9 @@ secs-sim --mode=integrated
 # 带一个两腔体演示会话：主机可以连上来问 S1F3
 secs-sim --mode=integrated --demo-session --hsms-port 5000
 
+# 从配置文件装载设备（格式见 docs/schema-v4.md）
+secs-sim --mode=integrated --config ./device.json --hsms-port 5000
+
 # 服务端：对外绑定，交由 systemd 托管
 secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN
 
@@ -85,4 +88,5 @@ HTTP API（v1）：
 - [ADR 0003 · 曲线必须是纯函数](docs/adr/0003-pure-curves.md)
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md)
+- [配置格式 Schema v4](docs/schema-v4.md)
