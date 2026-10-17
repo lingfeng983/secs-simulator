@@ -24,6 +24,9 @@ import java.util.Set;
  * <p>函数：{@code clamp} {@code lerp} {@code min} {@code max} {@code abs}
  * {@code roundTo} {@code sum} {@code avg} {@code select} {@code sin} {@code floor} {@code ceil}。
  * </p>
+ *
+ * <p>比较运算符 {@code > < >= <= == !=} 返回 1.0 / 0.0，可直接作为
+ * {@code select} 的条件，或用于 OnCondition 触发。</p>
  */
 public final class Expression {
 
@@ -103,7 +106,7 @@ public final class Expression {
     }
 
     /** AST 节点。 */
-    sealed interface Node permits Const, Var, Neg, Binary, Call {
+    sealed interface Node permits Const, Var, Neg, Binary, Compare, Call {
 
         double eval(Env env);
     }
@@ -141,6 +144,24 @@ public final class Expression {
                 case '/' -> a / b;
                 default -> throw new ExpressionException("未知运算符: " + this.op);
             };
+        }
+    }
+
+    record Compare(String op, Node left, Node right) implements Node {
+        @Override
+        public double eval(Env env) {
+            double a = this.left.eval(env);
+            double b = this.right.eval(env);
+            boolean result = switch (this.op) {
+                case ">" -> a > b;
+                case "<" -> a < b;
+                case ">=" -> a >= b;
+                case "<=" -> a <= b;
+                case "==" -> a == b;
+                case "!=" -> a != b;
+                default -> throw new ExpressionException("未知比较运算符: " + this.op);
+            };
+            return result ? 1.0 : 0.0;
         }
     }
 
@@ -196,6 +217,19 @@ public final class Expression {
         }
 
         Node parseExpression() {
+            Node left = this.parseSum();
+            for (;;) {
+                this.skipSpaces();
+                String op = this.peekComparison();
+                if (op == null) {
+                    return left;
+                }
+                this.pos += op.length();
+                left = new Compare(op, left, this.parseSum());
+            }
+        }
+
+        private Node parseSum() {
             Node left = this.parseTerm();
             for (;;) {
                 this.skipSpaces();
@@ -206,6 +240,22 @@ public final class Expression {
                     return left;
                 }
             }
+        }
+
+        private String peekComparison() {
+            if (this.pos >= this.src.length()) {
+                return null;
+            }
+            char c = this.src.charAt(this.pos);
+            char next = this.pos + 1 < this.src.length() ? this.src.charAt(this.pos + 1) : '\0';
+
+            if ((c == '>' || c == '<') && next == '=') {
+                return "" + c + '=';
+            }
+            if ((c == '>' || c == '<') || (c == '=' && next == '=') || (c == '!' && next == '=')) {
+                return c == '=' || c == '!' ? "" + c + next : String.valueOf(c);
+            }
+            return null;
         }
 
         private Node parseTerm() {

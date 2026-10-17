@@ -2,8 +2,10 @@ package com.shimizukenta.secssim.core.event;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import com.shimizukenta.secssim.core.curve.Rng;
+import com.shimizukenta.secssim.core.template.Expression;
 
 /**
  * 触发规则。
@@ -13,7 +15,7 @@ import com.shimizukenta.secssim.core.curve.Rng;
  * 不会重复触发边界上的事件。
  * </p>
  */
-public sealed interface Trigger permits Trigger.At, Trigger.Periodic {
+public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.OnCondition {
 
     /**
      * 计算区间内应触发的时刻。
@@ -36,6 +38,37 @@ public sealed interface Trigger permits Trigger.At, Trigger.Periodic {
         @Override
         public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId) {
             return (fromMs < this.atMs && this.atMs <= toMs) ? List.of(this.atMs) : List.of();
+        }
+    }
+
+    /**
+     * 条件触发。
+     *
+     * <p>条件表达式由运行时每 tick 求值。{@link #fireTimes} 返回空列表：
+     * 条件触发不可能只凭时间区间算出来，去抖状态属于运行时
+     * （见 {@link ConditionDebouncer}）。</p>
+     *
+     * @param expression 条件表达式，结果非 0 表示成立；变量支持 {@code t} 与 {@code svid.<id>}
+     * @param debounceMs 条件必须连续成立的毫秒数
+     */
+    record OnCondition(Expression expression, long debounceMs) implements Trigger {
+
+        /**
+         * 校验并创建。
+         *
+         * @param expression 条件表达式
+         * @param debounceMs 去抖毫秒数
+         */
+        public OnCondition {
+            Objects.requireNonNull(expression, "expression");
+            if (debounceMs < 0L) {
+                throw new IllegalArgumentException("debounceMs must be >= 0 but was " + debounceMs);
+            }
+        }
+
+        @Override
+        public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId) {
+            return List.of();
         }
     }
 

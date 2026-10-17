@@ -163,6 +163,31 @@ class SessionConfigJsonTest {
     }
 
     @Test
+    void onConditionTriggerRoundTrips() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1",
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
+                 "events":{"plans":[{"id":"hot","ceid":2001,
+                   "trigger":{"type":"onCondition","expression":"svid.1001 > 190","debounceMs":1000}}]}}
+                """;
+
+        SessionConfig parsed = SessionConfigJson.parse(json);
+        Trigger trigger = parsed.schedule().plans().get(0).trigger();
+        assertTrue(trigger instanceof Trigger.OnCondition, "应为 OnCondition");
+
+        Trigger.OnCondition condition = (Trigger.OnCondition) trigger;
+        assertEquals("svid.1001 > 190", condition.expression().source());
+        assertEquals(1_000L, condition.debounceMs());
+
+        String serialized = SessionConfigJson.toJson(parsed);
+        assertTrue(serialized.contains("\"onCondition\""));
+        assertTrue(serialized.contains("svid.1001 > 190"));
+    }
+
+    @Test
     void s6f11WbitSurvivesRoundTrip() {
         SessionConfig base = demoConfig();
         SessionConfig withWbit = new SessionConfig(base.spec(), base.schedule(), base.maxEventsPerSec(), true);

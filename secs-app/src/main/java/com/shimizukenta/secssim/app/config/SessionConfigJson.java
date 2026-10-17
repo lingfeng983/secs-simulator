@@ -27,6 +27,8 @@ import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
+import com.shimizukenta.secssim.core.template.Expression;
+import com.shimizukenta.secssim.core.template.ExpressionException;
 
 /**
  * Schema v4 配置的读写。
@@ -292,6 +294,13 @@ public final class SessionConfigJson {
                     b.pair("atMs", at.atMs()));
         }
 
+        if (trigger instanceof Trigger.OnCondition condition) {
+            return b.object(
+                    b.pair("type", "onCondition"),
+                    b.pair("expression", condition.expression().source()),
+                    b.pair("debounceMs", condition.debounceMs()));
+        }
+
         Trigger.Periodic periodic = (Trigger.Periodic) trigger;
         return b.object(
                 b.pair("type", "periodic"),
@@ -497,7 +506,22 @@ public final class SessionConfigJson {
             case "periodic" -> new Trigger.Periodic(
                     JsonAccess.longValue(jh, "periodMs", path),
                     jh.containsKey("jitterMs") ? JsonAccess.longValue(jh, "jitterMs", path) : 0L);
-            default -> throw new ConfigException(path + ".type", "未知触发类型: " + type + "（可选 at / periodic）");
+            case "onCondition" -> {
+                String source = JsonAccess.string(jh, "expression", path);
+                Expression expression;
+                try {
+                    expression = Expression.parse(source);
+                } catch (ExpressionException e) {
+                    throw new ConfigException(path + ".expression", e.getMessage());
+                }
+                long debounceMs = jh.containsKey("debounceMs")
+                        ? JsonAccess.longValue(jh, "debounceMs", path) : 0L;
+                if (debounceMs < 0L) {
+                    throw new ConfigException(path + ".debounceMs", "debounceMs 不能为负数");
+                }
+                yield new Trigger.OnCondition(expression, debounceMs);
+            }
+            default -> throw new ConfigException(path + ".type", "未知触发类型: " + type + "（可选 at / periodic / onCondition）");
         };
     }
 

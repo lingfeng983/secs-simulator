@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,9 +46,13 @@ import com.shimizukenta.secssim.core.EngineClock;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.curve.Rng;
+import com.shimizukenta.secssim.core.event.ConditionDebouncer;
+import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Fire;
 import com.shimizukenta.secssim.core.event.RateLimiter;
+import com.shimizukenta.secssim.core.event.Trigger;
+import com.shimizukenta.secssim.core.template.ExpressionException;
 import com.shimizukenta.secssim.core.value.CurveValueSource;
 import com.shimizukenta.secssim.core.trace.TracePlan;
 import com.shimizukenta.secssim.core.value.ValueSource;
@@ -98,6 +103,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong alarmsSent = new AtomicLong();
     private final AtomicLong alarmDropped = new AtomicLong();
     private final Map<Integer, AlarmState> activeAlarms = new ConcurrentHashMap<>();
+    private final Map<String, ConditionDebouncer> conditionDebouncers = new ConcurrentHashMap<>();
+    private final Set<String> conditionErrorLogged = ConcurrentHashMap.newKeySet();
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -327,6 +334,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     public void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
         this.schedule = schedule == null ? EventSchedule.empty() : schedule;
         this.limiter = new RateLimiter(maxEventsPerSec, RATE_WINDOW_MS);
+
+        this.conditionDebouncers.clear();
+        this.conditionErrorLogged.clear();
+        for (EventPlan plan : this.schedule.plans()) {
+            if (plan.trigger() instanceof Trigger.OnCondition condition) {
+                this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
+            }
+        }
     }
 
     /**
@@ -378,6 +393,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         if (!this.communicatable) {
             this.lastFireMs = this.clock.nowMs();
+            this.resetConditions();
             return;
         }
 
@@ -656,11 +672,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             if (!this.communicatable) {
                 /* 没有主机在线时不要积压事件：上线后从当前时刻重新开始，避免一次涌出几百条 */
                 this.lastFireMs = this.clock.nowMs();
+                this.resetConditions();
                 return;
             }
 
             long now = this.clock.nowMs();
             long from = this.lastFireMs;
+
+            /* 条件触发必须每个 tick 求值，不能只靠区间查询 */
+            this.pumpConditions(now);
 
             if (now <= from) {
                 return;
@@ -677,6 +697,79 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         } catch (Exception e) {
             this.lastError = e.toString();
             Log.error("会话 " + this.spec.id() + " 事件上报失败", e);
+        }
+    }
+
+    /**
+     * 求值全部 OnCondition 计划。
+     *
+     * <p>去抖状态在 {@link ConditionDebouncer} 里；这里只负责把当前 SVID 值
+     * 喂给表达式、按限流器发 CEID，并在主机掉线/事件被禁用时清状态。</p>
+     */
+    private void pumpConditions(long nowMs) {
+        for (EventPlan plan : this.schedule.plans()) {
+            if (!(plan.trigger() instanceof Trigger.OnCondition condition)) {
+                continue;
+            }
+
+            ConditionDebouncer debouncer = this.conditionDebouncers.computeIfAbsent(
+                    plan.id(), id -> new ConditionDebouncer(condition.debounceMs()));
+
+            if (!this.hostReports.isEnabled(plan.ceid())) {
+                debouncer.reset();
+                continue;
+            }
+
+            boolean active;
+            try {
+                active = condition.expression().evaluate(name -> this.conditionVariable(name, nowMs)) != 0.0;
+            } catch (RuntimeException e) {
+                this.lastError = e.toString();
+                if (this.conditionErrorLogged.add(plan.id())) {
+                    Log.error("会话 " + this.spec.id() + " 条件表达式失败: plan " + plan.id(), e);
+                }
+                debouncer.reset();
+                continue;
+            }
+            this.conditionErrorLogged.remove(plan.id());
+
+            if (!debouncer.update(nowMs, active)) {
+                continue;
+            }
+
+            if (this.limiter.tryAcquire(nowMs)) {
+                try {
+                    this.emitCeid(plan.ceid());
+                } catch (Exception e) {
+                    this.lastError = e.toString();
+                    Log.error("会话 " + this.spec.id() + " 条件事件上报失败: plan " + plan.id(), e);
+                }
+            } else {
+                this.rejected.incrementAndGet();
+            }
+        }
+    }
+
+    private double conditionVariable(String name, long nowMs) {
+        if ("t".equals(name)) {
+            return nowMs / 1000.0;
+        }
+        if (name.startsWith("svid.")) {
+            int svid;
+            try {
+                svid = Integer.parseInt(name.substring("svid.".length()));
+            } catch (NumberFormatException e) {
+                throw new ExpressionException("条件表达式里的 SVID 非法: " + name, e);
+            }
+            return this.values.valueAt(svid, nowMs).orElseThrow(
+                    () -> new ExpressionException("条件表达式引用的 SVID 没有值: " + svid));
+        }
+        throw new ExpressionException("条件表达式只支持 t 和 svid.<id>: " + name);
+    }
+
+    private void resetConditions() {
+        for (ConditionDebouncer debouncer : this.conditionDebouncers.values()) {
+            debouncer.reset();
         }
     }
 

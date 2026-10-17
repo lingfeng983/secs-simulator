@@ -46,6 +46,7 @@ List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId);
 - **负面**：区间查询天然不支持"依赖上一事件"的复杂触发（例如"A 事件后 2 秒再发 B"）。
   这类需求需要引入事件链（`AfterEvent`），届时把 `lastFireMs` 换成"已发生事件集合"即可，
   接口形状不变。
-- **暂未实现**：条件触发（`OnCondition`，如"温度 > 190 才报"）。
-  它需要每 tick 求值一次表达式，实现上放 `pumpEvents` 里即可，
-  但要先解决"条件持续成立时如何去抖"。
+- **已实现（2026-10-18）**：条件触发（`OnCondition`，如"温度 > 190 才报"）。
+  运行时每 tick 求值表达式，`ConditionDebouncer` 负责"连续成立 `debounceMs` 才触发一次"；
+  主机掉线或事件被禁用时状态清零，重新上线需重新满足去抖时间。
+- **仍暂未实现**：事件链（`AfterEvent`，A 之后 N 秒发 B）。

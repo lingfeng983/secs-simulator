@@ -43,6 +43,19 @@ class ExpressionTest {
     }
 
     @Test
+    void comparisonsReturnZeroOrOne() {
+        assertEquals(1.0, eval("2 > 1"), 1e-9);
+        assertEquals(0.0, eval("2 < 1"), 1e-9);
+        assertEquals(1.0, eval("2 >= 2"), 1e-9);
+        assertEquals(1.0, eval("2 <= 2"), 1e-9);
+        assertEquals(1.0, eval("2 == 2"), 1e-9);
+        assertEquals(1.0, eval("2 != 3"), 1e-9);
+        assertEquals(1.0, eval("1 + 2 * 3 >= 7"), 1e-9);
+        assertEquals(1.0, eval("select(200 > 190, 1, 0)"), 1e-9);
+        assertEquals(0.0, eval("select(180 > 190, 1, 0)"), 1e-9);
+    }
+
+    @Test
     void variablesAreResolvedFromEnv() {
         Expression.Env env = name -> switch (name) {
             case "t" -> 2.0;
