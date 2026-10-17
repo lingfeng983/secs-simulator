@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -94,6 +95,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong traceWbitDropped = new AtomicLong();
     private final AtomicLong terminalReceived = new AtomicLong();
     private final Deque<TerminalMessage> terminalMessages = new ArrayDeque<>();
+    private final AtomicLong alarmsSent = new AtomicLong();
+    private final AtomicLong alarmDropped = new AtomicLong();
+    private final Map<Integer, AlarmState> activeAlarms = new ConcurrentHashMap<>();
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
@@ -439,6 +443,79 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
     }
 
+    /**
+     * 上报/清除一个报警（S5F1）。
+     *
+     * <p>S5F1 默认带 W 位并等待 S5F2；发送放到 ACK 队列，HTTP 请求不会阻塞到 T3。
+     * ALCD 高位置 1 表示置位、清 0 表示清除，低 3 位是类别。</p>
+     */
+    @Override
+    public void emitAlarm(int alid, boolean set, String text, int category) throws IOException {
+        SecsCommunicator comm = this.communicator;
+        if (comm == null) {
+            throw new IOException("session not open: " + this.spec.id());
+        }
+        if (alid < 1) {
+            throw new IOException("ALID 必须 >= 1: " + alid);
+        }
+        if (category < 0 || category > 7) {
+            throw new IOException("报警类别必须在 0..7: " + category);
+        }
+
+        String altx = text == null || text.isBlank()
+                ? (set ? "ALARM " + alid : "CLEAR " + alid)
+                : text;
+        byte alcd = (byte) ((set ? 0x80 : 0x00) | category);
+        Secs2 body = Secs2.getBuilder().list(
+                Secs2.getBuilder().binary(alcd),
+                Secs2.getBuilder().uint4(alid),
+                Secs2.getBuilder().ascii(altx));
+
+        try {
+            this.ackSender.execute(() -> {
+                try {
+                    comm.send(5, 1, true, body);
+                    this.alarmsSent.incrementAndGet();
+                    if (set) {
+                        this.activeAlarms.put(alid,
+                                new AlarmState(alid, altx, category, System.currentTimeMillis()));
+                    } else {
+                        this.activeAlarms.remove(alid);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    this.lastError = "等待 S5F2 被中断: ALID " + alid;
+                } catch (Exception e) {
+                    this.lastError = e.toString();
+                    Log.error("会话 " + this.spec.id() + " 等待 S5F2 失败: ALID " + alid, e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            this.alarmDropped.incrementAndGet();
+            throw new IOException("S5F1 ACK 队列已满: ALID " + alid, e);
+        }
+    }
+
+    /**
+     * 当前处于置位状态的报警。
+     *
+     * @return 快照
+     */
+    public List<AlarmState> alarms() {
+        return List.copyOf(this.activeAlarms.values());
+    }
+
+    /**
+     * 一条活动报警。
+     *
+     * @param alid     ALID
+     * @param text     报警文本
+     * @param category 类别 0..7
+     * @param atMillis 置位时刻（墙钟）
+     */
+    public record AlarmState(int alid, String text, int category, long atMillis) {
+    }
+
     @Override
     public String id() {
         return this.spec.id();
@@ -528,17 +605,20 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public Map<String, Long> counters() {
-        return Map.of(
-                "emitted", this.emitted.get(),
-                "rejected", this.rejected.get(),
-                "skipped", this.skipped.get(),
-                "wbitDropped", this.wbitDropped.get(),
-                "traceWbitDropped", this.traceWbitDropped.get(),
-                "terminalMessages", this.terminalReceived.get(),
-                "traceFrames", this.traceFrames.get(),
-                "activeTraces", (long) this.traces.activeCount(),
-                "hostReports", (long) this.hostReports.reportCount(),
-                "hostLinks", (long) this.hostReports.linkCount());
+        return Map.ofEntries(
+                Map.entry("emitted", this.emitted.get()),
+                Map.entry("rejected", this.rejected.get()),
+                Map.entry("skipped", this.skipped.get()),
+                Map.entry("wbitDropped", this.wbitDropped.get()),
+                Map.entry("traceWbitDropped", this.traceWbitDropped.get()),
+                Map.entry("terminalMessages", this.terminalReceived.get()),
+                Map.entry("alarmsSent", this.alarmsSent.get()),
+                Map.entry("alarmDropped", this.alarmDropped.get()),
+                Map.entry("activeAlarms", (long) this.activeAlarms.size()),
+                Map.entry("traceFrames", this.traceFrames.get()),
+                Map.entry("activeTraces", (long) this.traces.activeCount()),
+                Map.entry("hostReports", (long) this.hostReports.reportCount()),
+                Map.entry("hostLinks", (long) this.hostReports.linkCount()));
     }
 
     @Override

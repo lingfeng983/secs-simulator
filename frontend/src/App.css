@@ -106,5 +106,7 @@ input {
 
 .preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .preview-controls select,
+.preview-controls input,
 .preview-controls button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 0.2rem 0.5rem; }
 .preview-controls select { min-width: 8rem; }
+.preview-controls .ceid { margin-top: 0; }

@@ -110,4 +110,19 @@ public interface SessionRuntime {
     default void emitCeid(int ceid) throws IOException {
         throw new IOException("session does not support collection events: " + this.id());
     }
+
+    /**
+     * 上报/清除一个报警（S5F1）。
+     *
+     * <p>默认实现明确失败，避免调用方以为报警已经发出。</p>
+     *
+     * @param alid     ALID
+     * @param set      {@code true} 置位，{@code false} 清除
+     * @param text     报警文本（ALTX），空串表示用默认文本
+     * @param category 报警类别 0..7（写入 ALCD 低 3 位）
+     * @throws IOException 不支持、会话未打开或发送失败
+     */
+    default void emitAlarm(int alid, boolean set, String text, int category) throws IOException {
+        throw new IOException("session does not support alarms: " + this.id());
+    }
 }

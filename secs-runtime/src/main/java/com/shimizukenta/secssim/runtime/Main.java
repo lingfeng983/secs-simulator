@@ -309,5 +309,25 @@ public final class Main {
                 return TriggerOutcome.FAILED;
             }
         }
+
+        @Override
+        public TriggerOutcome triggerAlarm(String sessionId, int alid, boolean set, String text, int category) {
+            SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+
+            if (session == null) {
+                return TriggerOutcome.UNKNOWN_SESSION;
+            }
+            if (session.state() != SessionState.OPEN || !session.hasPeer()) {
+                return TriggerOutcome.NOT_OPEN;
+            }
+
+            try {
+                session.emitAlarm(alid, set, text, category);
+                return TriggerOutcome.OK;
+            } catch (IOException e) {
+                Log.error("手动触发 ALID " + alid + " 失败", e);
+                return TriggerOutcome.FAILED;
+            }
+        }
     }
 }

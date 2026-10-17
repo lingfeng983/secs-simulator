@@ -36,6 +36,7 @@ class HttpApiServerTest {
     private HttpApiServer server;
     private String base;
     private final List<String> triggered = new ArrayList<>();
+    private final List<String> alarms = new ArrayList<>();
     private TriggerOutcome outcome = TriggerOutcome.OK;
 
     @BeforeEach
@@ -75,6 +76,19 @@ class HttpApiServerTest {
                     return TriggerOutcome.NOT_OPEN;
                 }
                 triggered.add(sessionId + ":" + ceid);
+                return outcome;
+            }
+
+            @Override
+            public TriggerOutcome triggerAlarm(String sessionId, int alid, boolean set,
+                                               String text, int category) {
+                if ("missing".equals(sessionId)) {
+                    return TriggerOutcome.UNKNOWN_SESSION;
+                }
+                if ("closed".equals(sessionId)) {
+                    return TriggerOutcome.NOT_OPEN;
+                }
+                alarms.add(sessionId + ":" + alid + ":" + set + ":" + text + ":" + category);
                 return outcome;
             }
 
@@ -155,6 +169,28 @@ class HttpApiServerTest {
         assertEquals(400, post("/api/v1/sessions/s1/ceid/not-a-number", TOKEN).statusCode());
         assertEquals(400, post("/api/v1/sessions/s1/other/2001", TOKEN).statusCode());
         assertEquals(400, post("/api/v1/sessions//ceid/2001", TOKEN).statusCode());
+    }
+
+    @Test
+    void alarmAcceptsPostAndPassesParams() throws Exception {
+        HttpResponse<String> response = post(
+                "/api/v1/sessions/s1/alarm/1001?set=false&text=HOT&category=2", TOKEN);
+        assertEquals(202, response.statusCode(), response.body());
+        assertEquals(List.of("s1:1001:false:HOT:2"), this.alarms);
+    }
+
+    @Test
+    void alarmRejectsBadParameters() throws Exception {
+        assertEquals(400, post("/api/v1/sessions/s1/alarm/0", TOKEN).statusCode());
+        assertEquals(400, post("/api/v1/sessions/s1/alarm/x", TOKEN).statusCode());
+        assertEquals(400, post("/api/v1/sessions/s1/alarm/1001?category=8", TOKEN).statusCode());
+        assertEquals(400, post("/api/v1/sessions/s1/alarm/1001?category=x", TOKEN).statusCode());
+    }
+
+    @Test
+    void alarmMapsSessionState() throws Exception {
+        assertEquals(404, post("/api/v1/sessions/missing/alarm/1001", TOKEN).statusCode());
+        assertEquals(409, post("/api/v1/sessions/closed/alarm/1001", TOKEN).statusCode());
     }
 
     @Test

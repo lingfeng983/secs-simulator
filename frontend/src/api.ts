@@ -7,6 +7,9 @@ export interface Counters {
   wbitDropped?: number;
   traceWbitDropped?: number;
   terminalMessages?: number;
+  alarmsSent?: number;
+  alarmDropped?: number;
+  activeAlarms?: number;
   traceFrames?: number;
   activeTraces?: number;
   hostReports?: number;
@@ -61,6 +64,7 @@ export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;
   trigger(sessionId: string, ceid: number): Promise<number>;
+  alarm(sessionId: string, alid: number, set: boolean, text: string, category: number): Promise<number>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
@@ -121,6 +125,21 @@ export function createClient(token: string): ApiClient {
     async trigger(sessionId, ceid) {
       const response = await fetch(
         `/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`,
+        { method: 'POST', headers: auth },
+      );
+      if (response.status === 401) {
+        throw new Error('401 未授权');
+      }
+      return response.status;
+    },
+    async alarm(sessionId, alid, set, text, category) {
+      const query = new URLSearchParams({
+        set: String(set),
+        text,
+        category: String(category),
+      });
+      const response = await fetch(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`,
         { method: 'POST', headers: auth },
       );
       if (response.status === 401) {

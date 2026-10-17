@@ -103,6 +103,10 @@ export function App(): JSX.Element {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewSession, setPreviewSession] = useState('');
   const [windowMs, setWindowMs] = useState(WINDOWS[0].ms);
+  const [alarmSession, setAlarmSession] = useState('');
+  const [alid, setAlid] = useState(1001);
+  const [alarmText, setAlarmText] = useState('TEMP HIGH');
+  const [alarmCategory, setAlarmCategory] = useState(1);
   const logRef = useRef<HTMLPreElement | null>(null);
   const nextMessageKey = useRef(0);
   const openedOnce = useRef(false);
@@ -263,6 +267,19 @@ export function App(): JSX.Element {
     }
   }, [sessions, previewSession]);
 
+  /* 会话列表变化后保证报警下拉框指向一个存在的会话 */
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (alarmSession !== '') {
+        setAlarmSession('');
+      }
+      return;
+    }
+    if (!sessions.some((session) => session.id === alarmSession)) {
+      setAlarmSession(sessions[0].id);
+    }
+  }, [sessions, alarmSession]);
+
   const onSaveToken = () => {
     const value = draftToken.trim();
     if (value === '') {
@@ -293,6 +310,24 @@ export function App(): JSX.Element {
       append(`已刷新 ${target.id} 的曲线（${Math.round((to - from) / 1000)} 秒窗口）`);
     } catch (error) {
       append(`预览失败: ${(error as Error).message}`);
+    }
+  };
+
+  const onAlarm = async (set: boolean) => {
+    if (client === null) {
+      return;
+    }
+
+    const target = sessions.find((session) => session.id === alarmSession) ?? sessions[0];
+    if (target === undefined) {
+      return;
+    }
+
+    try {
+      const status = await client.alarm(target.id, alid, set, alarmText, alarmCategory);
+      append(`报警${set ? '置位' : '清除'} ${target.id} ALID ${alid} -> HTTP ${status}`);
+    } catch (error) {
+      append(`报警失败: ${(error as Error).message}`);
     }
   };
 
@@ -395,6 +430,51 @@ export function App(): JSX.Element {
               onChange={(event) => setCeid(Number(event.target.value) || 1)}
             />
           </label>
+        </section>
+
+        <section>
+          <h2>报警</h2>
+          <div className="preview-controls">
+            <select value={alarmSession} onChange={(event) => setAlarmSession(event.target.value)}>
+              {sessions.length === 0 && <option value="">（无会话）</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+            <label className="ceid">
+              ALID
+              <input
+                type="number"
+                min={1}
+                value={alid}
+                onChange={(event) => setAlid(Number(event.target.value) || 1)}
+              />
+            </label>
+            <label className="ceid">
+              类别
+              <input
+                type="number"
+                min={0}
+                max={7}
+                value={alarmCategory}
+                onChange={(event) => setAlarmCategory(Number(event.target.value) || 0)}
+              />
+            </label>
+            <input
+              placeholder="报警文本"
+              value={alarmText}
+              onChange={(event) => setAlarmText(event.target.value)}
+            />
+            <button type="button" onClick={() => void onAlarm(true)} disabled={sessions.length === 0}>
+              置位
+            </button>
+            <button type="button" onClick={() => void onAlarm(false)} disabled={sessions.length === 0}>
+              清除
+            </button>
+          </div>
+          <p className="hint">置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。</p>
         </section>
 
         <section>

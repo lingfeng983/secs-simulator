@@ -541,22 +541,56 @@ public final class HttpApiServer implements AutoCloseable {
         String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
         String[] parts = rest.split("/");
 
-        if (parts.length != 3
-                || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()
-                || !"ceid".equals(parts[1])) {
+        if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
             return;
         }
 
-        int ceid;
-        try {
-            ceid = Integer.parseInt(parts[2]);
-        } catch (NumberFormatException e) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
+        TriggerOutcome outcome;
+
+        if ("ceid".equals(parts[1])) {
+            int ceid;
+            try {
+                ceid = Integer.parseInt(parts[2]);
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
+                return;
+            }
+            outcome = this.context.triggerCeid(parts[0], ceid);
+        } else if ("alarm".equals(parts[1])) {
+            int alid;
+            try {
+                alid = Integer.parseInt(parts[2]);
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
+                return;
+            }
+            if (alid < 1) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
+                return;
+            }
+
+            Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+            boolean set = !"false".equalsIgnoreCase(query.getOrDefault("set", "true"));
+            String text = query.getOrDefault("text", "");
+
+            int category;
+            try {
+                category = Integer.parseInt(query.getOrDefault("category", "1"));
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
+                return;
+            }
+            if (category < 0 || category > 7) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
+                return;
+            }
+
+            outcome = this.context.triggerAlarm(parts[0], alid, set, text, category);
+        } else {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
             return;
         }
-
-        TriggerOutcome outcome = this.context.triggerCeid(parts[0], ceid);
 
         switch (outcome) {
             case OK -> respond(ex, 202, "{\"ok\":true}");

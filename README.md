@@ -77,6 +77,7 @@ HTTP API（v1）：
 | `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | 是 | 会话列表（状态 / 设备 / 单元数 / 计数器） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | 是 | 手动触发一次 S6F11（202 / 404 / 409） |
+| `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | 是 | 置位/清除 S5F1；`set` 默认 true，`category` 0..7（202 / 400 / 404 / 409） |
 | `GET /api/v1/preview` | 是 | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg |
 | `POST /api/v1/shutdown` | 是 | 优雅停机 |
 
@@ -96,7 +97,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID。
+界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）。
 
 ## 打包
 
