@@ -3,7 +3,7 @@
 SECS/GEM 多单元（multi-unit）设备模拟器。
 
 **一套内核、两种形态**：既可单机一体化运行，也可作为 Linux 服务端供远程客户端访问；
-两种形态共用同一份内核、同一套 HTTP/WebSocket API、同一份前端。
+两种形态共用同一份内核、同一套 HTTP/SSE API、同一份前端。
 
 ---
 
@@ -14,11 +14,11 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 | `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |
 | `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |
 | `secs-core` | 领域模型、ID 规划、曲线、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |
-| `secs-app` | 应用服务：会话、配置、模板注册表、预览、审计 | core + json |
-| `secs-api-http` | REST + WebSocket + 二进制曲线流 | app + json + `com.sun.net.httpserver` |
+| `secs-app` | 应用服务：会话、配置、日志 | core + json |
+| `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |
 | `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |
-| `secs-cli` | 端到端测试宿主（打包职责 M9 迁往 `secs-dist`） | runtime |
-| `secs-dist` | 打包：jlink 镜像、AOT 缓存、native-image | runtime + cli |
+| `secs-cli` | 端到端测试宿主 | runtime |
+| `secs-dist` | 打包模块（当前占位；实际打包脚本在 `scripts/package.ps1`） | runtime + cli |
 
 依赖方向由 `ArchitectureTest` 强制，越界即构建失败。
 
@@ -55,8 +55,8 @@ secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 scripts\build-frontend.ps1
 secs-sim --mode=integrated --demo-session --web-root frontend/dist
 
-# 服务端：对外绑定，交由 systemd 托管
-secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN
+# 服务端：对外绑定（当前为明文 HTTP + 单 token，建议置于 TLS 反向代理后）
+secs-sim --mode=server --bind 0.0.0.0 --port 8080 --token $env:SECS_TOKEN
 
 # 能力探针：开 HSMS 被动端口应答 S1F1，用于现场排障与 CI
 secs-sim --mode=probe --hsms-port 5000
@@ -107,7 +107,7 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 
 产物是绿色包：`secs-sim.exe` + `web/` + `start.cmd`，双击即用（无需安装 JVM）。
 
-## 三条铁律
+## 四条铁律
 
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
 2. **禁止 `--enable-preview`**。预览特性会把 class 文件绑死到具体 JDK，且与 native-image 不兼容。
@@ -122,5 +122,7 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
+- [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
+- [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
 - [配置格式 Schema v4](docs/schema-v4.md)
