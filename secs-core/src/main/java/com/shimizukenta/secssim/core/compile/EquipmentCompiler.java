@@ -87,7 +87,8 @@ public final class EquipmentCompiler {
                 this.reserved("SVID", def.id(), def.name());
             }
 
-            ResolvedSvid resolved = new ResolvedSvid(def.id(), ResolvedSvid.GLOBAL_OWNER, def.name(), def.type());
+            ResolvedSvid resolved = new ResolvedSvid(def.id(), ResolvedSvid.GLOBAL_OWNER, def.name(),
+                    def.type(), "");
             ResolvedSvid previous = this.svids.putIfAbsent(def.id(), resolved);
 
             if (previous != null) {
@@ -151,7 +152,7 @@ public final class EquipmentCompiler {
                 this.reserved("SVID", id, unit.name() + "." + def.slot());
             }
 
-            ResolvedSvid resolved = new ResolvedSvid(id, unit.name(), def.slot(), def.type());
+            ResolvedSvid resolved = new ResolvedSvid(id, unit.name(), def.slot(), def.type(), def.unitSymbol());
             ResolvedSvid previous = this.svids.putIfAbsent(id, resolved);
 
             if (previous != null) {
