@@ -1,9 +1,11 @@
 package com.shimizukenta.secssim.api.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -13,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,10 +98,21 @@ class HttpApiServerTest {
     }
 
     @Test
-    void healthNeedsNoToken() throws Exception {
+    void healthNeedsNoTokenButHidesDetails() throws Exception {
         HttpResponse<String> response = get("/api/v1/health", null);
         assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"ok\":true"), response.body());
+        assertTrue(response.body().contains("uptimeMs"), response.body());
+        assertFalse(response.body().contains("\"version\""), "免鉴权不应泄露版本: " + response.body());
+        assertFalse(response.body().contains("\"mode\""), "免鉴权不应泄露形态: " + response.body());
+    }
+
+    @Test
+    void healthWithTokenExposesDetails() throws Exception {
+        HttpResponse<String> response = get("/api/v1/health", TOKEN);
+        assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"mode\":\"integrated\""), response.body());
+        assertTrue(response.body().contains("\"version\":\"test\""), response.body());
     }
 
     @Test
@@ -201,42 +216,49 @@ class HttpApiServerTest {
     }
 
     @Test
-    void tokenInQueryIsUrlDecoded() throws Exception {
-        ApiContext context = new ApiContext() {
-            @Override
-            public String mode() {
-                return "test";
-            }
+    void tokenInQueryIsNoLongerAccepted() throws Exception {
+        /* 长期凭据不进 URL：普通端点只认 Authorization 头 */
+        assertEquals(401, get("/api/v1/sessions?token=" + TOKEN, null).statusCode());
+    }
 
-            @Override
-            public String version() {
-                return "test";
-            }
+    @Test
+    void ticketRequiresBearerAndPost() throws Exception {
+        assertEquals(401, post("/api/v1/ticket", null).statusCode());
+        assertEquals(405, get("/api/v1/ticket", TOKEN).statusCode());
+        assertEquals(200, post("/api/v1/ticket", TOKEN).statusCode());
+    }
 
-            @Override
-            public String extraHealthJson() {
-                return "";
-            }
+    @Test
+    void sseTicketIsSingleUse() throws Exception {
+        String ticket = postTicket();
+        HttpClient client = HttpClient.newHttpClient();
 
-            @Override
-            public void requestShutdown() {
-                /* 桩 */
-            }
-        };
+        HttpResponse<InputStream> first = client.send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/events?ticket=" + ticket))
+                        .timeout(Duration.ofSeconds(5)).GET().build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(200, first.statusCode(), "票据首次使用应建立连接");
+        first.body().close();
 
-        HttpApiServer special = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), "a+b", context);
-        try {
-            String specialBase = "http://127.0.0.1:" + special.port();
+        HttpResponse<String> second = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/events?ticket=" + ticket)).GET(), null);
+        assertEquals(401, second.statusCode(), "同一票据不能用第二次");
+    }
 
-            assertEquals(200, send(HttpRequest.newBuilder(
-                    URI.create(specialBase + "/api/v1/sessions?token=a%2Bb")).GET(), null).statusCode(),
-                    "百分号编码的 + 必须解码回 +");
-            assertEquals(401, send(HttpRequest.newBuilder(
-                    URI.create(specialBase + "/api/v1/sessions?token=a+b")).GET(), null).statusCode(),
-                    "裸 + 按 query 语义解码成空格，不应通过");
-        } finally {
-            special.close();
-        }
+    @Test
+    void sseRejectsTokenInQuery() throws Exception {
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/events?token=" + TOKEN)).GET(), null);
+        assertEquals(401, response.statusCode(), "SSE 不再接受长期 token，只能使用一次性 ticket");
+    }
+
+    private String postTicket() throws Exception {
+        HttpResponse<String> response = post("/api/v1/ticket", TOKEN);
+        assertEquals(200, response.statusCode(), response.body());
+
+        Matcher matcher = Pattern.compile("\"ticket\":\"([0-9a-f]+)\"").matcher(response.body());
+        assertTrue(matcher.find(), response.body());
+        return matcher.group(1);
     }
 
     private HttpResponse<String> get(String path, String token) throws Exception {

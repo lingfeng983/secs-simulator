@@ -36,8 +36,9 @@ class SseMessageTest {
 
         try {
             String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
             HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
-                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?token=" + TOKEN))
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
 
@@ -59,6 +60,23 @@ class SseMessageTest {
             pool.shutdownNow();
             server.close();
         }
+    }
+
+    private static String ticket(String base) throws Exception {
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .timeout(Duration.ofSeconds(5))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\"ticket\":\"([0-9a-f]+)\"").matcher(response.body());
+        if (!matcher.find()) {
+            throw new IllegalStateException("没有拿到票据: " + response.body());
+        }
+        return matcher.group(1);
     }
 
     private static String readUntilMessage(HttpResponse<InputStream> stream) throws Exception {

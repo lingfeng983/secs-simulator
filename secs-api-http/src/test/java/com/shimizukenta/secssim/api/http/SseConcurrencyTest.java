@@ -46,8 +46,9 @@ class SseConcurrencyTest {
 
         try {
             for (int i = 0; i < STREAMS; i++) {
+                String ticket = ticket(base);
                 HttpResponse<InputStream> stream = client.send(
-                        HttpRequest.newBuilder(URI.create(base + "/api/v1/events?token=" + TOKEN))
+                        HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
                                 .timeout(Duration.ofSeconds(10)).GET().build(),
                         HttpResponse.BodyHandlers.ofInputStream());
                 assertEquals(200, stream.statusCode(), "第 " + (i + 1) + " 个 SSE 连接应建立成功");
@@ -73,6 +74,27 @@ class SseConcurrencyTest {
             }
             server.close();
         }
+    }
+
+    /** 取一次性票据（每个连接一张）。 */
+    private static String ticket(String base) throws Exception {
+        HttpResponse<String> response = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(5))
+                .build()
+                .send(HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
+                                .header("Authorization", "Bearer " + TOKEN)
+                                .timeout(Duration.ofSeconds(5))
+                                .POST(HttpRequest.BodyPublishers.noBody())
+                                .build(),
+                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\"ticket\":\"([0-9a-f]+)\"").matcher(response.body());
+        if (!matcher.find()) {
+            throw new IllegalStateException("没有拿到票据: " + response.body());
+        }
+        return matcher.group(1);
     }
 
     /** 最小上下文桩。 */

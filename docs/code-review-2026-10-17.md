@@ -115,17 +115,17 @@
 | M1 | 已修 | 前端会话下拉 + 1/5/15 分钟时间窗，按 `uptimeMs` 取 `[now-N, now]` |
 | M2 | 已修 | 重连后刷新会话列表并提示"断线期间不补发" |
 | M3 | 已修 | `Subscriber.enqueue` 同步化，消除 poll/offer 竞态 |
-| M4 | 缓解 | 队列 256 帧 + 30 分钟硬截止；JDK 无写超时 API（见 M9-b 已知边界） |
+| M4 | 已修 | 看门狗：60 秒无写入进展即断开（5 秒巡检）；连接寿命 30 → 10 分钟；`SseStallTest` 覆盖 |
 | M5 | 已修 | 仅无扩展名路径回落 `index.html` |
 | M6 | 已修 | preview 参数非法一律 400 |
-| M7 | 已修 | `getRawQuery()` + 单次解码（顺带修掉 `%2B` 双重解码） |
+| M7 | 已修 | URL 不再接受长期 token：改用 30 秒一次性 ticket；打包地址改 `#token=`，前端读完即抹掉 |
 | M8 | 已修 | `lastFireMs` 加 `volatile` |
 | M9 | 已修 | 6 条 SSE 并发、preview 全分支、sibling 前缀、ETag 304 等用例 |
 | L1 | 已修 | UTF-8 自检文件清理（目录仅空时删） |
 | L2 | 已修 | 新增 `app/log/Log`，单行时间戳日志 |
 | L3 | 已修 | ETag + 304 + `no-cache` |
 | L4 | 已修 | contentType 补全 + `nosniff` |
-| L5 | 接受 | `/health` 无鉴权暴露 version/mode（探针依赖），记录为接受项 |
+| L5 | 已修 | `/health` 免鉴权只回 ok/uptimeMs；版本、形态、会话数需 Bearer |
 | L6 | 已修 | 心跳 1s → 15s |
 | L7 | 已修 | 报文行 key 改自增序号 |
 | L8 | 已修 | SSE 错误按 readyState 记录并 5 秒节流 |

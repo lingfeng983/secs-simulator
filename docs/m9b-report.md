@@ -67,16 +67,39 @@
 | 项 | 结果 |
 |---|---|
 | `mvn -B verify` | **BUILD SUCCESS** |
-| 单元测试 | **168 个全绿**：core 79 + app 16 + api-http 28 + runtime 12（含 ArchUnit）+ cli 33 |
+| 单元测试 | **173 个全绿**：core 79 + app 16 + api-http 33 + runtime 12（含 ArchUnit）+ cli 33 |
 | 前端类型检查 | `tsc --noEmit` 通过 |
-| 前端构建 | 150.67 kB（gzip 49.3 kB） |
+| 前端构建 | 151.92 kB（gzip 49.58 kB） |
 | 编译 | JDK 25（GraalVM）+ Maven 3.6.3，`-Werror` 下零警告 |
+| 原生镜像 | `secs-sim.exe` 13,705,216 B；zip 5.4 MB；冒烟通过 |
 
-## 已知边界（未做）
+## 边界问题处理（M9-c）
 
-| 项 | 说明 |
+原报告列的四个"已知边界"已全部处理：
+
+| 项 | 处理 |
 |---|---|
-| SSE 写超时 | `com.sun.net.httpserver` 不暴露 socket，无法给 `out.write` 设超时。现状：队列有界（256 帧）+ 连接寿命 30 分钟硬截止，最坏情况占 1/64 个 SSE 线程 30 分钟。要根治需换传输层（Servlet/Netty）或自建 socket，与"零依赖、13MB 原生镜像"的取舍冲突。 |
-| query token 日志泄露 | `EventSource` 不能设请求头，这是已知妥协。README 已写明；要消除需引入一次性 ticket（下一轮）。 |
-| `/health` 信息暴露 | 无鉴权返回 version/mode，供探针与启动脚本使用，已接受。 |
-| 原生镜像 | 本轮未重跑 `native-image`（只跑 JVM 测试）。前端与后端改动都不涉及反射/动态代理，风险低，但发包前应重跑 `scripts\package.ps1` 冒烟。 |
+| SSE 写超时 | 新增看门狗：每 5 秒巡检，连接连续 60 秒没有任何一帧写成功即判定客户端不读，移除订阅者并在独立线程 `exchange.close()`（关闭本身可能阻塞，不能拖住巡检线程）。连接寿命同时从 30 分钟收到 10 分钟，浏览器到点用新票据重连。回归测试 `SseStallTest` 用不读数据的裸 socket 灌满窗口，5 秒内验证连接被回收。 |
+| query token 泄露 | 普通端点只认 `Authorization: Bearer`，URL 里不再接受长期 token。新增 `POST /api/v1/ticket`：用 Bearer 换 32 字节随机票据，30 秒有效、只能消费一次（`ConcurrentHashMap.remove` 原子消费）。SSE 走 `?ticket=`。前端改为每次（重）连都申请新票据，因此不再依赖 EventSource 的自动重连。打包脚本打开的地址改为 `#token=`，hash 不会发给服务端；前端读到后立刻 `history.replaceState` 抹掉。 |
+| `/health` 信息暴露 | 免鉴权只返回 `{"ok":true,"uptimeMs":…}`；版本、形态、会话数、HSMS 端口需要 Bearer。前端 health 轮询带 token，界面信息不变。 |
+| 原生镜像未重跑 | 已重跑并冒烟：`secs-sim.exe` 13,705,216 B，zip 5.4 MB。冒烟覆盖：未鉴权 health 无版本、带 token 有版本、query token 401、票据签发/连接/复用 401、静态首页 200、工作目录无 UTF-8 自检残留。 |
+
+### 工具链踩坑
+
+GraalVM 在 Windows 上需要 MSVC 的 `cl.exe`。本机 VS 的 C++ 工作负载实际在
+`C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`，但它不在默认 PATH 里；
+而**在这个执行环境里用 PowerShell 设置 `$env:PATH` 不会传给子 Java 进程**
+（`System.getenv("PATH")` 拿到的是被重置过的 PATH），所以 `mvn -Pnative` 一直报
+`cl.exe not found`。最终在 Bash 里导出 `PATH/INCLUDE/LIB` 后构建成功（22.9 秒）：
+
+```bash
+MSVC="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207"
+export PATH="$MSVC/bin/Hostx64/x64:/e/Java/graalvm-jdk-25.0.4+7.1/bin:$PATH"
+export JAVA_HOME='E:\Java\graalvm-jdk-25.0.4+7.1'
+export INCLUDE='<MSVC>\include;<SDK>\Include\10.0.26100.0\ucrt;...'
+export LIB='<MSVC>\lib\x64;<SDK>\Lib\10.0.26100.0\ucrt\x64;...'
+mvn -B -Pnative -pl secs-cli -am -DskipTests package
+```
+
+注：Windows SDK 版本是 `10.0.26100.0`；换机器时这两段路径要按 `vswhere` 结果改。
+

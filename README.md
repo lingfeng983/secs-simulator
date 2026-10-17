@@ -72,14 +72,18 @@ HTTP API（v1）：
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `GET /api/v1/health` | 否 | 存活、版本、形态、UTF-8 回归结果、会话数 |
-| `GET /api/v1/events` | 是 | SSE 事件流（当前为心跳，M8 起推实时值） |
+| `GET /api/v1/health` | 否 | 存活与 uptime；带 token 时才返回版本、形态、会话数 |
+| `POST /api/v1/ticket` | 是 | 换取一次性 SSE 票据（30 秒有效、只能用一次） |
+| `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | 是 | 会话列表（状态 / 设备 / 单元数 / 计数器） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | 是 | 手动触发一次 S6F11（202 / 404 / 409） |
 | `GET /api/v1/preview` | 是 | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg |
-| `GET /api/v1/shutdown` | 是 | 优雅停机 |
+| `POST /api/v1/shutdown` | 是 | 优雅停机 |
 
-鉴权用 `Authorization: Bearer <token>`；浏览器 `EventSource` 无法设置请求头，可改用 `?token=`。
+鉴权只用 `Authorization: Bearer <token>`。URL 里不再接受长期 token：
+`EventSource` 不能设置请求头，所以浏览器先 `POST /api/v1/ticket` 换一张
+30 秒、一次性的票据再连 SSE。打包脚本打开的界面地址形如
+`http://127.0.0.1:<port>/#token=<token>`，token 放在 hash 里，不会发给服务端。
 
 ## 前端
 

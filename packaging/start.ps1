@@ -34,7 +34,8 @@ if (-not $ready) {
 
 $port = [regex]::Match($ready, 'http=(\d+)').Groups[1].Value
 $token = [regex]::Match($ready, 'token=([0-9a-f]+)').Groups[1].Value
-$url = "http://127.0.0.1:$port/?token=$token"
+# token 放在 hash 里：hash 不会发给服务端，也不进访问日志
+$url = "http://127.0.0.1:$port/#token=$token"
 
 Write-Host $ready
 Write-Host ''

@@ -59,16 +59,29 @@ export interface ApiClient {
   sessions(): Promise<SessionSummary[]>;
   trigger(sessionId: string, ceid: number): Promise<number>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
-  eventsUrl(): string;
+  /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
+  ticket(): Promise<string>;
+  eventsUrl(ticket: string): string;
 }
 
 const TOKEN_KEY = 'secs-sim-token';
 
+/**
+ * 读取访问令牌。
+ *
+ * 优先 hash（打包脚本用 `#token=` 打开浏览器，hash 不会发给服务端，也不进服务端日志），
+ * 兼容旧的 `?token=`；读到后立刻从地址栏抹掉，避免留在历史里。
+ */
 export function readToken(): string {
-  const fromUrl = new URLSearchParams(window.location.search).get('token');
-  if (fromUrl !== null && fromUrl !== '') {
-    window.sessionStorage.setItem(TOKEN_KEY, fromUrl);
-    return fromUrl;
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+  const fromUrl =
+    new URLSearchParams(hash).get('token') ?? new URLSearchParams(window.location.search).get('token');
+  const token = (fromUrl ?? '').trim();
+
+  if (token !== '') {
+    window.sessionStorage.setItem(TOKEN_KEY, token);
+    window.history.replaceState({}, '', window.location.pathname);
+    return token;
   }
   return window.sessionStorage.getItem(TOKEN_KEY) ?? '';
 }
@@ -93,7 +106,8 @@ export function createClient(token: string): ApiClient {
 
   return {
     async health() {
-      return json<Health>(await fetch('/api/v1/health'));
+      /* 带 token 才返回版本/形态；不带也能拿到 ok 与 uptimeMs */
+      return json<Health>(await fetch('/api/v1/health', { headers: auth }));
     },
     async sessions() {
       const body = await json<{ sessions: SessionSummary[] }>(
@@ -119,8 +133,14 @@ export function createClient(token: string): ApiClient {
         ),
       );
     },
-    eventsUrl() {
-      return `/api/v1/events?token=${encodeURIComponent(token)}`;
+    async ticket() {
+      const body = await json<{ ticket: string }>(
+        await fetch('/api/v1/ticket', { method: 'POST', headers: auth }),
+      );
+      return body.ticket;
+    },
+    eventsUrl(ticket) {
+      return `/api/v1/events?ticket=${encodeURIComponent(ticket)}`;
     },
   };
 }

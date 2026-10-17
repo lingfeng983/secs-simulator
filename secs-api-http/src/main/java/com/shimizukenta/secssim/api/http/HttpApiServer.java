@@ -9,17 +9,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -39,8 +42,9 @@ import com.sun.net.httpserver.HttpServer;
  * 这个后端的 API 面积很小，而框架会把原生镜像从 13MB 撑到 100MB 以上。
  * </p>
  *
- * <p>鉴权采用每次启动生成的一次性 token（{@code Authorization: Bearer}），
- * 并额外接受查询参数 {@code ?token=}，因为浏览器的 {@code EventSource} 无法设置请求头。
+ * <p>鉴权采用每次启动生成的一次性 token（{@code Authorization: Bearer}）。
+ * URL 里不接受长期 token：浏览器的 {@code EventSource} 无法设置请求头，
+ * 因此改由 {@code POST /api/v1/ticket} 换取 30 秒、只能使用一次的票据。
  * </p>
  *
  * <p><b>线程模型</b>：请求处理器与 SSE 长连接分属两个线程池。SSE 连接会长时间占住线程，
@@ -67,11 +71,29 @@ public final class HttpApiServer implements AutoCloseable {
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
 
+    /** 一次性 SSE 票据路径（POST，需 Bearer）。 */
+    public static final String PATH_TICKET = "/api/v1/ticket";
+
+    /** 票据有效期：够浏览器建连即可，短到即使泄漏也基本无用。 */
+    private static final Duration TICKET_TTL = Duration.ofSeconds(30L);
+
     /** 心跳间隔：15 秒足够穿过常见代理的空闲超时，又不至于把界面刷爆。 */
     private static final Duration SSE_HEARTBEAT = Duration.ofSeconds(15L);
 
     /** 单个 SSE 连接的最长寿命；到点主动断开，浏览器会自动重连。 */
-    private static final Duration SSE_MAX_LIFETIME = Duration.ofMinutes(30L);
+    private static final Duration SSE_MAX_LIFETIME = Duration.ofMinutes(10L);
+
+    /**
+     * 写入停滞判定：连续这么久没有任何一帧写成功，就认为客户端已经不读了。
+     *
+     * <p>正常连接每 15 秒至少有一次心跳，所以 60 秒无进展必然异常。
+     * 测试可用 {@code -Dsecssim.sse.stallTimeoutMs=...} 调小。
+     * </p>
+     */
+    private static final long SSE_STALL_TIMEOUT_DEFAULT_MS = 60_000L;
+
+    /** 看门狗巡检间隔。 */
+    private static final long SSE_WATCHDOG_TICK_MS = 5_000L;
 
     /** 每个 SSE 订阅者的待发帧上限；满了丢最旧的一帧。 */
     private static final int SSE_QUEUE_FRAMES = 256;
@@ -86,25 +108,35 @@ public final class HttpApiServer implements AutoCloseable {
     private static final int PREVIEW_BUCKETS_MIN = 1;
     private static final int PREVIEW_BUCKETS_MAX = 500;
 
+    /** 票据随机源。 */
+    private static final SecureRandom TICKET_RANDOM = new SecureRandom();
+
     private final HttpServer server;
     private final ExecutorService executor;
     private final ExecutorService sseExecutor;
+    private final ScheduledExecutorService watchdog;
     private final String token;
     private final ApiContext context;
     private final Path webRoot;
     private final CopyOnWriteArrayList<Subscriber> subscribers = new CopyOnWriteArrayList<>();
+    /** 一次性票据：ticket -> 过期时刻（毫秒）。 */
+    private final ConcurrentHashMap<String, Long> tickets = new ConcurrentHashMap<>();
+    private final long stallTimeoutMs;
     private final Instant startedAt = Instant.now();
 
     private AutoCloseable eventSubscription;
 
     private HttpApiServer(HttpServer server, ExecutorService executor, ExecutorService sseExecutor,
-                          String token, ApiContext context, Path webRoot) {
+                          ScheduledExecutorService watchdog, String token, ApiContext context, Path webRoot,
+                          long stallTimeoutMs) {
         this.server = server;
         this.executor = executor;
         this.sseExecutor = sseExecutor;
+        this.watchdog = watchdog;
         this.token = token;
         this.context = context;
         this.webRoot = webRoot;
+        this.stallTimeoutMs = stallTimeoutMs;
     }
 
     /**
@@ -174,7 +206,15 @@ public final class HttpApiServer implements AutoCloseable {
                     return thread;
                 });
 
-        HttpApiServer api = new HttpApiServer(http, pool, ssePool, token, context, normalizeRoot(webRoot));
+        ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "sse-watchdog");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        HttpApiServer api = new HttpApiServer(http, pool, ssePool, watchdog, token, context,
+                normalizeRoot(webRoot),
+                Long.getLong("secssim.sse.stallTimeoutMs", SSE_STALL_TIMEOUT_DEFAULT_MS));
         http.setExecutor(pool);
 
         if (bus != null) {
@@ -183,6 +223,7 @@ public final class HttpApiServer implements AutoCloseable {
 
         http.createContext(PATH_HEALTH, api::handleHealth);
         http.createContext(PATH_EVENTS, api::handleEvents);
+        http.createContext(PATH_TICKET, api::handleTicket);
         http.createContext(PATH_SHUTDOWN, api::handleShutdown);
         http.createContext(PATH_SESSIONS, api::handleSessions);
         http.createContext(PATH_SESSION_PREFIX, api::handleSessionCommand);
@@ -192,6 +233,9 @@ public final class HttpApiServer implements AutoCloseable {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
             http.createContext("/", api::handleStatic);
         }
+
+        watchdog.scheduleWithFixedDelay(api::sweepStalledStreams,
+                SSE_WATCHDOG_TICK_MS, SSE_WATCHDOG_TICK_MS, TimeUnit.MILLISECONDS);
 
         http.start();
         return api;
@@ -204,6 +248,15 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public int port() {
         return this.server.getAddress().getPort();
+    }
+
+    /**
+     * 当前活跃的 SSE 连接数（测试与诊断用）。
+     *
+     * @return 连接数
+     */
+    public int activeStreams() {
+        return this.subscribers.size();
     }
 
     /**
@@ -245,6 +298,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         this.server.stop(0);
+        this.watchdog.shutdownNow();
         this.sseExecutor.shutdownNow();
         this.executor.shutdownNow();
         try {
@@ -261,12 +315,81 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         long uptime = Duration.between(this.startedAt, Instant.now()).toMillis();
+
+        /*
+         * 免鉴权只回答"活着吗"：探针和启动脚本只需要这个。
+         * 版本、形态、会话数、HSMS 端口要带 token 才给，避免白名单外的扫描者拿到部署信息。
+         */
+        if (!this.authorized(ex)) {
+            respond(ex, 200, "{\"ok\":true,\"uptimeMs\":" + uptime + "}");
+            return;
+        }
+
         respond(ex, 200, "{\"ok\":true"
                 + ",\"version\":\"" + json(this.context.version()) + "\""
                 + ",\"mode\":\"" + json(this.context.mode()) + "\""
                 + ",\"uptimeMs\":" + uptime
                 + this.context.extraHealthJson()
                 + "}");
+    }
+
+    /**
+     * 签发一次性 SSE 票据。
+     *
+     * <p>{@code EventSource} 不能设置请求头，只能把凭据放进 URL。直接放 token 会进
+     * 访问日志和浏览器历史，而且长期有效；改成 30 秒、只能用一次的票据，
+     * 即使被记下来也基本无法利用。
+     * </p>
+     */
+    private void handleTicket(HttpExchange ex) throws IOException {
+        if (!this.authorized(ex)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        this.tickets.entrySet().removeIf(entry -> entry.getValue() < now);
+
+        String ticket = newTicket();
+        this.tickets.put(ticket, now + TICKET_TTL.toMillis());
+
+        respond(ex, 200, "{\"ok\":true,\"ticket\":\"" + ticket + "\""
+                + ",\"expiresInMs\":" + TICKET_TTL.toMillis() + "}");
+    }
+
+    /** 生成票据：32 字节随机数的十六进制。 */
+    private static String newTicket() {
+        byte[] bytes = new byte[32];
+        TICKET_RANDOM.nextBytes(bytes);
+        return java.util.HexFormat.of().formatHex(bytes);
+    }
+
+    /** 消费票据：原子移除 + 过期校验，保证只能用一次。 */
+    private boolean consumeTicket(String ticket) {
+        if (ticket == null || ticket.isEmpty()) {
+            return false;
+        }
+        Long expiry = this.tickets.remove(ticket);
+        return expiry != null && expiry >= System.currentTimeMillis();
+    }
+
+    /** 看门狗：把长时间写不动的连接踢掉，避免占着线程和队列。 */
+    private void sweepStalledStreams() {
+        long now = System.currentTimeMillis();
+
+        for (Subscriber subscriber : this.subscribers) {
+            if (!subscriber.isStalled(now, this.stallTimeoutMs)) {
+                continue;
+            }
+            if (this.subscribers.remove(subscriber)) {
+                Log.error("SSE 连接 " + this.stallTimeoutMs / 1000 + " 秒无写入进展，主动断开", null);
+                subscriber.abort();
+            }
+        }
     }
 
     private void handleShutdown(HttpExchange ex) throws IOException {
@@ -547,15 +670,18 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * SSE 入口：鉴权在被占用的线程里完成，然后把长连接交给 SSE 专用池。
+     * SSE 入口：用一次性票据鉴权（{@code EventSource} 无法带请求头），
+     * 然后把长连接交给 SSE 专用池。
      */
     private void handleEvents(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
-            return;
-        }
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        String ticket = parseQuery(ex.getRequestURI().getRawQuery()).get("ticket");
+        if (!this.consumeTicket(ticket)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
             return;
         }
 
@@ -589,11 +715,11 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         Instant deadline = Instant.now().plus(SSE_MAX_LIFETIME);
-        Subscriber subscriber = new Subscriber();
+        Subscriber subscriber = new Subscriber(ex);
         this.subscribers.add(subscriber);
 
         try (out) {
-            while (Instant.now().isBefore(deadline)) {
+            while (Instant.now().isBefore(deadline) && !subscriber.isClosed()) {
                 String frame;
                 try {
                     frame = subscriber.poll(SSE_HEARTBEAT.toMillis());
@@ -608,37 +734,30 @@ public final class HttpApiServer implements AutoCloseable {
 
                 out.write(frame.getBytes(StandardCharsets.UTF_8));
                 out.flush();
+                subscriber.touch();
             }
         } catch (IOException clientGone) {
             /* 客户端断开是常态，静默退出 */
         } finally {
+            subscriber.markClosed();
             this.subscribers.remove(subscriber);
         }
     }
 
+    /**
+     * 普通端点鉴权：只认 {@code Authorization: Bearer}。
+     *
+     * <p>不再接受 {@code ?token=}：URL 里的长期凭据会进访问日志、浏览器历史和 Referer。
+     * SSE 走一次性 ticket（见 {@link #handleTicket}）。
+     * </p>
+     */
     private boolean authorized(HttpExchange ex) {
         String header = ex.getRequestHeaders().getFirst("Authorization");
-        String presented = null;
-
-        if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            presented = header.substring(7).trim();
-        } else {
-            /* 必须用 rawQuery：getQuery() 已经解码过一次，再解会破坏 %2B 之类的值 */
-            String query = ex.getRequestURI().getRawQuery();
-            if (query != null) {
-                for (String pair : query.split("&")) {
-                    int eq = pair.indexOf('=');
-                    if (eq > 0 && "token".equals(pair.substring(0, eq))) {
-                        presented = decode(pair.substring(eq + 1));
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (presented == null) {
+        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
             return false;
         }
+
+        String presented = header.substring(7).trim();
         return MessageDigest.isEqual(
                 presented.getBytes(StandardCharsets.UTF_8),
                 this.token.getBytes(StandardCharsets.UTF_8));
@@ -659,12 +778,25 @@ public final class HttpApiServer implements AutoCloseable {
      * <p>"满了丢最旧"是"poll 再 offer"两步，必须与写端互斥：否则两个发布线程
      * 交错执行会各丢一帧，白白多丢数据。
      * </p>
+     *
+     * <p>同时记录"最后一次写成功"的时间：客户端不读时 TCP 会卡住写，看门狗据此断开。
+     * </p>
      */
     private static final class Subscriber {
 
         private final BlockingQueue<String> queue = new LinkedBlockingQueue<>(SSE_QUEUE_FRAMES);
+        private final HttpExchange exchange;
+        private volatile long lastProgressAt = System.currentTimeMillis();
+        private volatile boolean closed;
+
+        Subscriber(HttpExchange exchange) {
+            this.exchange = exchange;
+        }
 
         synchronized void enqueue(String frame) {
+            if (this.closed) {
+                return;
+            }
             if (!this.queue.offer(frame)) {
                 this.queue.poll();
                 this.queue.offer(frame);
@@ -673,6 +805,46 @@ public final class HttpApiServer implements AutoCloseable {
 
         String poll(long timeoutMs) throws InterruptedException {
             return this.queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+        }
+
+        void touch() {
+            this.lastProgressAt = System.currentTimeMillis();
+        }
+
+        boolean isStalled(long now, long timeoutMs) {
+            return !this.closed && now - this.lastProgressAt > timeoutMs;
+        }
+
+        boolean isClosed() {
+            return this.closed;
+        }
+
+        void markClosed() {
+            this.closed = true;
+        }
+
+        /**
+         * 强制断开。
+         *
+         * <p>{@code exchange.close()} 在写线程被 TCP 卡住时可能也会阻塞，
+         * 所以放到独立线程里做，不能拖住看门狗。
+         * </p>
+         */
+        void abort() {
+            if (this.closed) {
+                return;
+            }
+            this.closed = true;
+
+            Thread closer = new Thread(() -> {
+                try {
+                    this.exchange.close();
+                } catch (RuntimeException ignored) {
+                    /* 关闭失败不影响清理 */
+                }
+            }, "sse-abort");
+            closer.setDaemon(true);
+            closer.start();
         }
     }
 

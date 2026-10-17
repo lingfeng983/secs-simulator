@@ -147,49 +147,100 @@ export function App(): JSX.Element {
     refresh();
     const timer = window.setInterval(refresh, 2000);
 
-    const stream = new EventSource(client.eventsUrl());
-    stream.addEventListener('open', () => {
-      setStreamState('已连接');
-      if (openedOnce.current) {
-        /* 断线期间的报文后端不补发，界面必须明说，否则用户会以为中间没有报文 */
-        append('事件流已重连：断线期间的报文不会补发');
-        void refresh();
-      }
-      openedOnce.current = true;
-    });
-    stream.addEventListener('heartbeat', (event) => {
-      const at = Number(event.data);
-      setStreamState(Number.isFinite(at) ? `心跳 ${new Date(at).toLocaleTimeString()}` : '心跳');
-    });
-    stream.addEventListener('message', (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as WireMessage;
-        const key = nextMessageKey.current;
-        nextMessageKey.current += 1;
-        setMessages((previous) => {
-          const next = [...previous, { key, msg: parsed }];
-          return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
-        });
-      } catch {
-        append('收到无法解析的报文事件');
-      }
-    });
-    stream.addEventListener('error', () => {
-      const state = stream.readyState === EventSource.CLOSED ? '已关闭' : '重连中';
-      setStreamState(`断开（${state}）`);
+    let stream: EventSource | null = null;
+    let retryTimer = 0;
+    let disposed = false;
+    let lastTicketErrorAt = 0;
 
-      /* EventSource 会自己重连，错误事件可能很密集，5 秒内只记一条 */
-      const now = Date.now();
-      if (now - lastStreamErrorAt.current > 5000) {
-        lastStreamErrorAt.current = now;
-        append(`事件流断开（${state}），浏览器将自动重连`);
+    const scheduleReconnect = () => {
+      if (disposed || retryTimer !== 0) {
+        return;
       }
-    });
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        void connect();
+      }, 2000);
+    };
+
+    const connect = async () => {
+      if (disposed) {
+        return;
+      }
+
+      try {
+        /* 票据是一次性的：每次（重）连都要重新换一张，不能复用 URL */
+        const ticket = await client.ticket();
+        if (disposed) {
+          return;
+        }
+
+        const source = new EventSource(client.eventsUrl(ticket));
+        stream = source;
+
+        source.addEventListener('open', () => {
+          setStreamState('已连接');
+          if (openedOnce.current) {
+            /* 断线期间的报文后端不补发，界面必须明说，否则用户会以为中间没有报文 */
+            append('事件流已重连：断线期间的报文不会补发');
+            void refresh();
+          }
+          openedOnce.current = true;
+        });
+        source.addEventListener('heartbeat', (event) => {
+          const at = Number(event.data);
+          setStreamState(Number.isFinite(at) ? `心跳 ${new Date(at).toLocaleTimeString()}` : '心跳');
+        });
+        source.addEventListener('message', (event) => {
+          try {
+            const parsed = JSON.parse(event.data) as WireMessage;
+            const key = nextMessageKey.current;
+            nextMessageKey.current += 1;
+            setMessages((previous) => {
+              const next = [...previous, { key, msg: parsed }];
+              return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
+            });
+          } catch {
+            append('收到无法解析的报文事件');
+          }
+        });
+        source.addEventListener('error', () => {
+          const state = source.readyState === EventSource.CLOSED ? '已关闭' : '连接中断';
+          setStreamState(`断开（${state}）`);
+
+          const now = Date.now();
+          if (now - lastStreamErrorAt.current > 5000) {
+            lastStreamErrorAt.current = now;
+            append(`事件流断开（${state}），2 秒后用新票据重连`);
+          }
+
+          /* 票据只能用一次，自动重连会带着旧票据被 401，必须自己换票重连 */
+          source.close();
+          if (stream === source) {
+            stream = null;
+          }
+          scheduleReconnect();
+        });
+      } catch (error) {
+        const now = Date.now();
+        if (now - lastTicketErrorAt > 10_000) {
+          lastTicketErrorAt = now;
+          append(`获取事件流票据失败: ${(error as Error).message}`);
+        }
+        setStreamState('等待重连');
+        scheduleReconnect();
+      }
+    };
+
+    void connect();
 
     return () => {
       cancelled = true;
+      disposed = true;
       window.clearInterval(timer);
-      stream.close();
+      if (retryTimer !== 0) {
+        window.clearTimeout(retryTimer);
+      }
+      stream?.close();
     };
   }, [client, append]);
 
