@@ -105,11 +105,17 @@ class NativeRuntimeIT {
 
         int hsmsPort = freePort();
         Path workDir = Files.createTempDirectory("secs-sim-demo-");
+
+        /* 前端目录：surefire 的工作目录是模块目录，仓库根在上一级 */
+        Path webRoot = Path.of("..", "web").toAbsolutePath().normalize();
+        assumeTrue(Files.isDirectory(webRoot), "skip: web root not found: " + webRoot);
+
         Process process = new ProcessBuilder(
                 exePath.toString(),
                 "--mode=probe",
                 "--demo-session",
                 "--hsms-port", Integer.toString(hsmsPort),
+                "--web-root", webRoot.toString(),
                 "--work-dir", workDir.toString())
                 .redirectErrorStream(true)
                 .start();
@@ -126,6 +132,14 @@ class NativeRuntimeIT {
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertTrue(health.body().contains("\"sessions\":1"), health.body());
+
+            /* 静态前端：与 API 同源，浏览器直接打开即可 */
+            HttpResponse<String> page = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/"))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            assertEquals(200, page.statusCode(), page.body());
+            assertTrue(page.body().contains("SECS Simulator"), "首页未托管: " + page.body().substring(0, 80));
 
             /* 会话列表：真实运行时的 sessionsJson 组装 */
             HttpResponse<String> sessions = client.send(

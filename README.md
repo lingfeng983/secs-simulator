@@ -51,6 +51,9 @@ secs-sim --mode=integrated --demo-session --hsms-port 5000
 # 从配置文件装载设备（格式见 docs/schema-v4.md）
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
+# 同时托管内置的零依赖前端：浏览器直接打开 READY 行里的 http 地址
+secs-sim --mode=integrated --demo-session --web-root web
+
 # 服务端：对外绑定，交由 systemd 托管
 secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN
 
@@ -91,5 +94,5 @@ HTTP API（v1）：
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md)
 - [配置格式 Schema v4](docs/schema-v4.md)
