@@ -38,10 +38,27 @@ export interface WireMessage {
   at: number;
 }
 
+/** 曲线预览：分桶 min/max/avg。 */
+export interface PreviewSeries {
+  svid: number;
+  min: number[];
+  max: number[];
+  avg: number[];
+}
+
+export interface PreviewData {
+  from: number;
+  to: number;
+  buckets: number;
+  bucketMs: number;
+  series: PreviewSeries[];
+}
+
 export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;
   trigger(sessionId: string, ceid: number): Promise<number>;
+  preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   eventsUrl(): string;
 }
 
@@ -93,6 +110,14 @@ export function createClient(token: string): ApiClient {
         throw new Error('401 未授权');
       }
       return response.status;
+    },
+    async preview(sessionId, fromMs, toMs, buckets) {
+      return json<PreviewData>(
+        await fetch(
+          `/api/v1/preview?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`,
+          { headers: auth },
+        ),
+      );
     },
     eventsUrl() {
       return `/api/v1/events?token=${encodeURIComponent(token)}`;

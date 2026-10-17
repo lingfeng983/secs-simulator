@@ -86,6 +86,18 @@ public interface SessionRuntime {
     }
 
     /**
+     * 预览某一时间段的曲线（分桶 min/max/avg）。
+     *
+     * @param fromMs  起始
+     * @param toMs    结束
+     * @param buckets 桶数
+     * @return JSON 文本；不支持时返回空序列
+     */
+    default String previewJson(long fromMs, long toMs, int buckets) {
+        return "{\"series\":[]}";
+    }
+
+    /**
      * 手动上报一个采集事件。
      *
      * <p>并非所有会话都支持（例如只做被动应答的场景），默认实现明确失败，

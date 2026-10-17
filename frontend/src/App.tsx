@@ -5,6 +5,8 @@ import {
   saveToken,
   type Health,
   type SessionSummary,
+  type PreviewData,
+  type PreviewSeries,
   type WireMessage,
 } from './api';
 
@@ -15,6 +17,59 @@ interface LogLine {
 
 const MAX_LOG = 400;
 
+/** 单条 SVID 的曲线：min/max 包络 + avg 线。 */
+function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext('2d');
+    if (canvas == null || context == null) {
+      return;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    context.clearRect(0, 0, width, height);
+
+    const count = series.min.length;
+    if (count === 0) {
+      return;
+    }
+
+    let low = Math.min(...series.min);
+    let high = Math.max(...series.max);
+    if (!(high > low)) {
+      high = low + 1;
+    }
+
+    const x = (index: number) => (index / Math.max(1, count - 1)) * (width - 1);
+    const y = (value: number) => height - 2 - ((value - low) / (high - low)) * (height - 4);
+
+    context.beginPath();
+    series.max.forEach((value, index) => (index === 0 ? context.moveTo(x(0), y(value)) : context.lineTo(x(index), y(value))));
+    for (let index = count - 1; index >= 0; index -= 1) {
+      context.lineTo(x(index), y(series.min[index]));
+    }
+    context.closePath();
+    context.fillStyle = 'rgba(68, 147, 248, 0.22)';
+    context.fill();
+
+    context.beginPath();
+    series.avg.forEach((value, index) => (index === 0 ? context.moveTo(x(0), y(value)) : context.lineTo(x(index), y(value))));
+    context.strokeStyle = '#4493f8';
+    context.lineWidth = 1.5;
+    context.stroke();
+  }, [series]);
+
+  return (
+    <div className="spark">
+      <span>{series.svid}</span>
+      <canvas ref={ref} width={760} height={56} />
+    </div>
+  );
+}
+
 export function App(): JSX.Element {
   const [token, setToken] = useState<string>(() => readToken());
   const [draftToken, setDraftToken] = useState('');
@@ -24,6 +79,7 @@ export function App(): JSX.Element {
   const [log, setLog] = useState<LogLine[]>([]);
   const [streamState, setStreamState] = useState('未连接');
   const [messages, setMessages] = useState<WireMessage[]>([]);
+  const [preview, setPreview] = useState<PreviewData | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
 
   const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
@@ -95,6 +151,19 @@ export function App(): JSX.Element {
     saveToken(value);
     setToken(value);
     append('token 已保存');
+  };
+
+  const onPreview = async () => {
+    const first = sessions[0];
+    if (client === null || first === undefined) {
+      return;
+    }
+    try {
+      setPreview(await client.preview(first.id, 0, 60_000, 120));
+      append('已刷新曲线预览（60 秒 / 120 桶）');
+    } catch (error) {
+      append(`预览失败: ${(error as Error).message}`);
+    }
   };
 
   const onTrigger = async (session: SessionSummary) => {
@@ -196,6 +265,24 @@ export function App(): JSX.Element {
               onChange={(event) => setCeid(Number(event.target.value))}
             />
           </label>
+        </section>
+
+        <section>
+          <h2>
+            曲线预览{' '}
+            <button type="button" onClick={() => void onPreview()} disabled={sessions.length === 0}>
+              预览 60 秒
+            </button>
+          </h2>
+          {preview === null ? (
+            <p className="hint">点上面的按钮，按当前配置算出一分钟的曲线（min/max 包络 + avg 线）。</p>
+          ) : (
+            <div className="sparks">
+              {preview.series.map((series) => (
+                <Sparkline key={series.svid} series={series} />
+              ))}
+            </div>
+          )}
         </section>
 
         <section>

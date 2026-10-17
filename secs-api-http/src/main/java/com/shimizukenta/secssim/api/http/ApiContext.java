@@ -54,4 +54,17 @@ public interface ApiContext {
     default TriggerOutcome triggerCeid(String sessionId, int ceid) {
         return TriggerOutcome.UNKNOWN_SESSION;
     }
+
+    /**
+     * 曲线预览（分桶 min/max/avg）。
+     *
+     * @param sessionId 会话标识
+     * @param fromMs    起始
+     * @param toMs      结束
+     * @param buckets   桶数
+     * @return JSON 文本；会话不存在时返回 {@code null}
+     */
+    default String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
+        return null;
+    }
 }

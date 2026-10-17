@@ -51,6 +51,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 会话命令前缀（{@code /api/v1/sessions/{id}/ceid/{ceid}}）。 */
     public static final String PATH_SESSION_PREFIX = "/api/v1/sessions/";
 
+    /** 曲线预览路径。 */
+    public static final String PATH_PREVIEW = "/api/v1/preview";
+
     private static final Duration SSE_HEARTBEAT = Duration.ofSeconds(1L);
     private static final Duration SSE_MAX_LIFETIME = Duration.ofMinutes(30L);
 
@@ -142,6 +145,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_SHUTDOWN, api::handleShutdown);
         http.createContext(PATH_SESSIONS, api::handleSessions);
         http.createContext(PATH_SESSION_PREFIX, api::handleSessionCommand);
+        http.createContext(PATH_PREVIEW, api::handlePreview);
 
         if (api.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
@@ -360,6 +364,63 @@ public final class HttpApiServer implements AutoCloseable {
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
             case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
             case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+        }
+    }
+
+    /**
+     * 曲线预览：{@code /api/v1/preview?session=demo&from=0&to=60000&buckets=120}
+     */
+    private void handlePreview(HttpExchange ex) throws IOException {
+        if (!this.authorized(ex)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        java.util.Map<String, String> query = parseQuery(ex.getRequestURI().getQuery());
+        String sessionId = query.getOrDefault("session", "");
+        long fromMs = longParam(query, "from", 0L);
+        long toMs = longParam(query, "to", 60_000L);
+        int buckets = (int) longParam(query, "buckets", 120L);
+
+        if (toMs <= fromMs) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-range\"}");
+            return;
+        }
+
+        String body = this.context.previewJson(sessionId, fromMs, toMs, buckets);
+        if (body == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+            return;
+        }
+
+        respond(ex, 200, body);
+    }
+
+    private static java.util.Map<String, String> parseQuery(String query) {
+        java.util.Map<String, String> values = new java.util.HashMap<>();
+        if (query == null || query.isEmpty()) {
+            return values;
+        }
+
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                values.put(pair.substring(0, eq),
+                        java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+            }
+        }
+        return values;
+    }
+
+    private static long longParam(java.util.Map<String, String> query, String key, long fallback) {
+        try {
+            return query.containsKey(key) ? Long.parseLong(query.get(key)) : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 
