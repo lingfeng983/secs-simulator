@@ -103,3 +103,8 @@ input {
 .spark { display: flex; align-items: center; gap: 0.6rem; }
 .spark span { width: 4rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
 .spark canvas { border: 1px solid var(--line); border-radius: 4px; width: 100%; max-width: 760px; }
+
+.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.preview-controls select,
+.preview-controls button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 0.2rem 0.5rem; }
+.preview-controls select { min-width: 8rem; }

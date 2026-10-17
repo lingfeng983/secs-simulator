@@ -15,7 +15,21 @@ interface LogLine {
   text: string;
 }
 
+/** 报文表的一行：key 只增不减，避免 slice 之后 index 位移导致整表重建。 */
+interface MessageEntry {
+  key: number;
+  msg: WireMessage;
+}
+
 const MAX_LOG = 400;
+const MAX_MESSAGES = 200;
+
+/** 可选的时间窗：后端引擎时钟从进程启动起算，时间窗要相对"现在"而不是 0。 */
+const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
+  { label: '最近 1 分钟', ms: 60_000 },
+  { label: '最近 5 分钟', ms: 300_000 },
+  { label: '最近 15 分钟', ms: 900_000 },
+];
 
 /** 单条 SVID 的曲线：min/max 包络 + avg 线。 */
 function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
@@ -37,8 +51,15 @@ function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
       return;
     }
 
-    let low = Math.min(...series.min);
-    let high = Math.max(...series.max);
+    let low = Number.POSITIVE_INFINITY;
+    let high = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < count; index += 1) {
+      low = Math.min(low, series.min[index]);
+      high = Math.max(high, series.max[index]);
+    }
+    if (!Number.isFinite(low) || !Number.isFinite(high)) {
+      return;
+    }
     if (!(high > low)) {
       high = low + 1;
     }
@@ -78,9 +99,14 @@ export function App(): JSX.Element {
   const [ceid, setCeid] = useState(2001);
   const [log, setLog] = useState<LogLine[]>([]);
   const [streamState, setStreamState] = useState('未连接');
-  const [messages, setMessages] = useState<WireMessage[]>([]);
+  const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [previewSession, setPreviewSession] = useState('');
+  const [windowMs, setWindowMs] = useState(WINDOWS[0].ms);
   const logRef = useRef<HTMLPreElement | null>(null);
+  const nextMessageKey = useRef(0);
+  const openedOnce = useRef(false);
+  const lastStreamErrorAt = useRef(0);
 
   const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
 
@@ -99,16 +125,22 @@ export function App(): JSX.Element {
     let cancelled = false;
 
     const refresh = async () => {
-      try {
-        const [nextHealth, nextSessions] = await Promise.all([client.health(), client.sessions()]);
-        if (!cancelled) {
-          setHealth(nextHealth);
-          setSessions(nextSessions);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          append(`刷新失败: ${(error as Error).message}`);
-        }
+      const [healthResult, sessionsResult] = await Promise.allSettled([client.health(), client.sessions()]);
+
+      if (cancelled) {
+        return;
+      }
+
+      if (healthResult.status === 'fulfilled') {
+        setHealth(healthResult.value);
+      } else {
+        append(`健康检查失败: ${(healthResult.reason as Error).message}`);
+      }
+
+      if (sessionsResult.status === 'fulfilled') {
+        setSessions(sessionsResult.value);
+      } else {
+        append(`会话列表刷新失败: ${(sessionsResult.reason as Error).message}`);
       }
     };
 
@@ -116,19 +148,43 @@ export function App(): JSX.Element {
     const timer = window.setInterval(refresh, 2000);
 
     const stream = new EventSource(client.eventsUrl());
-    stream.addEventListener('open', () => setStreamState('已连接'));
+    stream.addEventListener('open', () => {
+      setStreamState('已连接');
+      if (openedOnce.current) {
+        /* 断线期间的报文后端不补发，界面必须明说，否则用户会以为中间没有报文 */
+        append('事件流已重连：断线期间的报文不会补发');
+        void refresh();
+      }
+      openedOnce.current = true;
+    });
     stream.addEventListener('heartbeat', (event) => {
-      setStreamState(`心跳 ${new Date(Number(event.data)).toLocaleTimeString()}`);
+      const at = Number(event.data);
+      setStreamState(Number.isFinite(at) ? `心跳 ${new Date(at).toLocaleTimeString()}` : '心跳');
     });
     stream.addEventListener('message', (event) => {
       try {
         const parsed = JSON.parse(event.data) as WireMessage;
-        setMessages((previous) => [...previous.slice(-199), parsed]);
+        const key = nextMessageKey.current;
+        nextMessageKey.current += 1;
+        setMessages((previous) => {
+          const next = [...previous, { key, msg: parsed }];
+          return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
+        });
       } catch {
         append('收到无法解析的报文事件');
       }
     });
-    stream.addEventListener('error', () => setStreamState('断开，重连中'));
+    stream.addEventListener('error', () => {
+      const state = stream.readyState === EventSource.CLOSED ? '已关闭' : '重连中';
+      setStreamState(`断开（${state}）`);
+
+      /* EventSource 会自己重连，错误事件可能很密集，5 秒内只记一条 */
+      const now = Date.now();
+      if (now - lastStreamErrorAt.current > 5000) {
+        lastStreamErrorAt.current = now;
+        append(`事件流断开（${state}），浏览器将自动重连`);
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -143,6 +199,19 @@ export function App(): JSX.Element {
     }
   }, [log]);
 
+  /* 会话列表变化后保证预览下拉框指向一个存在的会话 */
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (previewSession !== '') {
+        setPreviewSession('');
+      }
+      return;
+    }
+    if (!sessions.some((session) => session.id === previewSession)) {
+      setPreviewSession(sessions[0].id);
+    }
+  }, [sessions, previewSession]);
+
   const onSaveToken = () => {
     const value = draftToken.trim();
     if (value === '') {
@@ -154,13 +223,23 @@ export function App(): JSX.Element {
   };
 
   const onPreview = async () => {
-    const first = sessions[0];
-    if (client === null || first === undefined) {
+    if (client === null) {
       return;
     }
+
+    const target = sessions.find((session) => session.id === previewSession) ?? sessions[0];
+    if (target === undefined) {
+      return;
+    }
+
     try {
-      setPreview(await client.preview(first.id, 0, 60_000, 120));
-      append('已刷新曲线预览（60 秒 / 120 桶）');
+      /* 先取一次 uptime，时间窗才是"最近 N 分钟"而不是"开局 N 秒" */
+      const fresh = await client.health();
+      setHealth(fresh);
+      const to = Math.max(1, fresh.uptimeMs ?? 0);
+      const from = Math.max(0, to - windowMs);
+      setPreview(await client.preview(target.id, from, to, 120));
+      append(`已刷新 ${target.id} 的曲线（${Math.round((to - from) / 1000)} 秒窗口）`);
     } catch (error) {
       append(`预览失败: ${(error as Error).message}`);
     }
@@ -262,20 +341,35 @@ export function App(): JSX.Element {
               type="number"
               min={1}
               value={ceid}
-              onChange={(event) => setCeid(Number(event.target.value))}
+              onChange={(event) => setCeid(Number(event.target.value) || 1)}
             />
           </label>
         </section>
 
         <section>
-          <h2>
-            曲线预览{' '}
+          <h2>曲线预览</h2>
+          <div className="preview-controls">
+            <select value={previewSession} onChange={(event) => setPreviewSession(event.target.value)}>
+              {sessions.length === 0 && <option value="">（无会话）</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+            <select value={windowMs} onChange={(event) => setWindowMs(Number(event.target.value))}>
+              {WINDOWS.map((item) => (
+                <option key={item.ms} value={item.ms}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
             <button type="button" onClick={() => void onPreview()} disabled={sessions.length === 0}>
-              预览 60 秒
+              刷新曲线
             </button>
-          </h2>
+          </div>
           {preview === null ? (
-            <p className="hint">点上面的按钮，按当前配置算出一分钟的曲线（min/max 包络 + avg 线）。</p>
+            <p className="hint">选好会话与时间窗后点"刷新曲线"，按当前配置算出 min/max 包络 + avg 线。</p>
           ) : (
             <div className="sparks">
               {preview.series.map((series) => (
@@ -300,17 +394,17 @@ export function App(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {messages.map((message, index) => (
-                <tr key={`${message.at}-${index}`}>
-                  <td>{new Date(message.at).toLocaleTimeString()}</td>
-                  <td>{message.sessionId}</td>
-                  <td>{message.direction === 'in' ? '← 收' : '→ 发'}</td>
+              {messages.map((entry) => (
+                <tr key={entry.key}>
+                  <td>{new Date(entry.msg.at).toLocaleTimeString()}</td>
+                  <td>{entry.msg.sessionId}</td>
+                  <td>{entry.msg.direction === 'in' ? '← 收' : '→ 发'}</td>
                   <td>
-                    S{message.stream}F{message.function}
-                    {message.wbit ? ' W' : ''}
+                    S{entry.msg.stream}F{entry.msg.function}
+                    {entry.msg.wbit ? ' W' : ''}
                   </td>
-                  <td className="body" title={message.body}>
-                    {message.body.length > 120 ? `${message.body.slice(0, 120)}…` : message.body}
+                  <td className="body" title={entry.msg.body}>
+                    {entry.msg.body.length > 120 ? `${entry.msg.body.slice(0, 120)}…` : entry.msg.body}
                   </td>
                 </tr>
               ))}

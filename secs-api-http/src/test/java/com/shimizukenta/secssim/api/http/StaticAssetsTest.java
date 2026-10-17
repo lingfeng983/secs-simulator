@@ -76,12 +76,44 @@ class StaticAssetsTest {
     }
 
     @Test
+    void missingAssetWithExtensionIs404() throws Exception {
+        HttpResponse<String> response = get("/missing.js");
+
+        assertEquals(404, response.statusCode(), "带扩展名的缺失文件不应回落成 HTML");
+        assertFalse(response.body().contains("MARKER"));
+    }
+
+    @Test
     void pathTraversalDoesNotLeakFilesOutsideRoot() throws Exception {
         Path secret = this.root.getParent().resolve("secret.txt");
         Files.writeString(secret, "SECRET-CONTENT", StandardCharsets.UTF_8);
 
         HttpResponse<String> response = get("/%2e%2e/secret.txt");
         assertFalse(response.body().contains("SECRET-CONTENT"), "不得越过 web root");
+    }
+
+    @Test
+    void siblingPrefixIsNotTreatedAsInsideRoot() throws Exception {
+        /* 目录名与 web root 同前缀（root-evil），startsWith 必须按路径段比较而不是字符串前缀 */
+        Path evil = this.root.getParent().resolve(this.root.getFileName() + "-evil");
+        Files.createDirectories(evil);
+        Files.writeString(evil.resolve("leak.txt"), "SIBLING-SECRET", StandardCharsets.UTF_8);
+
+        HttpResponse<String> response = get("/%2e%2e/" + evil.getFileName() + "/leak.txt");
+
+        assertFalse(response.body().contains("SIBLING-SECRET"), "同前缀兄弟目录也必须在 root 之外");
+        assertEquals(403, response.statusCode());
+    }
+
+    @Test
+    void etagAllowsRevalidation() throws Exception {
+        HttpResponse<String> first = get("/app.js");
+        assertEquals(200, first.statusCode());
+        String etag = first.headers().firstValue("ETag").orElse("");
+        assertFalse(etag.isEmpty(), "静态资源应带 ETag");
+
+        HttpResponse<String> second = get("/app.js", "If-None-Match", etag);
+        assertEquals(304, second.statusCode());
     }
 
     @Test
@@ -92,10 +124,20 @@ class StaticAssetsTest {
     }
 
     private HttpResponse<String> get(String path) throws Exception {
+        return get(path, new String[0]);
+    }
+
+    private HttpResponse<String> get(String path, String... headers) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path))
+                .timeout(Duration.ofSeconds(10))
+                .GET();
+
+        for (int i = 0; i + 1 < headers.length; i += 2) {
+            builder.header(headers[i], headers[i + 1]);
+        }
+
         return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
-                .send(HttpRequest.newBuilder(URI.create(this.base + path))
-                                .timeout(Duration.ofSeconds(10)).GET().build(),
-                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                .send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
     /** 最小上下文桩。 */

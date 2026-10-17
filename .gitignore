@@ -8,7 +8,9 @@ target/
 package/
 
 # ---- native / runtime images ----
-runtime/
+# 只忽略仓库根下的 runtime/（jlink 产物）；不要写成 runtime/，
+# 那会连 secs-runtime 模块的 Java 源码一起忽略掉。
+/runtime/
 *.aot
 *.hprof
 
@@ -34,3 +36,6 @@ sessions/
 # ---- OS ----
 *.DS_Store
 Thumbs.db
+
+# ---- 本地工作区状态 ----
+.workbuddy/

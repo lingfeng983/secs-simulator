@@ -3,6 +3,8 @@ package com.shimizukenta.secssim.app.event;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
+import com.shimizukenta.secssim.app.log.Log;
+
 /**
  * 极简事件总线。
  *
@@ -35,7 +37,7 @@ public final class EventBus {
             try {
                 listener.accept(event);
             } catch (RuntimeException e) {
-                System.err.println("事件订阅者失败（已忽略）: " + e);
+                Log.error("事件订阅者失败（已忽略）", e);
             }
         }
     }
