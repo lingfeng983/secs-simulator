@@ -84,4 +84,5 @@ HTTP API（v1）：
 - [ADR 0002 · 领域模型与 ID 空间](docs/adr/0002-domain-and-idspace.md)
 - [ADR 0003 · 曲线必须是纯函数](docs/adr/0003-pure-curves.md)
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
-- [M0 报告](docs/m0-report.md) · [M1 报告](docs/m1-report.md) · [M2 报告](docs/m2-report.md) · [M3 报告](docs/m3-report.md)
+- [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
+- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md)
