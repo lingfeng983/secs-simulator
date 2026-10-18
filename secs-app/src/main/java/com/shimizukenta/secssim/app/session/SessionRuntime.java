@@ -143,4 +143,21 @@ public interface SessionRuntime {
     default String terminalMessagesJson() {
         return "[]";
     }
+
+    /**
+     * SVID / RPTID / CEID 目录的 JSON 文本。
+     *
+     * <p>主机侧报文里只有数字，"2001 是什么"只有设备知道。目录接口把
+     * "数字 → 语义"的映射摊开，界面上就不用让人猜 CEID 了。
+     * </p>
+     *
+     * <p>默认返回三个空数组而不是 {@code null}：没有目录是一种合法状态
+     * （例如探针），不该让调用方处理"可能没有"这种情况。
+     * </p>
+     *
+     * @return JSON 文本
+     */
+    default String catalogJson() {
+        return "{\"ceids\":[],\"reports\":[],\"svids\":[]}";
+    }
 }

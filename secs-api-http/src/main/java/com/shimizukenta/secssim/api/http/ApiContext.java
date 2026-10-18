@@ -90,6 +90,19 @@ public interface ApiContext {
     }
 
     /**
+     * 会话的 SVID / RPTID / CEID 目录 JSON；会话不存在时返回 {@code null}。
+     *
+     * <p>界面靠它把"2001 到底是哪个事件"讲清楚，不用让人猜。
+     * </p>
+     *
+     * @param sessionId 会话标识
+     * @return JSON 文本或 {@code null}
+     */
+    default String catalogJson(String sessionId) {
+        return null;
+    }
+
+    /**
      * 曲线预览（分桶 min/max/avg）。
      *
      * @param sessionId 会话标识

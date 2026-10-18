@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createClient,
+  hasRole,
   readToken,
+  roleLabel,
   saveToken,
   type AlarmState,
+  type Catalog,
   type Health,
   type SessionSummary,
   type TerminalMessage,
@@ -111,12 +114,27 @@ export function App(): JSX.Element {
   const [alarmCategory, setAlarmCategory] = useState(1);
   const [alarms, setAlarms] = useState<AlarmState[]>([]);
   const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
+  const [catalogSession, setCatalogSession] = useState('');
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
   const nextMessageKey = useRef(0);
   const openedOnce = useRef(false);
   const lastStreamErrorAt = useRef(0);
 
   const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
+
+  /*
+   * 会改变设备状态的操作（触发 CEID、报警置位/清除）至少要 operator。
+   * 角色未知时按"没有权限"处理：按钮灰掉并说明原因，好过让人点了才吃 403。
+   * 后端仍然最终裁决，这里只是不制造无谓的尝试。
+   */
+  const role = health?.role;
+  const canOperate = hasRole(role, 'operator');
+  /* 按钮灰掉时要说清是"角色不够"还是"还不知道角色"，否则用户会以为界面坏了 */
+  const operateHint =
+    role === undefined
+      ? '尚未取到身份信息，连上后端后才能判断权限'
+      : `当前角色为${roleLabel(role)}（只读），需要操作员或管理员`;
 
   const append = useCallback((text: string) => {
     setLog((previous) => {
@@ -316,6 +334,49 @@ export function App(): JSX.Element {
     };
   }, [client, alarmSession]);
 
+  /* 会话列表变化后保证目录下拉框指向一个存在的会话 */
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (catalogSession !== '') {
+        setCatalogSession('');
+      }
+      return;
+    }
+    if (!sessions.some((session) => session.id === catalogSession)) {
+      setCatalogSession(sessions[0].id);
+    }
+  }, [sessions, catalogSession]);
+
+  /*
+   * 设备目录：CEID 的号段按单元独立，跨会话复用编号会指错事件，
+   * 所以目录必须跟着选中的会话换。
+   */
+  useEffect(() => {
+    if (client === null || catalogSession === '') {
+      setCatalog(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const next = await client.catalog(catalogSession);
+        if (!cancelled) {
+          setCatalog(next);
+        }
+      } catch {
+        if (!cancelled) {
+          setCatalog(null);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, catalogSession]);
+
   const onSaveToken = () => {
     const value = draftToken.trim();
     if (value === '') {
@@ -390,6 +451,12 @@ export function App(): JSX.Element {
           <dd>{health?.version ?? '-'}</dd>
           <dt>会话</dt>
           <dd>{health?.sessions ?? sessions.length}</dd>
+          <dt>身份</dt>
+          <dd>
+            {role === undefined
+              ? '-'
+              : `${health?.user ?? '?'}（${roleLabel(role)}）`}
+          </dd>
           <dt>事件流</dt>
           <dd>{streamState}</dd>
         </dl>
@@ -397,8 +464,9 @@ export function App(): JSX.Element {
 
       {token === '' && (
         <section className="token-panel">
-          <p>
+          <p className="hint">
             需要访问令牌（启动时打印在 <code>READY</code> 行里，或由桌面壳注入）。
+            用 <code>--auth-users</code> 启动时填账号口令，不是那条 token。
           </p>
           <input
             type="password"
@@ -441,7 +509,12 @@ export function App(): JSX.Element {
                   <td>{session.counters.skipped ?? 0}</td>
                   <td>{session.counters.traceFrames ?? 0}</td>
                   <td>
-                    <button type="button" onClick={() => void onTrigger(session)}>
+                    <button
+                      type="button"
+                      onClick={() => void onTrigger(session)}
+                      disabled={!canOperate}
+                      title={canOperate ? '手动触发一次 S6F11' : operateHint}
+                    >
                       上报
                     </button>
                   </td>
@@ -464,8 +537,11 @@ export function App(): JSX.Element {
               min={1}
               value={ceid}
               onChange={(event) => setCeid(Number(event.target.value) || 1)}
+              disabled={!canOperate}
             />
           </label>
+          {!canOperate && <p className="hint">当前为只读身份：上报与报警操作需要操作员或管理员。</p>}
+          {canOperate && <p className="hint">CEID 可在下方"设备目录"里按名称挑选，不用背数字。</p>}
         </section>
 
         <section>
@@ -503,14 +579,27 @@ export function App(): JSX.Element {
               value={alarmText}
               onChange={(event) => setAlarmText(event.target.value)}
             />
-            <button type="button" onClick={() => void onAlarm(true)} disabled={sessions.length === 0}>
+            <button
+              type="button"
+              onClick={() => void onAlarm(true)}
+              disabled={sessions.length === 0 || !canOperate}
+              title={canOperate ? '置位报警（S5F1）' : operateHint}
+            >
               置位
             </button>
-            <button type="button" onClick={() => void onAlarm(false)} disabled={sessions.length === 0}>
+            <button
+              type="button"
+              onClick={() => void onAlarm(false)}
+              disabled={sessions.length === 0 || !canOperate}
+              title={canOperate ? '清除报警（S5F1）' : operateHint}
+            >
               清除
             </button>
           </div>
-          <p className="hint">置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。</p>
+          <p className="hint">
+            置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。
+            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，操作已禁用。`}
+          </p>
 
           <h3>活动报警</h3>
           <table>
@@ -600,6 +689,123 @@ export function App(): JSX.Element {
               ))}
             </div>
           )}
+        </section>
+
+        <section>
+          <h2>设备目录</h2>
+          <div className="preview-controls">
+            <select value={catalogSession} onChange={(event) => setCatalogSession(event.target.value)}>
+              {sessions.length === 0 && <option value="">（无会话）</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+            <span className="hint">
+              CEID / RPTID / SVID 的号段按单元独立，不同会话之间不能照搬。
+            </span>
+          </div>
+
+          <h3>采集事件（CEID）</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>CEID</th>
+                <th>归属</th>
+                <th>名称</th>
+                <th>携带报告</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(catalog?.ceids ?? []).map((entry) => (
+                <tr key={entry.ceid}>
+                  <td>{entry.ceid}</td>
+                  <td>{entry.owner}</td>
+                  <td>{entry.slot}</td>
+                  <td>{entry.reports.join(', ') || '-'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => setCeid(entry.ceid)}
+                      disabled={!canOperate}
+                      title={canOperate ? '填入上方的 CEID 框' : operateHint}
+                    >
+                      填入
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {(catalog === null || catalog.ceids.length === 0) && (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义采集事件'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <h3>报告（RPTID）</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>RPTID</th>
+                <th>归属</th>
+                <th>名称</th>
+                <th>变量</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(catalog?.reports ?? []).map((entry) => (
+                <tr key={entry.rptid}>
+                  <td>{entry.rptid}</td>
+                  <td>{entry.owner}</td>
+                  <td>{entry.slot}</td>
+                  <td>{entry.svids.join(', ') || '-'}</td>
+                </tr>
+              ))}
+              {(catalog === null || catalog.reports.length === 0) && (
+                <tr>
+                  <td colSpan={4} className="hint">
+                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义报告'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <h3>状态变量（SVID）</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>SVID</th>
+                <th>归属</th>
+                <th>名称</th>
+                <th>类型</th>
+                <th>单位</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(catalog?.svids ?? []).map((entry) => (
+                <tr key={entry.svid}>
+                  <td>{entry.svid}</td>
+                  <td>{entry.owner}</td>
+                  <td>{entry.slot}</td>
+                  <td>{entry.type}</td>
+                  <td>{entry.unit || '-'}</td>
+                </tr>
+              ))}
+              {(catalog === null || catalog.svids.length === 0) && (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义状态变量'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </section>
 
         <section>

@@ -47,7 +47,9 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.core.EngineClock;
+import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
+import com.shimizukenta.secssim.core.compile.ResolvedReport;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.event.ConditionDebouncer;
@@ -1060,14 +1062,64 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * SVID / RPTID / CEID 目录。
+     *
+     * <p>直接投影编译后的 {@code ResolvedEquipment}——它是"绝对 ID → 语义"的唯一权威，
+     * 主机侧 S1F11/S2F33 的应答也从这里取，两边永远对得上。
+     * </p>
+     *
+     * <p>按 ID 升序：这是给人看的清单，稳定顺序才能让界面上两次刷新之间的
+     * 差异一眼看出是配置变了，而不是"顺序抖了"。
+     * </p>
+     */
+    @Override
+    public String catalogJson() {
+        JsonHubBuilder b = JsonHub.getBuilder();
+
+        List<JsonHub> ceids = new ArrayList<>();
+        this.model.ceids().values().stream()
+                .sorted(Comparator.comparingInt(ResolvedCeid::id))
+                .forEach(ceid -> ceids.add(b.object(
+                        b.pair("ceid", ceid.id()),
+                        b.pair("owner", ceid.owner()),
+                        b.pair("slot", ceid.slot()),
+                        b.pair("reports", b.array(ceid.reportIds().stream()
+                                .map(b::number).map(n -> (JsonHub) n).toList())))));
+
+        List<JsonHub> reports = new ArrayList<>();
+        this.model.reports().values().stream()
+                .sorted(Comparator.comparingInt(ResolvedReport::id))
+                .forEach(report -> reports.add(b.object(
+                        b.pair("rptid", report.id()),
+                        b.pair("owner", report.owner()),
+                        b.pair("slot", report.slot()),
+                        b.pair("svids", b.array(report.svidIds().stream()
+                                .map(b::number).map(n -> (JsonHub) n).toList())))));
+
+        List<JsonHub> svids = new ArrayList<>();
+        this.model.svids().values().stream()
+                .sorted(Comparator.comparingInt(ResolvedSvid::id))
+                .forEach(svid -> svids.add(b.object(
+                        b.pair("svid", svid.id()),
+                        b.pair("owner", svid.owner()),
+                        b.pair("slot", svid.slot()),
+                        b.pair("type", svid.type().name()),
+                        b.pair("unit", svid.unitSymbol()))));
+
+        return b.object(
+                b.pair("ceids", b.array(ceids)),
+                b.pair("reports", b.array(reports)),
+                b.pair("svids", b.array(svids))).toJson();
+    }
+
+    /**
      * 一条终端消息。
      *
      * @param tid      终端 ID
      * @param text     文本
      * @param atMillis 收到时的墙钟毫秒
      */
-    public record TerminalMessage(int tid, String text, long atMillis) {
-    }
+    public record TerminalMessage(int tid, String text, long atMillis) {    }
 
     /**
      * S2F33：主机定义报告（RPTID → VID 列表）。

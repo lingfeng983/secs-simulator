@@ -25,12 +25,13 @@ import java.util.Set;
  * @param workDir     工作目录（配置、日志、模板）
  * @param tlsKeystore PKCS#12 keystore，{@code null} 表示明文 HTTP
  * @param tlsPassword keystore 密码
+ * @param authUsers   多账号文件（带角色），{@code null} 表示只用单 {@code --token}
  * @param help        是否只打印帮助
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
                              int hsmsPort, int deviceId, boolean demoSession,
                              Path configFile, Path webRoot, Path workDir,
-                             Path tlsKeystore, String tlsPassword, boolean help) {
+                             Path tlsKeystore, String tlsPassword, Path authUsers, boolean help) {
 
     /**
      * 校验并创建。
@@ -47,6 +48,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
      * @param workDir     工作目录
      * @param tlsKeystore PKCS#12 keystore
      * @param tlsPassword keystore 密码
+     * @param authUsers   多账号文件（带角色）
      * @param help        帮助标记
      */
     public RuntimeOptions {
@@ -99,7 +101,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
 
         Set<String> known = Set.of("mode", "bind", "port", "token", "hsms-port",
                 "device-id", "demo-session", "config", "web-root", "work-dir",
-                "tls-keystore", "tls-password", "help");
+                "tls-keystore", "tls-password", "auth-users", "help");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -121,6 +123,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                 Path.of(values.getOrDefault("work-dir", defaultWorkDir())),
                 values.containsKey("tls-keystore") ? Path.of(values.get("tls-keystore")) : null,
                 values.getOrDefault("tls-password", ""),
+                values.containsKey("auth-users") ? Path.of(values.get("auth-users")) : null,
                 Boolean.parseBoolean(values.getOrDefault("help", "false")));
     }
 
@@ -145,7 +148,14 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                   --work-dir <path>                 工作目录
                   --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
                   --tls-password <s>                keystore 密码（默认空）
+                  --auth-users <path>               多账号文件（带角色）；提供时取代 --token
                   --help                            打印本帮助
+
+                鉴权：默认单 --token（等价于 admin）。--auth-users 的 JSON 形如
+                  {"users":[{"name":"guest","role":"viewer","secret":"..."},
+                            {"name":"line1","role":"operator","secret":"..."}]}
+                角色 viewer 只读 / operator 可触发 CEID 与报警 / admin 额外可停机。
+                server 模式必须显式给 --token 或 --auth-users。
 
                 启动后会向 stdout 打印一行 READY，供桌面壳与测试脚本握手。
                 """;

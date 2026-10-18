@@ -103,6 +103,15 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String catalogJson(String sessionId) {
+                return "missing".equals(sessionId)
+                        ? null
+                        : "{\"ceids\":[{\"ceid\":2001,\"owner\":\"CH1\",\"slot\":\"START\",\"reports\":[]}],"
+                                + "\"reports\":[],\"svids\":[{\"svid\":1001,\"owner\":\"CH1\","
+                                + "\"slot\":\"TEMP\",\"type\":\"F4\",\"unit\":\"C\"}]}";
+            }
+
+            @Override
             public String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
                 if ("missing".equals(sessionId)) {
                     return null;
@@ -215,6 +224,19 @@ class HttpApiServerTest {
     void alarmMapsSessionState() throws Exception {
         assertEquals(404, post("/api/v1/sessions/missing/alarm/1001", TOKEN).statusCode());
         assertEquals(409, post("/api/v1/sessions/closed/alarm/1001", TOKEN).statusCode());
+    }
+
+    @Test
+    void catalogReturnsAbsoluteIdsWithSemantics() throws Exception {
+        HttpResponse<String> response = get("/api/v1/sessions/s1/catalog", TOKEN);
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"ceid\":2001"), response.body());
+        assertTrue(response.body().contains("\"slot\":\"START\""), response.body());
+        assertTrue(response.body().contains("\"svid\":1001"), response.body());
+        assertTrue(response.body().contains("\"unit\":\"C\""), response.body());
+
+        assertEquals(404, get("/api/v1/sessions/missing/catalog", TOKEN).statusCode());
     }
 
     @Test

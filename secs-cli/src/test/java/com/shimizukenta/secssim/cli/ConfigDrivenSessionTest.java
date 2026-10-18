@@ -22,7 +22,9 @@ import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Builder;
 import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
+import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
+import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.curve.Rng;
@@ -156,6 +158,92 @@ class ConfigDrivenSessionTest {
         } finally {
             session.close();
         }
+    }
+
+    /**
+     * 设备目录必须与 S6F11 实际发送的内容一致。
+     *
+     * <p>报告里的 SVID 顺序是断言的重点：{@code injectUnitId} 会把 {@code UNIT_ID}
+     * 顶到首位，而 S6F11 也按这个顺序组包。如果目录按 ID 升序排，
+     * 界面上看到的报告会与主机收到的不一致——那就正好复制了"猜"的痛苦。
+     * </p>
+     */
+    @Test
+    void catalogExposesAbsoluteIdsWithSemantics(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("目录-设备.json");
+        Files.writeString(file, CONFIG, StandardCharsets.UTF_8);
+
+        SessionConfig config = SessionConfigJson.read(file);
+        CompilationResult compiled = config.compile();
+        assertTrue(compiled.ok(), () -> "配置应能编译: " + compiled.errors());
+
+        SessionSpec configured = config.spec();
+        SessionSpec spec = new SessionSpec(configured.id(), configured.passive(), configured.bindHost(),
+                0, configured.deviceId(), configured.seed(), configured.equipment());
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+
+        String json = session.catalogJson();
+
+        assertTrue(json.contains("{\"ceid\":2001,\"owner\":\"CH5\",\"slot\":\"PROCESS_START\",\"reports\":[3001]}"),
+                json);
+        assertTrue(json.contains("{\"rptid\":3001,\"owner\":\"CH5\",\"slot\":\"STATUS\",\"svids\":[1090,1001]}"),
+                "报告内 SVID 顺序应与 S6F11 组包一致（UNIT_ID 在前）: " + json);
+        assertTrue(json.contains("{\"svid\":1001,\"owner\":\"CH5\",\"slot\":\"TEMP_PV\",\"type\":\"F4\",\"unit\":\"C\"}"),
+                json);
+        assertTrue(json.contains("{\"svid\":1090,\"owner\":\"CH5\",\"slot\":\"UNIT_ID\",\"type\":\"U4\""),
+                json);
+    }
+
+    /** 目录按 ID 升序：两次刷新之间的差异才能一眼看出是配置变了，而不是顺序抖了。 */
+    @Test
+    void catalogIsSortedById(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("排序-设备.json");
+        Files.writeString(file, CONFIG, StandardCharsets.UTF_8);
+
+        SessionConfig config = SessionConfigJson.read(file);
+        CompilationResult compiled = config.compile();
+
+        SessionSpec configured = config.spec();
+        HsmsSessionRuntime session = new HsmsSessionRuntime(
+                new SessionSpec(configured.id(), true, configured.bindHost(),
+                        0, configured.deviceId(), configured.seed(), configured.equipment()),
+                compiled.equipment(), new ManualEngineClock(0L));
+
+        String json = session.catalogJson();
+        assertTrue(json.indexOf("\"svid\":1001") < json.indexOf("\"svid\":1090"), json);
+    }
+
+    /** 默认实现返回三个空数组：探针这类会话没有目录，但也不是错误。 */
+    @Test
+    void sessionsWithoutCatalogReportEmptyArrays() {
+        SessionRuntime bare = new SessionRuntime() {
+            @Override
+            public String id() {
+                return "bare";
+            }
+
+            @Override
+            public void open() {
+                /* 桩 */
+            }
+
+            @Override
+            public void close() {
+                /* 桩 */
+            }
+
+            @Override
+            public SessionState state() {
+                return SessionState.CLOSED;
+            }
+
+            @Override
+            public String lastError() {
+                return "";
+            }
+        };
+
+        assertEquals("{\"ceids\":[],\"reports\":[],\"svids\":[]}", bare.catalogJson());
     }
 
     private static SecsCommunicator connect(int port, int deviceId) throws Exception {

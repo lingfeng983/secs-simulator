@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch;
 
 import javax.net.ssl.SSLContext;
 
+import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -84,8 +85,10 @@ public final class Main {
             return 0;
         }
 
-        if (options.mode() == RuntimeMode.SERVER && options.token().isBlank()) {
-            Log.error("server 模式必须显式提供 --token（不能每次启动随机生成，否则所有客户端都会掉线）", null);
+        if (options.mode() == RuntimeMode.SERVER
+                && options.token().isBlank() && options.authUsers() == null) {
+            Log.error("server 模式必须显式提供 --token 或 --auth-users"
+                    + "（不能每次启动随机生成，否则所有客户端都会掉线）", null);
             return 2;
         }
 
@@ -99,7 +102,16 @@ public final class Main {
             }
         }
 
-        String token = options.token().isBlank() ? newToken() : options.token();
+        Credentials credentials;
+        try {
+            credentials = resolveCredentials(options);
+        } catch (ConfigException | IOException e) {
+            Log.error("加载账号文件失败: " + options.authUsers(), e);
+            return 2;
+        }
+        AccessControl access = credentials.access();
+        String token = credentials.token();
+
         boolean utf8Ok = utf8RoundTrip(options.workDir());
         CountDownLatch stopped = new CountDownLatch(1);
 
@@ -133,7 +145,7 @@ public final class Main {
                 extra.toString(), stopped::countDown, sessions);
 
         HttpApiServer api = HttpApiServer.start(
-                new InetSocketAddress(options.bindHost(), options.httpPort()), token, context,
+                new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
                 options.webRoot(), bus, tls);
 
         Runtime.getRuntime().addShutdownHook(new Thread(stopped::countDown, "shutdown-hook"));
@@ -141,6 +153,7 @@ public final class Main {
         System.out.println("READY mode=" + options.mode().id()
                 + " http=" + api.port()
                 + " token=" + token
+                + " accounts=" + access.size()
                 + " utf8=" + utf8Ok
                 + " tls=" + (tls != null)
                 + " sessions=" + sessions.list().size()
@@ -158,6 +171,45 @@ public final class Main {
             api.close();
         }
         return 0;
+    }
+
+    /**
+     * 决定这次启动用哪种凭据。
+     *
+     * <p>{@code --auth-users} 与 {@code --token} 不是叠加关系，而是<b>二选一</b>：
+     * 同时给出时按账号文件走，并把这件事打进日志——
+     * 悄悄忽略一个用户明确写了的参数，比报错更难查。
+     * </p>
+     *
+     * <p>单令牌模式下，未显式给 {@code --token} 就随机生成一个。
+     * 注意这里必须用生成后的 {@code token} 去建 {@code AccessControl}：
+     * {@code options.token()} 此时还是空串，直接拿它建表会得到一个"空口令"账号。
+     * </p>
+     *
+     * @param options 命令行
+     * @return 访问控制与 READY 行要打印的 token
+     * @throws IOException 账号文件读失败
+     */
+    static Credentials resolveCredentials(RuntimeOptions options) throws IOException {
+        if (options.authUsers() != null) {
+            if (!options.token().isBlank()) {
+                Log.error("--token 与 --auth-users 同时给出：按 --auth-users 走，--token 被忽略", null);
+            }
+            /* 凭据在账号文件里，READY 行的 token 留空表示"没有单一令牌" */
+            return new Credentials(AccessControl.load(options.authUsers()), "");
+        }
+
+        String token = options.token().isBlank() ? newToken() : options.token();
+        return new Credentials(AccessControl.singleToken(token), token);
+    }
+
+    /**
+     * 一次启动的凭据结果。
+     *
+     * @param access 访问控制
+     * @param token  READY 行要打印的 token；账号文件模式下为空串
+     */
+    record Credentials(AccessControl access, String token) {
     }
 
     private static int startConfiguredSession(RuntimeOptions options, SessionManager sessions, EventBus bus)
@@ -372,6 +424,11 @@ public final class Main {
         @Override
         public String terminalMessagesJson(String sessionId) {
             return this.sessions.find(sessionId).map(SessionRuntime::terminalMessagesJson).orElse(null);
+        }
+
+        @Override
+        public String catalogJson(String sessionId) {
+            return this.sessions.find(sessionId).map(SessionRuntime::catalogJson).orElse(null);
         }
     }
 }

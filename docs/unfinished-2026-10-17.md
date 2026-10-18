@@ -5,6 +5,11 @@
 验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**370 个测试全绿**
 （json 110 / protocol 45 / core 90 / app 25 / api-http 37 / runtime 17 / cli 46）。
 
+> **2026-10-18 更新**：在其后完成 M10 安全边界的最后一块——SERVER 账号/角色鉴权
+> （ADR-0007），并把角色分级接到前端、补上 SVID/CEID/RPTID 目录接口。
+> 当前 `master @ eea1332` + 本轮改动 = **404 个测试全绿**
+> （json 110 / protocol 45 / core 90 / app 25 / api-http 61 / runtime 24 / cli 49）。
+
 本清单分三类：
 
 - **真缺口**：功能确实没做；
@@ -27,7 +32,8 @@
 | 没有报警上报能力 | ✅ 已修 | 新增 `emitAlarm` → S5F1（W 位等 S5F2）；HTTP `POST /sessions/{id}/alarm/{alid}`；前端报警置位/清除；新增 `SessionAlarmTest` 与 HTTP 路由用例 |
 | 只有 at/periodic，不能按条件触发 | ✅ 已修 | 新增 `Trigger.OnCondition` + `ConditionDebouncer`；表达式支持比较运算；每 tick 求值 `t` / `svid.<id>`；新增 `SessionOnConditionTest` |
 | 生产路径无法使用模板 DAG | ✅ 已修 | Schema v5 增加 `templates`；`TemplateConfig.build` 生成 `TemplateGraph`；`Main` 用 `GraphValueSource`；新增 `SessionConfigJsonTest#templateConfigBuildsGraph` 与 `ConfigDrivenSessionTest#schemaV5TemplatesDriveS1F3` |
-| SERVER 模式只能明文 HTTP | ✅ 部分修复 | 新增 `--tls-keystore` / `--tls-password`，`HttpApiServer` 支持 `HttpsServer`；server 模式强制显式 `--token`；新增 `TlsServerTest`。账号/角色鉴权仍未做 |
+| SERVER 模式只能明文 HTTP | ✅ 已修 | 新增 `--tls-keystore` / `--tls-password`，`HttpApiServer` 支持 `HttpsServer`；server 模式强制显式凭据（`--token` 或 `--auth-users`）；新增 `TlsServerTest` |
+| 单一令牌 = 一把钥匙开所有门 | ✅ 已修 | 新增 `AccessControl` / `ApiRole`；`--auth-users` 账号文件分 viewer / operator / admin；401 与 403 分开；比对不提前 break 防计时侧信道；新增 ADR-0007、`AccessControlTest`、`HttpApiServerAuthTest` |
 | 活动报警/终端消息只能存内存、界面看不到 | ✅ 已修 | `SessionRuntime` 增加 `alarmsJson` / `terminalMessagesJson`；HTTP `GET /sessions/{id}/alarms`、`/terminal`；前端每 2 秒刷新面板 |
 | 不能表达“A 之后 N 秒发 B” | ✅ 已修 | 新增 `Trigger.AfterEvent` + 延迟队列；源计划成功后才入队；配置校验源计划存在/无环；新增 `SessionAfterEventTest` |
 
@@ -73,10 +79,11 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **前端只有 Canvas 包络 + 均值线**：没有缩放、游标读数、多轴，也没有 uPlot。
 - [ ] **报文不落盘**：面板只保留 200 条，没有 `messages.jsonl`、回放、导出。
 - [ ] **没有手动发送 SML/SECS 报文**：`templates/sml/**` 样例未被任何代码/测试引用。
-- [ ] **没有 SVID/CEID/RPTID 目录接口**：界面默认 CEID 写死 2001，用户只能猜。
+- [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，直接投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取。
 - [ ] **没有报警/终端消息/主机动态报告面板**：`hostReports` / `hostLinks` 计数在 JSON 里，但界面没展示；ADR-0006 要求的“报告来自本地还是主机”没有做。
 - [ ] **没有会话生命周期操作**：创建/关闭/重开/重载配置都没有。
 - [ ] **没有前端测试**：`frontend/package.json` 没有 test 脚本；CI 只跑 `tsc --noEmit` + `vite build`。
+- [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
 - [ ] **没有 OpenAPI 契约**：m0 承诺 M7 前落地，仓库里没有 `openapi.yaml`。
 
 ## 4. P2：分发与工程化
@@ -125,8 +132,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 **M10：清 P0 + 安全边界**
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
-3. SERVER TLS 已实现（`--tls-keystore`）；下一步是账号/角色鉴权，或继续使用单 token + 反向代理。
-4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；下一步进入 SERVER 安全边界与前端模板编辑器。
+3. SERVER TLS 与账号/角色鉴权均已实现（`--tls-keystore`、`--auth-users`）；剩余安全边界只有"口令明文存储 + 无口令轮转"，需运维纪律兜底。
+4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；SERVER 安全边界已封口；前端已按 `user`/`role` 禁用无权限按钮，设备目录接口已落地；下一步是前端模板编辑器与实例参数 UI。
 
 **M11：协议能力**
 5. S5F1 / S10F3：先定 ALCD/ALID/去抖、终端消息队列与 ACK。
@@ -154,7 +161,9 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - OnCondition 条件触发（含比较运算与去抖）。
 - AfterEvent 事件链（延迟队列 + 环校验）。
 - Schema v5 模板 DAG / 曲线进配置（`TemplateConfig` + `GraphValueSource`）。
-- SERVER 模式 TLS（PKCS#12 keystore）+ 强制显式 token。
+- SERVER 模式 TLS（PKCS#12 keystore）+ 强制显式凭据。
+- **API 账号/角色鉴权**（viewer / operator / admin，`--auth-users`，ADR-0007）；前端按角色禁用无权限按钮。
+- **SVID / RPTID / CEID 目录接口**（`GET /api/v1/sessions/{id}/catalog`）+ 前端「设备目录」面板。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。

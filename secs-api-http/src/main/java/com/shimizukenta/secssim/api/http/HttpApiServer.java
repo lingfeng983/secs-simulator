@@ -8,13 +8,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -46,8 +46,12 @@ import com.sun.net.httpserver.HttpsServer;
  * 这个后端的 API 面积很小，而框架会把原生镜像从 13MB 撑到 100MB 以上。
  * </p>
  *
- * <p>鉴权采用每次启动生成的一次性 token（{@code Authorization: Bearer}）。
- * URL 里不接受长期 token：浏览器的 {@code EventSource} 无法设置请求头，
+ * <p>鉴权采用 {@code Authorization: Bearer}，凭据由 {@link AccessControl} 判定。
+ * 默认是单 token 模式（等价于一个 {@link ApiRole#ADMIN} 账号）；
+ * 传账号文件则按 {@link ApiRole} 分级：只读 / 可下发 / 可停机。
+ * </p>
+ *
+ * <p>URL 里不接受长期 token：浏览器的 {@code EventSource} 无法设置请求头，
  * 因此改由 {@code POST /api/v1/ticket} 换取 30 秒、只能使用一次的票据。
  * </p>
  *
@@ -119,32 +123,36 @@ public final class HttpApiServer implements AutoCloseable {
     private final ExecutorService executor;
     private final ExecutorService sseExecutor;
     private final ScheduledExecutorService watchdog;
-    private final String token;
+    private final AccessControl access;
     private final ApiContext context;
     private final Path webRoot;
     private final CopyOnWriteArrayList<Subscriber> subscribers = new CopyOnWriteArrayList<>();
-    /** 一次性票据：ticket -> 过期时刻（毫秒）。 */
-    private final ConcurrentHashMap<String, Long> tickets = new ConcurrentHashMap<>();
+    /** 一次性票据：ticket -> 票据。 */
+    private final ConcurrentHashMap<String, Ticket> tickets = new ConcurrentHashMap<>();
     private final long stallTimeoutMs;
     private final Instant startedAt = Instant.now();
 
     private AutoCloseable eventSubscription;
 
     private HttpApiServer(HttpServer server, ExecutorService executor, ExecutorService sseExecutor,
-                          ScheduledExecutorService watchdog, String token, ApiContext context, Path webRoot,
-                          long stallTimeoutMs) {
+                          ScheduledExecutorService watchdog, AccessControl access, ApiContext context,
+                          Path webRoot, long stallTimeoutMs) {
         this.server = server;
         this.executor = executor;
         this.sseExecutor = sseExecutor;
         this.watchdog = watchdog;
-        this.token = token;
+        this.access = access;
         this.context = context;
         this.webRoot = webRoot;
         this.stallTimeoutMs = stallTimeoutMs;
     }
 
     /**
-     * 启动服务器。
+     * 启动服务器（单 token 模式）。
+     *
+     * <p>口令持有者即 {@link ApiRole#ADMIN}：整个 API 都开放。
+     * 需要分级时改用 {@link AccessControl} 版本。
+     * </p>
      *
      * @param bind    绑定地址，端口可传 0 由系统分配
      * @param token   访问令牌，不得为空
@@ -205,9 +213,38 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public static HttpApiServer start(InetSocketAddress bind, String token, ApiContext context,
                                       Path webRoot, EventBus bus, SSLContext sslContext) throws IOException {
-        if (token == null || token.isBlank()) {
-            throw new IllegalArgumentException("token must not be blank");
-        }
+        return start(bind, AccessControl.singleToken(token), context, webRoot, bus, sslContext);
+    }
+
+    /**
+     * 启动服务器，鉴权由账号集合决定。
+     *
+     * @param bind    绑定地址
+     * @param access  访问控制
+     * @param context 运行时信息
+     * @return 已启动的服务器
+     * @throws IOException 绑定失败
+     */
+    public static HttpApiServer start(InetSocketAddress bind, AccessControl access,
+                                      ApiContext context) throws IOException {
+        return start(bind, access, context, null, null, null);
+    }
+
+    /**
+     * 启动服务器，可选用 TLS，可选用多账号鉴权。
+     *
+     * @param bind       绑定地址
+     * @param access     访问控制，不得为 {@code null}
+     * @param context    运行时信息
+     * @param webRoot    静态资源根目录，{@code null} 表示不托管
+     * @param bus        事件总线，{@code null} 表示不推报文
+     * @param sslContext TLS 上下文；{@code null} 表示明文 HTTP
+     * @return 已启动的服务器
+     * @throws IOException 绑定失败
+     */
+    public static HttpApiServer start(InetSocketAddress bind, AccessControl access, ApiContext context,
+                                      Path webRoot, EventBus bus, SSLContext sslContext) throws IOException {
+        Objects.requireNonNull(access, "access");
 
         HttpServer http;
         if (sslContext == null) {
@@ -240,7 +277,7 @@ public final class HttpApiServer implements AutoCloseable {
             return thread;
         });
 
-        HttpApiServer api = new HttpApiServer(http, pool, ssePool, watchdog, token, context,
+        HttpApiServer api = new HttpApiServer(http, pool, ssePool, watchdog, access, context,
                 normalizeRoot(webRoot),
                 Long.getLong("secssim.sse.stallTimeoutMs", SSE_STALL_TIMEOUT_DEFAULT_MS));
         http.setExecutor(pool);
@@ -346,9 +383,10 @@ public final class HttpApiServer implements AutoCloseable {
 
         /*
          * 免鉴权只回答"活着吗"：探针和启动脚本只需要这个。
-         * 版本、形态、会话数、HSMS 端口要带 token 才给，避免白名单外的扫描者拿到部署信息。
+         * 版本、形态、会话数、HSMS 端口要带凭据才给，避免白名单外的扫描者拿到部署信息。
          */
-        if (!this.authorized(ex)) {
+        AccessControl.Principal principal = this.authenticate(ex);
+        if (principal == null) {
             respond(ex, 200, "{\"ok\":true,\"uptimeMs\":" + uptime + "}");
             return;
         }
@@ -356,6 +394,8 @@ public final class HttpApiServer implements AutoCloseable {
         respond(ex, 200, "{\"ok\":true"
                 + ",\"version\":\"" + json(this.context.version()) + "\""
                 + ",\"mode\":\"" + json(this.context.mode()) + "\""
+                + ",\"user\":\"" + json(principal.name()) + "\""
+                + ",\"role\":\"" + json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
                 + ",\"uptimeMs\":" + uptime
                 + this.context.extraHealthJson()
                 + "}");
@@ -364,14 +404,13 @@ public final class HttpApiServer implements AutoCloseable {
     /**
      * 签发一次性 SSE 票据。
      *
-     * <p>{@code EventSource} 不能设置请求头，只能把凭据放进 URL。直接放 token 会进
+     * <p>{@code EventSource} 不能设置请求头，只能把凭据放进 URL。直接放口令会进
      * 访问日志和浏览器历史，而且长期有效；改成 30 秒、只能用一次的票据，
      * 即使被记下来也基本无法利用。
      * </p>
      */
     private void handleTicket(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+        if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -380,13 +419,29 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         long now = System.currentTimeMillis();
-        this.tickets.entrySet().removeIf(entry -> entry.getValue() < now);
+        this.tickets.entrySet().removeIf(entry -> entry.getValue().expiresAtMs() < now);
 
         String ticket = newTicket();
-        this.tickets.put(ticket, now + TICKET_TTL.toMillis());
+        AccessControl.Principal principal = this.authenticate(ex);
+        this.tickets.put(ticket, new Ticket(now + TICKET_TTL.toMillis(), principal));
 
         respond(ex, 200, "{\"ok\":true,\"ticket\":\"" + ticket + "\""
+                + ",\"user\":\"" + json(principal.name()) + "\""
+                + ",\"role\":\"" + json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
                 + ",\"expiresInMs\":" + TICKET_TTL.toMillis() + "}");
+    }
+
+    /**
+     * 一次性票据：记录过期时刻与签发身份。
+     *
+     * <p>身份留在票据上，是为了在 SSE 建连那一刻还能说出"是谁在看报文流"——
+     * 票据本身是匿名的 URL 参数，用完即弃。
+     * </p>
+     *
+     * @param expiresAtMs 过期时刻（毫秒）
+     * @param principal   签发者
+     */
+    private record Ticket(long expiresAtMs, AccessControl.Principal principal) {
     }
 
     /** 生成票据：32 字节随机数的十六进制。 */
@@ -397,12 +452,12 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /** 消费票据：原子移除 + 过期校验，保证只能用一次。 */
-    private boolean consumeTicket(String ticket) {
+    private Ticket consumeTicket(String ticket) {
         if (ticket == null || ticket.isEmpty()) {
-            return false;
+            return null;
         }
-        Long expiry = this.tickets.remove(ticket);
-        return expiry != null && expiry >= System.currentTimeMillis();
+        Ticket value = this.tickets.remove(ticket);
+        return value != null && value.expiresAtMs() >= System.currentTimeMillis() ? value : null;
     }
 
     /** 看门狗：把长时间写不动的连接踢掉，避免占着线程和队列。 */
@@ -421,8 +476,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void handleShutdown(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+        if (!requireRole(ex, ApiRole.ADMIN)) {
             return;
         }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -538,8 +592,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void handleSessions(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+        if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -551,31 +604,36 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * 会话命令：目前只有"手动触发一个采集事件"。
+     * 会话命令：目前只有"手动触发一个采集事件"与"置位/清除报警"。
      *
-     * <p>用 POST 是因为它会改变设备状态（主机会看到一条 S6F11），不是幂等查询。
+     * <p>用 POST 是因为它会改变设备状态（主机会看到一条 S6F11 / S5F1），不是幂等查询，
+     * 因此最低角色是 {@link ApiRole#OPERATOR}。
      * </p>
      */
     private void handleSessionPath(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
-            return;
-        }
-
         if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
             this.handleSessionQuery(ex);
             return;
         }
         if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
             this.handleSessionCommand(ex);
             return;
         }
 
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
         respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
     }
 
     /**
-     * GET /api/v1/sessions/{id}/alarms 或 /terminal。
+     * GET /api/v1/sessions/{id}/alarms、/terminal 或 /catalog。
      */
     private void handleSessionQuery(HttpExchange ex) throws IOException {
         String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
@@ -594,6 +652,7 @@ public final class HttpApiServer implements AutoCloseable {
         String body = switch (parts[1]) {
             case "alarms" -> this.context.alarmsJson(parts[0]);
             case "terminal" -> this.context.terminalMessagesJson(parts[0]);
+            case "catalog" -> this.context.catalogJson(parts[0]);
             default -> null;
         };
 
@@ -605,10 +664,6 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void handleSessionCommand(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
-            return;
-        }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
@@ -683,8 +738,7 @@ public final class HttpApiServer implements AutoCloseable {
      * </p>
      */
     private void handlePreview(HttpExchange ex) throws IOException {
-        if (!this.authorized(ex)) {
-            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+        if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -782,6 +836,10 @@ public final class HttpApiServer implements AutoCloseable {
     /**
      * SSE 入口：用一次性票据鉴权（{@code EventSource} 无法带请求头），
      * 然后把长连接交给 SSE 专用池。
+     *
+     * <p>票据只能由通过鉴权的账号换取，因此持有票据即至少 {@link ApiRole#VIEWER}，
+     * 这里不再重复判角色——报文流是只读的。
+     * </p>
      */
     private void handleEvents(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -790,10 +848,14 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         String ticket = parseQuery(ex.getRequestURI().getRawQuery()).get("ticket");
-        if (!this.consumeTicket(ticket)) {
+        Ticket redeemed = consumeTicket(ticket);
+        if (redeemed == null) {
             respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
             return;
         }
+        /* 报文流能看到全部会话的收发，谁在看要留痕：这是排障时最常问的一句话 */
+        Log.info("SSE 订阅者 " + redeemed.principal().name()
+                + "（" + redeemed.principal().role().name().toLowerCase(Locale.ROOT) + "）已连接");
 
         try {
             this.sseExecutor.execute(() -> this.streamEvents(ex));
@@ -855,22 +917,40 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * 普通端点鉴权：只认 {@code Authorization: Bearer}。
+     * 普通端点鉴权：只认 {@code Authorization: Bearer}，并判定角色。
      *
      * <p>不再接受 {@code ?token=}：URL 里的长期凭据会进访问日志、浏览器历史和 Referer。
      * SSE 走一次性 ticket（见 {@link #handleTicket}）。
      * </p>
+     *
+     * <p>未认证回 401，认证通过但角色不够回 403：
+     * 两者的区别要如实告诉调用方，否则"我的口令是不是打错了"永远查不出来。
+     * </p>
+     *
+     * @param ex       交换
+     * @param required 需要的最低角色
+     * @return {@code true} 表示放行；否则已写出错误响应，调用方必须立即返回
      */
-    private boolean authorized(HttpExchange ex) {
-        String header = ex.getRequestHeaders().getFirst("Authorization");
-        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+    private boolean requireRole(HttpExchange ex, ApiRole required) throws IOException {
+        AccessControl.Principal principal = this.authenticate(ex);
+        if (principal == null) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
             return false;
         }
+        if (!principal.role().atLeast(required)) {
+            respond(ex, 403, "{\"ok\":false,\"error\":\"forbidden\",\"required\":\"" + required + "\"}");
+            return false;
+        }
+        return true;
+    }
 
-        String presented = header.substring(7).trim();
-        return MessageDigest.isEqual(
-                presented.getBytes(StandardCharsets.UTF_8),
-                this.token.getBytes(StandardCharsets.UTF_8));
+    /** 只做认证、不判角色（health 需要区分"没带凭据"和"带了凭据"）。 */
+    private AccessControl.Principal authenticate(HttpExchange ex) {
+        String header = ex.getRequestHeaders().getFirst("Authorization");
+        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return null;
+        }
+        return this.access.authenticate(header.substring(7).trim());
     }
 
     private static void respond(HttpExchange ex, int status, String body) throws IOException {
