@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -1062,10 +1063,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * SVID / RPTID / CEID 目录。
+     * SVID / RPTID / CEID 目录，<b>反映实际发出去的那一份</b>，不只是本地配置。
      *
-     * <p>直接投影编译后的 {@code ResolvedEquipment}——它是"绝对 ID → 语义"的唯一权威，
-     * 主机侧 S1F11/S2F33 的应答也从这里取，两边永远对得上。
+     * <p>取的是 {@link HostReportTable} 叠加之后的<b>有效</b>定义：主机用
+     * S2F33/S2F35 下发过的条目以主机为准（ADR-0006），没碰过的仍是本地配置。
+     * </p>
+     *
+     * <p>只列本地配置是不够的：主机完全新建一个本地没有的 RPTID 时，它一样会被发出去。
+     * 漏掉这种条目，现场就只能对着报文猜设备"哪来的这个报告"。
      * </p>
      *
      * <p>按 ID 升序：这是给人看的清单，稳定顺序才能让界面上两次刷新之间的
@@ -1076,25 +1081,42 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     public String catalogJson() {
         JsonHubBuilder b = JsonHub.getBuilder();
 
-        List<JsonHub> ceids = new ArrayList<>();
-        this.model.ceids().values().stream()
-                .sorted(Comparator.comparingInt(ResolvedCeid::id))
-                .forEach(ceid -> ceids.add(b.object(
-                        b.pair("ceid", ceid.id()),
-                        b.pair("owner", ceid.owner()),
-                        b.pair("slot", ceid.slot()),
-                        b.pair("reports", b.array(ceid.reportIds().stream()
-                                .map(b::number).map(n -> (JsonHub) n).toList())))));
+        /* 本地配置 + 主机新建的条目，键是绝对 ID */
+        Map<Integer, ResolvedReport> reports = new TreeMap<>(this.model.reports());
+        Map<Integer, ResolvedCeid> ceids = new TreeMap<>(this.model.ceids());
 
-        List<JsonHub> reports = new ArrayList<>();
-        this.model.reports().values().stream()
-                .sorted(Comparator.comparingInt(ResolvedReport::id))
-                .forEach(report -> reports.add(b.object(
-                        b.pair("rptid", report.id()),
-                        b.pair("owner", report.owner()),
-                        b.pair("slot", report.slot()),
-                        b.pair("svids", b.array(report.svidIds().stream()
-                                .map(b::number).map(n -> (JsonHub) n).toList())))));
+        List<Integer> hostCeids = new ArrayList<>(this.hostReports.definedCeids());
+        for (int ceidId : hostCeids) {
+            ceids.computeIfAbsent(ceidId, id -> new ResolvedCeid(id, "", "", List.of()));
+        }
+        List<Integer> hostRptids = new ArrayList<>(this.hostReports.definedRptids());
+        for (int rptid : hostRptids) {
+            reports.computeIfAbsent(rptid, id -> new ResolvedReport(id, "", "", List.of()));
+        }
+
+        List<JsonHub> reportItems = new ArrayList<>();
+        for (ResolvedReport report : reports.values()) {
+            /* 主机定义过就以主机为准，否则回落到本地配置 */
+            List<Integer> effective = this.hostReports.svidsOf(report.id()).orElse(report.svidIds());
+            reportItems.add(b.object(
+                    b.pair("rptid", report.id()),
+                    b.pair("owner", report.owner()),
+                    b.pair("slot", report.slot()),
+                    b.pair("svids", b.array(numbers(b, effective))),
+                    b.pair("source", this.hostReports.svidsOf(report.id()).isPresent() ? "host" : "local")));
+        }
+
+        List<JsonHub> ceidItems = new ArrayList<>();
+        for (ResolvedCeid ceid : ceids.values()) {
+            List<Integer> effective = this.hostReports.reportsFor(ceid.id()).orElse(ceid.reportIds());
+            ceidItems.add(b.object(
+                    b.pair("ceid", ceid.id()),
+                    b.pair("owner", ceid.owner()),
+                    b.pair("slot", ceid.slot()),
+                    b.pair("reports", b.array(numbers(b, effective))),
+                    b.pair("source", this.hostReports.reportsFor(ceid.id()).isPresent() ? "host" : "local"),
+                    b.pair("enabled", this.hostReports.isEnabled(ceid.id()))));
+        }
 
         List<JsonHub> svids = new ArrayList<>();
         this.model.svids().values().stream()
@@ -1107,9 +1129,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                         b.pair("unit", svid.unitSymbol()))));
 
         return b.object(
-                b.pair("ceids", b.array(ceids)),
-                b.pair("reports", b.array(reports)),
-                b.pair("svids", b.array(svids))).toJson();
+                b.pair("ceids", b.array(ceidItems)),
+                b.pair("reports", b.array(reportItems)),
+                b.pair("svids", b.array(svids)),
+                b.pair("hostReports", this.hostReports.reportCount()),
+                b.pair("hostLinks", this.hostReports.linkCount()),
+                b.pair("hostAllDisabled", this.hostReports.isAllDisabled())).toJson();
+    }
+
+    /** 整数列表转 JSON 数组。 */
+    private static List<JsonHub> numbers(JsonHubBuilder b, List<Integer> values) {
+        return values.stream().map(b::number).map(n -> (JsonHub) n).toList();
     }
 
     /**

@@ -146,4 +146,26 @@ public final class HostReportTable {
     public boolean isAllDisabled() {
         return this.allDisabled;
     }
+
+    /**
+     * 主机定义过的报告 ID 快照。
+     *
+     * <p>返回快照而不是 live 视图：调用方多半要遍历并渲染成 JSON，
+     * 拿到的是"某一刻的主机定义"比"边遍历边变化"可预期得多。
+     * </p>
+     *
+     * @return 报告 ID 副本
+     */
+    public Set<Integer> definedRptids() {
+        return Set.copyOf(this.reports.keySet());
+    }
+
+    /**
+     * 主机定义过链接的事件 ID 快照。
+     *
+     * @return CEID 副本
+     */
+    public Set<Integer> definedCeids() {
+        return Set.copyOf(this.links.keySet());
+    }
 }

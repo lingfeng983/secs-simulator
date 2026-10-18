@@ -6,9 +6,9 @@
 （json 110 / protocol 45 / core 90 / app 25 / api-http 37 / runtime 17 / cli 46）。
 
 > **2026-10-18 更新**：在其后完成 M10 安全边界的最后一块——SERVER 账号/角色鉴权
-> （ADR-0007），并把角色分级接到前端、补上 SVID/CEID/RPTID 目录接口。
-> 当前 `master @ eea1332` + 本轮改动 = **404 个测试全绿**
-> （json 110 / protocol 45 / core 90 / app 25 / api-http 61 / runtime 24 / cli 49）。
+> （ADR-0007），并把角色分级接到前端、补上 SVID/CEID/RPTID 目录接口与主机覆盖来源标注。
+> 当前 `master @ 7deba69` + 本轮改动 = **406 个测试全绿**
+> （json 110 / protocol 45 / core 90 / app 25 / api-http 61 / runtime 24 / cli 51）。
 
 本清单分三类：
 
@@ -79,8 +79,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **前端只有 Canvas 包络 + 均值线**：没有缩放、游标读数、多轴，也没有 uPlot。
 - [ ] **报文不落盘**：面板只保留 200 条，没有 `messages.jsonl`、回放、导出。
 - [ ] **没有手动发送 SML/SECS 报文**：`templates/sml/**` 样例未被任何代码/测试引用。
-- [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，直接投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取。
-- [ ] **没有报警/终端消息/主机动态报告面板**：`hostReports` / `hostLinks` 计数在 JSON 里，但界面没展示；ADR-0006 要求的“报告来自本地还是主机”没有做。
+- [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取并每 2 秒轮询（主机随时可能改定义）。
+- [x] **没有报警/终端消息/主机动态报告面板**：报警与终端消息面板上一轮已落地；主机动态报告并入「设备目录」——每条报告/事件标 `source`（local/host），CEID 标 `enabled`，并暴露 `hostReports` / `hostLinks` / `hostAllDisabled`。ADR-0006 要求的"报告来自本地还是主机"已兑现，且目录反映的是**实际发出去的那一份**（含主机新建、本地不存在的 RPTID）。
 - [ ] **没有会话生命周期操作**：创建/关闭/重开/重载配置都没有。
 - [ ] **没有前端测试**：`frontend/package.json` 没有 test 脚本；CI 只跑 `tsc --noEmit` + `vite build`。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。

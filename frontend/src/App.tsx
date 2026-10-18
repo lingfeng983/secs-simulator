@@ -350,6 +350,10 @@ export function App(): JSX.Element {
   /*
    * 设备目录：CEID 的号段按单元独立，跨会话复用编号会指错事件，
    * 所以目录必须跟着选中的会话换。
+   *
+   * 而且要轮询：主机随时可能用 S2F33/S2F35/S2F37 改定义，
+   * 只在切换时拉一次的话，"来源"列会一直停在"本地"，
+   * 恰好在最需要它的时候说谎。
    */
   useEffect(() => {
     if (client === null || catalogSession === '') {
@@ -372,8 +376,10 @@ export function App(): JSX.Element {
     };
 
     void load();
+    const timer = window.setInterval(load, 2000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [client, catalogSession]);
 
@@ -706,6 +712,13 @@ export function App(): JSX.Element {
               CEID / RPTID / SVID 的号段按单元独立，不同会话之间不能照搬。
             </span>
           </div>
+          {catalog !== null && (catalog.hostReports! > 0 || catalog.hostLinks! > 0 || catalog.hostAllDisabled) && (
+            <p className="hint">
+              主机已下发 {catalog.hostReports} 条报告定义、{catalog.hostLinks} 条事件链接
+              {catalog.hostAllDisabled ? '，并把全部事件上报关掉了（S2F37）' : ''}；
+              下面标了「主机」的条目就是主机覆盖过的配置（ADR-0006）。
+            </p>
+          )}
 
           <h3>采集事件（CEID）</h3>
           <table>
@@ -715,6 +728,7 @@ export function App(): JSX.Element {
                 <th>归属</th>
                 <th>名称</th>
                 <th>携带报告</th>
+                <th>来源</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -722,9 +736,13 @@ export function App(): JSX.Element {
               {(catalog?.ceids ?? []).map((entry) => (
                 <tr key={entry.ceid}>
                   <td>{entry.ceid}</td>
-                  <td>{entry.owner}</td>
-                  <td>{entry.slot}</td>
+                  <td>{entry.owner || '-'}</td>
+                  <td>{entry.slot || '-'}</td>
                   <td>{entry.reports.join(', ') || '-'}</td>
+                  <td>
+                    {entry.source === 'host' ? '主机' : '本地'}
+                    {entry.enabled === false ? '（已禁用）' : ''}
+                  </td>
                   <td>
                     <button
                       type="button"
@@ -739,7 +757,7 @@ export function App(): JSX.Element {
               ))}
               {(catalog === null || catalog.ceids.length === 0) && (
                 <tr>
-                  <td colSpan={5} className="hint">
+                  <td colSpan={6} className="hint">
                     {catalog === null ? '该会话没有提供目录' : '该会话没有定义采集事件'}
                   </td>
                 </tr>
@@ -755,20 +773,22 @@ export function App(): JSX.Element {
                 <th>归属</th>
                 <th>名称</th>
                 <th>变量</th>
+                <th>来源</th>
               </tr>
             </thead>
             <tbody>
               {(catalog?.reports ?? []).map((entry) => (
                 <tr key={entry.rptid}>
                   <td>{entry.rptid}</td>
-                  <td>{entry.owner}</td>
-                  <td>{entry.slot}</td>
+                  <td>{entry.owner || '-'}</td>
+                  <td>{entry.slot || '-'}</td>
                   <td>{entry.svids.join(', ') || '-'}</td>
+                  <td>{entry.source === 'host' ? '主机' : '本地'}</td>
                 </tr>
               ))}
               {(catalog === null || catalog.reports.length === 0) && (
                 <tr>
-                  <td colSpan={4} className="hint">
+                  <td colSpan={5} className="hint">
                     {catalog === null ? '该会话没有提供目录' : '该会话没有定义报告'}
                   </td>
                 </tr>

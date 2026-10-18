@@ -100,6 +100,62 @@ class SessionDynamicReportTest {
         }
     }
 
+    /**
+     * 目录必须反映<b>实际发出去的那一份</b>，而不是只把本地配置抄一遍。
+     *
+     * <p>这是 ADR-0006 留在"后果"里的那条：界面要能看出报告来自本地还是主机。
+     * 关键在主机<b>新建</b>本地没有的 RPTID —— 它一样会被发出去，
+     * 只列本地配置的话，现场只能对着报文猜设备"哪来的这个报告"。
+     * </p>
+     */
+    @Test
+    void catalogReflectsHostOverlayRatherThanJustLocalConfig() throws Exception {
+        try (Fixture f = new Fixture()) {
+            String before = f.session.catalogJson();
+            assertTrue(before.contains("\"hostReports\":0"), before);
+            assertTrue(before.contains("{\"rptid\":3001,\"owner\":\"CH1\",\"slot\":\"STATUS\","
+                    + "\"svids\":[1090,1001,1003],\"source\":\"local\"}"),
+                    "未下发时 3001 是本地定义: " + before);
+
+            /* 主机新建一个本地没有的 RPTID，并把它挂到 2001 */
+            assertEquals(0, f.defineReport(5000, List.of(1001)), "DRACK=0");
+            assertEquals(0, f.linkEvent(2001, List.of(5000)), "LRACK=0");
+
+            String after = f.session.catalogJson();
+            assertTrue(after.contains("{\"rptid\":5000,\"owner\":\"\",\"slot\":\"\","
+                    + "\"svids\":[1001],\"source\":\"host\"}"),
+                    "主机新建的报告必须出现在目录里: " + after);
+            assertTrue(after.contains("{\"ceid\":2001,\"owner\":\"CH1\",\"slot\":\"PROCESS_START\","
+                    + "\"reports\":[5000],\"source\":\"host\",\"enabled\":true}"),
+                    "CEID 的有效报告应被主机链接覆盖: " + after);
+            assertTrue(after.contains("\"hostReports\":1"), after);
+            assertTrue(after.contains("\"hostLinks\":1"), after);
+
+            /* 清空后要回落到本地，否则目录会一直说谎 */
+            assertEquals(0, f.defineReport(-1, List.of()), "清空报告定义");
+            assertEquals(0, f.linkEvent(-1, List.of()), "清空事件链接");
+
+            String cleared = f.session.catalogJson();
+            assertTrue(cleared.contains("\"reports\":[3001],\"source\":\"local\""), cleared);
+            assertTrue(cleared.contains("\"hostReports\":0"), cleared);
+        }
+    }
+
+    /** S2F37 禁用事件后，目录要标出来——否则界面上的"可上报"是假的。 */
+    @Test
+    void catalogMarksDisabledEvents() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertEquals(0, f.setEnabled(false, List.of(2001)), "ERACK=0");
+
+            String json = f.session.catalogJson();
+            assertTrue(json.contains("{\"ceid\":2001,\"owner\":\"CH1\",\"slot\":\"PROCESS_START\","
+                    + "\"reports\":[3001],\"source\":\"local\",\"enabled\":false}"), json);
+            assertTrue(json.contains("{\"ceid\":2101,\"owner\":\"CH2\",\"slot\":\"PROCESS_START\","
+                    + "\"reports\":[3101],\"source\":\"local\",\"enabled\":true}"),
+                    "只禁用了 2001，另一个单元不受影响: " + json);
+        }
+    }
+
     /** 会话 + 客户端夹具。 */
     private static final class Fixture implements AutoCloseable {
 

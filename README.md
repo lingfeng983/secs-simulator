@@ -130,17 +130,26 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 `GET /api/v1/sessions/{id}/catalog` 把"绝对 ID → 语义"的映射摊开：
 
 ```json
-{"ceids":   [{"ceid":2001,"owner":"CH1","slot":"PROCESS_START","reports":[3001]}],
- "reports": [{"rptid":3001,"owner":"CH1","slot":"STATUS","svids":[1090,1001]}],
- "svids":   [{"svid":1001,"owner":"CH1","slot":"TEMP_PV","type":"F4","unit":"C"}]}
+{"ceids":   [{"ceid":2001,"owner":"CH1","slot":"PROCESS_START",
+              "reports":[3001],"source":"local","enabled":true}],
+ "reports": [{"rptid":3001,"owner":"CH1","slot":"STATUS",
+              "svids":[1090,1001],"source":"local"}],
+ "svids":   [{"svid":1001,"owner":"CH1","slot":"TEMP_PV","type":"F4","unit":"C"}],
+ "hostReports": 0, "hostLinks": 0, "hostAllDisabled": false}
 ```
 
 - 主机侧报文里只有数字，而"2001 是哪个事件"只有设备知道；目录让界面上不用再让人猜。
-- 数据直接投影编译后的 `ResolvedEquipment`——它和 S1F11/S2F33 应答取的是同一份，
+- **`source` 标的是"实际发出去的那一份"**：`host` 表示被主机的 S2F33/S2F35 覆盖过
+  （ADR-0006 规定主机优先），`local` 表示仍是本地配置。
+- **主机新建、本地没有的 RPTID 也会出现在目录里** —— 它一样会被发出去，
+  只列本地配置的话，现场只能对着报文猜设备"哪来的这个报告"。
+- `enabled: false` 表示该事件被 S2F37 禁用（直接丢弃、不缓存）。
+- 数据直接投影编译后的 `ResolvedEquipment`，与 S1F11/S2F33 应答同源，
   **报告里 SVID 的顺序也与 S6F11 实际组包一致**（`injectUnitId` 会把 `UNIT_ID` 顶到首位）。
 - **号段按单元独立**：演示设备的 CH1 起始 CEID 是 2001、CH2 是 2101，
   所以目录必须按会话取，跨设备照搬编号会指错事件。
-- 界面用目录里的 CEID 填入上报框，ALID 不在此列——报警不是配置项，是运行时自由编号。
+- 界面用目录里的 CEID 填入上报框；ALID 不在此列——报警不是配置项，是运行时自由编号。
+- 目录每 2 秒轮询一次：主机随时可能改定义，只在切换时拉一次会让"来源"列一直停在"本地"。
 
 ## 前端
 

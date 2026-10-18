@@ -116,6 +116,10 @@ export interface CatalogCeid {
   owner: string;
   slot: string;
   reports: number[];
+  /** 有效定义来自主机（S2F35）还是本地配置。 */
+  source?: 'local' | 'host';
+  /** 是否被 S2F37 禁用。禁用的事件直接丢弃、不缓存。 */
+  enabled?: boolean;
 }
 
 /** 目录里的一个报告定义。 */
@@ -124,6 +128,8 @@ export interface CatalogReport {
   owner: string;
   slot: string;
   svids: number[];
+  /** 有效 VID 列表来自主机（S2F33）还是本地配置。 */
+  source?: 'local' | 'host';
 }
 
 /** 目录里的一个 SVID。 */
@@ -139,11 +145,17 @@ export interface CatalogSvid {
  * 设备目录：把"绝对 ID → 语义"的映射摊开。
  *
  * 每个单元有独立的 CEID 号段，所以目录必须按会话取，不能跨设备复用。
+ * 报告与事件的来源已按主机覆盖层算好（ADR-0006），看到的就是实际发出去的那份。
  */
 export interface Catalog {
   ceids: CatalogCeid[];
   reports: CatalogReport[];
   svids: CatalogSvid[];
+  /** 主机定义的报告数 / 链接数。 */
+  hostReports?: number;
+  hostLinks?: number;
+  /** 主机是否把全部事件上报关掉了（S2F37）。 */
+  hostAllDisabled?: boolean;
 }
 
 export const EMPTY_CATALOG: Catalog = { ceids: [], reports: [], svids: [] };
@@ -266,12 +278,15 @@ export function createClient(token: string): ApiClient {
       const body = await json<Partial<Catalog>>(
         await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`, { headers: auth }),
       );
-      /* 三个数组都要兜底：老后端没有 catalog 端点时缺字段，缺了就当空目录，
+      /* 每个字段都要兜底：老后端没有 catalog 端点时缺字段，缺了就当默认值，
          总比整个面板崩掉强 */
       return {
         ceids: body.ceids ?? [],
         reports: body.reports ?? [],
         svids: body.svids ?? [],
+        hostReports: body.hostReports ?? 0,
+        hostLinks: body.hostLinks ?? 0,
+        hostAllDisabled: body.hostAllDisabled ?? false,
       };
     },
     async preview(sessionId, fromMs, toMs, buckets) {

@@ -184,9 +184,10 @@ class ConfigDrivenSessionTest {
 
         String json = session.catalogJson();
 
-        assertTrue(json.contains("{\"ceid\":2001,\"owner\":\"CH5\",\"slot\":\"PROCESS_START\",\"reports\":[3001]}"),
-                json);
-        assertTrue(json.contains("{\"rptid\":3001,\"owner\":\"CH5\",\"slot\":\"STATUS\",\"svids\":[1090,1001]}"),
+        assertTrue(json.contains("{\"ceid\":2001,\"owner\":\"CH5\",\"slot\":\"PROCESS_START\","
+                + "\"reports\":[3001],\"source\":\"local\",\"enabled\":true}"), json);
+        assertTrue(json.contains("{\"rptid\":3001,\"owner\":\"CH5\",\"slot\":\"STATUS\","
+                + "\"svids\":[1090,1001],\"source\":\"local\"}"),
                 "报告内 SVID 顺序应与 S6F11 组包一致（UNIT_ID 在前）: " + json);
         assertTrue(json.contains("{\"svid\":1001,\"owner\":\"CH5\",\"slot\":\"TEMP_PV\",\"type\":\"F4\",\"unit\":\"C\"}"),
                 json);
