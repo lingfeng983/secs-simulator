@@ -160,6 +160,25 @@ export interface Catalog {
 
 export const EMPTY_CATALOG: Catalog = { ceids: [], reports: [], svids: [] };
 
+/** 配置目录里的一个配置文件。 */
+export interface ConfigEntry {
+  name: string;
+  sizeBytes: number;
+  modifiedMs: number;
+}
+
+/** 校验结果：valid 为假时 problems 里是具体哪里错了。 */
+export interface ConfigProblems {
+  valid: boolean;
+  problems: string[];
+}
+
+/** 保存结果：状态码 + 问题清单（422 时非空）。 */
+export interface ConfigSaveResult {
+  status: number;
+  problems: string[];
+}
+
 export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;
@@ -176,6 +195,16 @@ export interface ApiClient {
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  /** 配置目录列表。 */
+  configs(): Promise<ConfigEntry[]>;
+  /** 新建一份配置（后端生成能直接编译的骨架）。 */
+  createConfig(name: string): Promise<number>;
+  /** 读一份配置的原始文本。 */
+  configText(name: string): Promise<string>;
+  /** 只校验不落盘。 */
+  validateConfig(name: string, text: string): Promise<ConfigProblems>;
+  /** 校验通过后落盘。 */
+  saveConfig(name: string, text: string): Promise<ConfigSaveResult>;
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
   eventsUrl(ticket: string): string;
@@ -334,6 +363,60 @@ export function createClient(token: string): ApiClient {
         await fetch('/api/v1/ticket', { method: 'POST', headers: auth }),
       );
       return body.ticket;
+    },
+    async configs() {
+      const body = await json<{ configs?: ConfigEntry[] }>(
+        await fetch('/api/v1/configs', { headers: auth }),
+      );
+      return body.configs ?? [];
+    },
+    async createConfig(name) {
+      const response = await fetch('/api/v1/configs', {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ name }),
+      });
+      return command(response);
+    },
+    async configText(name) {
+      const body = await json<{ name?: string; text?: string }>(
+        await fetch(`/api/v1/configs/${encodeURIComponent(name)}`, { headers: auth }),
+      );
+      return body.text ?? '';
+    },
+    async validateConfig(name, text) {
+      const body = await json<ConfigProblems>(
+        await fetch(`/api/v1/configs/${encodeURIComponent(name)}/validate`, {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+          body: text,
+        }),
+      );
+      return { valid: body.valid ?? false, problems: body.problems ?? [] };
+    },
+    async saveConfig(name, text) {
+      const response = await fetch(`/api/v1/configs/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+        body: text,
+      });
+
+      if (response.status === 401) {
+        throw new Error('401 未授权：token 无效或缺失');
+      }
+      if (response.status === 403) {
+        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
+      }
+
+      /* 失败响应也带 problems，尽量把它带回来；解析不了就当没有 */
+      let problems: string[] = [];
+      try {
+        const body = (await response.json()) as { problems?: string[] };
+        problems = body.problems ?? [];
+      } catch {
+        /* 非 JSON 响应（网关错误页等）没有可带回来的问题 */
+      }
+      return { status: response.status, problems };
     },
     eventsUrl(ticket) {
       return `/api/v1/events?ticket=${encodeURIComponent(ticket)}`;

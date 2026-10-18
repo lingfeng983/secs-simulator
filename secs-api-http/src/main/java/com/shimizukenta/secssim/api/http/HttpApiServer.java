@@ -12,6 +12,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -40,7 +41,7 @@ import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 
 /**
- * 极简 HTTP/HTTPS API：健康检查、会话、曲线预览、SSE 报文流、静态前端、优雅停机。
+ * 极简 HTTP/HTTPS API：健康检查、会话、配置、曲线预览、SSE 报文流、静态前端、优雅停机。
  *
  * <p>只依赖 JDK 自带 {@code com.sun.net.httpserver}，不引入 Web 框架：
  * 这个后端的 API 面积很小，而框架会把原生镜像从 13MB 撑到 100MB 以上。
@@ -78,6 +79,15 @@ public final class HttpApiServer implements AutoCloseable {
 
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
+
+    /** 配置目录列表路径。 */
+    public static final String PATH_CONFIGS = "/api/v1/configs";
+
+    /** 单份配置路径前缀（{@code /api/v1/configs/{name}}）。 */
+    public static final String PATH_CONFIG_PREFIX = "/api/v1/configs/";
+
+    /** 只校验不落盘的子路径。 */
+    private static final String PATH_VALIDATE_SUFFIX = "validate";
 
     /** 一次性 SSE 票据路径（POST，需 Bearer）。 */
     public static final String PATH_TICKET = "/api/v1/ticket";
@@ -121,6 +131,16 @@ public final class HttpApiServer implements AutoCloseable {
 
     /** 请求体上限：创建会话只需要一个配置名，给 4 KiB 已经很宽裕。 */
     private static final int MAX_BODY_BYTES = 4096;
+
+    /**
+     * 配置正文上限。
+     *
+     * <p>和 {@link #MAX_BODY_BYTES} 分开：配置正文是一整份设备定义，
+     * 几百字节的设备还能编，真实的多腔体配置轻松几十 KB。
+     * 给到 256 KiB 已经远超任何真实配置，又能挡住"上传一个 1 GiB 文件"的客户端。
+     * </p>
+     */
+    private static final int MAX_CONFIG_BYTES = 256 * 1024;
 
     private final HttpServer server;
     private final ExecutorService executor;
@@ -295,6 +315,8 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_SHUTDOWN, api::handleShutdown);
         http.createContext(PATH_SESSIONS, api::handleSessions);
         http.createContext(PATH_SESSION_PREFIX, api::handleSessionPath);
+        http.createContext(PATH_CONFIGS, api::handleConfigs);
+        http.createContext(PATH_CONFIG_PREFIX, api::handleConfigPath);
         http.createContext(PATH_PREVIEW, api::handlePreview);
 
         if (api.webRoot != null) {
@@ -664,19 +686,257 @@ public final class HttpApiServer implements AutoCloseable {
      * 读请求体，带上限。
      *
      * <p>不给上限的话，一个失控的客户端可以让内存先于服务挂掉；
-     * 这个端点只需要几十字节的配置名。
+     * 创建会话这个端点只需要几十字节的配置名。
      * </p>
      *
      * @return 正文；超过上限返回 {@code null}
      */
     private static String readBody(HttpExchange ex) throws IOException {
+        return readBody(ex, MAX_BODY_BYTES);
+    }
+
+    /**
+     * 读请求体，带上限。
+     *
+     * @param ex    交换
+     * @param limit 字节上限
+     * @return 正文；超过上限返回 {@code null}
+     * @throws IOException 读失败
+     */
+    private static String readBody(HttpExchange ex, int limit) throws IOException {
         try (var in = ex.getRequestBody()) {
-            byte[] bytes = in.readNBytes(MAX_BODY_BYTES + 1);
-            if (bytes.length > MAX_BODY_BYTES) {
+            byte[] bytes = in.readNBytes(limit + 1);
+            if (bytes.length > limit) {
                 return null;
             }
             return new String(bytes, StandardCharsets.UTF_8);
         }
+    }
+
+    /**
+     * GET /api/v1/configs：配置目录列表。
+     *
+     * <p>POST 同一个路径是"新建"：给个文件名，后端生成一份能直接编译的骨架。
+     * 新建与保存分开，是因为两者的语义完全不同——
+     * 新建是"给我一个起点"，保存是"把这段内容写成这样"。
+     * </p>
+     */
+    private void handleConfigs(HttpExchange ex) throws IOException {
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, "{\"configs\":" + this.context.configsJson() + "}");
+            return;
+        }
+
+        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.createConfig(ex);
+            return;
+        }
+
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /**
+     * POST /api/v1/configs：新建一份配置。
+     *
+     * <p>体是 {@code {"name":"新配置.json"}}。
+     * </p>
+     */
+    private void createConfig(HttpExchange ex) throws IOException {
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        String name = newConfigNameFrom(body);
+        if (name == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"missing-name\"}");
+            return;
+        }
+
+        ConfigResult result = this.context.createConfig(name);
+        switch (result.outcome()) {
+            case OK -> respond(ex, 201, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
+            case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"config-exists\"}");
+            /* 名字非法要说清是哪个名字、为什么不行，不能笼统回一句"创建失败" */
+            case NOT_FOUND, INVALID -> respond(ex, 400, problemsJson(false, result.problems()));
+            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"create-failed\"}");
+        }
+    }
+
+    /** 从请求体里取 name 字段；体不是对象或没有该字段时返回 {@code null}。 */
+    private static String newConfigNameFrom(String body) {
+        try {
+            com.shimizukenta.jsonhub.JsonHub root =
+                    com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+            if (!root.isObject()) {
+                return null;
+            }
+            return root.get("name").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 单份配置的读取、校验与保存。
+     *
+     * <p>读是 {@link ApiRole#VIEWER}；保存是 {@link ApiRole#OPERATOR}：
+     * 配置决定了下一台设备长什么样，改它属于"会改变设备状态"的那一类，
+     * 和触发 CEID、增删会话同属一级。
+     * </p>
+     */
+    private void handleConfigPath(HttpExchange ex) throws IOException {
+        if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.saveConfig(ex);
+            return;
+        }
+
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            this.readConfig(ex);
+            return;
+        }
+        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            this.validateConfig(ex);
+            return;
+        }
+
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /**
+     * GET /api/v1/configs/{name}：回原文。
+     *
+     * <p>回的是<b>原文</b>而不是模型反序列化结果：编辑器必须看到用户写的每一个键。
+     * </p>
+     */
+    private void readConfig(HttpExchange ex) throws IOException {
+        String name = configNameFromPath(ex);
+        if (name == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        String text = this.context.configText(name);
+        if (text == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+
+        respond(ex, 200, "{\"name\":\"" + json(name) + "\",\"text\":\"" + json(text) + "\"}");
+    }
+
+    /**
+     * POST /api/v1/configs/{name}/validate：只校验不落盘。
+     *
+     * <p>和"保存"分开，是因为保存一步就写盘了。用户想先确认自己这份改动能不能编译，
+     * 不该被迫先覆盖一份能用的配置。
+     * </p>
+     */
+    private void validateConfig(HttpExchange ex) throws IOException {
+        String name = configNameFromPath(ex);
+        if (name == null || !isValidatePath(ex)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        String text = readBody(ex, MAX_CONFIG_BYTES);
+        if (text == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        List<String> problems = this.context.validateConfig(text);
+        respond(ex, 200, problemsJson(problems.isEmpty(), problems));
+    }
+
+    /**
+     * PUT /api/v1/configs/{name}：校验通过后原子落盘。
+     *
+     * <p>请求体就是配置原文，不包一层 JSON 包装：
+     * 编辑器里那份文本应当能原样发出去、原样存回来，中间任何一层转义都只会制造差异。
+     * </p>
+     */
+    private void saveConfig(HttpExchange ex) throws IOException {
+        String name = configNameFromPath(ex);
+        if (name == null || isValidatePath(ex)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        String text = readBody(ex, MAX_CONFIG_BYTES);
+        if (text == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        ConfigResult result = this.context.saveConfig(name, text);
+        switch (result.outcome()) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
+            /* 内容不合法用 422：请求本身没毛病，是内容过不了关，和 400 的"body 坏了"不是一回事 */
+            case INVALID -> respond(ex, 422, problemsJson(false, result.problems()));
+            /* 名字非法：这是请求字段的问题，不是"文件没找到" */
+            case NOT_FOUND -> respond(ex, 400, problemsJson(false, result.problems()));
+            case FAILED -> respond(ex, 500, problemsJson(false, result.problems()));
+        }
+    }
+
+    /** 问题清单的 JSON。 */
+    private static String problemsJson(boolean valid, List<String> problems) {
+        StringBuilder sb = new StringBuilder("{\"ok\":").append(valid)
+                .append(",\"valid\":").append(valid)
+                .append(",\"problems\":[");
+        for (int i = 0; i < problems.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(json(problems.get(i))).append('"');
+        }
+        return sb.append("]}").toString();
+    }
+
+    /** 取路径里的配置名；形状不对时返回 {@code null}。 */
+    private static String configNameFromPath(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        if (path == null || !path.startsWith(PATH_CONFIG_PREFIX)) {
+            return null;
+        }
+
+        String rest = path.substring(PATH_CONFIG_PREFIX.length());
+        if (rest.isEmpty()) {
+            return null;
+        }
+
+        String[] parts = rest.split("/");
+        if (parts.length == 1 && !parts[0].isEmpty()) {
+            return decode(parts[0]);
+        }
+        if (parts.length == 2 && !parts[0].isEmpty() && PATH_VALIDATE_SUFFIX.equals(parts[1])) {
+            return decode(parts[0]);
+        }
+        return null;
+    }
+
+    /** 请求是否打在校验子路径上。 */
+    private static boolean isValidatePath(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        return path != null && path.endsWith("/" + PATH_VALIDATE_SUFFIX);
     }
 
     /**

@@ -6,12 +6,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
 import javax.net.ssl.SSLContext;
 
 import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
+import com.shimizukenta.secssim.api.http.ConfigOutcome;
+import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -114,6 +117,9 @@ public final class Main {
          */
         SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
 
+        /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
+        ConfigStore configStore = new ConfigStore(options.workDir());
+
         if (options.configFile() != null) {
             int code = startConfiguredSession(options, launcher);
             if (code != 0) {
@@ -137,7 +143,7 @@ public final class Main {
         }
 
         ApiContext context = new Context(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher);
+                extra.toString(), stopped::countDown, sessions, launcher, configStore);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
@@ -281,15 +287,17 @@ public final class Main {
         private final Runnable shutdown;
         private final SessionManager sessions;
         private final SessionLauncher launcher;
+        private final ConfigStore configs;
 
         Context(String mode, String version, String extraHealthJson, Runnable shutdown,
-                SessionManager sessions, SessionLauncher launcher) {
+                SessionManager sessions, SessionLauncher launcher, ConfigStore configs) {
             this.mode = mode;
             this.version = version;
             this.extraHealthJson = extraHealthJson;
             this.shutdown = shutdown;
             this.sessions = sessions;
             this.launcher = launcher;
+            this.configs = configs;
         }
 
         @Override
@@ -424,6 +432,64 @@ public final class Main {
             } catch (IOException e) {
                 Log.error("重载失败（端口绑定）: " + e.getMessage(), null);
                 return SessionOutcome.FAILED;
+            }
+        }
+
+        @Override
+        public String configsJson() {
+            return this.configs.listJson();
+        }
+
+        @Override
+        public String configText(String name) {
+            try {
+                return this.configs.read(name);
+            } catch (ConfigException e) {
+                /* 名字非法与文件不存在都归到"取不到"，界面只需知道这份打不开 */
+                return null;
+            } catch (IOException e) {
+                Log.error("读取配置失败: " + name, e);
+                return null;
+            }
+        }
+
+        @Override
+        public List<String> validateConfig(String text) {
+            return ConfigStore.validate(text);
+        }
+
+        @Override
+        public ConfigResult saveConfig(String name, String text) {
+            ConfigResult result = this.configs.save(name, text);
+            if (result.outcome() == ConfigOutcome.OK) {
+                this.warnStaleSessions(name);
+            }
+            return result;
+        }
+
+        @Override
+        public ConfigResult createConfig(String name) {
+            ConfigResult result = this.configs.create(name);
+            if (result.outcome() == ConfigOutcome.OK) {
+                Log.info("新建配置 " + name);
+            }
+            return result;
+        }
+
+        /**
+         * 提示"存了但没生效"。
+         *
+         * <p>会话是在启动那一刻读配置读进内存的，之后再改文件它不会自己变。
+         * 用户改完配置发现设备行为没变，第一反应是"编辑器根本没存"。
+         * 这里直接把还要重载哪个会话说清楚，比让人自己猜要省事。
+         * </p>
+         */
+        private void warnStaleSessions(String name) {
+            for (SessionRuntime session : this.sessions.list()) {
+                Path source = this.launcher.sourceOf(session.id()).orElse(null);
+                if (source != null && source.getFileName().toString().equals(name.trim())) {
+                    Log.info("配置已改，但会话 " + session.id() + " 仍在用旧配置，重载后才生效");
+                }
             }
         }
     }

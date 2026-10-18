@@ -1,7 +1,6 @@
 package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -45,9 +44,6 @@ import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
  * </p>
  */
 public final class SessionLauncher {
-
-    /** 配置文件名后缀。 */
-    private static final String CONFIG_SUFFIX = ".json";
 
     /** 请求里代表"建一个内置演示会话"的关键字。 */
     public static final String DEMO = "demo";
@@ -237,23 +233,13 @@ public final class SessionLauncher {
     /**
      * 校验配置文件名。
      *
-     * <p>只允许文件名，不允许任何分隔符或上级引用——接口给的只是一个名字，
-     * 不是一条路径。
+     * <p>规则与 {@link ConfigStore} 完全一致（就调它那份）：
+     * 接口建会话和接口保存配置走的是同一个目录，两处各写一份校验，
+     * 迟早会出现"这里能读、那里读不了"这种只在一条路径上复现的问题。
      * </p>
      */
-    private static String resolveConfigName(String name) {
-        if (!name.endsWith(CONFIG_SUFFIX)) {
-            throw new ConfigException("$.config", "必须是 " + CONFIG_SUFFIX + " 文件");
-        }
-        if (name.contains("/") || name.contains("\\") || name.contains("..") || name.contains(":")) {
-            throw new ConfigException("$.config", "只能是 --work-dir 下的文件名，不能带路径");
-        }
-        try {
-            Path.of(name);
-        } catch (InvalidPathException e) {
-            throw new ConfigException("$.config", "不是合法的文件名");
-        }
-        return name;
+    private static String resolveConfigName(String name) throws ConfigException {
+        return ConfigStore.requireFileName(name, "$.config");
     }
 
     /** 已组装好、只差 open 的会话。 */

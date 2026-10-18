@@ -126,6 +126,22 @@ class HttpApiServerAuthTest {
             public String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
                 return "{\"series\":[]}";
             }
+
+            @Override
+            public String configsJson() {
+                return "[{\"name\":\"line1.json\",\"sizeBytes\":12,\"modifiedMs\":1700000000000}]";
+            }
+
+            @Override
+            public String configText(String name) {
+                return "line1.json".equals(name) ? "{\"ok\":true}" : null;
+            }
+
+            @Override
+            public ConfigResult saveConfig(String name, String text) {
+                HttpApiServerAuthTest.this.lifecycle.add("save:" + name);
+                return ConfigResult.ok();
+            }
         };
 
         this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), access, context);
@@ -146,6 +162,8 @@ class HttpApiServerAuthTest {
         assertEquals(401, post("/api/v1/sessions/s1/ceid/2001", null).statusCode());
         assertEquals(401, post("/api/v1/sessions/s1/alarm/1001", null).statusCode());
         assertEquals(401, post("/api/v1/shutdown", null).statusCode());
+        assertEquals(401, get("/api/v1/configs", null).statusCode());
+        assertEquals(401, get("/api/v1/configs/line1.json", null).statusCode());
     }
 
     @Test
@@ -246,6 +264,33 @@ class HttpApiServerAuthTest {
     void operatorCanReloadButViewerCannot() throws Exception {
         assertEquals(200, post("/api/v1/sessions/s1/reload", OPERATOR_PASS).statusCode());
         assertEquals(List.of("reload:s1"), this.lifecycle);
+    }
+
+    /**
+     * 改配置属于"会改变设备状态"，和触发 CEID 同一级。
+     *
+     * <p>配置决定了下一台设备长什么样，viewer 放行它等于让人改设备。
+     * </p>
+     */
+    @Test
+    void viewerCanReadConfigButNotSaveIt() throws Exception {
+        assertEquals(200, get("/api/v1/configs", VIEWER_PASS).statusCode());
+        assertEquals(200, get("/api/v1/configs/line1.json", VIEWER_PASS).statusCode());
+
+        assertEquals(403, send(HttpRequest.newBuilder(URI.create(this.base + "/api/v1/configs/line1.json"))
+                .PUT(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8)),
+                VIEWER_PASS).statusCode());
+
+        assertTrue(this.lifecycle.isEmpty(), "只读身份不得保存配置: " + this.lifecycle);
+    }
+
+    @Test
+    void operatorCanSaveConfig() throws Exception {
+        assertEquals(200, send(HttpRequest.newBuilder(URI.create(this.base + "/api/v1/configs/line1.json"))
+                .PUT(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8)),
+                OPERATOR_PASS).statusCode());
+
+        assertEquals(List.of("save:line1.json"), this.lifecycle);
     }
 
     @Test

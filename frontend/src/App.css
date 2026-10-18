@@ -111,3 +111,26 @@ input {
 .preview-controls button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 0.2rem 0.5rem; }
 .preview-controls select { min-width: 8rem; }
 .preview-controls .ceid { margin-top: 0; }
+
+.config-editor {
+  width: 100%;
+  min-height: 24rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem;
+  background: transparent;
+  color: var(--fg);
+  font: 12px/1.6 ui-monospace, Consolas, monospace;
+  tab-size: 2;
+  resize: vertical;
+}
+
+.problems {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+  color: #c0392b;
+}
+@media (prefers-color-scheme: dark) {
+  .problems { color: #ff7b72; }
+}

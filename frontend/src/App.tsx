@@ -7,6 +7,7 @@ import {
   saveToken,
   type AlarmState,
   type Catalog,
+  type ConfigEntry,
   type Health,
   type SessionSummary,
   type TerminalMessage,
@@ -117,6 +118,13 @@ export function App(): JSX.Element {
   const [newConfig, setNewConfig] = useState('demo');
   const [catalogSession, setCatalogSession] = useState('');
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [configList, setConfigList] = useState<ConfigEntry[]>([]);
+  const [configName, setConfigName] = useState('');
+  const [configDraft, setConfigDraft] = useState('');
+  const [configBaseline, setConfigBaseline] = useState('');
+  const [configProblems, setConfigProblems] = useState<string[]>([]);
+  const [configNotice, setConfigNotice] = useState('');
+  const [newConfigName, setNewConfigName] = useState('');
   const logRef = useRef<HTMLPreElement | null>(null);
   const nextMessageKey = useRef(0);
   const openedOnce = useRef(false);
@@ -384,6 +392,37 @@ export function App(): JSX.Element {
     };
   }, [client, catalogSession]);
 
+  /*
+   * 配置目录列表：轮询。
+   *
+   * <p>只轮询列表，不轮询正文——正文正在编辑时自动刷新会把用户正在写的东西冲掉。
+   * 列表本身很少变，5 秒一次足够。
+   * </p>
+   */
+  const refreshConfigs = useCallback(async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      setConfigList(await client.configs());
+    } catch {
+      /* 读不到目录先不打扰用户，下一轮再试 */
+    }
+  }, [client]);
+
+  useEffect(() => {
+    if (client === null) {
+      setConfigList([]);
+      return;
+    }
+
+    void refreshConfigs();
+    const timer = window.setInterval(() => void refreshConfigs(), 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [client, refreshConfigs]);
+
   const onSaveToken = () => {
     const value = draftToken.trim();
     if (value === '') {
@@ -500,6 +539,128 @@ export function App(): JSX.Element {
       append(lifecycleMessage(status, `重载会话 ${session.id}`));
     } catch (error) {
       append(`重载会话失败: ${(error as Error).message}`);
+    }
+  };
+
+  /** 编辑区里的内容相对磁盘有没有变。 */
+  const configDirty = configDraft !== configBaseline;
+
+  /** 打开一份配置。有未保存改动时先问一句：悄悄丢掉别人正在写的东西最招人烦。 */
+  const openConfig = async (name: string) => {
+    if (client === null) {
+      return;
+    }
+    if (configDirty && !window.confirm(`${configName} 有未保存的改动，切换会丢掉。继续？`)) {
+      return;
+    }
+
+    try {
+      const text = await client.configText(name);
+      setConfigName(name);
+      setConfigDraft(text);
+      setConfigBaseline(text);
+      setConfigProblems([]);
+      setConfigNotice(`已打开 ${name}`);
+    } catch (error) {
+      append(`打开配置失败: ${(error as Error).message}`);
+    }
+  };
+
+  /** 丢掉本地改动，重新拉磁盘上的原文。 */
+  const reloadConfig = async () => {
+    if (client === null || configName === '') {
+      return;
+    }
+    try {
+      const text = await client.configText(configName);
+      setConfigDraft(text);
+      setConfigBaseline(text);
+      setConfigProblems([]);
+      setConfigNotice(`已重新载入 ${configName}`);
+    } catch (error) {
+      append(`重新载入失败: ${(error as Error).message}`);
+    }
+  };
+
+  /** 只校验不落盘：用户想确认改动能不能编译，不该被迫先覆盖一份能用的配置。 */
+  const validateConfig = async () => {
+    if (client === null || configName === '') {
+      return;
+    }
+    try {
+      const result = await client.validateConfig(configName, configDraft);
+      setConfigProblems(result.problems);
+      setConfigNotice(result.valid ? '校验通过' : '校验未通过');
+    } catch (error) {
+      append(`校验失败: ${(error as Error).message}`);
+    }
+  };
+
+  const saveConfig = async () => {
+    if (client === null || configName === '') {
+      return;
+    }
+    try {
+      const result = await client.saveConfig(configName, configDraft);
+      if (result.status === 200) {
+        setConfigProblems([]);
+        setConfigBaseline(configDraft);
+        setConfigNotice(`已保存 ${configName}（已在运行的会话需要重载才生效）`);
+        append(`配置已保存: ${configName}`);
+        void refreshConfigs();
+        return;
+      }
+
+      setConfigProblems(result.problems);
+      setConfigNotice(result.status === 422 ? '保存被拒：配置有问题，未落盘' : `保存失败（HTTP ${result.status}）`);
+    } catch (error) {
+      append(`保存失败: ${(error as Error).message}`);
+    }
+  };
+
+  /**
+   * 新建：让后端生成一份能直接编译的骨架。
+   *
+   * <p>骨架不在前端写死：只有一份判据，才不会出现"界面上给的模板起不来"。
+   * </p>
+   */
+  const onNewConfig = async () => {
+    if (client === null) {
+      return;
+    }
+
+    const name = newConfigName.trim();
+    if (name === '') {
+      return;
+    }
+    if (!name.toLowerCase().endsWith('.json')) {
+      setConfigNotice('文件名必须以 .json 结尾');
+      return;
+    }
+    if (configDirty && !window.confirm(`${configName} 有未保存的改动，新建会丢掉。继续？`)) {
+      return;
+    }
+
+    try {
+      const status = await client.createConfig(name);
+      if (status === 409) {
+        setConfigNotice('已经有同名的配置了，直接从上面选它来改');
+        return;
+      }
+      if (status !== 201) {
+        setConfigNotice(`新建失败（HTTP ${status}）`);
+        return;
+      }
+
+      const text = await client.configText(name);
+      setConfigName(name);
+      setConfigDraft(text);
+      setConfigBaseline(text);
+      setConfigProblems([]);
+      setConfigNotice(`已新建 ${name}，改完点「保存」才会落盘`);
+      void refreshConfigs();
+    } catch (error) {
+      append(`新建配置失败: ${(error as Error).message}`);
     }
   };
 
@@ -917,6 +1078,89 @@ export function App(): JSX.Element {
               )}
             </tbody>
           </table>
+        </section>
+
+        <section>
+          <h2>配置编辑器</h2>
+          <div className="preview-controls">
+            <select
+              value={configList.some((entry) => entry.name === configName) ? configName : ''}
+              onChange={(event) => {
+                if (event.target.value !== '') {
+                  void openConfig(event.target.value);
+                }
+              }}
+            >
+              <option value="">（选择配置）</option>
+              {configList.map((entry) => (
+                <option key={entry.name} value={entry.name}>
+                  {entry.name}（{entry.sizeBytes} 字节）
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="新文件名.json"
+              value={newConfigName}
+              onChange={(event) => setNewConfigName(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => void onNewConfig()}
+              disabled={newConfigName.trim() === '' || !canOperate}
+              title={canOperate ? '新建一份能直接编译的配置骨架' : operateHint}
+            >
+              新建
+            </button>
+            <button type="button" onClick={() => void reloadConfig()} disabled={configName === ''}>
+              重新载入
+            </button>
+            <button type="button" onClick={() => void validateConfig()} disabled={configName === ''}>
+              校验
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveConfig()}
+              disabled={configName === '' || !canOperate}
+              title={canOperate ? '校验通过后原子落盘' : operateHint}
+            >
+              保存
+            </button>
+          </div>
+
+          {configName === '' ? (
+            <p className="hint">
+              从上面挑一份配置，或输入新文件名点「新建」。配置只认 <code>--work-dir</code> 下的文件名。
+            </p>
+          ) : (
+            <>
+              <p className="hint">
+                {configName}
+                {configDirty ? '（有未保存的改动）' : '（与磁盘一致）'}
+                {configNotice !== '' ? `　${configNotice}` : ''}
+              </p>
+              <textarea
+                className="config-editor"
+                spellCheck={false}
+                value={configDraft}
+                onChange={(event) => {
+                  setConfigDraft(event.target.value);
+                  setConfigProblems([]);
+                }}
+              />
+              {configProblems.length > 0 && (
+                <ul className="problems">
+                  {configProblems.map((problem, index) => (
+                    <li key={index}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          <p className="hint">
+            编辑的是原始 JSON 文本，保存时逐字节写回：多写的键、空格和缩进都不会被动过。
+            校验按真实启动路径走（解析 → 编译设备模型 → 建模板图），过了才会落盘。
+            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，保存已禁用。`}
+          </p>
         </section>
 
         <section>

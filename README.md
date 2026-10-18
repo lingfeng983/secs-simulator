@@ -99,6 +99,11 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/sessions/{id}/terminal` | viewer | 最近 20 条终端消息（S10F3） |
 | `GET /api/v1/sessions/{id}/catalog` | viewer | 设备目录：CEID / RPTID / SVID 的绝对 ID 与语义，按 ID 升序 |
 | `GET /api/v1/preview` | viewer | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg |
+| `GET /api/v1/configs` | viewer | 配置目录列表（文件名 / 字节数 / 修改时间） |
+| `POST /api/v1/configs` | operator | 新建配置，体为 `{"name":"设备.json"}`，内容是能直接编译的骨架（201 / 400 / 409） |
+| `GET /api/v1/configs/{name}` | viewer | 读配置**原文**（编辑器要看到用户写的每一个键） |
+| `POST /api/v1/configs/{name}/validate` | viewer | 只校验不落盘，回 `{"valid":bool,"problems":[...]}` |
+| `PUT /api/v1/configs/{name}` | operator | 校验通过后原子落盘，体就是配置原文（200 / 400 / 422 / 500） |
 | `POST /api/v1/shutdown` | admin | 优雅停机 |
 
 鉴权只用 `Authorization: Bearer <口令>`。未认证回 401，认证通过但角色不够回 403
@@ -148,6 +153,34 @@ curl -X DELETE -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/session
   否则第二个会话会撞端口。
 - 界面上的「新建 / 重载 / 关闭」与「上报 / 报警」一样要 operator 及以上。
 
+### 配置编辑器
+
+配置可以在界面上读、改、校验、保存，不必回到命令行改文件。
+
+```bash
+curl -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/configs
+curl -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/configs/line1.json
+curl -X POST -H 'Authorization: Bearer T' --data-binary @line1.json \
+     http://127.0.0.1:PORT/api/v1/configs/line1.json/validate
+curl -X PUT  -H 'Authorization: Bearer T' --data-binary @line1.json \
+     http://127.0.0.1:PORT/api/v1/configs/line1.json
+```
+
+- **编辑器操作的是原始 JSON 文本**，不做模型往返：`toJson` 只认模型里有的字段，
+  手写的额外键会被静默丢掉。一个保存动作悄悄改掉用户的配置，比报错糟糕得多。
+  保存时逐字节写回，多写的键、空格和缩进都不会被动过。
+- **先校验再落盘**：存一份编译不过的配置等于给下一次启动埋雷。
+  校验判据和真实启动路径一致——解析 → 编译设备模型 → 建模板图，
+  过了才写盘。校验不过时**原文件一个字节都不动**。
+- **校验和保存分成两个动作**：想确认改动能不能编译，不必先覆盖一份能用的配置。
+- 写盘是**原子的**（先写临时文件再整体替换）：崩在半路不会留下半截 JSON，
+  而这份配置正是设备启动时要读的东西。
+- **接口只收文件名**，与建会话、列目录同一套规则（`ConfigStore.requireFileName` 是唯一出处）。
+- 界面上的「新建」由后端生成骨架：只有一份判据，才不会出现"界面上给的模板起不来"。
+- **改配置不会让已在跑的会话自动改变**：会话是启动那一刻把配置读进内存的，
+  存完要在「会话」里点**重载**才生效（服务端日志里也会提醒）。
+- 保存是 operator 及以上（改配置属于"会改变设备状态"）；读与校验是 viewer。
+
 ### 设备目录
 
 `GET /api/v1/sessions/{id}/catalog` 把"绝对 ID → 语义"的映射摊开：
@@ -185,7 +218,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、活动报警与终端消息面板。
+界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览、**配置编辑器**（读原文 / 校验 / 保存 / 新建）。
 
 ## 打包
 
@@ -211,6 +244,8 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
+- [ADR 0007 · API 账号与角色分级](docs/adr/0007-api-roles.md)
+- [ADR 0008 · 配置编辑器走原始 JSON 文本](docs/adr/0008-config-editor-raw-text.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)

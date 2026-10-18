@@ -1,5 +1,7 @@
 package com.shimizukenta.secssim.api.http;
 
+import java.util.List;
+
 /**
  * HTTP 层需要的运行时信息。
  *
@@ -143,5 +145,61 @@ public interface ApiContext {
      */
     default SessionOutcome reloadSession(String sessionId) {
         return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * 配置目录里的配置文件名列表 JSON。
+     *
+     * @return JSON 数组文本
+     */
+    default String configsJson() {
+        return "[]";
+    }
+
+    /**
+     * 读一份配置的原始文本。
+     *
+     * <p>给的是<b>原文</b>而不是模型反序列化结果：编辑器必须看到用户写的每一个键。
+     * </p>
+     *
+     * @param name 文件名
+     * @return 原文；不存在时返回 {@code null}
+     */
+    default String configText(String name) {
+        return null;
+    }
+
+    /**
+     * 校验一段配置文本（不落盘）。
+     *
+     * @param text JSON 文本
+     * @return 问题清单；空表示合法
+     */
+    default List<String> validateConfig(String text) {
+        return List.of("当前形态不支持配置校验");
+    }
+
+    /**
+     * 新建一份配置（内容是能直接编译的骨架）。
+     *
+     * @param name 文件名
+     * @return 结果
+     */
+    default ConfigResult createConfig(String name) {
+        return ConfigResult.notFound("当前形态不支持新建配置");
+    }
+
+    /**
+     * 保存一份配置。
+     *
+     * <p>实现必须<b>先校验再落盘</b>：存一份编译不过的配置等于给下一次启动埋雷。
+     * </p>
+     *
+     * @param name 文件名
+     * @param text JSON 文本
+     * @return 结果（带问题清单）
+     */
+    default ConfigResult saveConfig(String name, String text) {
+        return ConfigResult.notFound("当前形态不支持保存配置");
     }
 }
