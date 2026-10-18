@@ -90,6 +90,9 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `POST /api/v1/ticket` | viewer | 换取一次性 SSE 票据（30 秒有效、只能用一次），并回显身份与角色 |
 | `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | viewer | 会话列表（状态 / 设备 / 单元数 / 计数器） |
+| `POST /api/v1/sessions` | operator | 新建会话，体为 `{"config":"demo"}` 或 `{"config":"设备.json"}`（201 / 400 / 409） |
+| `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
+| `POST /api/v1/sessions/{id}/reload` | operator | 按配置热重载（200 / 404 / 409 / 400） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | operator | 手动触发一次 S6F11（202 / 404 / 409） |
 | `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | operator | 置位/清除 S5F1；`set` 默认 true，`category` 0..7（202 / 400 / 404 / 409） |
 | `GET /api/v1/sessions/{id}/alarms` | viewer | 当前活动报警（ALID / 类别 / 文本 / 置位时间） |
@@ -124,6 +127,26 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 - 口令在文件里是**明文**：服务端要在运行时比对，没法只存哈希。
   账号文件与私钥同级，别进版本库、别打进分发包。
 - 角色常量按能力递增排列，**调整顺序等于给已部署的账号集体降级/升级**，不要重排。
+
+### 会话生命周期
+
+一个进程不再只装一份配置：可以在运行时新建、关闭、按配置重载会话。
+
+```bash
+curl -X POST  -H 'Authorization: Bearer T' -d '{"config":"line1.json"}' \
+     http://127.0.0.1:PORT/api/v1/sessions
+curl -X POST  -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/sessions/line1/reload
+curl -X DELETE -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/sessions/line1
+```
+
+- **`--work-dir` 就是配置目录**。接口只接受**文件名**，不含任何路径分隔符——
+  接口给的是"名字"不是"路径"，否则一次 API 调用就能把服务器上任意 JSON 当配置读进来试。
+- **重载先编译再动旧会话**：配置有错时旧会话原样跑着，只返回失败。
+  一个手滑的逗号不该让设备凭空消失。
+- 内置演示会话（`demo`）没有配置来源，重载返回 **409 `not-reloadable`**，而不是笼统的 500。
+- 配置没指定端口时会用 `--hsms-port` 的值，因此**多个会话要在配置里各自写明端口**，
+  否则第二个会话会撞端口。
+- 界面上的「新建 / 重载 / 关闭」与「上报 / 报警」一样要 operator 及以上。
 
 ### 设备目录
 

@@ -38,6 +38,10 @@ class HttpApiServerTest {
     private final List<String> triggered = new ArrayList<>();
     private final List<String> alarms = new ArrayList<>();
     private TriggerOutcome outcome = TriggerOutcome.OK;
+    private final List<String> created = new ArrayList<>();
+    private final List<String> closed = new ArrayList<>();
+    private final List<String> reloaded = new ArrayList<>();
+    private SessionOutcome createResult = SessionOutcome.OK;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -118,6 +122,30 @@ class HttpApiServerTest {
                 }
                 return "{\"from\":" + fromMs + ",\"to\":" + toMs
                         + ",\"buckets\":" + buckets + ",\"series\":[]}";
+            }
+
+            @Override
+            public SessionOutcome createSession(String configName) {
+                HttpApiServerTest.this.created.add(configName);
+                return HttpApiServerTest.this.createResult;
+            }
+
+            @Override
+            public SessionOutcome closeSession(String sessionId) {
+                HttpApiServerTest.this.closed.add(sessionId);
+                return "missing".equals(sessionId) ? SessionOutcome.UNKNOWN_SESSION : SessionOutcome.OK;
+            }
+
+            @Override
+            public SessionOutcome reloadSession(String sessionId) {
+                HttpApiServerTest.this.reloaded.add(sessionId);
+                if ("missing".equals(sessionId)) {
+                    return SessionOutcome.UNKNOWN_SESSION;
+                }
+                if ("demo".equals(sessionId)) {
+                    return SessionOutcome.NOT_RELOADABLE;
+                }
+                return SessionOutcome.OK;
             }
         };
 
@@ -227,8 +255,88 @@ class HttpApiServerTest {
     }
 
     @Test
-    void catalogReturnsAbsoluteIdsWithSemantics() throws Exception {
-        HttpResponse<String> response = get("/api/v1/sessions/s1/catalog", TOKEN);
+    void sessionsCanBeCreatedFromConfigName() throws Exception {
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"config\":\"demo\"}", StandardCharsets.UTF_8)),
+                TOKEN);
+
+        assertEquals(201, response.statusCode(), response.body());
+        assertEquals(List.of("demo"), this.created);
+    }
+
+    @Test
+    void createRejectsBadOrMissingBody() throws Exception {
+        assertEquals(400, post("/api/v1/sessions", TOKEN).statusCode(), "空体没有 config 字段");
+        assertEquals(400, send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8)), TOKEN).statusCode());
+        assertEquals(400, send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("not json", StandardCharsets.UTF_8)),
+                TOKEN).statusCode());
+        assertTrue(this.created.isEmpty(), "参数非法的请求不得产生副作用");
+    }
+
+    @Test
+    void createMapsConflict() throws Exception {
+        this.createResult = SessionOutcome.CONFLICT;
+
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"config\":\"demo\"}", StandardCharsets.UTF_8)),
+                TOKEN);
+
+        assertEquals(409, response.statusCode(), response.body());
+    }
+
+    @Test
+    void createRejectsOversizedBody() throws Exception {
+        String huge = "{\"config\":\"" + "x".repeat(8192) + "\"}";
+
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString(huge, StandardCharsets.UTF_8)),
+                TOKEN);
+
+        assertEquals(400, response.statusCode(), "超大请求体应被拒绝，而不是把内存喂满");
+        assertTrue(this.created.isEmpty());
+    }
+
+    @Test
+    void sessionCanBeClosedWithDelete() throws Exception {
+        HttpResponse<String> response = delete("/api/v1/sessions/s1", TOKEN);
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals(List.of("s1"), this.closed);
+        assertEquals(404, delete("/api/v1/sessions/missing", TOKEN).statusCode());
+    }
+
+    @Test
+    void sessionCanBeReloaded() throws Exception {
+        assertEquals(200, post("/api/v1/sessions/s1/reload", TOKEN).statusCode());
+        assertEquals(List.of("s1"), this.reloaded);
+    }
+
+    @Test
+    void reloadDistinguishesUnknownFromNotReloadable() throws Exception {
+        HttpResponse<String> unknown = post("/api/v1/sessions/missing/reload", TOKEN);
+        assertEquals(404, unknown.statusCode(), unknown.body());
+
+        HttpResponse<String> demo = post("/api/v1/sessions/demo/reload", TOKEN);
+        assertEquals(409, demo.statusCode(), "演示会话没有配置来源，要说清楚而不是笼统 500");
+        assertTrue(demo.body().contains("not-reloadable"), demo.body());
+    }
+
+    @Test
+    void sessionsRejectsPut() throws Exception {
+        assertEquals(405, send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .method("PUT", HttpRequest.BodyPublishers.noBody()), TOKEN).statusCode());
+    }
+
+    @Test
+    void catalogReturnsAbsoluteIdsWithSemantics() throws Exception {        HttpResponse<String> response = get("/api/v1/sessions/s1/catalog", TOKEN);
 
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"ceid\":2001"), response.body());
@@ -350,6 +458,10 @@ class HttpApiServerTest {
     private HttpResponse<String> post(String path, String token) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(this.base + path))
                 .POST(HttpRequest.BodyPublishers.noBody()), token);
+    }
+
+    private HttpResponse<String> delete(String path, String token) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(this.base + path)).DELETE(), token);
     }
 
     private HttpResponse<String> send(HttpRequest.Builder builder, String token) throws Exception {

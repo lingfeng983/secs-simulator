@@ -114,4 +114,34 @@ public interface ApiContext {
     default String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
         return null;
     }
+
+    /**
+     * 新建一个会话。
+     *
+     * @param configName {@code demo} 或配置目录下的文件名
+     * @return 结果
+     */
+    default SessionOutcome createSession(String configName) {
+        return SessionOutcome.FAILED;
+    }
+
+    /**
+     * 关闭并移除一个会话。
+     *
+     * @param sessionId 会话标识
+     * @return 结果
+     */
+    default SessionOutcome closeSession(String sessionId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * 按配置重新装载一个会话（热重载）。
+     *
+     * @param sessionId 会话标识
+     * @return 结果
+     */
+    default SessionOutcome reloadSession(String sessionId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
 }

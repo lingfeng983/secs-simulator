@@ -114,6 +114,7 @@ export function App(): JSX.Element {
   const [alarmCategory, setAlarmCategory] = useState(1);
   const [alarms, setAlarms] = useState<AlarmState[]>([]);
   const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
+  const [newConfig, setNewConfig] = useState('demo');
   const [catalogSession, setCatalogSession] = useState('');
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
@@ -446,6 +447,62 @@ export function App(): JSX.Element {
     }
   };
 
+  /**
+   * 会话生命周期操作的状态码文案。
+   *
+   * <p>服务端已经在日志里记了原因，这里只负责把状态码说成人话：
+   * 400 分成"配置有问题"和"名字不合法"两种可能，光一个 400 谁也看不出该改哪。
+   * </p>
+   */
+  const lifecycleMessage = (status: number, what: string): string => {
+    switch (status) {
+      case 400:
+        return `${what}失败（配置不合法或读不到，详见服务端日志）`;
+      case 404:
+        return `${what}失败：会话不存在`;
+      case 409:
+        return `${what}失败：标识已被占用，或该会话没有配置来源`;
+      default:
+        return `${what} -> HTTP ${status}`;
+    }
+  };
+
+  const onCreateSession = async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const status = await client.createSession(newConfig.trim());
+      append(lifecycleMessage(status, '新建会话'));
+    } catch (error) {
+      append(`新建会话失败: ${(error as Error).message}`);
+    }
+  };
+
+  const onCloseSession = async (session: SessionSummary) => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const status = await client.closeSession(session.id);
+      append(lifecycleMessage(status, `关闭会话 ${session.id}`));
+    } catch (error) {
+      append(`关闭会话失败: ${(error as Error).message}`);
+    }
+  };
+
+  const onReloadSession = async (session: SessionSummary) => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const status = await client.reloadSession(session.id);
+      append(lifecycleMessage(status, `重载会话 ${session.id}`));
+    } catch (error) {
+      append(`重载会话失败: ${(error as Error).message}`);
+    }
+  };
+
   return (
     <div className="app">
       <header>
@@ -500,7 +557,8 @@ export function App(): JSX.Element {
                 <th>限流丢弃</th>
                 <th>禁用跳过</th>
                 <th>S6F1</th>
-                <th>操作</th>
+                <th>上报</th>
+                <th>生命周期</th>
               </tr>
             </thead>
             <tbody>
@@ -524,17 +582,50 @@ export function App(): JSX.Element {
                       上报
                     </button>
                   </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => void onReloadSession(session)}
+                      disabled={!canOperate}
+                      title={canOperate ? '按配置文件重新装载（配置有问题时旧会话不受影响）' : operateHint}
+                    >
+                      重载
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onCloseSession(session)}
+                      disabled={!canOperate}
+                      title={canOperate ? '关闭并移除该会话（端口立即解绑）' : operateHint}
+                    >
+                      关闭
+                    </button>
+                  </td>
                 </tr>
               ))}
               {sessions.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="hint">
-                    暂无会话（用 --demo-session 或 --config 启动一个）
+                  <td colSpan={10} className="hint">
+                    暂无会话（用 --demo-session / --config 启动，或在下方新建）
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+
+          <div className="preview-controls">
+            <input
+              placeholder="demo 或 work-dir 下的配置文件名"
+              value={newConfig}
+              onChange={(event) => setNewConfig(event.target.value)}
+              disabled={!canOperate}
+            />
+            <button type="button" onClick={() => void onCreateSession()} disabled={!canOperate || newConfig.trim() === ''}>
+              新建会话
+            </button>
+            <span className="hint">
+              配置只认 <code>--work-dir</code> 下的文件名，不接受路径。
+            </span>
+          </div>
 
           <label className="ceid">
             CEID

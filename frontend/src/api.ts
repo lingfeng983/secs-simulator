@@ -163,6 +163,12 @@ export const EMPTY_CATALOG: Catalog = { ceids: [], reports: [], svids: [] };
 export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;
+  /** 新建会话；config 为 demo 或配置目录下的文件名。 */
+  createSession(config: string): Promise<number>;
+  /** 关闭并移除会话。 */
+  closeSession(sessionId: string): Promise<number>;
+  /** 按配置重载会话。 */
+  reloadSession(sessionId: string): Promise<number>;
   trigger(sessionId: string, ceid: number): Promise<number>;
   alarm(sessionId: string, alid: number, set: boolean, text: string, category: number): Promise<number>;
   alarms(sessionId: string): Promise<AlarmState[]>;
@@ -242,6 +248,32 @@ export function createClient(token: string): ApiClient {
         await fetch('/api/v1/sessions', { headers: auth }),
       );
       return body.sessions ?? [];
+    },
+    async createSession(config) {
+      /* 失败原因全在服务端日志里，界面只报状态码与文案，不自己猜 */
+      return command(
+        await fetch('/api/v1/sessions', {
+          method: 'POST',
+          headers: auth,
+          body: JSON.stringify({ config }),
+        }),
+      );
+    },
+    async closeSession(sessionId) {
+      return command(
+        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+          method: 'DELETE',
+          headers: auth,
+        }),
+      );
+    },
+    async reloadSession(sessionId) {
+      return command(
+        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reload`, {
+          method: 'POST',
+          headers: auth,
+        }),
+      );
     },
     async trigger(sessionId, ceid) {
       return command(

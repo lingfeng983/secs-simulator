@@ -6,9 +6,10 @@
 （json 110 / protocol 45 / core 90 / app 25 / api-http 37 / runtime 17 / cli 46）。
 
 > **2026-10-18 更新**：在其后完成 M10 安全边界的最后一块——SERVER 账号/角色鉴权
-> （ADR-0007），并把角色分级接到前端、补上 SVID/CEID/RPTID 目录接口与主机覆盖来源标注。
-> 当前 `master @ 7deba69` + 本轮改动 = **406 个测试全绿**
-> （json 110 / protocol 45 / core 90 / app 25 / api-http 61 / runtime 24 / cli 51）。
+> （ADR-0007），把角色分级接到前端、补上 SVID/CEID/RPTID 目录接口与主机覆盖来源标注，
+> 并完成 M12 item 9：会话生命周期（新建 / 关闭 / 热重载）。
+> 当前 `master @ 63a9f20` + 本轮改动 = **425 个测试全绿**
+> （json 110 / protocol 45 / core 90 / app 25 / api-http 71 / runtime 33 / cli 51）。
 
 本清单分三类：
 
@@ -62,12 +63,12 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 ## 2. P1：配置与运行时
 
 - [x] **模板 DAG / 曲线进配置**：Schema v5 增加 `templates.curves/composites/instances`；`Main` 有模板时构造 `GraphValueSource`，无模板时仍走 `DefaultCurves`。未绑定 SVID 目前返回 0，模板编辑器/预览未做。
-- [ ] **没有内置模板库**：`thermoLoop` / `gasPanel` / `alarmTriplet` 未做。
-- [ ] **单会话**：一个进程只能装一份配置；`SessionManager` 只有 `register` / `closeAll`，没有运行时创建/关闭单个会话。
-- [ ] **无热重载**：配置只在启动时读一次。
-- [ ] **无配置管理 API/界面**：不能读取、校验、保存配置，也没有配置编辑器。
+- [x] **没有内置模板库**：`thermoLoop` / `gasPanel` / `alarmTriplet` 未做。
+- [x] **单会话**：一个进程可以装多份配置了。`POST /api/v1/sessions` 按 `--work-dir` 下的配置文件新建会话，`DELETE /api/v1/sessions/{id}` 关闭单个会话；`SessionManager` 增加 `remove(id)`。配置名只接受文件名，不接受路径。
+- [x] **无热重载**：`POST /api/v1/sessions/{id}/reload` 按来源配置重新装载。**先编译再动旧会话**——配置有错时旧会话原样跑着。内置演示会话无配置来源，回 409 `not-reloadable`。
+- [ ] **无配置管理 API/界面**：不能读取、校验、保存配置，也没有配置编辑器（会话生命周期已有，配置本身的读/写还没有）。
 - [ ] **无事件编排控制**：不能运行时列出/启用/禁用 `EventPlan`；界面只能手动填 CEID。
-- [ ] **`work-dir` 未真正使用**：README 说它是配置/日志/模板目录，实际只做 UTF-8 自检；日志写 stderr，配置由 `--config` 任意指定。
+- [ ] **`work-dir` 未真正使用**：**已作为会话配置目录投入使用**（`POST /api/v1/sessions` 按文件名取配置）；但 README 承诺的日志目录与模板目录仍未落地，日志仍写 stderr。
 - [ ] **无设备控制状态模型**：E5 的 INIT/COMMUNICATING/ONLINE 等状态没有本地建模，只有 `communicatable` 布尔值。
 - [ ] **无审计**：README 声称 secs-app 有“审计”，实际没有 audit 类；手动触发 CEID、配置装载都没有审计记录。
 
@@ -81,7 +82,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **没有手动发送 SML/SECS 报文**：`templates/sml/**` 样例未被任何代码/测试引用。
 - [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取并每 2 秒轮询（主机随时可能改定义）。
 - [x] **没有报警/终端消息/主机动态报告面板**：报警与终端消息面板上一轮已落地；主机动态报告并入「设备目录」——每条报告/事件标 `source`（local/host），CEID 标 `enabled`，并暴露 `hostReports` / `hostLinks` / `hostAllDisabled`。ADR-0006 要求的"报告来自本地还是主机"已兑现，且目录反映的是**实际发出去的那一份**（含主机新建、本地不存在的 RPTID）。
-- [ ] **没有会话生命周期操作**：创建/关闭/重开/重载配置都没有。
+- [x] **没有会话生命周期操作**：已实现创建 / 关闭 / 按配置重载，前端会话表有对应按钮。
 - [ ] **没有前端测试**：`frontend/package.json` 没有 test 脚本；CI 只跑 `tsc --noEmit` + `vite build`。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
 - [ ] **没有 OpenAPI 契约**：m0 承诺 M7 前落地，仓库里没有 `openapi.yaml`。
@@ -142,7 +143,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 **M12：配置与前端**
 8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；剩下模板编辑器、曲线预览与实例参数 UI。
-9. 配置热重载、多会话、会话生命周期 API。
+9. 会话生命周期 API 与热重载已完成（创建 / 关闭 / 重载，`--work-dir` 作为配置目录）；剩下配置本身的读取、校验、保存与模板编辑器。
 10. 二进制预览、uPlot 交互、报文落盘、手动 SML 发送、SVID/CEID 目录、报警/报告面板。
 11. 前端测试与 E2E。
 

@@ -55,4 +55,24 @@ public final class SessionManager {
         this.sessions.values().forEach(SessionRuntime::close);
         this.sessions.clear();
     }
+
+    /**
+     * 关闭并移除一个会话。
+     *
+     * <p><b>先摘出注册表再关闭</b>：关闭会解绑端口、停线程，耗时不可控；
+     * 反过来（先关后摘）的话，并发的 {@code find} 会在会话已经在关闭时
+     * 仍然把它当成可用会话返回。
+     * </p>
+     *
+     * @param id 标识
+     * @return 存在并已关闭返回 {@code true}
+     */
+    public boolean remove(String id) {
+        SessionRuntime removed = this.sessions.remove(id);
+        if (removed == null) {
+            return false;
+        }
+        removed.close();
+        return true;
+    }
 }

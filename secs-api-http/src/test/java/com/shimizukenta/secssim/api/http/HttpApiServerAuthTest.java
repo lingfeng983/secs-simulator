@@ -38,6 +38,7 @@ class HttpApiServerAuthTest {
     private HttpApiServer server;
     private String base;
     private final List<String> triggered = new ArrayList<>();
+    private final List<String> lifecycle = new ArrayList<>();
     private boolean shutdownRequested;
 
     @BeforeEach
@@ -101,6 +102,24 @@ class HttpApiServerAuthTest {
             @Override
             public String catalogJson(String sessionId) {
                 return "{\"ceids\":[],\"reports\":[],\"svids\":[]}";
+            }
+
+            @Override
+            public SessionOutcome createSession(String configName) {
+                HttpApiServerAuthTest.this.lifecycle.add("create:" + configName);
+                return SessionOutcome.OK;
+            }
+
+            @Override
+            public SessionOutcome closeSession(String sessionId) {
+                HttpApiServerAuthTest.this.lifecycle.add("close:" + sessionId);
+                return "missing".equals(sessionId) ? SessionOutcome.UNKNOWN_SESSION : SessionOutcome.OK;
+            }
+
+            @Override
+            public SessionOutcome reloadSession(String sessionId) {
+                HttpApiServerAuthTest.this.lifecycle.add("reload:" + sessionId);
+                return "missing".equals(sessionId) ? SessionOutcome.UNKNOWN_SESSION : SessionOutcome.OK;
             }
 
             @Override
@@ -211,6 +230,25 @@ class HttpApiServerAuthTest {
     }
 
     @Test
+    void viewerCannotChangeSessionLifecycle() throws Exception {
+        assertEquals(403, delete("/api/v1/sessions/s1", VIEWER_PASS).statusCode());
+        assertEquals(403, post("/api/v1/sessions/s1/reload", VIEWER_PASS).statusCode());
+        assertEquals(403, send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"config\":\"demo\"}", StandardCharsets.UTF_8)),
+                VIEWER_PASS).statusCode());
+
+        assertTrue(this.lifecycle.isEmpty(),
+                "只读身份不得增删会话（会改变设备状态）: " + this.lifecycle);
+    }
+
+    @Test
+    void operatorCanReloadButViewerCannot() throws Exception {
+        assertEquals(200, post("/api/v1/sessions/s1/reload", OPERATOR_PASS).statusCode());
+        assertEquals(List.of("reload:s1"), this.lifecycle);
+    }
+
+    @Test
     void methodCheckStillBeatsTheRoleOnCommandPaths() throws Exception {
         /* GET 一个只接受 POST 的命令路径：viewer 有读权限，应回 405 而不是 403 */
         assertEquals(405, get("/api/v1/sessions/s1/ceid/2001", VIEWER_PASS).statusCode());
@@ -227,6 +265,10 @@ class HttpApiServerAuthTest {
     private HttpResponse<String> post(String path, String token) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(this.base + path))
                 .POST(HttpRequest.BodyPublishers.noBody()), token);
+    }
+
+    private HttpResponse<String> delete(String path, String token) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(this.base + path)).DELETE(), token);
     }
 
     private HttpResponse<String> send(HttpRequest.Builder builder, String token) throws Exception {

@@ -119,6 +119,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 票据随机源。 */
     private static final SecureRandom TICKET_RANDOM = new SecureRandom();
 
+    /** 请求体上限：创建会话只需要一个配置名，给 4 KiB 已经很宽裕。 */
+    private static final int MAX_BODY_BYTES = 4096;
+
     private final HttpServer server;
     private final ExecutorService executor;
     private final ExecutorService sseExecutor;
@@ -592,22 +595,95 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void handleSessions(HttpExchange ex) throws IOException {
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, "{\"sessions\":" + this.context.sessionsJson() + "}");
+            return;
+        }
+
+        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            this.createSession(ex);
+            return;
+        }
+
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-
-        respond(ex, 200, "{\"sessions\":" + this.context.sessionsJson() + "}");
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
     }
 
     /**
-     * 会话命令：目前只有"手动触发一个采集事件"与"置位/清除报警"。
+     * POST /api/v1/sessions：新建会话。
      *
-     * <p>用 POST 是因为它会改变设备状态（主机会看到一条 S6F11 / S5F1），不是幂等查询，
-     * 因此最低角色是 {@link ApiRole#OPERATOR}。
+     * <p>体是 {@code {"config":"demo"}} 或 {@code {"config":"设备.json"}}。
+     * 配置只能给文件名：接口给的是<b>名字</b>，不是一条路径——
+     * 否则一次 API 调用就能把服务器上任意 JSON 当配置读进来试。
+     * </p>
+     */
+    private void createSession(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        String config = configNameFrom(body);
+        if (config == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"missing-config\"}");
+            return;
+        }
+
+        switch (this.context.createSession(config)) {
+            case OK -> respond(ex, 201, "{\"ok\":true}");
+            case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-exists\"}");
+            default -> respond(ex, 400, "{\"ok\":false,\"error\":\"create-failed\"}");
+        }
+    }
+
+    /** 从请求体里取 config 字段；体不是对象或没有该字段时返回 {@code null}。 */
+    private static String configNameFrom(String body) {
+        try {
+            com.shimizukenta.jsonhub.JsonHub root =
+                    com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+            if (!root.isObject()) {
+                return null;
+            }
+            return root.get("config").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 读请求体，带上限。
+     *
+     * <p>不给上限的话，一个失控的客户端可以让内存先于服务挂掉；
+     * 这个端点只需要几十字节的配置名。
+     * </p>
+     *
+     * @return 正文；超过上限返回 {@code null}
+     */
+    private static String readBody(HttpExchange ex) throws IOException {
+        try (var in = ex.getRequestBody()) {
+            byte[] bytes = in.readNBytes(MAX_BODY_BYTES + 1);
+            if (bytes.length > MAX_BODY_BYTES) {
+                return null;
+            }
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+    }
+
+    /**
+     * 会话命令：目前有"手动触发采集事件"、"置位/清除报警"、"按配置重载"。
+     *
+     * <p>用 POST 是因为它们会改变设备状态（主机会看到一条 S6F11 / S5F1），
+     * 不是幂等查询，因此最低角色是 {@link ApiRole#OPERATOR}。
      * </p>
      */
     private void handleSessionPath(HttpExchange ex) throws IOException {
@@ -625,11 +701,50 @@ public final class HttpApiServer implements AutoCloseable {
             this.handleSessionCommand(ex);
             return;
         }
+        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.closeSession(ex);
+            return;
+        }
 
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
         respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /**
+     * DELETE /api/v1/sessions/{id}：关闭并移除会话。
+     *
+     * <p>响应等真正关完才发：客户端拿到 200 就应当认为端口已经解绑了。
+     * </p>
+     */
+    private void closeSession(HttpExchange ex) throws IOException {
+        String id = sessionIdFromPath(ex);
+        if (id == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        switch (this.context.closeSession(id)) {
+            case OK -> respond(ex, 200, "{\"ok\":true}");
+            default -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+        }
+    }
+
+    /** 取路径里的会话标识；路径不合法时返回 {@code null}。 */
+    private static String sessionIdFromPath(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        if (path == null || !path.startsWith(PATH_SESSION_PREFIX)) {
+            return null;
+        }
+        String rest = path.substring(PATH_SESSION_PREFIX.length());
+        if (rest.isEmpty() || rest.contains("/")) {
+            return null;
+        }
+        return decode(rest);
     }
 
     /**
@@ -671,6 +786,17 @@ public final class HttpApiServer implements AutoCloseable {
 
         String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
         String[] parts = rest.split("/");
+
+        if (parts.length == 2 && "reload".equals(parts[1])) {
+            switch (this.context.reloadSession(parts[0])) {
+                case OK -> respond(ex, 200, "{\"ok\":true}");
+                case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                /* 演示会话没有配置来源，说"不可重载"比笼统的 500 有用得多 */
+                case NOT_RELOADABLE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-reloadable\"}");
+                default -> respond(ex, 400, "{\"ok\":false,\"error\":\"reload-failed\"}");
+            }
+            return;
+        }
 
         if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");

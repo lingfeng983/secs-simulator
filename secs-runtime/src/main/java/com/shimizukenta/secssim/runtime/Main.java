@@ -13,26 +13,15 @@ import javax.net.ssl.SSLContext;
 import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
+import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.config.ConfigException;
-import com.shimizukenta.secssim.app.config.SessionConfig;
-import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
-import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
-import com.shimizukenta.secssim.core.EngineClock;
-import com.shimizukenta.secssim.core.compile.CompilationResult;
-import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
-import com.shimizukenta.secssim.core.curve.Rng;
-import com.shimizukenta.secssim.core.domain.EquipmentSpec;
-import com.shimizukenta.secssim.core.value.GraphValueSource;
-import com.shimizukenta.secssim.core.value.ValueSource;
-import com.shimizukenta.secssim.runtime.session.DemoEquipment;
-import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
 /**
  * 程序入口。
@@ -119,13 +108,19 @@ public final class Main {
         EventBus bus = new EventBus();
         SecsProbe probe = null;
 
+        /*
+         * 整个进程只有一个启动器：它记着"哪个会话的配置从哪来"，
+         * 热重载全靠这份记忆。每次调用现造一个的话，重载接口会永远说"没有配置来源"。
+         */
+        SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
+
         if (options.configFile() != null) {
-            int code = startConfiguredSession(options, sessions, bus);
+            int code = startConfiguredSession(options, launcher);
             if (code != 0) {
                 return code;
             }
         } else if (options.demoSession()) {
-            int code = startDemoSession(options, sessions, bus);
+            int code = startDemoSession(options, launcher);
             if (code != 0) {
                 return code;
             }
@@ -142,7 +137,7 @@ public final class Main {
         }
 
         ApiContext context = new Context(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions);
+                extra.toString(), stopped::countDown, sessions, launcher);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
@@ -212,70 +207,20 @@ public final class Main {
     record Credentials(AccessControl access, String token) {
     }
 
-    private static int startConfiguredSession(RuntimeOptions options, SessionManager sessions, EventBus bus)
+    private static int startConfiguredSession(RuntimeOptions options, SessionLauncher launcher)
             throws IOException {
-        SessionConfig config;
         try {
-            config = SessionConfigJson.read(options.configFile());
+            launcher.startFromFile(options.configFile(), options.hsmsPort());
+            return 0;
         } catch (ConfigException e) {
             Log.error("配置错误", e);
             return 3;
         }
-
-        CompilationResult compiled = config.compile();
-        if (!compiled.ok()) {
-            compiled.errors().forEach(e -> Log.error("配置错误: " + e));
-            return 3;
-        }
-
-        SessionSpec configured = config.spec();
-        SessionSpec spec = new SessionSpec(configured.id(), configured.passive(),
-                configured.bindHost(),
-                configured.port() == 0 ? options.hsmsPort() : configured.port(),
-                configured.deviceId(), configured.seed(), configured.equipment());
-
-        ValueSource values = null;
-        if (!config.templates().isEmpty()) {
-            try {
-                values = new GraphValueSource(config.templates().build(compiled.equipment()),
-                        new Rng(config.spec().seed()).derive("graph"));
-            } catch (ConfigException e) {
-                Log.error("配置错误: " + e.getMessage());
-                return 3;
-            }
-        }
-
-        HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment(),
-                EngineClock.system(), values);
-        runtime.eventBus(bus);
-        runtime.enableSchedule(config.schedule(), config.maxEventsPerSec());
-        runtime.collectionEventWbit(config.s6f11Wbit());
-        runtime.traceWbit(config.s6f1Wbit());
-        runtime.open();
-        sessions.register(runtime);
-        return 0;
     }
 
-    private static int startDemoSession(RuntimeOptions options, SessionManager sessions, EventBus bus)
+    private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher)
             throws IOException {
-        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", options.deviceId());
-        CompilationResult compiled = EquipmentCompiler.compile(demo);
-
-        if (!compiled.ok()) {
-            compiled.errors().forEach(e -> Log.error("配置错误: " + e));
-            return 3;
-        }
-
-        SessionSpec spec = new SessionSpec("demo", true, "127.0.0.1", options.hsmsPort(),
-                options.deviceId(), DEMO_SEED, demo);
-
-        HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
-        runtime.eventBus(bus);
-        runtime.enableSchedule(new com.shimizukenta.secssim.core.event.EventSchedule(java.util.List.of(
-                new com.shimizukenta.secssim.core.event.EventPlan("demo-process-start", 2001,
-                        new com.shimizukenta.secssim.core.event.Trigger.Periodic(5_000L, 200L)))), 20);
-        runtime.open();
-        sessions.register(runtime);
+        launcher.startDemo("demo", options.hsmsPort(), options.deviceId());
         return 0;
     }
 
@@ -335,13 +280,16 @@ public final class Main {
         private final String extraHealthJson;
         private final Runnable shutdown;
         private final SessionManager sessions;
+        private final SessionLauncher launcher;
 
-        Context(String mode, String version, String extraHealthJson, Runnable shutdown, SessionManager sessions) {
+        Context(String mode, String version, String extraHealthJson, Runnable shutdown,
+                SessionManager sessions, SessionLauncher launcher) {
             this.mode = mode;
             this.version = version;
             this.extraHealthJson = extraHealthJson;
             this.shutdown = shutdown;
             this.sessions = sessions;
+            this.launcher = launcher;
         }
 
         @Override
@@ -429,6 +377,54 @@ public final class Main {
         @Override
         public String catalogJson(String sessionId) {
             return this.sessions.find(sessionId).map(SessionRuntime::catalogJson).orElse(null);
+        }
+
+        @Override
+        public SessionOutcome createSession(String configName) {
+            try {
+                String id = this.launcher.create(configName);
+                Log.info("新建会话 " + id + "（配置 " + configName + "）");
+                return SessionOutcome.OK;
+            } catch (ConfigException e) {
+                /* 配置名非法、文件读不了、内容编译不过——都是"这台设备起不来" */
+                Log.error("新建会话失败（配置）: " + e.getMessage(), null);
+                return SessionOutcome.FAILED;
+            } catch (IOException e) {
+                /* 到这一步配置已经是好的，只剩端口没绑上 */
+                Log.error("新建会话失败（端口绑定）: " + e.getMessage(), null);
+                return SessionOutcome.FAILED;
+            } catch (IllegalArgumentException e) {
+                Log.error("新建会话失败（标识冲突）: " + e.getMessage(), null);
+                return SessionOutcome.CONFLICT;
+            }
+        }
+
+        @Override
+        public SessionOutcome closeSession(String sessionId) {
+            return this.launcher.close(sessionId) ? SessionOutcome.OK : SessionOutcome.UNKNOWN_SESSION;
+        }
+
+        @Override
+        public SessionOutcome reloadSession(String sessionId) {
+            if (this.sessions.find(sessionId).isEmpty()) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            if (this.launcher.sourceOf(sessionId).isEmpty()) {
+                return SessionOutcome.NOT_RELOADABLE;
+            }
+
+            try {
+                this.launcher.reload(sessionId);
+                Log.info("会话 " + sessionId + " 已按配置重载");
+                return SessionOutcome.OK;
+            } catch (ConfigException e) {
+                /* 配置有问题时旧会话原样跑着，这里只是如实报告失败 */
+                Log.error("重载失败（配置，旧会话未动）: " + e.getMessage(), null);
+                return SessionOutcome.FAILED;
+            } catch (IOException e) {
+                Log.error("重载失败（端口绑定）: " + e.getMessage(), null);
+                return SessionOutcome.FAILED;
+            }
         }
     }
 }
