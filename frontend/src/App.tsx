@@ -3,8 +3,10 @@ import {
   createClient,
   readToken,
   saveToken,
+  type AlarmState,
   type Health,
   type SessionSummary,
+  type TerminalMessage,
   type PreviewData,
   type PreviewSeries,
   type WireMessage,
@@ -107,6 +109,8 @@ export function App(): JSX.Element {
   const [alid, setAlid] = useState(1001);
   const [alarmText, setAlarmText] = useState('TEMP HIGH');
   const [alarmCategory, setAlarmCategory] = useState(1);
+  const [alarms, setAlarms] = useState<AlarmState[]>([]);
+  const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
   const logRef = useRef<HTMLPreElement | null>(null);
   const nextMessageKey = useRef(0);
   const openedOnce = useRef(false);
@@ -279,6 +283,38 @@ export function App(): JSX.Element {
       setAlarmSession(sessions[0].id);
     }
   }, [sessions, alarmSession]);
+
+  /* 活动报警 / 终端消息轮询：只在选中会话时跑 */
+  useEffect(() => {
+    if (client === null || alarmSession === '') {
+      setAlarms([]);
+      setTerminalMessages([]);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [nextAlarms, nextTerminal] = await Promise.all([
+          client.alarms(alarmSession),
+          client.terminalMessages(alarmSession),
+        ]);
+        if (!cancelled) {
+          setAlarms(nextAlarms);
+          setTerminalMessages(nextTerminal);
+        }
+      } catch {
+        /* 会话可能刚好被关闭，下一轮再试 */
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client, alarmSession]);
 
   const onSaveToken = () => {
     const value = draftToken.trim();
@@ -475,6 +511,62 @@ export function App(): JSX.Element {
             </button>
           </div>
           <p className="hint">置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。</p>
+
+          <h3>活动报警</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ALID</th>
+                <th>类别</th>
+                <th>文本</th>
+                <th>置位时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alarms.map((alarm) => (
+                <tr key={alarm.alid}>
+                  <td>{alarm.alid}</td>
+                  <td>{alarm.category}</td>
+                  <td>{alarm.text}</td>
+                  <td>{new Date(alarm.atMillis).toLocaleTimeString()}</td>
+                </tr>
+              ))}
+              {alarms.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="hint">
+                    暂无活动报警
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <h3>终端消息</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>TID</th>
+                <th>文本</th>
+                <th>收到时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {terminalMessages.map((message, index) => (
+                <tr key={`${message.atMillis}-${index}`}>
+                  <td>{message.tid}</td>
+                  <td>{message.text}</td>
+                  <td>{new Date(message.atMillis).toLocaleTimeString()}</td>
+                </tr>
+              ))}
+              {terminalMessages.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="hint">
+                    暂无终端消息
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </section>
 
         <section>

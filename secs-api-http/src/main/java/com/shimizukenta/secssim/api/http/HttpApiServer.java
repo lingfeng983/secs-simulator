@@ -254,7 +254,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_TICKET, api::handleTicket);
         http.createContext(PATH_SHUTDOWN, api::handleShutdown);
         http.createContext(PATH_SESSIONS, api::handleSessions);
-        http.createContext(PATH_SESSION_PREFIX, api::handleSessionCommand);
+        http.createContext(PATH_SESSION_PREFIX, api::handleSessionPath);
         http.createContext(PATH_PREVIEW, api::handlePreview);
 
         if (api.webRoot != null) {
@@ -556,6 +556,54 @@ public final class HttpApiServer implements AutoCloseable {
      * <p>用 POST 是因为它会改变设备状态（主机会看到一条 S6F11），不是幂等查询。
      * </p>
      */
+    private void handleSessionPath(HttpExchange ex) throws IOException {
+        if (!this.authorized(ex)) {
+            respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
+            return;
+        }
+
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            this.handleSessionQuery(ex);
+            return;
+        }
+        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            this.handleSessionCommand(ex);
+            return;
+        }
+
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /**
+     * GET /api/v1/sessions/{id}/alarms 或 /terminal。
+     */
+    private void handleSessionQuery(HttpExchange ex) throws IOException {
+        String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
+        String[] parts = rest.split("/");
+
+        if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+            /* 命令路径用 GET 访问时仍按 405 处理，而不是误报 400 */
+            if (parts.length == 3 && ("ceid".equals(parts[1]) || "alarm".equals(parts[1]))) {
+                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+                return;
+            }
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        String body = switch (parts[1]) {
+            case "alarms" -> this.context.alarmsJson(parts[0]);
+            case "terminal" -> this.context.terminalMessagesJson(parts[0]);
+            default -> null;
+        };
+
+        if (body == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        respond(ex, 200, body);
+    }
+
     private void handleSessionCommand(HttpExchange ex) throws IOException {
         if (!this.authorized(ex)) {
             respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");

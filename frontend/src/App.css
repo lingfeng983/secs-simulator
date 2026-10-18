@@ -38,6 +38,7 @@ header {
 
 h1 { font-size: 1.2rem; margin: 0; }
 h2 { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+h3 { font-size: 0.9rem; margin: 1rem 0 0.35rem; }
 
 .health { display: flex; gap: 0.5rem 1rem; margin: 0; color: var(--muted); }
 .health dt { font-weight: 600; }

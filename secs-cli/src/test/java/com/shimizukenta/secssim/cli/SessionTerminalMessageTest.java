@@ -47,6 +47,8 @@ class SessionTerminalMessageTest {
             assertEquals(1, messages.size());
             assertEquals(1, messages.get(0).tid());
             assertEquals("LINE READY", messages.get(0).text());
+            assertTrue(f.session.terminalMessagesJson().contains("LINE READY"),
+                    f.session.terminalMessagesJson());
             assertEquals(1L, f.session.counters().get("terminalMessages"));
         }
     }

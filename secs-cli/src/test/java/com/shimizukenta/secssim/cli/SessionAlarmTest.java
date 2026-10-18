@@ -48,6 +48,7 @@ class SessionAlarmTest {
             assertEquals(1001, Secs2Read.asInt(setBody.get(1)));
             assertEquals("TEMP HIGH", setBody.get(2).getAscii());
             assertEquals(1, f.session.alarms().size(), "置位后应有一条活动报警");
+            assertTrue(f.session.alarmsJson().contains("\"alid\":1001"), f.session.alarmsJson());
 
             f.session.emitAlarm(1001, false, "TEMP HIGH", 1);
             awaitAlarms(f.session, 2L);
@@ -57,6 +58,7 @@ class SessionAlarmTest {
             int clearAlcd = Secs2Read.asByte(clear.secs2().get(0)) & 0xFF;
             assertEquals(0x01, clearAlcd, "ALCD 高位清零 + 类别 1");
             assertTrue(f.session.alarms().isEmpty(), "清除后活动报警应为空");
+            assertEquals("[]", f.session.alarmsJson());
             assertEquals(0L, f.session.counters().get("alarmDropped"));
         }
     }

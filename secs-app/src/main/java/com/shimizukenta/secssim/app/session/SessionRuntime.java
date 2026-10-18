@@ -125,4 +125,22 @@ public interface SessionRuntime {
     default void emitAlarm(int alid, boolean set, String text, int category) throws IOException {
         throw new IOException("session does not support alarms: " + this.id());
     }
+
+    /**
+     * 当前活动报警的 JSON 数组。
+     *
+     * @return JSON 数组文本
+     */
+    default String alarmsJson() {
+        return "[]";
+    }
+
+    /**
+     * 最近终端消息的 JSON 数组（旧→新）。
+     *
+     * @return JSON 数组文本
+     */
+    default String terminalMessagesJson() {
+        return "[]";
+    }
 }

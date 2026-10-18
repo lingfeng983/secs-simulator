@@ -2,8 +2,8 @@
 
 基线：`master @ 5179263`，工作树干净。
 
-验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**369 个测试全绿**
-（json 110 / protocol 45 / core 90 / app 25 / api-http 36 / runtime 17 / cli 46）。
+验证：GraalVM 25 下 `mvn -B -o verify` = **BUILD SUCCESS**，**370 个测试全绿**
+（json 110 / protocol 45 / core 90 / app 25 / api-http 37 / runtime 17 / cli 46）。
 
 本清单分三类：
 
@@ -28,6 +28,7 @@
 | 只有 at/periodic，不能按条件触发 | ✅ 已修 | 新增 `Trigger.OnCondition` + `ConditionDebouncer`；表达式支持比较运算；每 tick 求值 `t` / `svid.<id>`；新增 `SessionOnConditionTest` |
 | 生产路径无法使用模板 DAG | ✅ 已修 | Schema v5 增加 `templates`；`TemplateConfig.build` 生成 `TemplateGraph`；`Main` 用 `GraphValueSource`；新增 `SessionConfigJsonTest#templateConfigBuildsGraph` 与 `ConfigDrivenSessionTest#schemaV5TemplatesDriveS1F3` |
 | SERVER 模式只能明文 HTTP | ✅ 部分修复 | 新增 `--tls-keystore` / `--tls-password`，`HttpApiServer` 支持 `HttpsServer`；server 模式强制显式 `--token`；新增 `TlsServerTest`。账号/角色鉴权仍未做 |
+| 活动报警/终端消息只能存内存、界面看不到 | ✅ 已修 | `SessionRuntime` 增加 `alarmsJson` / `terminalMessagesJson`；HTTP `GET /sessions/{id}/alarms`、`/terminal`；前端每 2 秒刷新面板 |
 | 不能表达“A 之后 N 秒发 B” | ✅ 已修 | 新增 `Trigger.AfterEvent` + 延迟队列；源计划成功后才入队；配置校验源计划存在/无环；新增 `SessionAfterEventTest` |
 
 验证命令：
@@ -41,8 +42,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 1. P1：协议能力
 
-- [x] **S5F1 报警**：已实现置位/清除 S5F1 + S5F2 等待，ALCD = 类别 | 0x80，HTTP/UI 可手动触发。活动报警列表 API/面板、自动去抖与报警定义配置仍可补。
-- [x] **S10F3 终端消息**：已实现 S10F3 → S10F4，保存最近 20 条；格式非法回 `MessageWillNotBeDisplayed`。终端消息面板/查询 API 仍可补。
+- [x] **S5F1 报警**：已实现置位/清除 S5F1 + S5F2 等待，ALCD = 类别 | 0x80；HTTP/UI 可手动触发；`GET /sessions/{id}/alarms` + 前端面板。自动去抖与报警定义配置仍可补。
+- [x] **S10F3 终端消息**：已实现 S10F3 → S10F4，保存最近 20 条；格式非法回 `MessageWillNotBeDisplayed`；`GET /sessions/{id}/terminal` + 前端面板。
 - [x] **S6F11 的 W 位 + S6F12**：已支持 `events.s6f11Wbit`；开启后异步等待 S6F12，队列满计入 `wbitDropped`。S6F12 的 ACKC6 业务处理（非 0 时告警/重试）仍可补。
 - [x] **S6F1 的 W 位 + S6F2**：已支持 `events.s6f1Wbit`；开启后异步等待 S6F2，队列满计入 `traceWbitDropped`。S6F2 的 ACKC6 业务处理仍可补。
 - [x] **未知 Stream/Function 的 S9Fx**：已实现 S9F3/S9F5；S9 自身不再回 S9。S9F1/7/9/11 仍按具体错误类型细分时可补。
@@ -144,7 +145,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 ## 8. 已确认完成，不要重复做
 
-- M0–M9-c 主体功能；369 个测试全绿。
+- M0–M9-c 主体功能；370 个测试全绿。
 - S1F1/F2、S1F3/F4（含空列表=全部）、**S1F11/F12**、S1F13–F18、S2F17/F18、S2F23/F24、S2F31/F32。
 - 未知 Stream/Function 的 S9F3/S9F5 应答。
 - S6F11 / S6F1 可选 W 位 + 异步等待 S6F12 / S6F2。

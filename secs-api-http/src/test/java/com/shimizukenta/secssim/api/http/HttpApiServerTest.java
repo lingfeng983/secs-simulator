@@ -93,6 +93,16 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String alarmsJson(String sessionId) {
+                return "missing".equals(sessionId) ? null : "[{\"alid\":1001}]";
+            }
+
+            @Override
+            public String terminalMessagesJson(String sessionId) {
+                return "missing".equals(sessionId) ? null : "[{\"tid\":1,\"text\":\"LINE READY\"}]";
+            }
+
+            @Override
             public String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
                 if ("missing".equals(sessionId)) {
                     return null;
@@ -169,6 +179,20 @@ class HttpApiServerTest {
         assertEquals(400, post("/api/v1/sessions/s1/ceid/not-a-number", TOKEN).statusCode());
         assertEquals(400, post("/api/v1/sessions/s1/other/2001", TOKEN).statusCode());
         assertEquals(400, post("/api/v1/sessions//ceid/2001", TOKEN).statusCode());
+    }
+
+    @Test
+    void alarmsAndTerminalQueriesReturnJson() throws Exception {
+        HttpResponse<String> alarms = get("/api/v1/sessions/s1/alarms", TOKEN);
+        assertEquals(200, alarms.statusCode());
+        assertTrue(alarms.body().contains("\"alid\":1001"), alarms.body());
+
+        HttpResponse<String> terminal = get("/api/v1/sessions/s1/terminal", TOKEN);
+        assertEquals(200, terminal.statusCode());
+        assertTrue(terminal.body().contains("LINE READY"), terminal.body());
+
+        assertEquals(404, get("/api/v1/sessions/missing/alarms", TOKEN).statusCode());
+        assertEquals(404, get("/api/v1/sessions/s1/unknown", TOKEN).statusCode());
     }
 
     @Test

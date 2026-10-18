@@ -363,5 +363,15 @@ public final class Main {
                 return TriggerOutcome.FAILED;
             }
         }
+
+        @Override
+        public String alarmsJson(String sessionId) {
+            return this.sessions.find(sessionId).map(SessionRuntime::alarmsJson).orElse(null);
+        }
+
+        @Override
+        public String terminalMessagesJson(String sessionId) {
+            return this.sessions.find(sessionId).map(SessionRuntime::terminalMessagesJson).orElse(null);
+        }
     }
 }

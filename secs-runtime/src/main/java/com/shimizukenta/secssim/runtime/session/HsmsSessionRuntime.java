@@ -35,6 +35,8 @@ import com.shimizukenta.secs.gem.ONLACK;
 import com.shimizukenta.secs.gem.TIACK;
 import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Builder;
+import com.shimizukenta.jsonhub.JsonHub;
+import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.secs.secs2.Secs2Exception;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
@@ -527,6 +529,23 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public List<AlarmState> alarms() {
         return List.copyOf(this.activeAlarms.values());
+    }
+
+    @Override
+    public String alarmsJson() {
+        JsonHubBuilder b = JsonHub.getBuilder();
+        List<AlarmState> sorted = new ArrayList<>(this.activeAlarms.values());
+        sorted.sort(Comparator.comparingInt(AlarmState::alid));
+
+        List<JsonHub> items = new ArrayList<>(sorted.size());
+        for (AlarmState alarm : sorted) {
+            items.add(b.object(
+                    b.pair("alid", alarm.alid()),
+                    b.pair("text", alarm.text()),
+                    b.pair("category", alarm.category()),
+                    b.pair("atMillis", alarm.atMillis())));
+        }
+        return b.array(items).toJson();
     }
 
     /**
@@ -1024,6 +1043,20 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         synchronized (this.terminalMessages) {
             return List.copyOf(this.terminalMessages);
         }
+    }
+
+    @Override
+    public String terminalMessagesJson() {
+        JsonHubBuilder b = JsonHub.getBuilder();
+        List<JsonHub> items = new ArrayList<>();
+
+        for (TerminalMessage message : this.terminalMessages()) {
+            items.add(b.object(
+                    b.pair("tid", message.tid()),
+                    b.pair("text", message.text()),
+                    b.pair("atMillis", message.atMillis())));
+        }
+        return b.array(items).toJson();
     }
 
     /**

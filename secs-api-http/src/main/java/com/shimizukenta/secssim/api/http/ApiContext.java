@@ -70,6 +70,26 @@ public interface ApiContext {
     }
 
     /**
+     * 会话的活动报警 JSON；会话不存在时返回 {@code null}。
+     *
+     * @param sessionId 会话标识
+     * @return JSON 数组文本或 {@code null}
+     */
+    default String alarmsJson(String sessionId) {
+        return null;
+    }
+
+    /**
+     * 会话的终端消息 JSON；会话不存在时返回 {@code null}。
+     *
+     * @param sessionId 会话标识
+     * @return JSON 数组文本或 {@code null}
+     */
+    default String terminalMessagesJson(String sessionId) {
+        return null;
+    }
+
+    /**
      * 曲线预览（分桶 min/max/avg）。
      *
      * @param sessionId 会话标识

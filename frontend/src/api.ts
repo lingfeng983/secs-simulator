@@ -52,6 +52,19 @@ export interface PreviewSeries {
   avg: number[];
 }
 
+export interface AlarmState {
+  alid: number;
+  text: string;
+  category: number;
+  atMillis: number;
+}
+
+export interface TerminalMessage {
+  tid: number;
+  text: string;
+  atMillis: number;
+}
+
 export interface PreviewData {
   from: number;
   to: number;
@@ -65,6 +78,8 @@ export interface ApiClient {
   sessions(): Promise<SessionSummary[]>;
   trigger(sessionId: string, ceid: number): Promise<number>;
   alarm(sessionId: string, alid: number, set: boolean, text: string, category: number): Promise<number>;
+  alarms(sessionId: string): Promise<AlarmState[]>;
+  terminalMessages(sessionId: string): Promise<TerminalMessage[]>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
@@ -146,6 +161,16 @@ export function createClient(token: string): ApiClient {
         throw new Error('401 未授权');
       }
       return response.status;
+    },
+    async alarms(sessionId) {
+      return json<AlarmState[]>(
+        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`, { headers: auth }),
+      );
+    },
+    async terminalMessages(sessionId) {
+      return json<TerminalMessage[]>(
+        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`, { headers: auth }),
+      );
     },
     async preview(sessionId, fromMs, toMs, buckets) {
       return json<PreviewData>(
