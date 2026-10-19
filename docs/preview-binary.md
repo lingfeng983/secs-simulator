@@ -21,6 +21,9 @@
 
 `truncated = svidTotal > seriesCount`。
 
+> JSON 预览的 `series` 还带 `owner` / `unit`（供多轴模式按单位分组）；
+> 二进制 v1 为了固定布局不包含这两个字符串。
+
 ## 序列区
 
 每条序列按 SVID 升序排列：

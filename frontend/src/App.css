@@ -124,9 +124,9 @@ input {
 .audit-detail { white-space: normal; max-width: 28rem; }
 
 .uplots { display: flex; flex-direction: column; gap: 1rem; }
-.uplot-block { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; }
+.uplot-block, .multi-axis-block { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; }
 .uplot-title { margin-bottom: 0.25rem; color: var(--muted); font: 12px/1.4 ui-monospace, Consolas, monospace; }
-.uplot-host { width: 100%; }
+.uplot-host, .multi-axis-host { width: 100%; }
 .uplot-host .u-legend { font-size: 11px; }
 
 @media (max-width: 760px) {

@@ -132,8 +132,8 @@ async function mockApi(page: Page): Promise<void> {
           svidTotal: 2,
           truncated: false,
           series: [
-            { svid: 1001, min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] },
-            { svid: 1002, min: [1, 2, 3, 4], max: [5, 6, 7, 8], avg: [3, 4, 5, 6] },
+            { svid: 1001, owner: 'CH1', unit: 'C', min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] },
+            { svid: 1002, owner: 'CH1', unit: 'Torr', min: [1, 2, 3, 4], max: [5, 6, 7, 8], avg: [3, 4, 5, 6] },
           ],
         },
       });
@@ -196,6 +196,10 @@ test('loads identity, session, Canvas and uPlot preview', async ({ page }) => {
   await expect(page.locator('.uplot-block')).toHaveCount(2);
   await expect(page.locator('.uplot-host canvas')).toHaveCount(2);
   await expect(page.locator('.uplot-host .u-legend').first()).toContainText('min');
+
+  await page.locator('label:has-text("图表") select').selectOption('multi');
+  await expect(page.locator('.multi-axis-host canvas')).toHaveCount(1);
+  await expect(page.locator('.multi-axis-host .u-axis')).toHaveCount(3);
 });
 
 test('opens a config and adds a curve through the structured editor', async ({ page }) => {

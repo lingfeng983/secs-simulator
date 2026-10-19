@@ -284,6 +284,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         for (PreviewSeries value : data.series()) {
             series.add(b.object(
                     b.pair("svid", value.svid()),
+                    b.pair("owner", value.owner()),
+                    b.pair("unit", value.unit()),
                     b.pair("min", b.array(numbers(value.min(), b))),
                     b.pair("max", b.array(numbers(value.max(), b))),
                     b.pair("avg", b.array(numbers(value.avg(), b)))));
@@ -397,7 +399,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 avg[i] = n == 0 ? 0.0 : sum / n;
             }
 
-            series.add(new PreviewSeries(svid, min, max, avg));
+            ResolvedSvid resolved = this.model.svids().get(svid);
+            series.add(new PreviewSeries(svid,
+                    resolved == null ? "" : resolved.owner(),
+                    resolved == null ? "" : resolved.unitSymbol(),
+                    min, max, avg));
         }
 
         return new PreviewData(fromMs, toMs, count, bucketMs, allSvids.size(), series);
@@ -407,7 +413,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                                int svidTotal, java.util.List<PreviewSeries> series) {
     }
 
-    private record PreviewSeries(int svid, double[] min, double[] max, double[] avg) {
+    private record PreviewSeries(int svid, String owner, String unit,
+                                 double[] min, double[] max, double[] avg) {
     }
 
     /**

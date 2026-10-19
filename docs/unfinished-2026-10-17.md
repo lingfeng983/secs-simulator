@@ -28,7 +28,7 @@
 > 与 JSON 预览共用同一份 `previewData`。
 > 随后完成**事件编排控制**：运行时列出/启用/禁用 `EventPlan`（禁用不补发、重载恢复配置），
 > 前端新增「事件编排」面板。
-> 再补上 **uPlot 预览引擎**：Canvas / uPlot 切换，图例开关、框选缩放、双击复位；
+> 再补上 **uPlot 预览引擎**：Canvas / uPlot / 多轴切换，图例开关、框选缩放、双击复位；
 > 用 Playwright-core + Edge 手工冒烟（10 图 / 10 图例 / 无 pageerror），但未进 CI。
 > 随后补上**审计**：`logs/audit.jsonl` + `GET /api/v1/audit`（admin），
 > 关键操作与 403 都带 actor/role/target/detail。
@@ -40,7 +40,7 @@
 > 事件切换+审计）与真实 Java 后端 1 例，CI 两个 job 均已接入。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端单元/组件测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）
-> + **3 个 Playwright E2E** 全绿。
+> + **3 个 Mock E2E + 1 个真实后端 E2E** 全绿。
 
 本清单分三类：
 
@@ -108,7 +108,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **WebSocket**：README / pom / package-info 声称有，实际只有 SSE。
 - [x] **二进制曲线流**：新增 `GET /api/v1/preview.bin`（SCSP v1，小端，48 字节头 + min/max/avg f64），与 JSON 预览共用 `previewData`；前端「下载二进制」。格式见 `docs/preview-binary.md`。
 - [x] **预览静默截断**：`previewJson` 新增 `svidTotal` / `truncated`，前端明说"共 N 个 SVID，只显示前 32 条"；buckets 上限仍为 500（界面显示桶宽）。
-- [x] **前端只有 Canvas 包络 + 均值线**：新增 Canvas / uPlot 双引擎；uPlot 支持图例开关（min/max/avg）、框选缩放、双击复位与光标读数；**多轴仍未做**。
+- [x] **前端只有 Canvas 包络 + 均值线**：Canvas / uPlot / 多轴三种模式；uPlot 支持图例开关、框选缩放、双击复位与光标读数；多轴按单位分配 y 轴（左右交替），只画 avg。
 - [x] **报文不落盘**：已实现 `<work-dir>/logs/messages.jsonl`（JSONL，追加 + flush），内存保留最近 5000 条；`GET /api/v1/messages` 支持 `session/direction/limit/format=jsonl`；前端「报文」面板可载入历史、导出 JSONL。**没有自动轮转/保留策略**。
 - [x] **没有手动发送 SML/SECS 报文**：新增 `SmlParser`（受控子集）与 `POST /api/v1/sessions/{id}/message`（operator），前端新增「手动发送」面板；W 位同步等 T3 并返回 `timedOut/replySml`。见 ADR-0010。
 - [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取并每 2 秒轮询（主机随时可能改定义）。
@@ -185,7 +185,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 **M12：配置与前端**
 8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；**配置读/校验/保存 API 与「配置编辑器」面板已完成**（原始 JSON 文本编辑，先校验再原子落盘）；**模板结构化表单**（曲线 / 组合模板 / 实例参数）与**曲线预览交互**（悬停读数、拖动放大、截断提示）也已完成。
 9. 会话生命周期 API 与热重载已完成（创建 / 关闭 / 重载，`--work-dir` 作为配置目录）；**配置本身的读取、校验、保存 API 与前端编辑器也已完成**（item 8 的第一步）。
-10. **uPlot 交互**（图例开关 / 框选缩放 / 双击复位）、**二进制预览**、**报文落盘 + 历史 / 导出**、**手动 SML 发送**、SVID/CEID 目录、报警/报告面板已完成；多轴仍未做。
+10. **uPlot 交互**（图例开关 / 框选缩放 / 双击复位）、**多轴（按单位）**、**二进制预览**、**报文落盘 + 历史 / 导出**、**手动 SML 发送**、SVID/CEID 目录、报警/报告面板已完成。
 11. 前端测试与 E2E：Vitest 22 例 + Mock Playwright 3 例 + 真实后端 Playwright 1 例，CI 已接入。
 
 **M13：分发**
@@ -212,7 +212,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **报文历史**（`MessageLog` → `<work-dir>/logs/messages.jsonl`，最近 5000 条；`GET /api/v1/messages` + JSONL 导出 + 前端载入历史）。
 - **手动发送 SML**（受控子集解析 + W 位等待回复 + 前端面板，ADR-0010）。
 - **事件编排控制**（列表 + 运行时启用/禁用 + 前端面板；禁用清理去抖/延迟队列）。
-- **uPlot 预览引擎**（Canvas/uPlot 切换；图例开关、框选缩放、双击复位；浏览器冒烟 10 图 10 图例、无 pageerror）。
+- **uPlot 预览引擎**（Canvas/uPlot/多轴；图例开关、框选缩放、双击复位；浏览器冒烟 10 图 10 图例、无 pageerror）。
 - **审计日志**（JSONL + actor/role/action/target/detail；覆盖关键操作与 403；admin 查询与前端面板）。
 - **设备控制状态**（OFFLINE / COMMUNICATING / ONLINE，S1F13/S1F15/S1F17 与断链迁移；会话列表显示）。
 - **OpenAPI 3.0.3 契约**（22 路径 / 16 schema，CI 用 openapi-spec-validator 校验）。

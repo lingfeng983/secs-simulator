@@ -292,6 +292,101 @@ function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineProps): 
   );
 }
 
+const MULTI_AXIS_COLORS = ['#4493f8', '#f0883e', '#3fb950', '#db61a2', '#a371f7', '#d29922', '#39c5cf', '#ff7b72'];
+
+/** 多轴：同一张图里按单位分配 y 轴，左右交替排列；只画 avg。 */
+function MultiAxisChart({ series, fromMs, bucketMs }: {
+  series: PreviewSeries[];
+  fromMs: number;
+  bucketMs: number;
+}): JSX.Element {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const plotRef = useRef<uPlot | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null || series.length === 0) {
+      return;
+    }
+
+    const unitOf = (item: PreviewSeries) => (item.unit ?? '').trim() || '无单位';
+    const units = [...new Set(series.map(unitOf))];
+    const unitIndex = new Map(units.map((unit, index) => [unit, index]));
+    const x = series[0].avg.map((_, index) => (fromMs + index * bucketMs) / 1000);
+    const data = [x, ...series.map((item) => item.avg)] as uPlot.AlignedData;
+
+    const scales: uPlot.Scales = { x: { time: false } };
+    for (let i = 0; i < units.length; i += 1) {
+      scales[`y${i}`] = {};
+    }
+
+    const axes: uPlot.Axis[] = [
+      { stroke: '#8b949e', grid: { stroke: 'rgba(128, 128, 128, 0.18)' } },
+      ...units.map((unit, index) => ({
+        scale: `y${index}`,
+        side: index % 2 === 0 ? (3 as const) : (1 as const),
+        label: unit,
+        stroke: MULTI_AXIS_COLORS[index % MULTI_AXIS_COLORS.length],
+        grid: { show: index === 0, stroke: 'rgba(128, 128, 128, 0.14)' },
+      })),
+    ];
+
+    const seriesOptions: uPlot.Series[] = [
+      { label: 't(s)' },
+      ...series.map((item, index) => ({
+        label: `${item.svid} ${unitOf(item)}`,
+        stroke: MULTI_AXIS_COLORS[index % MULTI_AXIS_COLORS.length],
+        width: 1.5,
+        scale: `y${unitIndex.get(unitOf(item)) ?? 0}`,
+        points: { show: false },
+      })),
+    ];
+
+    const plot = new uPlot(
+      {
+        width: Math.max(320, host.clientWidth || 900),
+        height: 300,
+        padding: [14, 14, 4, 4],
+        cursor: { drag: { x: true, y: false, setScale: true }, points: { show: false } },
+        legend: { show: true, live: true },
+        scales,
+        series: seriesOptions,
+        axes,
+      },
+      data,
+      host,
+    );
+    plotRef.current = plot;
+
+    const resize = () => {
+      const width = host.clientWidth;
+      if (width > 0 && plotRef.current !== null) {
+        plotRef.current.setSize({ width, height: 300 });
+      }
+    };
+    resize();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(resize);
+      observer.observe(host);
+    }
+
+    return () => {
+      observer?.disconnect();
+      plot.destroy();
+      plotRef.current = null;
+    };
+  }, [series, fromMs, bucketMs]);
+
+  return (
+    <div className="multi-axis-block">
+      <div className="uplot-title">多轴（按单位分配 y 轴，avg 曲线）</div>
+      <div className="multi-axis-host" ref={hostRef} />
+    </div>
+  );
+}
+
 interface UplotSeriesProps {
   series: PreviewSeries;
   fromMs: number;
@@ -399,7 +494,7 @@ export function App(): JSX.Element {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewSession, setPreviewSession] = useState('');
   const [windowMs, setWindowMs] = useState(WINDOWS[0].ms);
-  const [chartMode, setChartMode] = useState<'canvas' | 'uplot'>('canvas');
+  const [chartMode, setChartMode] = useState<'canvas' | 'uplot' | 'multi'>('canvas');
   const [zoom, setZoom] = useState<ZoomRange | null>(null);
   const [alarmSession, setAlarmSession] = useState('');
   const [alid, setAlid] = useState(1001);
@@ -1491,10 +1586,14 @@ export function App(): JSX.Element {
               图表
               <select
                 value={chartMode}
-                onChange={(event) => setChartMode(event.target.value === 'uplot' ? 'uplot' : 'canvas')}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setChartMode(value === 'uplot' ? 'uplot' : value === 'multi' ? 'multi' : 'canvas');
+                }}
               >
                 <option value="canvas">Canvas</option>
                 <option value="uplot">uPlot</option>
+                <option value="multi">多轴</option>
               </select>
             </label>
             <button type="button" onClick={() => void onPreview()} disabled={sessions.length === 0}>
@@ -1544,7 +1643,9 @@ export function App(): JSX.Element {
                   <p className="hint">
                     {chartMode === 'uplot'
                       ? '拖动框选放大，双击复位；点击图例可隐藏/显示 min/max/avg。'
-                      : '悬停看读数；在曲线上横向拖动选择区间放大；双击或点「重置缩放」恢复。'}
+                      : chartMode === 'multi'
+                        ? '按单位分配 y 轴，左右交替；只画 avg，点击图例可隐藏/显示单条 SVID。'
+                        : '悬停看读数；在曲线上横向拖动选择区间放大；双击或点「重置缩放」恢复。'}
                   </p>
                   {chartMode === 'uplot' ? (
                     <div className="uplots">
@@ -1557,6 +1658,12 @@ export function App(): JSX.Element {
                         />
                       ))}
                     </div>
+                  ) : chartMode === 'multi' ? (
+                    <MultiAxisChart
+                      series={preview.series}
+                      fromMs={preview.from}
+                      bucketMs={preview.bucketMs}
+                    />
                   ) : (
                     <div className="sparks">
                       {preview.series.map((series) => (

@@ -135,6 +135,8 @@ export interface MessagePage {
 /** 曲线预览：分桶 min/max/avg。 */
 export interface PreviewSeries {
   svid: number;
+  owner?: string;
+  unit?: string;
   min: number[];
   max: number[];
   avg: number[];

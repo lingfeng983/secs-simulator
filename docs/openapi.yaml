@@ -781,6 +781,8 @@ components:
       required: [svid, min, max, avg]
       properties:
         svid: { type: integer }
+        owner: { type: string }
+        unit: { type: string }
         min:
           type: array
           items: { type: number, format: double }

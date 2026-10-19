@@ -62,6 +62,8 @@ class SessionPreviewTest {
         }
 
         assertTrue(temperature != null, "缺少 SVID 1001 的序列");
+        assertEquals("CH1", temperature.get("owner").optionalString().orElse(""));
+        assertEquals("C", temperature.get("unit").optionalString().orElse(""));
         assertEquals(60, temperature.get("min").length());
         assertEquals(60, temperature.get("max").length());
         assertEquals(60, temperature.get("avg").length());
