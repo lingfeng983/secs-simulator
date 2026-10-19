@@ -21,6 +21,7 @@ import com.shimizukenta.secssim.api.http.SessionsJson;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.event.EventBus;
+import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
@@ -112,6 +113,19 @@ public final class Main {
         SecsProbe probe = null;
 
         /*
+         * 报文日志是"诊断材料"，不是业务数据：写不进去只少一段历史，不能让设备起不来。
+         * 打开失败时 messageLog 保持 null，HTTP 历史接口会如实回 503。
+         */
+        MessageLog messageLog = null;
+        try {
+            messageLog = MessageLog.open(options.workDir());
+            Log.info("报文日志: " + messageLog.file());
+        } catch (IOException e) {
+            Log.error("打开报文日志失败（本次不落盘）: " + options.workDir(), e);
+        }
+        AutoCloseable messageSubscription = messageLog == null ? null : bus.subscribe(messageLog::append);
+
+        /*
          * 整个进程只有一个启动器：它记着"哪个会话的配置从哪来"，
          * 热重载全靠这份记忆。每次调用现造一个的话，重载接口会永远说"没有配置来源"。
          */
@@ -123,11 +137,13 @@ public final class Main {
         if (options.configFile() != null) {
             int code = startConfiguredSession(options, launcher);
             if (code != 0) {
+                closeMessageLog(messageSubscription, messageLog);
                 return code;
             }
         } else if (options.demoSession()) {
             int code = startDemoSession(options, launcher);
             if (code != 0) {
+                closeMessageLog(messageSubscription, messageLog);
                 return code;
             }
         } else if (options.mode() == RuntimeMode.PROBE) {
@@ -143,7 +159,7 @@ public final class Main {
         }
 
         ApiContext context = new Context(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore);
+                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
@@ -170,8 +186,23 @@ public final class Main {
                 probe.close();
             }
             api.close();
+            closeMessageLog(messageSubscription, messageLog);
         }
         return 0;
+    }
+
+    /** 先退订再关闭；任何一步失败都只记录，不影响停机。 */
+    private static void closeMessageLog(AutoCloseable subscription, MessageLog log) {
+        if (subscription != null) {
+            try {
+                subscription.close();
+            } catch (Exception e) {
+                Log.error("取消报文日志订阅失败（已忽略）", e);
+            }
+        }
+        if (log != null) {
+            log.close();
+        }
     }
 
     /**
@@ -288,9 +319,11 @@ public final class Main {
         private final SessionManager sessions;
         private final SessionLauncher launcher;
         private final ConfigStore configs;
+        private final MessageLog messages;
 
         Context(String mode, String version, String extraHealthJson, Runnable shutdown,
-                SessionManager sessions, SessionLauncher launcher, ConfigStore configs) {
+                SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
+                MessageLog messages) {
             this.mode = mode;
             this.version = version;
             this.extraHealthJson = extraHealthJson;
@@ -298,6 +331,7 @@ public final class Main {
             this.sessions = sessions;
             this.launcher = launcher;
             this.configs = configs;
+            this.messages = messages;
         }
 
         @Override
@@ -385,6 +419,16 @@ public final class Main {
         @Override
         public String catalogJson(String sessionId) {
             return this.sessions.find(sessionId).map(SessionRuntime::catalogJson).orElse(null);
+        }
+
+        @Override
+        public String messagesJson(int limit, String sessionId, String direction) {
+            return this.messages == null ? null : this.messages.recentJson(limit, sessionId, direction);
+        }
+
+        @Override
+        public String messagesJsonl(int limit, String sessionId, String direction) {
+            return this.messages == null ? null : this.messages.recentJsonl(limit, sessionId, direction);
         }
 
         @Override

@@ -81,6 +81,14 @@ export interface WireMessage {
   at: number;
 }
 
+/** 报文历史：最多 limit 条，total 是过滤后的总数。 */
+export interface MessagePage {
+  messages: WireMessage[];
+  total: number;
+  limit: number;
+  truncated: boolean;
+}
+
 /** 曲线预览：分桶 min/max/avg。 */
 export interface PreviewSeries {
   svid: number;
@@ -200,6 +208,10 @@ export interface ApiClient {
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  /** 最近报文历史；session/direction 为空串表示全部。 */
+  messages(sessionId: string, direction: string, limit: number): Promise<MessagePage>;
+  /** 报文历史 JSON Lines，用于导出。 */
+  messagesJsonl(sessionId: string, direction: string, limit: number): Promise<string>;
   /** 配置目录列表。 */
   configs(): Promise<ConfigEntry[]>;
   /** 新建一份配置（后端生成能直接编译的骨架）。 */
@@ -368,6 +380,44 @@ export function createClient(token: string): ApiClient {
         await fetch('/api/v1/ticket', { method: 'POST', headers: auth }),
       );
       return body.ticket;
+    },
+    async messages(sessionId, direction, limit) {
+      const query = new URLSearchParams({ limit: String(limit) });
+      if (sessionId !== '') {
+        query.set('session', sessionId);
+      }
+      if (direction !== '') {
+        query.set('direction', direction);
+      }
+      const body = await json<Partial<MessagePage>>(
+        await fetch(`/api/v1/messages?${query}`, { headers: auth }),
+      );
+      return {
+        messages: body.messages ?? [],
+        total: body.total ?? 0,
+        limit: body.limit ?? limit,
+        truncated: body.truncated ?? false,
+      };
+    },
+    async messagesJsonl(sessionId, direction, limit) {
+      const query = new URLSearchParams({ limit: String(limit), format: 'jsonl' });
+      if (sessionId !== '') {
+        query.set('session', sessionId);
+      }
+      if (direction !== '') {
+        query.set('direction', direction);
+      }
+      const response = await fetch(`/api/v1/messages?${query}`, { headers: auth });
+      if (response.status === 401) {
+        throw new Error('401 未授权：token 无效或缺失');
+      }
+      if (response.status === 403) {
+        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
+      }
+      if (!response.ok) {
+        throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
+      }
+      return response.text();
     },
     async configs() {
       const body = await json<{ configs?: ConfigEntry[] }>(

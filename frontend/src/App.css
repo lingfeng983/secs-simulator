@@ -89,6 +89,8 @@ input {
 }
 
 .token-panel input { margin-right: 0.5rem; }
+.message-actions { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-left: 0.75rem; vertical-align: middle; }
+.message-actions button { font-size: 12px; }
 .messages { table-layout: fixed; }
 .messages .body {
   overflow: hidden;

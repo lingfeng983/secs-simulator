@@ -118,6 +118,30 @@ public interface ApiContext {
     }
 
     /**
+     * 最近报文历史（JSON）。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @return JSON 文本；报文日志不可用时返回 {@code null}
+     */
+    default String messagesJson(int limit, String sessionId, String direction) {
+        return null;
+    }
+
+    /**
+     * 最近报文历史（JSON Lines），供导出。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @return 每行一个 JSON 对象；报文日志不可用时返回 {@code null}
+     */
+    default String messagesJsonl(int limit, String sessionId, String direction) {
+        return null;
+    }
+
+    /**
      * 新建一个会话。
      *
      * @param configName {@code demo} 或配置目录下的文件名

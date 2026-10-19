@@ -41,7 +41,9 @@ class HttpApiServerTest {
     private final List<String> created = new ArrayList<>();
     private final List<String> closed = new ArrayList<>();
     private final List<String> reloaded = new ArrayList<>();
+    private final List<String> messageQueries = new ArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
+    private boolean messagesAvailable = true;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -122,6 +124,25 @@ class HttpApiServerTest {
                 }
                 return "{\"from\":" + fromMs + ",\"to\":" + toMs
                         + ",\"buckets\":" + buckets + ",\"series\":[]}";
+            }
+
+            @Override
+            public String messagesJson(int limit, String sessionId, String direction) {
+                if (!HttpApiServerTest.this.messagesAvailable) {
+                    return null;
+                }
+                HttpApiServerTest.this.messageQueries.add("json:" + limit + ":" + sessionId + ":" + direction);
+                return "{\"messages\":[],\"total\":0,\"limit\":" + limit
+                        + ",\"truncated\":false}";
+            }
+
+            @Override
+            public String messagesJsonl(int limit, String sessionId, String direction) {
+                if (!HttpApiServerTest.this.messagesAvailable) {
+                    return null;
+                }
+                HttpApiServerTest.this.messageQueries.add("jsonl:" + limit + ":" + sessionId + ":" + direction);
+                return "{\"sessionId\":\"s1\",\"direction\":\"in\"}\n";
             }
 
             @Override
@@ -392,6 +413,54 @@ class HttpApiServerTest {
     @Test
     void previewRejectsNonGet() throws Exception {
         assertEquals(405, post("/api/v1/preview?session=s1", TOKEN).statusCode());
+    }
+
+    @Test
+    void messagesRequireTokenAndGet() throws Exception {
+        assertEquals(401, get("/api/v1/messages", null).statusCode());
+        assertEquals(405, post("/api/v1/messages", TOKEN).statusCode());
+        assertEquals(200, get("/api/v1/messages", TOKEN).statusCode());
+    }
+
+    @Test
+    void messagesPassFiltersAndLimit() throws Exception {
+        HttpResponse<String> response = get(
+                "/api/v1/messages?limit=10&session=s1&direction=in", TOKEN);
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"limit\":10"), response.body());
+        assertEquals(List.of("json:10:s1:in"), this.messageQueries);
+    }
+
+    @Test
+    void messagesRejectBadParams() throws Exception {
+        assertEquals(400, get("/api/v1/messages?limit=0", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/messages?limit=5001", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/messages?limit=x", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/messages?direction=sideways", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/messages?format=xml", TOKEN).statusCode());
+    }
+
+    @Test
+    void messagesJsonlDownloadsAsAttachment() throws Exception {
+        HttpResponse<String> response = get(
+                "/api/v1/messages?format=jsonl&limit=5&direction=in", TOKEN);
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/x-ndjson"),
+                response.headers().toString());
+        assertTrue(response.headers().firstValue("Content-Disposition").orElse("").contains("messages.jsonl"),
+                response.headers().toString());
+        assertTrue(response.body().contains("\"sessionId\":\"s1\""), response.body());
+        assertEquals(List.of("jsonl:5::in"), this.messageQueries);
+    }
+
+    @Test
+    void messagesUnavailableIsServiceUnavailable() throws Exception {
+        this.messagesAvailable = false;
+
+        assertEquals(503, get("/api/v1/messages", TOKEN).statusCode());
+        assertEquals(503, get("/api/v1/messages?format=jsonl", TOKEN).statusCode());
     }
 
     @Test

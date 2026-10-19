@@ -80,6 +80,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
 
+    /** 报文历史路径。 */
+    public static final String PATH_MESSAGES = "/api/v1/messages";
+
     /** 配置目录列表路径。 */
     public static final String PATH_CONFIGS = "/api/v1/configs";
 
@@ -125,6 +128,10 @@ public final class HttpApiServer implements AutoCloseable {
     /** 预览桶数上下限，与运行时实现保持一致。 */
     private static final int PREVIEW_BUCKETS_MIN = 1;
     private static final int PREVIEW_BUCKETS_MAX = 500;
+
+    /** 报文历史默认条数与上限；上限与 MessageLog 的内存容量一致。 */
+    private static final int MESSAGES_LIMIT_DEFAULT = 500;
+    private static final int MESSAGES_LIMIT_MAX = 5000;
 
     /** 票据随机源。 */
     private static final SecureRandom TICKET_RANDOM = new SecureRandom();
@@ -318,6 +325,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_CONFIGS, api::handleConfigs);
         http.createContext(PATH_CONFIG_PREFIX, api::handleConfigPath);
         http.createContext(PATH_PREVIEW, api::handlePreview);
+        http.createContext(PATH_MESSAGES, api::handleMessages);
 
         if (api.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
@@ -1175,6 +1183,67 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
+     * 报文历史：{@code /api/v1/messages?session=&direction=&limit=&format=}。
+     *
+     * <p>它补的是 SSE 的“现在”之外的那一段：断线、刷新页面、或只是想看
+     * 上一分钟到底发了什么。默认回 JSON；{@code format=jsonl} 直接下载
+     * JSON Lines，方便丢给 jq / Select-String。</p>
+     */
+    private void handleMessages(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+
+        Long limitParam = longParam(query, "limit");
+        if (query.containsKey("limit") && limitParam == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+        long limit = limitParam == null ? MESSAGES_LIMIT_DEFAULT : limitParam;
+        if (limit < 1 || limit > MESSAGES_LIMIT_MAX) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+
+        String direction = query.getOrDefault("direction", "").trim().toLowerCase(Locale.ROOT);
+        if (!direction.isEmpty() && !"in".equals(direction) && !"out".equals(direction)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-direction\"}");
+            return;
+        }
+
+        String session = query.getOrDefault("session", "").trim();
+        String format = query.getOrDefault("format", "json").trim().toLowerCase(Locale.ROOT);
+
+        if ("jsonl".equals(format)) {
+            String body = this.context.messagesJsonl((int) limit, session, direction);
+            if (body == null) {
+                respond(ex, 503, "{\"ok\":false,\"error\":\"message-log-unavailable\"}");
+                return;
+            }
+            respondNdjson(ex, body);
+            return;
+        }
+
+        if (!format.isEmpty() && !"json".equals(format)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-format\"}");
+            return;
+        }
+
+        String body = this.context.messagesJson((int) limit, session, direction);
+        if (body == null) {
+            respond(ex, 503, "{\"ok\":false,\"error\":\"message-log-unavailable\"}");
+            return;
+        }
+        respond(ex, 200, body);
+    }
+
+    /**
      * 解析查询串，值做 URL 解码。
      *
      * <p>用 {@link LinkedHashMap} 保留首次出现的键；重复键忽略后者。
@@ -1343,6 +1412,18 @@ public final class HttpApiServer implements AutoCloseable {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(bytes);
+        }
+    }
+
+    /** 回 JSON Lines；浏览器会按附件下载，curl 拿到的是逐行 JSON。 */
+    private static void respondNdjson(HttpExchange ex, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().add("Content-Type", "application/x-ndjson; charset=utf-8");
+        ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"messages.jsonl\"");
+        ex.getResponseHeaders().add("Cache-Control", "no-store");
+        ex.sendResponseHeaders(200, bytes.length);
         try (OutputStream out = ex.getResponseBody()) {
             out.write(bytes);
         }

@@ -17,16 +17,11 @@ import {
   type WireMessage,
 } from './api';
 import { TemplateEditor } from './TemplateEditor';
+import { mergeMessages, type MessageEntry } from './messageHistory';
 
 interface LogLine {
   at: string;
   text: string;
-}
-
-/** 报文表的一行：key 只增不减，避免 slice 之后 index 位移导致整表重建。 */
-interface MessageEntry {
-  key: number;
-  msg: WireMessage;
 }
 
 const MAX_LOG = 400;
@@ -725,6 +720,59 @@ export function App(): JSX.Element {
     }
   };
 
+  /**
+   * 载入历史报文，补上 SSE 断线/刷新期间缺的那一段。
+   *
+   * <p>按全部字段去重后按时间合并，避免"历史覆盖实时"。
+   * 只保留面板上限 {@link MAX_MESSAGES} 条，完整历史在服务端文件里。</p>
+   */
+  const onLoadHistory = async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const page = await client.messages('', '', 1_000);
+      setMessages((previous) => {
+        const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
+        nextMessageKey.current = merged.nextKey;
+        return merged.entries;
+      });
+      append(
+        page.truncated
+          ? `已载入最近 ${page.messages.length} 条历史（共 ${page.total} 条，面板只保留最近 ${MAX_MESSAGES} 条）`
+          : `已载入历史 ${page.messages.length} 条`,
+      );
+    } catch (error) {
+      append(`载入历史失败: ${(error as Error).message}`);
+    }
+  };
+
+  /** 从服务端导出 JSONL：不受面板 200 条上限影响，最多 5000 条。 */
+  const onExportMessages = async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const text = await client.messagesJsonl('', '', 5_000);
+      if (text.trim() === '') {
+        append('没有可导出的报文');
+        return;
+      }
+      const blob = new Blob([text], { type: 'application/x-ndjson;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `messages-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      append(`已导出报文历史 ${text.trim().split('\n').length} 行`);
+    } catch (error) {
+      append(`导出报文失败: ${(error as Error).message}`);
+    }
+  };
+
   /** 编辑区里的内容相对磁盘有没有变。 */
   const configDirty = configDraft !== configBaseline;
 
@@ -1397,8 +1445,27 @@ export function App(): JSX.Element {
 
         <section>
           <h2>
-            报文 <button type="button" onClick={() => setMessages([])}>清空</button>
+            报文
+            <span className="message-actions">
+              <button type="button" onClick={() => void onLoadHistory()}>
+                载入历史
+              </button>
+              <button type="button" onClick={() => void onExportMessages()}>
+                导出 JSONL
+              </button>
+              <button
+                type="button"
+                onClick={() => setMessages([])}
+                title="只清界面；服务端日志文件不动"
+              >
+                清空
+              </button>
+            </span>
           </h2>
+          <p className="hint">
+            SSE 只推“现在”；断线或刷新后点「载入历史」补齐。落盘位置是
+            <code>--work-dir/logs/messages.jsonl</code>，每个进程最多回看最近 5000 条。
+          </p>
           <table className="messages">
             <thead>
               <tr>
