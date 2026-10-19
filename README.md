@@ -328,8 +328,17 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-E2E 用 Vite preview + Playwright 路由拦截 API，不启动 Java 进程；CI 的
-`frontend-e2e` job 会安装 Chromium 并跑这 3 条用例。
+- **Mock E2E**：Vite preview + Playwright 路由拦截 API，不启动 Java；
+  CI 的 `frontend-e2e` job 跑 3 条用例。
+- **真实后端 E2E**：先启动 `secs-sim --demo-session`，再指向它：
+
+```powershell
+$env:E2E_REAL_URL='http://127.0.0.1:5000'
+$env:E2E_REAL_TOKEN='e2e-token'
+npm --prefix frontend run test:e2e:real
+```
+
+CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这条真实链路。
 
 曲线预览有两种渲染引擎：
 

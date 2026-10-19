@@ -82,6 +82,51 @@ jobs:
         working-directory: frontend
         run: npm run test:e2e
 
+  frontend-e2e-real:
+    name: 前端 E2E（真实 Java 后端）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装 GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 安装前端依赖与 Chromium
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+      - name: 构建后端
+        run: mvn -B -ntp -DskipTests package
+      - name: 启动 secs-sim 并跑真实 E2E
+        run: |
+          mkdir -p /tmp/secs-e2e
+          CP="secs-json/target/classes:secs-protocol/target/classes:secs-core/target/classes:secs-app/target/classes:secs-api-http/target/classes:secs-runtime/target/classes:secs-cli/target/classes"
+          java -cp "$CP" com.shimizukenta.secssim.runtime.Main             --mode integrated --port 5000 --hsms-port 15000 --demo-session             --work-dir /tmp/secs-e2e --web-root frontend/dist             --token e2e-token > /tmp/secs-e2e/server.log 2>&1 &
+          echo $! > /tmp/secs-e2e/server.pid
+          for i in $(seq 1 100); do
+            if grep -q 'READY ' /tmp/secs-e2e/server.log; then break; fi
+            sleep 0.2
+          done
+          if ! grep -q 'READY ' /tmp/secs-e2e/server.log; then
+            cat /tmp/secs-e2e/server.log
+            exit 1
+          fi
+          E2E_REAL_URL=http://127.0.0.1:5000 E2E_REAL_TOKEN=e2e-token             npm --prefix frontend run test:e2e:real
+      - name: 停止 secs-sim
+        if: always()
+        run: |
+          if [ -f /tmp/secs-e2e/server.pid ]; then kill "$(cat /tmp/secs-e2e/server.pid)" || true; fi
+
   openapi:
     name: OpenAPI 契约校验
     runs-on: ubuntu-latest

@@ -36,8 +36,8 @@
 > 随 S1F13 / S1F15 / S1F17 与断链迁移，并在会话列表显示。
 > 最后补上 **OpenAPI 3.0.3 契约**（22 路径 / 16 schema），CI 用
 > `openapi-spec-validator` 校验。
-> 再补上 **Playwright E2E**：Chromium 3 例（uPlot / 模板编辑+校验保存 /
-> 事件切换+审计），CI 已接入。
+> 再补上 **Playwright E2E**：Mock API 3 例（uPlot / 模板编辑+校验保存 /
+> 事件切换+审计）与真实 Java 后端 1 例，CI 两个 job 均已接入。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端单元/组件测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）
 > + **3 个 Playwright E2E** 全绿。
@@ -115,7 +115,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **没有报警/终端消息/主机动态报告面板**：报警与终端消息面板上一轮已落地；主机动态报告并入「设备目录」——每条报告/事件标 `source`（local/host），CEID 标 `enabled`，并暴露 `hostReports` / `hostLinks` / `hostAllDisabled`。ADR-0006 要求的"报告来自本地还是主机"已兑现，且目录反映的是**实际发出去的那一份**（含主机新建、本地不存在的 RPTID）。
 - [x] **没有会话生命周期操作**：已实现创建 / 关闭 / 按配置重载，前端会话表有对应按钮。
 - [x] **没有配置读写界面**：已实现「配置编辑器」面板——列目录、读原文、改、校验、保存、新建。保存是 operator 及以上（改配置属于"会改变设备状态"），读与校验是 viewer。改配置**不会**让已在跑的会话自动改变，要在会话表点「重载」才生效（服务端日志也会提醒）。
-- [x] **没有前端测试**：已接 Vitest（`npm test`）22 例 + Playwright E2E 3 例；CI 有 `npm test` 与 `frontend-e2e` 两个 job。E2E 的 API 由 Playwright 路由拦截，尚未接真实 Java 后端全链路。
+- [x] **没有前端测试**：已接 Vitest 22 例 + Playwright 3 例（mock API）+ 1 例（真实 Java 后端）；CI 有 `npm test`、`frontend-e2e`、`frontend-e2e-real` 三个 job。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
 - [x] **没有 OpenAPI 契约**：新增 `docs/openapi.yaml`（OpenAPI 3.0.3，覆盖 22 个路径/16 个 schema），CI 增加 `openapi-spec-validator` 校验。
 
@@ -143,7 +143,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - `secs-protocol` 的 accept 连接上限、reply deviceId 匹配两项回退，无复现证据。
 - SSE 写超时是“看门狗 + 断开”的缓解，不是 JDK API 级别的真正写超时。
 - 模板结构化表单会把整份配置重排成 2 空格缩进；未知键保留，但纯文本排版不保真。要求逐字节保真的用户只能不用表单。
-- Playwright E2E 覆盖了模板表单加曲线 → 校验 → 保存的点击流程，但 API 是 mock；真实 Java 后端的全链路点击仍只做过手工冒烟，未进 CI。
+- Mock E2E 覆盖模板表单加曲线 → 校验 → 保存；真实后端 E2E 覆盖身份/会话/预览/uPlot/事件切换，CI 已接入。
 
 ## 6. 测试缺口
 
@@ -165,8 +165,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] 事件编排控制：运行时禁用期间不触发、重新启用恢复、未知计划返回 false；HTTP 列表/切换/鉴权/404/400。
 - [x] 审计：AuditLog 3 例（落盘/回读/limit/坏行）；HTTP 审计 actor/role/action、admin-only、401/403/400/405。
 - [x] 控制状态：真实链路 COMMUNICATING → ONLINE → OFFLINE → COMMUNICATING 迁移。
-- [x] 浏览器 E2E：Playwright + Chromium 3 例全绿；API 路由拦截，不启动 Java；CI `frontend-e2e` job。
-- [x] 真实浏览器 UI E2E 进 CI：新增 Playwright + Chromium 的 3 条用例（uPlot、配置模板编辑+校验/保存、事件切换+审计），CI `frontend-e2e` job 安装 Chromium 后执行；API 由 Playwright 路由拦截，不启动 Java。
+- [x] 浏览器 E2E：Mock API 3 例 + 真实 Java 后端 1 例全绿；CI 分别有 `frontend-e2e` / `frontend-e2e-real`。
+- [x] 真实浏览器 UI E2E 进 CI：Mock API 3 例（uPlot、模板编辑+校验/保存、事件+审计）+ 真实 Java 后端 1 例（身份/会话/预览/uPlot/事件切换）。
 - [ ] 大规模预览性能与 400 SVID / 多客户端并发的压力测试（SVID > 32 的截断提示已补）。
 
 ## 7. 建议顺序
@@ -175,7 +175,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
 3. SERVER TLS 与账号/角色鉴权均已实现（`--tls-keystore`、`--auth-users`）；剩余安全边界只有"口令明文存储 + 无口令轮转"，需运维纪律兜底。
-4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；SERVER 安全边界已封口；设备目录、模板结构化表单、uPlot、审计、控制状态、OpenAPI 与 Playwright E2E 均已完成。下一步主要是 P2 分发/工程化与真实后端全链路 E2E。
+4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；SERVER 安全边界已封口；设备目录、模板结构化表单、uPlot、审计、控制状态、OpenAPI 与 Playwright E2E（含真实后端）均已完成。下一步主要是 P2 分发/工程化。
 
 **M11：协议能力**
 5. S5F1 / S10F3：先定 ALCD/ALID/去抖、终端消息队列与 ACK。
@@ -186,7 +186,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；**配置读/校验/保存 API 与「配置编辑器」面板已完成**（原始 JSON 文本编辑，先校验再原子落盘）；**模板结构化表单**（曲线 / 组合模板 / 实例参数）与**曲线预览交互**（悬停读数、拖动放大、截断提示）也已完成。
 9. 会话生命周期 API 与热重载已完成（创建 / 关闭 / 重载，`--work-dir` 作为配置目录）；**配置本身的读取、校验、保存 API 与前端编辑器也已完成**（item 8 的第一步）。
 10. **uPlot 交互**（图例开关 / 框选缩放 / 双击复位）、**二进制预览**、**报文落盘 + 历史 / 导出**、**手动 SML 发送**、SVID/CEID 目录、报警/报告面板已完成；多轴仍未做。
-11. 前端测试与 E2E：Vitest 22 例 + Playwright 3 例（uPlot、模板编辑器+校验/保存、事件/审计），CI 已接入。
+11. 前端测试与 E2E：Vitest 22 例 + Mock Playwright 3 例 + 真实后端 Playwright 1 例，CI 已接入。
 
 **M13：分发**
 12. 代码签名、安装器、JVM 兜底包、自动更新、Linux 服务端打包与 systemd 单元。
@@ -216,7 +216,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **审计日志**（JSONL + actor/role/action/target/detail；覆盖关键操作与 403；admin 查询与前端面板）。
 - **设备控制状态**（OFFLINE / COMMUNICATING / ONLINE，S1F13/S1F15/S1F17 与断链迁移；会话列表显示）。
 - **OpenAPI 3.0.3 契约**（22 路径 / 16 schema，CI 用 openapi-spec-validator 校验）。
-- **Playwright E2E**（3 条：uPlot / 模板编辑+校验/保存 / 事件切换+审计；CI 安装 Chromium）。
+- **Playwright E2E**（Mock 3 条 + 真实 Java 后端 1 条；CI 安装 Chromium）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
