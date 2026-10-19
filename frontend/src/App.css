@@ -100,10 +100,30 @@ input {
 .messages th:nth-child(2) { width: 6rem; }
 .messages th:nth-child(3) { width: 4rem; }
 .messages th:nth-child(4) { width: 6rem; }
-.sparks { display: flex; flex-direction: column; gap: 0.35rem; }
-.spark { display: flex; align-items: center; gap: 0.6rem; }
-.spark span { width: 4rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
-.spark canvas { border: 1px solid var(--line); border-radius: 4px; width: 100%; max-width: 760px; }
+.sparks { display: flex; flex-direction: column; gap: 0.5rem; }
+.spark { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) 19rem; align-items: center; gap: 0.6rem; }
+.spark-id { color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+.spark canvas {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  width: 100%;
+  max-width: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+.spark-readout {
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin: 0.35rem 0 0.5rem; }
+
+@media (max-width: 760px) {
+  .spark { grid-template-columns: 3rem minmax(0, 1fr); }
+  .spark-readout { grid-column: 2; }
+}
 
 .preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .preview-controls select,
@@ -134,3 +154,129 @@ input {
 @media (prefers-color-scheme: dark) {
   .problems { color: #ff7b72; }
 }
+
+/* ---- 配置编辑器里的模板结构化表单 ---- */
+
+.template-editor {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.template-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.template-head h3 { margin: 0; }
+.template-editor h4 { margin: 1rem 0 0.35rem; }
+.template-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+.template-card {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.template-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.9rem;
+}
+
+.template-card-head label,
+.template-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.template-card-head input,
+.template-card-head select,
+.template-fields input,
+.template-fields select,
+.template-binding-row input,
+.template-binding-row select,
+.template-output-row input,
+.template-output-row select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  width: 8rem;
+}
+
+.template-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  margin-top: 0.55rem;
+}
+
+.template-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  align-self: flex-end;
+  padding-bottom: 0.2rem;
+}
+
+.template-checkbox input[type='checkbox'] {
+  width: auto;
+  padding: 0;
+}
+
+.template-badge {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.template-subtable {
+  flex-basis: 100%;
+  margin-top: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--line);
+}
+
+.template-subhead,
+.template-subrow {
+  display: grid;
+  grid-template-columns: 8rem 8rem 4rem;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.2rem 0;
+}
+
+.template-subhead { color: var(--muted); font-size: 12px; }
+.template-subhead button { grid-column: 3; }
+
+.template-outputs,
+.template-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.template-output-row,
+.template-binding-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.template-output-row input:first-child { width: 8rem; }
+.template-output-row .template-input-wide { width: min(34rem, 62vw); }
+.template-label { color: var(--muted); font-size: 12px; }
+.template-binding-row select { min-width: 8rem; }

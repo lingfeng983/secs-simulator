@@ -1,9 +1,12 @@
 package com.shimizukenta.secssim.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.ServerSocket;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +16,11 @@ import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.domain.IdSpacePolicy;
+import com.shimizukenta.secssim.core.domain.SvidDef;
+import com.shimizukenta.secssim.core.domain.UnitId;
+import com.shimizukenta.secssim.core.domain.UnitSpec;
+import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
@@ -41,6 +49,8 @@ class SessionPreviewTest {
 
         JsonHub series = root.get("series");
         assertEquals(10, series.length(), "两腔体 × 5 个 SVID");
+        assertEquals(10, root.get("svidTotal").intValue(), "预览要报告总 SVID 数，截断不能悄悄发生");
+        assertFalse(root.get("truncated").booleanValue(), "10 条没有超过 32 条上限");
 
         JsonHub temperature = null;
         for (int i = 0; i < series.length(); i++) {
@@ -60,6 +70,34 @@ class SessionPreviewTest {
             assertTrue(min <= max, "第 " + i + " 桶 min > max");
             assertTrue(min >= 0.0 && max <= 400.0, "越界: " + min + ".." + max);
         }
+    }
+
+    @Test
+    void previewReportsTruncationInsteadOfSilentlyDroppingSeries() throws Exception {
+        int port = freePort();
+        List<UnitSpec> units = new ArrayList<>();
+        for (int unit = 1; unit <= 7; unit++) {
+            units.add(new UnitSpec(UnitId.of(unit), "CH" + unit,
+                    List.of(
+                            new SvidDef(1, "TEMP_PV", ValueType.F4, "C", 2, 0.0, 400.0),
+                            new SvidDef(2, "TEMP_SV", ValueType.F4, "C", 2, 0.0, 400.0),
+                            new SvidDef(3, "PRESS", ValueType.F4, "Torr", 3, 0.0, 10.0),
+                            new SvidDef(4, "HEATER", ValueType.BOOLEAN, "", 0, 0.0, 1.0),
+                            new SvidDef(5, "FLOW", ValueType.F4, "sccm", 2, 0.0, 100.0)),
+                    List.of(), List.of(), false));
+        }
+        EquipmentSpec equipment = new EquipmentSpec("BIG-01", 11, units,
+                List.of(), List.of(), IdSpacePolicy.defaults());
+        CompilationResult compiled = EquipmentCompiler.compile(equipment);
+
+        SessionSpec spec = new SessionSpec("pv3", true, "127.0.0.1", port, 11, 7L, equipment);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+
+        JsonHub root = JsonHub.fromJson(session.previewJson(0L, 60_000L, 60));
+
+        assertEquals(35, root.get("svidTotal").intValue(), "7 个单元 × 5 个 SVID");
+        assertTrue(root.get("truncated").booleanValue(), "超过 32 条必须显式标截断");
+        assertEquals(32, root.get("series").length(), "预览最多返回 32 条序列");
     }
 
     @Test

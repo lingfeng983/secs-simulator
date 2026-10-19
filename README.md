@@ -98,7 +98,7 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/sessions/{id}/alarms` | viewer | 当前活动报警（ALID / 类别 / 文本 / 置位时间） |
 | `GET /api/v1/sessions/{id}/terminal` | viewer | 最近 20 条终端消息（S10F3） |
 | `GET /api/v1/sessions/{id}/catalog` | viewer | 设备目录：CEID / RPTID / SVID 的绝对 ID 与语义，按 ID 升序 |
-| `GET /api/v1/preview` | viewer | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg |
+| `GET /api/v1/preview` | viewer | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg + `svidTotal`/`truncated` |
 | `GET /api/v1/configs` | viewer | 配置目录列表（文件名 / 字节数 / 修改时间） |
 | `POST /api/v1/configs` | operator | 新建配置，体为 `{"name":"设备.json"}`，内容是能直接编译的骨架（201 / 400 / 409） |
 | `GET /api/v1/configs/{name}` | viewer | 读配置**原文**（编辑器要看到用户写的每一个键） |
@@ -180,6 +180,12 @@ curl -X PUT  -H 'Authorization: Bearer T' --data-binary @line1.json \
 - **改配置不会让已在跑的会话自动改变**：会话是启动那一刻把配置读进内存的，
   存完要在「会话」里点**重载**才生效（服务端日志里也会提醒）。
 - 保存是 operator 及以上（改配置属于"会改变设备状态"）；读与校验是 viewer。
+- **模板可以在原文之上做结构化编辑**：曲线（含 step/pwl 关键帧）、组合模板输出表达式、
+  实例的 SVID 绑定与参数都有表单。表单读的是当前原文解析出的 JSON，改完写回整份文本；
+  原文不是合法 JSON、或 `templates` 形状不对时表单会禁用并指出字段路径。
+  改模板 id 会同步实例引用；删除仍被实例引用的模板会被拒绝。
+  **代价**：结构化编辑会把整份文件重排成 2 空格缩进（未知键保留），
+  纯文本编辑仍然逐字节保真。
 
 ### 设备目录
 
@@ -217,8 +223,9 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 ```
 
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
+前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；CI 会跑）。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览、**配置编辑器**（读原文 / 校验 / 保存 / 新建）。
+界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送收发的 SECS 报文，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（悬停读数 / 拖动放大 / 截断提示）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
 
 ## 打包
 

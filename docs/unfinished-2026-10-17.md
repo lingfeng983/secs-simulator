@@ -14,7 +14,13 @@
 > **2026-10-18 续**：在其后完成 M12 item 8 的第一步——配置读取 / 校验 / 保存 API
 > （`GET/POST /api/v1/configs`、`GET/PUT /api/v1/configs/{name}`、
 > `POST /api/v1/configs/{name}/validate`）与前端「配置编辑器」面板。
-> 当前 **464 个测试全绿**（json 110 / protocol 45 / core 90 / app 25 / api-http 93 / runtime 50 / cli 51）。
+> 当时 **464 个测试全绿**（json 110 / protocol 45 / core 90 / app 25 / api-http 93 / runtime 50 / cli 51）。
+>
+> **2026-10-19 续**：完成 M12 item 8 的剩余部分——模板曲线 / 组合模板 / 实例参数的
+> **结构化表单**（在原文之上编辑，未知键保留、排版统一），并给曲线预览补上
+> 悬停读数、拖动放大 / 双击重置、SVID 截断提示。预览 JSON 新增 `svidTotal` / `truncated`。
+> 当前 **465 个后端测试**（json 110 / protocol 45 / core 90 / app 25 / api-http 93 / runtime 50 / cli 52）
+> + **17 个前端测试**（模板模型 13 + 服务端渲染 4）全绿。
 
 本清单分三类：
 
@@ -71,7 +77,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **没有内置模板库**：`thermoLoop` / `gasPanel` / `alarmTriplet` 未做。
 - [x] **单会话**：一个进程可以装多份配置了。`POST /api/v1/sessions` 按 `--work-dir` 下的配置文件新建会话，`DELETE /api/v1/sessions/{id}` 关闭单个会话；`SessionManager` 增加 `remove(id)`。配置名只接受文件名，不接受路径。
 - [x] **无热重载**：`POST /api/v1/sessions/{id}/reload` 按来源配置重新装载。**先编译再动旧会话**——配置有错时旧会话原样跑着。内置演示会话无配置来源，回 409 `not-reloadable`。
-- [x] **无配置管理 API/界面**：已实现。`ConfigStore` 负责读原文、校验、原子写盘；`GET /api/v1/configs` 列目录、`POST` 新建骨架、`GET /api/v1/configs/{name}` 读原文、`POST .../validate` 只校验不落盘、`PUT` 校验通过后落盘；前端新增「配置编辑器」面板（读 / 改 / 校验 / 保存 / 新建）。**编辑器操作原始 JSON 文本**，不走模型往返（`toJson` 会静默丢掉未知键）；**先校验再落盘**，校验不过时原文件一个字节不动。**模板编辑器（曲线/实例参数的可视化编辑）仍未做**——当前是 JSON 原文编辑。
+- [x] **无配置管理 API/界面**：已实现。`ConfigStore` 负责读原文、校验、原子写盘；`GET /api/v1/configs` 列目录、`POST` 新建骨架、`GET /api/v1/configs/{name}` 读原文、`POST .../validate` 只校验不落盘、`PUT` 校验通过后落盘；前端新增「配置编辑器」面板（读 / 改 / 校验 / 保存 / 新建）。**编辑器操作原始 JSON 文本**，不走模型往返（`toJson` 会静默丢掉未知键）；**先校验再落盘**，校验不过时原文件一个字节不动。**模板结构化编辑已落地**：曲线（含 step/pwl 关键帧）、组合模板输出表达式、实例 SVID 绑定与参数都能在表单里改；表单读当前原文解析出的 JSON，改模板 id / 实例 id 会同步引用，删除仍被引用的模板会被拒绝。**代价**：表单改动会把整份文件重排成 2 空格缩进（未知键保留），纯文本编辑仍逐字节保真。
 - [ ] **无事件编排控制**：不能运行时列出/启用/禁用 `EventPlan`；界面只能手动填 CEID。
 - [ ] **`work-dir` 未真正使用**：**已作为会话配置目录投入使用**（`POST /api/v1/sessions` 按文件名取配置）；但 README 承诺的日志目录与模板目录仍未落地，日志仍写 stderr。
 - [ ] **无设备控制状态模型**：E5 的 INIT/COMMUNICATING/ONLINE 等状态没有本地建模，只有 `communicatable` 布尔值。
@@ -81,15 +87,15 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 - [ ] **WebSocket**：README / pom / package-info 声称有，实际只有 SSE。
 - [ ] **二进制曲线流**：没有 `series.bin`；预览只有 JSON。
-- [ ] **预览静默截断**：`previewJson` 用 `.limit(32)` 截断 SVID，前端不知道；buckets 上限 500。
-- [ ] **前端只有 Canvas 包络 + 均值线**：没有缩放、游标读数、多轴，也没有 uPlot。
+- [x] **预览静默截断**：`previewJson` 新增 `svidTotal` / `truncated`，前端明说"共 N 个 SVID，只显示前 32 条"；buckets 上限仍为 500（界面显示桶宽）。
+- [ ] **前端只有 Canvas 包络 + 均值线**：已补悬停读数与拖动放大 / 双击重置；仍没有多轴、图例开关，也没有 uPlot。
 - [ ] **报文不落盘**：面板只保留 200 条，没有 `messages.jsonl`、回放、导出。
 - [ ] **没有手动发送 SML/SECS 报文**：`templates/sml/**` 样例未被任何代码/测试引用。
 - [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取并每 2 秒轮询（主机随时可能改定义）。
 - [x] **没有报警/终端消息/主机动态报告面板**：报警与终端消息面板上一轮已落地；主机动态报告并入「设备目录」——每条报告/事件标 `source`（local/host），CEID 标 `enabled`，并暴露 `hostReports` / `hostLinks` / `hostAllDisabled`。ADR-0006 要求的"报告来自本地还是主机"已兑现，且目录反映的是**实际发出去的那一份**（含主机新建、本地不存在的 RPTID）。
 - [x] **没有会话生命周期操作**：已实现创建 / 关闭 / 按配置重载，前端会话表有对应按钮。
 - [x] **没有配置读写界面**：已实现「配置编辑器」面板——列目录、读原文、改、校验、保存、新建。保存是 operator 及以上（改配置属于"会改变设备状态"），读与校验是 viewer。改配置**不会**让已在跑的会话自动改变，要在会话表点「重载」才生效（服务端日志也会提醒）。
-- [ ] **没有前端测试**：`frontend/package.json` 没有 test 脚本；CI 只跑 `tsc --noEmit` + `vite build`。
+- [x] **没有前端测试**：已接 Vitest（`npm test`），当前 17 例：模板 JSON 投影 / 编辑 / 表达式名校验 / BOM 13 例、模板表单服务端渲染 4 例；CI 增加 `npm test`。**真实浏览器 UI E2E 仍未做**。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
 - [ ] **没有 OpenAPI 契约**：m0 承诺 M7 前落地，仓库里没有 `openapi.yaml`。
 
@@ -116,6 +122,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - JSON 数字：`1e5` 被拒；> 2^53 的整数走 double 会丢精度；重复 key 保序保留。
 - `secs-protocol` 的 accept 连接上限、reply deviceId 匹配两项回退，无复现证据。
 - SSE 写超时是“看门狗 + 断开”的缓解，不是 JDK API 级别的真正写超时。
+- 模板结构化表单会把整份配置重排成 2 空格缩进；未知键保留，但纯文本排版不保真。要求逐字节保真的用户只能不用表单。
+- 模板表单的交互只有服务端渲染 + 模型单测，没有真实浏览器点击流程；保存前"失焦提交"的时序未做 E2E 验证。
 
 ## 6. 测试缺口
 
@@ -130,9 +138,9 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] AfterEvent（事件链）。
 - [x] 多会话、配置热重载、运行时创建/关闭会话（`SessionLauncherTest` 9 例：多会话、关闭、重载、配置坏了保住旧会话、演示会话不可重载、名字不能变成路径）。
 - [x] 打包后的 `start.cmd` 路径自检（`-CheckOnly`）；解压后真正拉起进程的全链路冒烟仍建议补进 CI。
-- [ ] 前端组件/交互测试、UI E2E。
-- [ ] 大规模预览（SVID > 32、buckets > 500）的截断提示与性能。
-- [ ] 400 SVID / 多客户端并发的压力测试。
+- [x] 前端组件/交互测试（Vitest 17 例：模板模型 13 + 服务端渲染 4；CI 已跑 `npm test`）。
+- [ ] 真实浏览器 UI E2E（打开配置 → 改模板表单 → 校验 / 保存的点击流程）。
+- [ ] 大规模预览性能与 400 SVID / 多客户端并发的压力测试（SVID > 32 的截断提示已补）。
 
 ## 7. 建议顺序
 
@@ -140,7 +148,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 1. `start.ps1` 已修；补“解压 → start.cmd → READY/health/页面”冒烟。
 2. `globalSvids` 已修；补配置文档与回归。
 3. SERVER TLS 与账号/角色鉴权均已实现（`--tls-keystore`、`--auth-users`）；剩余安全边界只有"口令明文存储 + 无口令轮转"，需运维纪律兜底。
-4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；SERVER 安全边界已封口；前端已按 `user`/`role` 禁用无权限按钮，设备目录接口已落地；下一步是前端模板编辑器与实例参数 UI。
+4. 未知 S/F 的 S9Fx、S6F11/S6F1 W 位、S10F3/S10F4、S5F1/S5F2、OnCondition、AfterEvent 均已完成；SERVER 安全边界已封口；前端已按 `user`/`role` 禁用无权限按钮，设备目录接口已落地；模板结构化表单与预览交互已完成，下一步是真实浏览器 E2E 与 M12 第 10 条。
 
 **M11：协议能力**
 5. S5F1 / S10F3：先定 ALCD/ALID/去抖、终端消息队列与 ACK。
@@ -148,10 +156,10 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 7. AfterEvent：把 `lastFireMs` 扩展为“已发生事件集合”。
 
 **M12：配置与前端**
-8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；**配置读/校验/保存 API 与「配置编辑器」面板已完成**（原始 JSON 文本编辑，先校验再原子落盘）；剩下**模板编辑器的可视化部分**（曲线与实例参数 UI）与曲线预览的交互增强。
+8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；**配置读/校验/保存 API 与「配置编辑器」面板已完成**（原始 JSON 文本编辑，先校验再原子落盘）；**模板结构化表单**（曲线 / 组合模板 / 实例参数）与**曲线预览交互**（悬停读数、拖动放大、截断提示）也已完成。
 9. 会话生命周期 API 与热重载已完成（创建 / 关闭 / 重载，`--work-dir` 作为配置目录）；**配置本身的读取、校验、保存 API 与前端编辑器也已完成**（item 8 的第一步）。
 10. 二进制预览、uPlot 交互、报文落盘、手动 SML 发送、SVID/CEID 目录、报警/报告面板。
-11. 前端测试与 E2E。
+11. 前端测试与 E2E（单元/组件测试已接 Vitest；真实浏览器点击流程未做）。
 
 **M13：分发**
 12. 代码签名、安装器、JVM 兜底包、自动更新、Linux 服务端打包与 systemd 单元。
@@ -173,6 +181,8 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **SVID / RPTID / CEID 目录接口**（`GET /api/v1/sessions/{id}/catalog`）+ 前端「设备目录」面板。
 - **会话生命周期 API**（`POST/DELETE /api/v1/sessions`、`POST .../reload`）+ 前端按钮。
 - **配置读写 API 与「配置编辑器」**（`ConfigStore`：读原文 / 校验 / 原子落盘 / 新建骨架）。
+- **模板结构化表单**（曲线含 step/pwl 关键帧、组合模板输出表达式、实例 SVID 绑定与参数；引用同步、删除保护、未知键保留、2 空格重排）+ **曲线预览交互**（悬停读数、拖动放大 / 双击重置、`svidTotal`/`truncated` 截断提示）。
+- **前端 Vitest**（17 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。

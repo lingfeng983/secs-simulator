@@ -267,7 +267,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         long bucketMs = Math.max(1L, span / count);
         long sampleMs = Math.max(1L, bucketMs / 4L);
 
-        java.util.List<Integer> svids = this.values.svids().stream().sorted().limit(32).toList();
+        java.util.List<Integer> allSvids = this.values.svids().stream().sorted().toList();
+        java.util.List<Integer> svids = allSvids.stream().limit(32).toList();
         com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
         java.util.List<com.shimizukenta.jsonhub.JsonHub> series = new java.util.ArrayList<>();
 
@@ -314,6 +315,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 b.pair("to", toMs),
                 b.pair("buckets", count),
                 b.pair("bucketMs", bucketMs),
+                b.pair("svidTotal", allSvids.size()),
+                b.pair("truncated", allSvids.size() > svids.size()),
                 b.pair("series", b.array(series))).toJson();
     }
 

@@ -107,7 +107,12 @@ export interface PreviewData {
   to: number;
   buckets: number;
   bucketMs: number;
+  /** 返回的序列；后端预览上限 32 条。 */
   series: PreviewSeries[];
+  /** 会话里的 SVID 总数；老后端可能没有。 */
+  svidTotal?: number;
+  /** 是否只返回了前 32 条。 */
+  truncated?: boolean;
 }
 
 /** 目录里的一个 CEID（绝对 ID + 语义）。 */

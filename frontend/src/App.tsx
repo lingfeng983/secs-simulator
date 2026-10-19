@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   createClient,
   hasRole,
@@ -15,6 +16,7 @@ import {
   type PreviewSeries,
   type WireMessage,
 } from './api';
+import { TemplateEditor } from './TemplateEditor';
 
 interface LogLine {
   at: string;
@@ -37,9 +39,67 @@ const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
   { label: '最近 15 分钟', ms: 900_000 },
 ];
 
-/** 单条 SVID 的曲线：min/max 包络 + avg 线。 */
-function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
+/** 预览图里选中的桶区间；跨所有 SVID 共享，便于对齐读数。 */
+interface ZoomRange {
+  start: number;
+  end: number;
+}
+
+interface SparklineProps {
+  series: PreviewSeries;
+  fromMs: number;
+  bucketMs: number;
+  zoom: ZoomRange | null;
+  onZoom: (zoom: ZoomRange | null) => void;
+}
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
+}
+
+function clampZoom(zoom: ZoomRange | null, count: number): { start: number; end: number } {
+  if (count <= 1) {
+    return { start: 0, end: 0 };
+  }
+  const start = clamp(zoom?.start ?? 0, 0, count - 1);
+  const end = clamp(zoom?.end ?? count - 1, start + 1, count - 1);
+  return { start, end };
+}
+
+function formatValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  if (Math.abs(value) >= 1000) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatSeconds(seconds: number): string {
+  if (seconds >= 60) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}m${(seconds - minutes * 60).toFixed(1)}s`;
+  }
+  return `${seconds.toFixed(2)}s`;
+}
+
+/**
+ * 单条 SVID 的曲线：min/max 包络 + avg 线。
+ *
+ * <p>悬停读数与拖动放大都在浏览器里做：预览数据已经按桶取回，
+ * 放大只是换一个可见桶区间，不需要再打一次后端。</p>
+ */
+function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineProps): JSX.Element {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const dragAnchor = useRef<number | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const [drag, setDrag] = useState<ZoomRange | null>(null);
+
+  const count = series.avg.length;
+  const visible = clampZoom(zoom, count);
+  const viewStart = visible.start;
+  const viewEnd = visible.end;
 
   useEffect(() => {
     const canvas = ref.current;
@@ -52,14 +112,13 @@ function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
     const height = canvas.height;
     context.clearRect(0, 0, width, height);
 
-    const count = series.min.length;
     if (count === 0) {
       return;
     }
 
     let low = Number.POSITIVE_INFINITY;
     let high = Number.NEGATIVE_INFINITY;
-    for (let index = 0; index < count; index += 1) {
+    for (let index = viewStart; index <= viewEnd; index += 1) {
       low = Math.min(low, series.min[index]);
       high = Math.max(high, series.max[index]);
     }
@@ -70,12 +129,31 @@ function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
       high = low + 1;
     }
 
-    const x = (index: number) => (index / Math.max(1, count - 1)) * (width - 1);
+    const span = Math.max(1, viewEnd - viewStart);
+    const x = (index: number) => ((index - viewStart) / span) * (width - 1);
     const y = (value: number) => height - 2 - ((value - low) / (high - low)) * (height - 4);
 
+    /* 三条水平参考线：没有刻度也要让人看出"高/中/低" */
+    context.strokeStyle = 'rgba(128, 128, 128, 0.22)';
+    context.lineWidth = 1;
+    for (let line = 0; line <= 3; line += 1) {
+      const at = 2 + (line / 3) * (height - 4);
+      context.beginPath();
+      context.moveTo(0, at);
+      context.lineTo(width, at);
+      context.stroke();
+    }
+
     context.beginPath();
-    series.max.forEach((value, index) => (index === 0 ? context.moveTo(x(0), y(value)) : context.lineTo(x(index), y(value))));
-    for (let index = count - 1; index >= 0; index -= 1) {
+    for (let index = viewStart; index <= viewEnd; index += 1) {
+      const value = series.max[index];
+      if (index === viewStart) {
+        context.moveTo(x(index), y(value));
+      } else {
+        context.lineTo(x(index), y(value));
+      }
+    }
+    for (let index = viewEnd; index >= viewStart; index -= 1) {
       context.lineTo(x(index), y(series.min[index]));
     }
     context.closePath();
@@ -83,16 +161,119 @@ function Sparkline({ series }: { series: PreviewSeries }): JSX.Element {
     context.fill();
 
     context.beginPath();
-    series.avg.forEach((value, index) => (index === 0 ? context.moveTo(x(0), y(value)) : context.lineTo(x(index), y(value))));
+    for (let index = viewStart; index <= viewEnd; index += 1) {
+      const value = series.avg[index];
+      if (index === viewStart) {
+        context.moveTo(x(index), y(value));
+      } else {
+        context.lineTo(x(index), y(value));
+      }
+    }
     context.strokeStyle = '#4493f8';
     context.lineWidth = 1.5;
     context.stroke();
-  }, [series]);
+
+    if (drag !== null) {
+      const from = Math.min(drag.start, drag.end);
+      const to = Math.max(drag.start, drag.end);
+      const left = clamp(x(from), 0, width);
+      const right = clamp(x(to), 0, width);
+      context.fillStyle = 'rgba(68, 147, 248, 0.16)';
+      context.fillRect(left, 0, Math.max(1, right - left), height);
+    }
+
+    if (hover !== null) {
+      const index = clamp(hover, viewStart, viewEnd);
+      const atX = x(index);
+      context.strokeStyle = 'rgba(128, 128, 128, 0.75)';
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(atX, 0);
+      context.lineTo(atX, height);
+      context.stroke();
+
+      context.fillStyle = '#4493f8';
+      context.beginPath();
+      context.arc(atX, y(series.avg[index]), 3, 0, Math.PI * 2);
+      context.fill();
+    }
+  }, [series, hover, drag, viewStart, viewEnd, count]);
+
+  const bucketAt = (event: ReactPointerEvent<HTMLCanvasElement>): number | null => {
+    const canvas = ref.current;
+    if (canvas === null) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0) {
+      return null;
+    }
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    return Math.round(viewStart + ratio * Math.max(0, viewEnd - viewStart));
+  };
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const index = bucketAt(event);
+    if (index === null) {
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragAnchor.current = index;
+    setDrag({ start: index, end: index });
+    setHover(index);
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const index = bucketAt(event);
+    if (index === null) {
+      return;
+    }
+    setHover(index);
+    if (dragAnchor.current !== null) {
+      setDrag({ start: dragAnchor.current, end: index });
+    }
+  };
+
+  const finishDrag = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const anchor = dragAnchor.current;
+    const index = bucketAt(event);
+    dragAnchor.current = null;
+    setDrag(null);
+
+    if (anchor !== null && index !== null && Math.abs(index - anchor) >= 3) {
+      onZoom({ start: Math.min(anchor, index), end: Math.max(anchor, index) });
+    }
+  };
+
+  const hovered = hover === null ? null : clamp(hover, viewStart, viewEnd);
+  const readout =
+    hovered === null
+      ? '悬停读数'
+      : `${formatSeconds((fromMs + hovered * bucketMs) / 1000)}  min ${formatValue(series.min[hovered])}  max ${formatValue(series.max[hovered])}  avg ${formatValue(series.avg[hovered])}`;
 
   return (
     <div className="spark">
-      <span>{series.svid}</span>
-      <canvas ref={ref} width={760} height={56} />
+      <span className="spark-id">{series.svid}</span>
+      <canvas
+        ref={ref}
+        width={760}
+        height={72}
+        title="悬停看读数；横向拖动选择区间放大；双击重置缩放"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={() => {
+          dragAnchor.current = null;
+          setDrag(null);
+        }}
+        onPointerLeave={() => {
+          if (dragAnchor.current === null) {
+            setHover(null);
+          }
+        }}
+        onDoubleClick={() => onZoom(null)}
+      />
+      <span className="spark-readout">{readout}</span>
     </div>
   );
 }
@@ -109,6 +290,7 @@ export function App(): JSX.Element {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewSession, setPreviewSession] = useState('');
   const [windowMs, setWindowMs] = useState(WINDOWS[0].ms);
+  const [zoom, setZoom] = useState<ZoomRange | null>(null);
   const [alarmSession, setAlarmSession] = useState('');
   const [alid, setAlid] = useState(1001);
   const [alarmText, setAlarmText] = useState('TEMP HIGH');
@@ -450,6 +632,7 @@ export function App(): JSX.Element {
       const to = Math.max(1, fresh.uptimeMs ?? 0);
       const from = Math.max(0, to - windowMs);
       setPreview(await client.preview(target.id, from, to, 120));
+      setZoom(null);
       append(`已刷新 ${target.id} 的曲线（${Math.round((to - from) / 1000)} 秒窗口）`);
     } catch (error) {
       append(`预览失败: ${(error as Error).message}`);
@@ -941,11 +1124,51 @@ export function App(): JSX.Element {
           {preview === null ? (
             <p className="hint">选好会话与时间窗后点"刷新曲线"，按当前配置算出 min/max 包络 + avg 线。</p>
           ) : (
-            <div className="sparks">
-              {preview.series.map((series) => (
-                <Sparkline key={series.svid} series={series} />
-              ))}
-            </div>
+            <>
+              <div className="preview-meta">
+                <span className="hint">
+                  {preview.series.length} 条曲线 · {preview.buckets} 桶 × {preview.bucketMs} ms
+                  {preview.from !== undefined ? ` · 窗口 ${Math.round((preview.to - preview.from) / 1000)} 秒` : ''}
+                </span>
+                {zoom !== null && (
+                  <>
+                    <span className="hint">
+                      已放大：桶 {zoom.start}–{zoom.end}
+                      （约 {Math.round(((zoom.end - zoom.start + 1) * preview.bucketMs) / 1000)} 秒）
+                    </span>
+                    <button type="button" onClick={() => setZoom(null)}>
+                      重置缩放
+                    </button>
+                  </>
+                )}
+              </div>
+              {preview.truncated === true && (
+                <p className="hint">
+                  后端只返回前 {preview.series.length} 条曲线
+                  {preview.svidTotal !== undefined ? `（共 ${preview.svidTotal} 个 SVID）` : ''}。
+                  这是预览上限，不是曲线消失了。
+                </p>
+              )}
+              {preview.series.length === 0 ? (
+                <p className="hint">该会话没有可预览的 SVID。</p>
+              ) : (
+                <>
+                  <p className="hint">悬停看读数；在曲线上横向拖动选择区间放大；双击或点「重置缩放」恢复。</p>
+                  <div className="sparks">
+                    {preview.series.map((series) => (
+                      <Sparkline
+                        key={series.svid}
+                        series={series}
+                        fromMs={preview.from}
+                        bucketMs={preview.bucketMs}
+                        zoom={zoom}
+                        onZoom={setZoom}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
           )}
         </section>
 
@@ -1147,6 +1370,14 @@ export function App(): JSX.Element {
                   setConfigProblems([]);
                 }}
               />
+              <TemplateEditor
+                text={configDraft}
+                onChange={(next) => {
+                  setConfigDraft(next);
+                  setConfigProblems([]);
+                  setConfigNotice('结构化编辑已修改草稿，保存前请校验');
+                }}
+              />
               {configProblems.length > 0 && (
                 <ul className="problems">
                   {configProblems.map((problem, index) => (
@@ -1157,7 +1388,8 @@ export function App(): JSX.Element {
             </>
           )}
           <p className="hint">
-            编辑的是原始 JSON 文本，保存时逐字节写回：多写的键、空格和缩进都不会被动过。
+            编辑的是原始 JSON 文本；不动模板表单时保存逐字节写回，多写的键、空格和缩进都不会被动过。
+            模板表单改动会保留未知键，但会把整份文件重排成 2 空格缩进。
             校验按真实启动路径走（解析 → 编译设备模型 → 建模板图），过了才会落盘。
             {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，保存已禁用。`}
           </p>
