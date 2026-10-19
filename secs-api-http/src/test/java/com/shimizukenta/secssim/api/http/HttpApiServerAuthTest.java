@@ -165,6 +165,7 @@ class HttpApiServerAuthTest {
         assertEquals(401, post("/api/v1/shutdown", null).statusCode());
         assertEquals(401, get("/api/v1/configs", null).statusCode());
         assertEquals(401, get("/api/v1/configs/line1.json", null).statusCode());
+        assertEquals(401, get("/api/v1/audit", null).statusCode());
     }
 
     @Test
@@ -195,6 +196,7 @@ class HttpApiServerAuthTest {
         assertEquals(403, post("/api/v1/sessions/s1/alarm/1001", VIEWER_PASS).statusCode());
         assertEquals(403, post("/api/v1/sessions/s1/events/beat?enabled=false", VIEWER_PASS).statusCode());
         assertEquals(403, post("/api/v1/shutdown", VIEWER_PASS).statusCode());
+        assertEquals(403, get("/api/v1/audit", VIEWER_PASS).statusCode());
 
         assertTrue(this.triggered.isEmpty(), "被拒的请求不得产生副作用: " + this.triggered);
         assertTrue(!this.shutdownRequested, "viewer 不得停机");
@@ -205,6 +207,7 @@ class HttpApiServerAuthTest {
         assertEquals(202, post("/api/v1/sessions/s1/ceid/2001", OPERATOR_PASS).statusCode());
         assertEquals(202, post("/api/v1/sessions/s1/alarm/1001", OPERATOR_PASS).statusCode());
         assertEquals(403, post("/api/v1/shutdown", OPERATOR_PASS).statusCode());
+        assertEquals(403, get("/api/v1/audit", OPERATOR_PASS).statusCode());
 
         assertEquals(List.of("ceid:s1:2001", "alarm:s1:1001:true"), this.triggered);
         assertTrue(!this.shutdownRequested);

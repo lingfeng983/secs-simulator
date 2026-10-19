@@ -121,6 +121,7 @@ input {
   white-space: nowrap;
 }
 .preview-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin: 0.35rem 0 0.5rem; }
+.audit-detail { white-space: normal; max-width: 28rem; }
 
 .uplots { display: flex; flex-direction: column; gap: 1rem; }
 .uplot-block { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; }

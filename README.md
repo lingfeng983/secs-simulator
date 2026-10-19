@@ -109,6 +109,7 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/configs/{name}` | viewer | 读配置**原文**（编辑器要看到用户写的每一个键） |
 | `POST /api/v1/configs/{name}/validate` | viewer | 只校验不落盘，回 `{"valid":bool,"problems":[...]}` |
 | `PUT /api/v1/configs/{name}` | operator | 校验通过后原子落盘，体就是配置原文（200 / 400 / 422 / 500） |
+| `GET /api/v1/audit` | admin | 最近审计记录（`limit` 默认 200，最大 1000） |
 | `POST /api/v1/shutdown` | admin | 优雅停机 |
 
 鉴权只用 `Authorization: Bearer <口令>`。未认证回 401，认证通过但角色不够回 403
@@ -243,6 +244,22 @@ curl -X POST -H 'Authorization: Bearer T' --data-binary @templates/sml/equip/s5f
 - 成功响应包含规范化后的 `sentSml`、`replySml`、`replyStream/Function/Wbit`、`elapsedMs`。
 - 正文上限 64 KiB；只有 operator 及以上能发（会改变设备对主机的行为）。
 
+### 审计
+
+关键操作会追加到 `<work-dir>/logs/audit.jsonl`（一行一个 JSON），
+也可以由 admin 通过接口查看最近记录：
+
+```bash
+curl -H 'Authorization: Bearer T' 'http://127.0.0.1:PORT/api/v1/audit?limit=100'
+```
+
+- 字段：`at / actor / role / action / target / detail`。
+- 覆盖：手动 CEID、报警、会话创建/关闭/重载、配置创建/保存、手动 SML、
+  事件编排切换、停机，以及角色不足的 403 拒绝。
+- **审计失败不影响业务**；写日志失败只记录一次错误。
+- 查询只给 **admin**：审计比报文历史更敏感。
+- 没有自动轮转；需要按现场磁盘规划归档。
+
 ### 事件编排控制
 
 运行中的编排计划可以列出并临时启用/禁用，不用改配置、不用重载：
@@ -302,7 +319,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 - **uPlot**：每条曲线独立图例（点击可隐藏 min/max/avg）、框选缩放、双击复位，
   适合逐条细看。切换引擎不会重新请求后端。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、**手动发送 SML**、**事件编排控制**、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（Canvas / uPlot 切换、悬停读数、拖动放大、截断提示、二进制下载）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
+界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、**手动发送 SML**、**事件编排控制**、**审计（admin）**、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（Canvas / uPlot 切换、悬停读数、拖动放大、截断提示、二进制下载）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
 
 ## 打包
 
@@ -333,6 +350,7 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [ADR 0009 · 报文落盘用 JSON Lines](docs/adr/0009-message-log.md)
 - [ADR 0010 · 手动发送 SML 只实现受控子集](docs/adr/0010-manual-sml.md)
 - [ADR 0011 · 事件编排的运行时启用/禁用](docs/adr/0011-event-runtime-control.md)
+- [ADR 0012 · 审计日志与业务日志分离](docs/adr/0012-audit-log.md)
 - [二进制曲线预览格式](docs/preview-binary.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)

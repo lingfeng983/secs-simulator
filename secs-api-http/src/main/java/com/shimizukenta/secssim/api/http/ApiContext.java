@@ -178,6 +178,16 @@ public interface ApiContext {
     }
 
     /**
+     * 最近审计记录。
+     *
+     * @param limit 最多返回条数
+     * @return JSON 文本；审计不可用时返回 {@code null}
+     */
+    default String auditJson(int limit) {
+        return null;
+    }
+
+    /**
      * 手动发送一条 SML 报文。
      *
      * @param sessionId 会话标识

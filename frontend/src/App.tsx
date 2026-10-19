@@ -8,6 +8,7 @@ import {
   roleLabel,
   saveToken,
   type AlarmState,
+  type AuditEntryView,
   type Catalog,
   type ConfigEntry,
   type EventPlanView,
@@ -400,6 +401,7 @@ export function App(): JSX.Element {
   const [smlBusy, setSmlBusy] = useState(false);
   const [eventSession, setEventSession] = useState('');
   const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntryView[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
   const [configName, setConfigName] = useState('');
@@ -422,6 +424,7 @@ export function App(): JSX.Element {
    */
   const role = health?.role;
   const canOperate = hasRole(role, 'operator');
+  const isAdmin = hasRole(role, 'admin');
   /* 按钮灰掉时要说清是"角色不够"还是"还不知道角色"，否则用户会以为界面坏了 */
   const operateHint =
     role === undefined
@@ -734,6 +737,37 @@ export function App(): JSX.Element {
       window.clearInterval(timer);
     };
   }, [client, eventSession]);
+
+  /*
+   * 审计：只有 admin 能看；低频轮询即可。
+   */
+  useEffect(() => {
+    if (client === null || !isAdmin) {
+      setAuditEntries([]);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const next = await client.audit(200);
+        if (!cancelled) {
+          setAuditEntries(next);
+        }
+      } catch {
+        if (!cancelled) {
+          setAuditEntries([]);
+        }
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client, isAdmin]);
 
   /*
    * 配置目录列表：轮询。
@@ -1634,6 +1668,50 @@ export function App(): JSX.Element {
               )}
             </tbody>
           </table>
+        </section>
+
+        <section>
+          <h2>审计</h2>
+          {!isAdmin ? (
+            <p className="hint">审计记录包含账号与操作目标，只有管理员可以查看。</p>
+          ) : (
+            <>
+              <p className="hint">
+                最近 200 条操作记录；完整历史在 <code>--work-dir/logs/audit.jsonl</code>。
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>操作者</th>
+                    <th>角色</th>
+                    <th>动作</th>
+                    <th>目标</th>
+                    <th>细节</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditEntries.map((entry, index) => (
+                    <tr key={`${entry.at}-${index}`}>
+                      <td>{new Date(entry.at).toLocaleString()}</td>
+                      <td>{entry.actor}</td>
+                      <td>{entry.role}</td>
+                      <td>{entry.action}</td>
+                      <td>{entry.target}</td>
+                      <td className="audit-detail">{entry.detail}</td>
+                    </tr>
+                  ))}
+                  {auditEntries.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="hint">
+                        暂无审计记录
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </>
+          )}
         </section>
 
         <section>

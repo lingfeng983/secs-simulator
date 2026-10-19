@@ -13,6 +13,7 @@ import javax.net.ssl.SSLContext;
 
 import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
+import com.shimizukenta.secssim.api.http.AuditSink;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.api.http.EventOutcome;
@@ -20,6 +21,7 @@ import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
+import com.shimizukenta.secssim.app.audit.AuditLog;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageLog;
@@ -126,6 +128,15 @@ public final class Main {
         }
         AutoCloseable messageSubscription = messageLog == null ? null : bus.subscribe(messageLog::append);
 
+        AuditLog auditLog = null;
+        try {
+            auditLog = AuditLog.open(options.workDir());
+            Log.info("审计日志: " + auditLog.file());
+        } catch (IOException e) {
+            Log.error("打开审计日志失败（本次不审计）: " + options.workDir(), e);
+        }
+        AuditSink auditSink = auditLog == null ? null : auditLog::record;
+
         /*
          * 整个进程只有一个启动器：它记着"哪个会话的配置从哪来"，
          * 热重载全靠这份记忆。每次调用现造一个的话，重载接口会永远说"没有配置来源"。
@@ -139,12 +150,14 @@ public final class Main {
             int code = startConfiguredSession(options, launcher);
             if (code != 0) {
                 closeMessageLog(messageSubscription, messageLog);
+                closeAuditLog(auditLog);
                 return code;
             }
         } else if (options.demoSession()) {
             int code = startDemoSession(options, launcher);
             if (code != 0) {
                 closeMessageLog(messageSubscription, messageLog);
+                closeAuditLog(auditLog);
                 return code;
             }
         } else if (options.mode() == RuntimeMode.PROBE) {
@@ -160,11 +173,11 @@ public final class Main {
         }
 
         ApiContext context = new Context(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog);
+                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog, auditLog);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
-                options.webRoot(), bus, tls);
+                options.webRoot(), bus, tls, auditSink);
 
         Runtime.getRuntime().addShutdownHook(new Thread(stopped::countDown, "shutdown-hook"));
 
@@ -188,6 +201,7 @@ public final class Main {
             }
             api.close();
             closeMessageLog(messageSubscription, messageLog);
+            closeAuditLog(auditLog);
         }
         return 0;
     }
@@ -201,6 +215,13 @@ public final class Main {
                 Log.error("取消报文日志订阅失败（已忽略）", e);
             }
         }
+        if (log != null) {
+            log.close();
+        }
+    }
+
+    /** 审计日志关闭失败只记录，不影响停机。 */
+    private static void closeAuditLog(AuditLog log) {
         if (log != null) {
             log.close();
         }
@@ -321,10 +342,11 @@ public final class Main {
         private final SessionLauncher launcher;
         private final ConfigStore configs;
         private final MessageLog messages;
+        private final AuditLog audit;
 
         Context(String mode, String version, String extraHealthJson, Runnable shutdown,
                 SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-                MessageLog messages) {
+                MessageLog messages, AuditLog audit) {
             this.mode = mode;
             this.version = version;
             this.extraHealthJson = extraHealthJson;
@@ -333,6 +355,7 @@ public final class Main {
             this.launcher = launcher;
             this.configs = configs;
             this.messages = messages;
+            this.audit = audit;
         }
 
         @Override
@@ -451,6 +474,11 @@ public final class Main {
         @Override
         public String messagesJsonl(int limit, String sessionId, String direction) {
             return this.messages == null ? null : this.messages.recentJsonl(limit, sessionId, direction);
+        }
+
+        @Override
+        public String auditJson(int limit) {
+            return this.audit == null ? null : this.audit.recentJson(limit);
         }
 
         @Override

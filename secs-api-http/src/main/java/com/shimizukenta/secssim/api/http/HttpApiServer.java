@@ -86,6 +86,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 报文历史路径。 */
     public static final String PATH_MESSAGES = "/api/v1/messages";
 
+    /** 审计历史路径。 */
+    public static final String PATH_AUDIT = "/api/v1/audit";
+
     /** 配置目录列表路径。 */
     public static final String PATH_CONFIGS = "/api/v1/configs";
 
@@ -136,6 +139,10 @@ public final class HttpApiServer implements AutoCloseable {
     private static final int MESSAGES_LIMIT_DEFAULT = 500;
     private static final int MESSAGES_LIMIT_MAX = 5000;
 
+    /** 审计历史默认条数与上限；审计是低频事件，不需要报文那么大。 */
+    private static final int AUDIT_LIMIT_DEFAULT = 200;
+    private static final int AUDIT_LIMIT_MAX = 1000;
+
     /** 票据随机源。 */
     private static final SecureRandom TICKET_RANDOM = new SecureRandom();
 
@@ -161,6 +168,7 @@ public final class HttpApiServer implements AutoCloseable {
     private final ScheduledExecutorService watchdog;
     private final AccessControl access;
     private final ApiContext context;
+    private final AuditSink audit;
     private final Path webRoot;
     private final CopyOnWriteArrayList<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     /** 一次性票据：ticket -> 票据。 */
@@ -172,13 +180,14 @@ public final class HttpApiServer implements AutoCloseable {
 
     private HttpApiServer(HttpServer server, ExecutorService executor, ExecutorService sseExecutor,
                           ScheduledExecutorService watchdog, AccessControl access, ApiContext context,
-                          Path webRoot, long stallTimeoutMs) {
+                          AuditSink audit, Path webRoot, long stallTimeoutMs) {
         this.server = server;
         this.executor = executor;
         this.sseExecutor = sseExecutor;
         this.watchdog = watchdog;
         this.access = access;
         this.context = context;
+        this.audit = audit;
         this.webRoot = webRoot;
         this.stallTimeoutMs = stallTimeoutMs;
     }
@@ -280,6 +289,25 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public static HttpApiServer start(InetSocketAddress bind, AccessControl access, ApiContext context,
                                       Path webRoot, EventBus bus, SSLContext sslContext) throws IOException {
+        return start(bind, access, context, webRoot, bus, sslContext, null);
+    }
+
+    /**
+     * 启动服务器，并挂上审计旁路。
+     *
+     * @param bind       绑定地址
+     * @param access     访问控制，不得为 {@code null}
+     * @param context    运行时信息
+     * @param webRoot    静态资源根目录，{@code null} 表示不托管
+     * @param bus        事件总线，{@code null} 表示不推报文
+     * @param sslContext TLS 上下文；{@code null} 表示明文 HTTP
+     * @param audit      审计旁路；{@code null} 表示不审计
+     * @return 已启动的服务器
+     * @throws IOException 绑定失败
+     */
+    public static HttpApiServer start(InetSocketAddress bind, AccessControl access, ApiContext context,
+                                      Path webRoot, EventBus bus, SSLContext sslContext,
+                                      AuditSink audit) throws IOException {
         Objects.requireNonNull(access, "access");
 
         HttpServer http;
@@ -313,7 +341,7 @@ public final class HttpApiServer implements AutoCloseable {
             return thread;
         });
 
-        HttpApiServer api = new HttpApiServer(http, pool, ssePool, watchdog, access, context,
+        HttpApiServer api = new HttpApiServer(http, pool, ssePool, watchdog, access, context, audit,
                 normalizeRoot(webRoot),
                 Long.getLong("secssim.sse.stallTimeoutMs", SSE_STALL_TIMEOUT_DEFAULT_MS));
         http.setExecutor(pool);
@@ -333,6 +361,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_PREVIEW, api::handlePreview);
         http.createContext(PATH_PREVIEW_BINARY, api::handlePreviewBinary);
         http.createContext(PATH_MESSAGES, api::handleMessages);
+        http.createContext(PATH_AUDIT, api::handleAudit);
 
         if (api.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
@@ -523,6 +552,7 @@ public final class HttpApiServer implements AutoCloseable {
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
         }
+        audit(ex, "shutdown", "server", "ok");
         respond(ex, 200, "{\"ok\":true,\"shuttingDown\":true}");
         this.context.requestShutdown();
     }
@@ -676,7 +706,9 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        switch (this.context.createSession(config)) {
+        SessionOutcome outcome = this.context.createSession(config);
+        audit(ex, "session-create", config, "outcome=" + outcome);
+        switch (outcome) {
             case OK -> respond(ex, 201, "{\"ok\":true}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-exists\"}");
             default -> respond(ex, 400, "{\"ok\":false,\"error\":\"create-failed\"}");
@@ -779,6 +811,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         ConfigResult result = this.context.createConfig(name);
+        audit(ex, "config-create", name, "outcome=" + result.outcome());
         switch (result.outcome()) {
             case OK -> respond(ex, 201, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"config-exists\"}");
@@ -902,6 +935,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         ConfigResult result = this.context.saveConfig(name, text);
+        audit(ex, "config-save", name, "outcome=" + result.outcome() + " bytes=" + text.length());
         switch (result.outcome()) {
             case OK -> respond(ex, 200, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
             /* 内容不合法用 422：请求本身没毛病，是内容过不了关，和 400 的"body 坏了"不是一回事 */
@@ -1003,7 +1037,9 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        switch (this.context.closeSession(id)) {
+        SessionOutcome outcome = this.context.closeSession(id);
+        audit(ex, "session-close", id, "outcome=" + outcome);
+        switch (outcome) {
             case OK -> respond(ex, 200, "{\"ok\":true}");
             default -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
         }
@@ -1069,7 +1105,9 @@ public final class HttpApiServer implements AutoCloseable {
         String[] parts = rest.split("/");
 
         if (parts.length == 2 && "reload".equals(parts[1])) {
-            switch (this.context.reloadSession(parts[0])) {
+            SessionOutcome outcome = this.context.reloadSession(parts[0]);
+            audit(ex, "session-reload", parts[0], "outcome=" + outcome);
+            switch (outcome) {
                 case OK -> respond(ex, 200, "{\"ok\":true}");
                 case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
                 /* 演示会话没有配置来源，说"不可重载"比笼统的 500 有用得多 */
@@ -1100,6 +1138,7 @@ public final class HttpApiServer implements AutoCloseable {
                 return;
             }
             outcome = this.context.triggerCeid(parts[0], ceid);
+            audit(ex, "trigger-ceid", parts[0], "ceid=" + ceid + " outcome=" + outcome);
         } else if ("alarm".equals(parts[1])) {
             int alid;
             try {
@@ -1130,6 +1169,8 @@ public final class HttpApiServer implements AutoCloseable {
             }
 
             outcome = this.context.triggerAlarm(parts[0], alid, set, text, category);
+            audit(ex, "alarm", parts[0], "alid=" + alid + " set=" + set
+                    + " category=" + category + " outcome=" + outcome);
         } else if ("events".equals(parts[1])) {
             Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
             String enabledParam = query.getOrDefault("enabled", "true");
@@ -1145,6 +1186,8 @@ public final class HttpApiServer implements AutoCloseable {
 
             EventOutcome eventOutcome = this.context.setEventEnabled(
                     parts[0], decode(parts[2]), enabled);
+            audit(ex, "event-toggle", parts[0],
+                    "plan=" + decode(parts[2]) + " enabled=" + enabled + " outcome=" + eventOutcome);
             switch (eventOutcome) {
                 case OK -> respond(ex, 200, "{\"ok\":true}");
                 case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
@@ -1184,16 +1227,21 @@ public final class HttpApiServer implements AutoCloseable {
         try {
             String body = this.context.sendSml(sessionId, sml);
             if (body == null) {
+                audit(ex, "send-sml", sessionId, "outcome=unknown-session bytes=" + sml.length());
                 respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
                 return;
             }
+            audit(ex, "send-sml", sessionId, "outcome=ok bytes=" + sml.length());
             respond(ex, 200, body);
         } catch (IllegalArgumentException e) {
+            audit(ex, "send-sml", sessionId, "outcome=bad-sml bytes=" + sml.length());
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-sml\",\"message\":\""
                     + json(e.getMessage()) + "\"}");
         } catch (IllegalStateException e) {
+            audit(ex, "send-sml", sessionId, "outcome=not-open bytes=" + sml.length());
             respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
         } catch (IOException e) {
+            audit(ex, "send-sml", sessionId, "outcome=failed bytes=" + sml.length());
             Log.error("手动发送 SML 失败", e);
             respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
@@ -1360,6 +1408,41 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
+     * 审计历史：{@code /api/v1/audit?limit=}。
+     *
+     * <p>只给 admin：审计里会有账号名、动作目标和结果，
+     * 比报文历史更敏感；viewer/operator 不应看到别人的操作轨迹。</p>
+     */
+    private void handleAudit(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.ADMIN)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+        Long limitParam = longParam(query, "limit");
+        if (query.containsKey("limit") && limitParam == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+        long limit = limitParam == null ? AUDIT_LIMIT_DEFAULT : limitParam;
+        if (limit < 1 || limit > AUDIT_LIMIT_MAX) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+
+        String body = this.context.auditJson((int) limit);
+        if (body == null) {
+            respond(ex, 503, "{\"ok\":false,\"error\":\"audit-log-unavailable\"}");
+            return;
+        }
+        respond(ex, 200, body);
+    }
+
+    /**
      * 解析查询串，值做 URL 解码。
      *
      * <p>用 {@link LinkedHashMap} 保留首次出现的键；重复键忽略后者。
@@ -1509,10 +1592,32 @@ public final class HttpApiServer implements AutoCloseable {
             return false;
         }
         if (!principal.role().atLeast(required)) {
+            audit(ex, "denied", ex.getRequestURI().getPath(),
+                    "required=" + required + " role=" + principal.role().name().toLowerCase(Locale.ROOT));
             respond(ex, 403, "{\"ok\":false,\"error\":\"forbidden\",\"required\":\"" + required + "\"}");
             return false;
         }
         return true;
+    }
+
+    /**
+     * 记录一条审计；没有审计器或没带凭据时静默跳过。
+     *
+     * <p>身份从请求头重新解析，而不是让每个 handler 都多传一个 Principal：
+     * 审计是旁路，不值得把鉴权对象穿透整条调用链。</p>
+     */
+    private void audit(HttpExchange ex, String action, String target, String detail) {
+        AuditSink sink = this.audit;
+        if (sink == null) {
+            return;
+        }
+        AccessControl.Principal principal = authenticate(ex);
+        if (principal == null) {
+            return;
+        }
+        sink.record(principal.name(),
+                principal.role().name().toLowerCase(Locale.ROOT),
+                action, target, detail);
     }
 
     /** 只做认证、不判角色（health 需要区分"没带凭据"和"带了凭据"）。 */

@@ -44,6 +44,7 @@ class HttpApiServerTest {
     private final List<String> messageQueries = new ArrayList<>();
     private final List<String> sentSml = new ArrayList<>();
     private final List<String> eventToggles = new ArrayList<>();
+    private final List<String> auditEntries = new ArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
     private boolean messagesAvailable = true;
 
@@ -156,6 +157,12 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String auditJson(int limit) {
+                return "{\"audit\":[{\"actor\":\"token\",\"role\":\"admin\","
+                        + "\"action\":\"trigger-ceid\",\"target\":\"s1\"}],\"limit\":" + limit + "}";
+            }
+
+            @Override
             public String eventsJson(String sessionId) {
                 if ("missing".equals(sessionId)) {
                     return null;
@@ -218,7 +225,10 @@ class HttpApiServerTest {
             }
         };
 
-        this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), TOKEN, context);
+        AuditSink audit = (actor, role, action, target, detail) ->
+                this.auditEntries.add(actor + ":" + role + ":" + action + ":" + target + ":" + detail);
+        this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0),
+                AccessControl.singleToken(TOKEN), context, null, null, null, audit);
         this.base = "http://127.0.0.1:" + this.server.port();
     }
 
@@ -554,6 +564,18 @@ class HttpApiServerTest {
     }
 
     @Test
+    void auditIsAdminOnlyAndValidatesLimit() throws Exception {
+        assertEquals(401, get("/api/v1/audit", null).statusCode());
+        HttpResponse<String> response = get("/api/v1/audit?limit=10", TOKEN);
+        assertEquals(200, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"action\":\"trigger-ceid\""), response.body());
+        assertTrue(response.body().contains("\"limit\":10"), response.body());
+        assertEquals(405, post("/api/v1/audit", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/audit?limit=0", TOKEN).statusCode());
+        assertEquals(400, get("/api/v1/audit?limit=x", TOKEN).statusCode());
+    }
+
+    @Test
     void eventsListAndToggleRequireAuthAndMapUnknowns() throws Exception {
         assertEquals(401, get("/api/v1/sessions/s1/events", null).statusCode());
         HttpResponse<String> list = get("/api/v1/sessions/s1/events", TOKEN);
@@ -567,6 +589,21 @@ class HttpApiServerTest {
         assertEquals(404, post("/api/v1/sessions/missing/events/beat", TOKEN).statusCode());
         assertEquals(404, post("/api/v1/sessions/s1/events/nope", TOKEN).statusCode());
         assertEquals(400, post("/api/v1/sessions/s1/events/beat?enabled=maybe", TOKEN).statusCode());
+    }
+
+    @Test
+    void auditsMutatingOperationsWithActorAndRole() throws Exception {
+        assertEquals(202, post("/api/v1/sessions/s1/ceid/2001", TOKEN).statusCode());
+        assertTrue(this.auditEntries.stream().anyMatch(entry ->
+                entry.contains("token:admin:trigger-ceid:s1:ceid=2001 outcome=OK")), this.auditEntries.toString());
+
+        HttpResponse<String> created = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/sessions"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"config\":\"demo\"}", StandardCharsets.UTF_8)),
+                TOKEN);
+        assertEquals(201, created.statusCode(), created.body());
+        assertTrue(this.auditEntries.stream().anyMatch(entry ->
+                entry.contains("token:admin:session-create:demo:outcome=OK")), this.auditEntries.toString());
     }
 
     @Test

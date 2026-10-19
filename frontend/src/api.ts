@@ -81,6 +81,16 @@ export interface WireMessage {
   at: number;
 }
 
+/** 审计记录。 */
+export interface AuditEntryView {
+  at: number;
+  actor: string;
+  role: string;
+  action: string;
+  target: string;
+  detail: string;
+}
+
 /** 事件编排计划（运行时视图）。 */
 export interface EventPlanView {
   id: string;
@@ -242,6 +252,8 @@ export interface ApiClient {
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
+  /** 最近审计记录（admin）。 */
+  audit(limit: number): Promise<AuditEntryView[]>;
   /** 事件编排列表。 */
   events(sessionId: string): Promise<EventPlanView[]>;
   /** 运行时启用/禁用一个计划（operator 及以上）。 */
@@ -368,6 +380,12 @@ export function createClient(token: string): ApiClient {
           headers: auth,
         }),
       );
+    },
+    async audit(limit) {
+      const body = await json<{ audit?: AuditEntryView[] }>(
+        await fetch(`/api/v1/audit?limit=${limit}`, { headers: auth }),
+      );
+      return body.audit ?? [];
     },
     async events(sessionId) {
       const body = await json<{ events?: EventPlanView[] }>(
