@@ -158,6 +158,9 @@ curl -X DELETE -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/session
 - 配置没指定端口时会用 `--hsms-port` 的值，因此**多个会话要在配置里各自写明端口**，
   否则第二个会话会撞端口。
 - 界面上的「新建 / 重载 / 关闭」与「上报 / 报警」一样要 operator 及以上。
+- 会话列表新增 `controlState`：`OFFLINE` / `COMMUNICATING` / `ONLINE`。
+  HSMS selected 或 S1F13 后进入 COMMUNICATING，S1F17 接受后 ONLINE，
+  S1F15 或主机断开后回到 OFFLINE。这是面向操作的简化模型，不是完整 E5 状态机。
 
 ### 配置编辑器
 
@@ -319,7 +322,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 - **uPlot**：每条曲线独立图例（点击可隐藏 min/max/avg）、框选缩放、双击复位，
   适合逐条细看。切换引擎不会重新请求后端。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、**手动发送 SML**、**事件编排控制**、**审计（admin）**、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（Canvas / uPlot 切换、悬停读数、拖动放大、截断提示、二进制下载）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
+界面目前包含：会话表（状态/控制状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、**手动发送 SML**、**事件编排控制**、**审计（admin）**、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（Canvas / uPlot 切换、悬停读数、拖动放大、截断提示、二进制下载）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
 
 ## 打包
 

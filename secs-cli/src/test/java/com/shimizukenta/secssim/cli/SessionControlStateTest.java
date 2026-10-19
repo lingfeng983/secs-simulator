@@ -16,6 +16,7 @@ import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
 import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Builder;
+import com.shimizukenta.secssim.app.session.EquipmentControlState;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
@@ -85,6 +86,29 @@ class SessionControlStateTest {
             SecsMessage reply = f.send(2, 31, clock);
             assertEquals(32, reply.getFunction());
             assertEquals(0, Secs2Read.asByte(reply.secs2()), "TIACK=0");
+        }
+    }
+
+    @Test
+    void tracksCommunicatingOnlineAndOffline() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
+                    "HSMS selected 后应进入 COMMUNICATING");
+
+            f.send(1, 17, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.ONLINE, f.session.controlState(),
+                    "S1F17 接受后应 ONLINE");
+
+            f.send(1, 15, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.OFFLINE, f.session.controlState(),
+                    "S1F15 后应回到 OFFLINE");
+
+            f.send(1, 13, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
+                    "重新建立通信后应回到 COMMUNICATING");
+
+            f.send(1, 17, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.ONLINE, f.session.controlState());
         }
     }
 

@@ -48,6 +48,7 @@ import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.DefaultCurves;
+import com.shimizukenta.secssim.app.session.EquipmentControlState;
 import com.shimizukenta.secssim.app.session.HostReportTable;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
@@ -132,6 +133,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private volatile String lastError;
     private volatile EventBus eventBus;
     private volatile boolean communicatable;
+    private volatile EquipmentControlState controlState = EquipmentControlState.OFFLINE;
     private volatile EventSchedule schedule = EventSchedule.empty();
     private final Set<String> disabledPlans = ConcurrentHashMap.newKeySet();
     private volatile RateLimiter limiter = new RateLimiter(DEFAULT_MAX_EVENTS_PER_SEC, RATE_WINDOW_MS);
@@ -825,7 +827,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this.onPrimary(message);
             });
             comm.addSendedMessagePassThroughListener(message -> this.publish("out", message));
-            comm.addSecsCommunicatableStateChangeListener(value -> this.communicatable = value);
+            comm.addSecsCommunicatableStateChangeListener(value -> {
+                this.communicatable = value;
+                if (!value) {
+                    this.controlState = EquipmentControlState.OFFLINE;
+                } else if (this.controlState == EquipmentControlState.OFFLINE) {
+                    this.controlState = EquipmentControlState.COMMUNICATING;
+                }
+            });
             this.communicator = comm;
             this.state.set(SessionState.OPEN);
             this.startTicker();
@@ -873,6 +882,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     @Override
     public int unitCount() {
         return this.spec.equipment().units().size();
+    }
+
+    @Override
+    public EquipmentControlState controlState() {
+        return this.controlState;
     }
 
     @Override
@@ -1134,14 +1148,19 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 }
                 case 113 -> {
                     this.communicator.gem().s1f14(primary, COMMACK.OK);
+                    if (this.controlState == EquipmentControlState.OFFLINE) {
+                        this.controlState = EquipmentControlState.COMMUNICATING;
+                    }
                     return;
                 }
                 case 115 -> {
                     this.communicator.gem().s1f16(primary);
+                    this.controlState = EquipmentControlState.OFFLINE;
                     return;
                 }
                 case 117 -> {
                     this.communicator.gem().s1f18(primary, ONLACK.OK);
+                    this.controlState = EquipmentControlState.ONLINE;
                     return;
                 }
                 case 217 -> {

@@ -373,6 +373,20 @@ function UplotSeries({ series, fromMs, bucketMs }: UplotSeriesProps): JSX.Elemen
   );
 }
 
+/** E5 简化控制状态的中文标签。 */
+function controlStateLabel(state: string | undefined): string {
+  switch (state) {
+    case 'OFFLINE':
+      return '离线';
+    case 'COMMUNICATING':
+      return '通信中';
+    case 'ONLINE':
+      return '在线';
+    default:
+      return state ?? '-';
+  }
+}
+
 export function App(): JSX.Element {
   const [token, setToken] = useState<string>(() => readToken());
   const [draftToken, setDraftToken] = useState('');
@@ -1249,6 +1263,7 @@ export function App(): JSX.Element {
               <tr>
                 <th>id</th>
                 <th>状态</th>
+                <th>控制</th>
                 <th>设备</th>
                 <th>单元</th>
                 <th>已上报</th>
@@ -1264,6 +1279,7 @@ export function App(): JSX.Element {
                 <tr key={session.id}>
                   <td>{session.id}</td>
                   <td>{session.state}</td>
+                  <td>{controlStateLabel(session.controlState)}</td>
                   <td>{session.device || '-'}</td>
                   <td>{session.units}</td>
                   <td>{session.counters.emitted ?? 0}</td>
@@ -1302,7 +1318,7 @@ export function App(): JSX.Element {
               ))}
               {sessions.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="hint">
+                  <td colSpan={11} className="hint">
                     暂无会话（用 --demo-session / --config 启动，或在下方新建）
                   </td>
                 </tr>

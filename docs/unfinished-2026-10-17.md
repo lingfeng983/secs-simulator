@@ -32,7 +32,9 @@
 > 用 Playwright-core + Edge 手工冒烟（10 图 / 10 图例 / 无 pageerror），但未进 CI。
 > 随后补上**审计**：`logs/audit.jsonl` + `GET /api/v1/audit`（admin），
 > 关键操作与 403 都带 actor/role/target/detail。
-> 当前 **495 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 57）
+> 再补上**设备控制状态**：OFFLINE / COMMUNICATING / ONLINE，
+> 随 S1F13 / S1F15 / S1F17 与断链迁移，并在会话列表显示。
+> 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）全绿。
 
 本清单分三类：
@@ -93,7 +95,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **无配置管理 API/界面**：已实现。`ConfigStore` 负责读原文、校验、原子写盘；`GET /api/v1/configs` 列目录、`POST` 新建骨架、`GET /api/v1/configs/{name}` 读原文、`POST .../validate` 只校验不落盘、`PUT` 校验通过后落盘；前端新增「配置编辑器」面板（读 / 改 / 校验 / 保存 / 新建）。**编辑器操作原始 JSON 文本**，不走模型往返（`toJson` 会静默丢掉未知键）；**先校验再落盘**，校验不过时原文件一个字节不动。**模板结构化编辑已落地**：曲线（含 step/pwl 关键帧）、组合模板输出表达式、实例 SVID 绑定与参数都能在表单里改；表单读当前原文解析出的 JSON，改模板 id / 实例 id 会同步引用，删除仍被引用的模板会被拒绝。**代价**：表单改动会把整份文件重排成 2 空格缩进（未知键保留），纯文本编辑仍逐字节保真。
 - [x] **无事件编排控制**：`GET /api/v1/sessions/{id}/events` 列计划（id/CEID/触发规则/启用状态），`POST .../events/{planId}?enabled=` 运行时启用/禁用；禁用清条件去抖与延迟队列，不补发；前端新增「事件编排」面板。**运行时状态不写回配置，重载会恢复。**
 - [ ] **`work-dir` 未真正使用**：**已作为配置目录与报文日志目录投入使用**（配置在根下，报文写到 `logs/messages.jsonl`；`ConfigStore` 只列普通文件）；README 承诺的**模板目录**仍未落地，运行日志仍写 stderr。
-- [ ] **无设备控制状态模型**：E5 的 INIT/COMMUNICATING/ONLINE 等状态没有本地建模，只有 `communicatable` 布尔值。
+- [x] **无设备控制状态模型**：新增 `EquipmentControlState`（OFFLINE / COMMUNICATING / ONLINE）。HSMS selected 或 S1F13 → COMMUNICATING，S1F17 → ONLINE，S1F15 或断开 → OFFLINE；会话列表与前端显示。这是操作级简化模型，不是完整 E5 状态机。
 - [x] **无审计**：新增 `AuditLog`（`<work-dir>/logs/audit.jsonl`）与 HTTP `AuditSink`；手动 CEID、报警、会话/配置/手动 SML/事件切换/停机/403 拒绝都有 actor+role+target+detail；`GET /api/v1/audit` 仅 admin；前端 admin 审计面板。见 ADR-0012。
 
 ## 3. P1：API 与前端
@@ -157,6 +159,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] 二进制预览：头字段/长度/与 JSON 数值一致/截断计数；HTTP 内容类型与鉴权。
 - [x] 事件编排控制：运行时禁用期间不触发、重新启用恢复、未知计划返回 false；HTTP 列表/切换/鉴权/404/400。
 - [x] 审计：AuditLog 3 例（落盘/回读/limit/坏行）；HTTP 审计 actor/role/action、admin-only、401/403/400/405。
+- [x] 控制状态：真实链路 COMMUNICATING → ONLINE → OFFLINE → COMMUNICATING 迁移。
 - [ ] 真实浏览器 UI E2E 进 CI（本轮已用 Playwright-core + Edge 手工冒烟 uPlot：10 图 / 10 图例 / 无 pageerror；未提交测试与浏览器依赖）。
 - [ ] 大规模预览性能与 400 SVID / 多客户端并发的压力测试（SVID > 32 的截断提示已补）。
 
@@ -205,6 +208,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **事件编排控制**（列表 + 运行时启用/禁用 + 前端面板；禁用清理去抖/延迟队列）。
 - **uPlot 预览引擎**（Canvas/uPlot 切换；图例开关、框选缩放、双击复位；浏览器冒烟 10 图 10 图例、无 pageerror）。
 - **审计日志**（JSONL + actor/role/action/target/detail；覆盖关键操作与 403；admin 查询与前端面板）。
+- **设备控制状态**（OFFLINE / COMMUNICATING / ONLINE，S1F13/S1F15/S1F17 与断链迁移；会话列表显示）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。

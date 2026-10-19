@@ -86,6 +86,15 @@ public interface SessionRuntime {
     }
 
     /**
+     * 设备控制状态（E5 的简化模型）。
+     *
+     * @return 控制状态；不支持时为 {@link EquipmentControlState#OFFLINE}
+     */
+    default EquipmentControlState controlState() {
+        return EquipmentControlState.OFFLINE;
+    }
+
+    /**
      * 事件编排列表（含启用状态）。
      *
      * @return JSON 文本

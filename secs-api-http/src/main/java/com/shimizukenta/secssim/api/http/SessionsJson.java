@@ -35,6 +35,7 @@ public final class SessionsJson {
             items.add(b.object(
                     b.pair("id", session.id()),
                     b.pair("state", session.state().name()),
+                    b.pair("controlState", session.controlState().name()),
                     b.pair("device", session.deviceName()),
                     b.pair("units", session.unitCount()),
                     b.pair("lastError", session.lastError() == null ? "" : session.lastError()),

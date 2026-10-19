@@ -53,6 +53,7 @@ export interface Counters {
 export interface SessionSummary {
   id: string;
   state: string;
+  controlState?: string;
   device: string;
   units: number;
   lastError: string;
