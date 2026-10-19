@@ -43,6 +43,7 @@ class HttpApiServerTest {
     private final List<String> reloaded = new ArrayList<>();
     private final List<String> messageQueries = new ArrayList<>();
     private final List<String> sentSml = new ArrayList<>();
+    private final List<String> eventToggles = new ArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
     private boolean messagesAvailable = true;
 
@@ -152,6 +153,27 @@ class HttpApiServerTest {
                 }
                 HttpApiServerTest.this.messageQueries.add("jsonl:" + limit + ":" + sessionId + ":" + direction);
                 return "{\"sessionId\":\"s1\",\"direction\":\"in\"}\n";
+            }
+
+            @Override
+            public String eventsJson(String sessionId) {
+                if ("missing".equals(sessionId)) {
+                    return null;
+                }
+                return "{\"events\":[{\"id\":\"beat\",\"ceid\":2001,\"enabled\":true,"
+                        + "\"triggerType\":\"periodic\",\"periodMs\":1000,\"jitterMs\":0}]}";
+            }
+
+            @Override
+            public EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
+                if ("missing".equals(sessionId)) {
+                    return EventOutcome.UNKNOWN_SESSION;
+                }
+                if ("nope".equals(planId)) {
+                    return EventOutcome.UNKNOWN_PLAN;
+                }
+                HttpApiServerTest.this.eventToggles.add(sessionId + ":" + planId + ":" + enabled);
+                return EventOutcome.OK;
             }
 
             @Override
@@ -529,6 +551,22 @@ class HttpApiServerTest {
     @Test
     void sendMessageRejectsEmptyBody() throws Exception {
         assertEquals(400, postSml("/api/v1/sessions/s1/message", TOKEN, "   ").statusCode());
+    }
+
+    @Test
+    void eventsListAndToggleRequireAuthAndMapUnknowns() throws Exception {
+        assertEquals(401, get("/api/v1/sessions/s1/events", null).statusCode());
+        HttpResponse<String> list = get("/api/v1/sessions/s1/events", TOKEN);
+        assertEquals(200, list.statusCode(), list.body());
+        assertTrue(list.body().contains("\"id\":\"beat\""), list.body());
+        assertTrue(list.body().contains("\"triggerType\":\"periodic\""), list.body());
+        assertEquals(404, get("/api/v1/sessions/missing/events", TOKEN).statusCode());
+
+        assertEquals(200, post("/api/v1/sessions/s1/events/beat?enabled=false", TOKEN).statusCode());
+        assertEquals(List.of("s1:beat:false"), this.eventToggles);
+        assertEquals(404, post("/api/v1/sessions/missing/events/beat", TOKEN).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/events/nope", TOKEN).statusCode());
+        assertEquals(400, post("/api/v1/sessions/s1/events/beat?enabled=maybe", TOKEN).statusCode());
     }
 
     @Test

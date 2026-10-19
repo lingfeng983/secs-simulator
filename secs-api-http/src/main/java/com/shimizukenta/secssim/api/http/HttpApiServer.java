@@ -1048,6 +1048,7 @@ public final class HttpApiServer implements AutoCloseable {
             case "alarms" -> this.context.alarmsJson(parts[0]);
             case "terminal" -> this.context.terminalMessagesJson(parts[0]);
             case "catalog" -> this.context.catalogJson(parts[0]);
+            case "events" -> this.context.eventsJson(parts[0]);
             default -> null;
         };
 
@@ -1129,6 +1130,27 @@ public final class HttpApiServer implements AutoCloseable {
             }
 
             outcome = this.context.triggerAlarm(parts[0], alid, set, text, category);
+        } else if ("events".equals(parts[1])) {
+            Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+            String enabledParam = query.getOrDefault("enabled", "true");
+            boolean enabled;
+            if ("true".equalsIgnoreCase(enabledParam)) {
+                enabled = true;
+            } else if ("false".equalsIgnoreCase(enabledParam)) {
+                enabled = false;
+            } else {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-enabled\"}");
+                return;
+            }
+
+            EventOutcome eventOutcome = this.context.setEventEnabled(
+                    parts[0], decode(parts[2]), enabled);
+            switch (eventOutcome) {
+                case OK -> respond(ex, 200, "{\"ok\":true}");
+                case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                case UNKNOWN_PLAN -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-plan\"}");
+            }
+            return;
         } else {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
             return;

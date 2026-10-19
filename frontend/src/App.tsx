@@ -9,6 +9,7 @@ import {
   type AlarmState,
   type Catalog,
   type ConfigEntry,
+  type EventPlanView,
   type Health,
   type SessionSummary,
   type TerminalMessage,
@@ -26,6 +27,22 @@ interface LogLine {
 
 const MAX_LOG = 400;
 const MAX_MESSAGES = 200;
+
+/** 事件编排的触发规则摘要。 */
+function triggerLabel(plan: EventPlanView): string {
+  switch (plan.triggerType) {
+    case 'at':
+      return `一次性 @ ${plan.atMs ?? 0} ms`;
+    case 'periodic':
+      return `每 ${plan.periodMs ?? 0} ms${plan.jitterMs ? ` ± ${plan.jitterMs} ms` : ''}`;
+    case 'onCondition':
+      return `${plan.expression ?? ''}（连续 ${plan.debounceMs ?? 0} ms）`;
+    case 'afterEvent':
+      return `${plan.sourcePlan ?? '?'} 之后 ${plan.delayMs ?? 0} ms`;
+    default:
+      return plan.triggerType;
+  }
+}
 
 /** 可选的时间窗：后端引擎时钟从进程启动起算，时间窗要相对"现在"而不是 0。 */
 const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
@@ -298,6 +315,8 @@ export function App(): JSX.Element {
   const [smlDraft, setSmlDraft] = useState('S1F1 W.');
   const [smlResult, setSmlResult] = useState('');
   const [smlBusy, setSmlBusy] = useState(false);
+  const [eventSession, setEventSession] = useState('');
+  const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
   const [configName, setConfigName] = useState('');
@@ -586,6 +605,53 @@ export function App(): JSX.Element {
     }
   }, [sessions, smlSession]);
 
+  /* 会话列表变化后保证事件编排下拉框指向一个存在的会话 */
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (eventSession !== '') {
+        setEventSession('');
+      }
+      return;
+    }
+    if (!sessions.some((session) => session.id === eventSession)) {
+      setEventSession(sessions[0].id);
+    }
+  }, [sessions, eventSession]);
+
+  /*
+   * 事件编排列表：轮询。
+   *
+   * <p>运行时的启用状态不属于配置：主机/操作员随时可能改，
+   * 只在切换会话时拉一次会让界面一直显示旧状态。</p>
+   */
+  useEffect(() => {
+    if (client === null || eventSession === '') {
+      setEventPlans([]);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const next = await client.events(eventSession);
+        if (!cancelled) {
+          setEventPlans(next);
+        }
+      } catch {
+        if (!cancelled) {
+          setEventPlans([]);
+        }
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client, eventSession]);
+
   /*
    * 配置目录列表：轮询。
    *
@@ -871,6 +937,28 @@ export function App(): JSX.Element {
       append(`手动发送失败: ${message}`);
     } finally {
       setSmlBusy(false);
+    }
+  };
+
+  /** 运行时启用/禁用一个编排计划；不写回配置，重载会恢复配置里的状态。 */
+  const onToggleEvent = async (plan: EventPlanView) => {
+    if (client === null || eventSession === '') {
+      return;
+    }
+    try {
+      const status = await client.setEventEnabled(eventSession, plan.id, !plan.enabled);
+      append(
+        status === 200
+          ? `事件计划 ${plan.id} 已${plan.enabled ? '禁用' : '启用'}`
+          : status === 404
+            ? `事件计划 ${plan.id} 操作失败：会话或计划不存在`
+            : `事件计划 ${plan.id} 操作失败（HTTP ${status}）`,
+      );
+      if (status === 200) {
+        setEventPlans(await client.events(eventSession));
+      }
+    } catch (error) {
+      append(`事件计划操作失败: ${(error as Error).message}`);
     }
   };
 
@@ -1375,6 +1463,67 @@ export function App(): JSX.Element {
             {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，发送已禁用。`}
           </p>
           {smlResult !== '' && <pre className="sml-result">{smlResult}</pre>}
+        </section>
+
+        <section>
+          <h2>事件编排</h2>
+          <div className="preview-controls">
+            <select value={eventSession} onChange={(event) => setEventSession(event.target.value)}>
+              {sessions.length === 0 && <option value="">（无会话）</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+            <span className="hint">
+              这里改的是运行时状态，不写回配置；重载会话会恢复配置里的启用状态。
+            </span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>计划</th>
+                <th>CEID</th>
+                <th>触发规则</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {eventPlans.map((plan) => (
+                <tr key={plan.id}>
+                  <td>{plan.id}</td>
+                  <td>{plan.ceid}</td>
+                  <td>{triggerLabel(plan)}</td>
+                  <td>{plan.enabled ? '启用' : '禁用'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => void onToggleEvent(plan)}
+                      disabled={!canOperate}
+                      title={
+                        canOperate
+                          ? plan.enabled
+                            ? '禁用后不再触发；已排队的延迟事件会清掉'
+                            : '重新启用；禁用期间的事件不补发'
+                          : operateHint
+                      }
+                    >
+                      {plan.enabled ? '禁用' : '启用'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {eventPlans.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    {sessions.length === 0 ? '暂无会话' : '该会话没有事件编排计划'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </section>
 
         <section>

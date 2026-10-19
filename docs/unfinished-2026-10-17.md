@@ -26,7 +26,9 @@
 > 前端「手动发送」面板；W 位同步等 T3 并返回 `timedOut/replySml`（ADR-0010）。
 > 再完成**二进制曲线预览**：`GET /api/v1/preview.bin`（SCSP v1）与前端下载，
 > 与 JSON 预览共用同一份 `previewData`。
-> 当前 **488 个后端测试**（json 110 / protocol 45 / core 90 / app 29 / api-http 102 / runtime 56 / cli 56）
+> 随后完成**事件编排控制**：运行时列出/启用/禁用 `EventPlan`（禁用不补发、重载恢复配置），
+> 前端新增「事件编排」面板。
+> 当前 **490 个后端测试**（json 110 / protocol 45 / core 90 / app 29 / api-http 103 / runtime 56 / cli 57）
 > + **22 个前端测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）全绿。
 
 本清单分三类：
@@ -85,7 +87,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **单会话**：一个进程可以装多份配置了。`POST /api/v1/sessions` 按 `--work-dir` 下的配置文件新建会话，`DELETE /api/v1/sessions/{id}` 关闭单个会话；`SessionManager` 增加 `remove(id)`。配置名只接受文件名，不接受路径。
 - [x] **无热重载**：`POST /api/v1/sessions/{id}/reload` 按来源配置重新装载。**先编译再动旧会话**——配置有错时旧会话原样跑着。内置演示会话无配置来源，回 409 `not-reloadable`。
 - [x] **无配置管理 API/界面**：已实现。`ConfigStore` 负责读原文、校验、原子写盘；`GET /api/v1/configs` 列目录、`POST` 新建骨架、`GET /api/v1/configs/{name}` 读原文、`POST .../validate` 只校验不落盘、`PUT` 校验通过后落盘；前端新增「配置编辑器」面板（读 / 改 / 校验 / 保存 / 新建）。**编辑器操作原始 JSON 文本**，不走模型往返（`toJson` 会静默丢掉未知键）；**先校验再落盘**，校验不过时原文件一个字节不动。**模板结构化编辑已落地**：曲线（含 step/pwl 关键帧）、组合模板输出表达式、实例 SVID 绑定与参数都能在表单里改；表单读当前原文解析出的 JSON，改模板 id / 实例 id 会同步引用，删除仍被引用的模板会被拒绝。**代价**：表单改动会把整份文件重排成 2 空格缩进（未知键保留），纯文本编辑仍逐字节保真。
-- [ ] **无事件编排控制**：不能运行时列出/启用/禁用 `EventPlan`；界面只能手动填 CEID。
+- [x] **无事件编排控制**：`GET /api/v1/sessions/{id}/events` 列计划（id/CEID/触发规则/启用状态），`POST .../events/{planId}?enabled=` 运行时启用/禁用；禁用清条件去抖与延迟队列，不补发；前端新增「事件编排」面板。**运行时状态不写回配置，重载会恢复。**
 - [ ] **`work-dir` 未真正使用**：**已作为配置目录与报文日志目录投入使用**（配置在根下，报文写到 `logs/messages.jsonl`；`ConfigStore` 只列普通文件）；README 承诺的**模板目录**仍未落地，运行日志仍写 stderr。
 - [ ] **无设备控制状态模型**：E5 的 INIT/COMMUNICATING/ONLINE 等状态没有本地建模，只有 `communicatable` 布尔值。
 - [ ] **无审计**：README 声称 secs-app 有“审计”，实际没有 audit 类；手动触发 CEID、配置装载都没有审计记录。
@@ -149,6 +151,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] 报文落盘（MessageLog 4 例：追加/重启回读/过滤/坏行/半截行修复）与 HTTP 历史接口（鉴权/过滤/JSONL/503）。
 - [x] 手动 SML：解析器 6 例（头/嵌套/各类型/转义/错误）、真实协议链路 3 例（W 位回复、W=0、无对端/坏 SML）、HTTP 映射 3 例。
 - [x] 二进制预览：头字段/长度/与 JSON 数值一致/截断计数；HTTP 内容类型与鉴权。
+- [x] 事件编排控制：运行时禁用期间不触发、重新启用恢复、未知计划返回 false；HTTP 列表/切换/鉴权/404/400。
 - [ ] 真实浏览器 UI E2E（打开配置 → 改模板表单 → 校验 / 保存的点击流程）。
 - [ ] 大规模预览性能与 400 SVID / 多客户端并发的压力测试（SVID > 32 的截断提示已补）。
 
@@ -194,6 +197,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **模板结构化表单**（曲线含 step/pwl 关键帧、组合模板输出表达式、实例 SVID 绑定与参数；引用同步、删除保护、未知键保留、2 空格重排）+ **曲线预览交互**（悬停读数、拖动放大 / 双击重置、`svidTotal`/`truncated` 截断提示）。
 - **报文历史**（`MessageLog` → `<work-dir>/logs/messages.jsonl`，最近 5000 条；`GET /api/v1/messages` + JSONL 导出 + 前端载入历史）。
 - **手动发送 SML**（受控子集解析 + W 位等待回复 + 前端面板，ADR-0010）。
+- **事件编排控制**（列表 + 运行时启用/禁用 + 前端面板；禁用清理去抖/延迟队列）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。

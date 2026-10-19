@@ -106,6 +106,28 @@ public interface ApiContext {
     }
 
     /**
+     * 事件编排列表。
+     *
+     * @param sessionId 会话标识
+     * @return JSON 文本；会话不存在时返回 {@code null}
+     */
+    default String eventsJson(String sessionId) {
+        return null;
+    }
+
+    /**
+     * 运行时启用/禁用一个编排计划。
+     *
+     * @param sessionId 会话标识
+     * @param planId    计划标识
+     * @param enabled   是否启用
+     * @return 结果
+     */
+    default EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
+        return EventOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
      * 曲线预览（分桶 min/max/avg）。
      *
      * @param sessionId 会话标识

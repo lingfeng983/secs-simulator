@@ -161,6 +161,7 @@ class HttpApiServerAuthTest {
         assertEquals(401, post("/api/v1/ticket", null).statusCode());
         assertEquals(401, post("/api/v1/sessions/s1/ceid/2001", null).statusCode());
         assertEquals(401, post("/api/v1/sessions/s1/alarm/1001", null).statusCode());
+        assertEquals(401, post("/api/v1/sessions/s1/events/beat?enabled=false", null).statusCode());
         assertEquals(401, post("/api/v1/shutdown", null).statusCode());
         assertEquals(401, get("/api/v1/configs", null).statusCode());
         assertEquals(401, get("/api/v1/configs/line1.json", null).statusCode());
@@ -192,6 +193,7 @@ class HttpApiServerAuthTest {
         assertTrue(ceid.body().contains("\"required\":\"OPERATOR\""), ceid.body());
 
         assertEquals(403, post("/api/v1/sessions/s1/alarm/1001", VIEWER_PASS).statusCode());
+        assertEquals(403, post("/api/v1/sessions/s1/events/beat?enabled=false", VIEWER_PASS).statusCode());
         assertEquals(403, post("/api/v1/shutdown", VIEWER_PASS).statusCode());
 
         assertTrue(this.triggered.isEmpty(), "被拒的请求不得产生副作用: " + this.triggered);

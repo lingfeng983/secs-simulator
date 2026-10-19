@@ -15,6 +15,7 @@ import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
+import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -426,6 +427,20 @@ public final class Main {
         @Override
         public String catalogJson(String sessionId) {
             return this.sessions.find(sessionId).map(SessionRuntime::catalogJson).orElse(null);
+        }
+
+        @Override
+        public String eventsJson(String sessionId) {
+            return this.sessions.find(sessionId).map(SessionRuntime::eventsJson).orElse(null);
+        }
+
+        @Override
+        public EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
+            SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+            if (session == null) {
+                return EventOutcome.UNKNOWN_SESSION;
+            }
+            return session.setEventEnabled(planId, enabled) ? EventOutcome.OK : EventOutcome.UNKNOWN_PLAN;
         }
 
         @Override

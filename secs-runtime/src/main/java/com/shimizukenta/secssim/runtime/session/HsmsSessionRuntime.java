@@ -133,6 +133,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private volatile EventBus eventBus;
     private volatile boolean communicatable;
     private volatile EventSchedule schedule = EventSchedule.empty();
+    private final Set<String> disabledPlans = ConcurrentHashMap.newKeySet();
     private volatile RateLimiter limiter = new RateLimiter(DEFAULT_MAX_EVENTS_PER_SEC, RATE_WINDOW_MS);
     private volatile ScheduledExecutorService ticker;
     private volatile boolean s6f11Wbit;
@@ -493,6 +494,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     public void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
         this.schedule = schedule == null ? EventSchedule.empty() : schedule;
         this.limiter = new RateLimiter(maxEventsPerSec, RATE_WINDOW_MS);
+        this.disabledPlans.clear();
 
         this.conditionDebouncers.clear();
         this.conditionErrorLogged.clear();
@@ -503,6 +505,86 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             if (plan.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
             }
+        }
+    }
+
+    /**
+     * 当前编排列表（含启用状态与触发规则）。
+     *
+     * @return JSON 文本
+     */
+    public String eventsJson() {
+        JsonHubBuilder b = JsonHub.getBuilder();
+        java.util.List<JsonHub> events = new java.util.ArrayList<>();
+
+        for (EventPlan plan : this.schedule.plans()) {
+            java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new java.util.ArrayList<>();
+            pairs.add(b.pair("id", plan.id()));
+            pairs.add(b.pair("ceid", plan.ceid()));
+            pairs.add(b.pair("enabled", !this.disabledPlans.contains(plan.id())));
+            triggerJson(plan.trigger(), pairs, b);
+            events.add(b.object(pairs));
+        }
+
+        return b.object(b.pair("events", b.array(events))).toJson();
+    }
+
+    /**
+     * 运行时启用/禁用一个计划。
+     *
+     * <p>禁用会清掉该计划的条件去抖状态与延迟队列条目：重新启用后
+     * 不应把禁用期间攒下的事件补发出去。</p>
+     *
+     * @param planId  计划标识
+     * @param enabled 是否启用
+     * @return 计划存在返回 {@code true}
+     */
+    public boolean setEventEnabled(String planId, boolean enabled) {
+        EventPlan target = null;
+        for (EventPlan plan : this.schedule.plans()) {
+            if (plan.id().equals(planId)) {
+                target = plan;
+                break;
+            }
+        }
+        if (target == null) {
+            return false;
+        }
+
+        if (enabled) {
+            this.disabledPlans.remove(planId);
+            if (target.trigger() instanceof Trigger.OnCondition condition) {
+                this.conditionDebouncers.computeIfAbsent(planId,
+                        id -> new ConditionDebouncer(condition.debounceMs()));
+            }
+        } else {
+            this.disabledPlans.add(planId);
+            this.conditionDebouncers.remove(planId);
+            synchronized (this.pendingFires) {
+                this.pendingFires.removeIf(fire -> fire.planId().equals(planId));
+            }
+        }
+        return true;
+    }
+
+    private static void triggerJson(Trigger trigger,
+                                    java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> pairs,
+                                    JsonHubBuilder b) {
+        if (trigger instanceof Trigger.At at) {
+            pairs.add(b.pair("triggerType", "at"));
+            pairs.add(b.pair("atMs", at.atMs()));
+        } else if (trigger instanceof Trigger.Periodic periodic) {
+            pairs.add(b.pair("triggerType", "periodic"));
+            pairs.add(b.pair("periodMs", periodic.periodMs()));
+            pairs.add(b.pair("jitterMs", periodic.jitterMs()));
+        } else if (trigger instanceof Trigger.OnCondition condition) {
+            pairs.add(b.pair("triggerType", "onCondition"));
+            pairs.add(b.pair("expression", condition.expression().source()));
+            pairs.add(b.pair("debounceMs", condition.debounceMs()));
+        } else if (trigger instanceof Trigger.AfterEvent after) {
+            pairs.add(b.pair("triggerType", "afterEvent"));
+            pairs.add(b.pair("sourcePlan", after.sourcePlan()));
+            pairs.add(b.pair("delayMs", after.delayMs()));
         }
     }
 
@@ -894,6 +976,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             ConditionDebouncer debouncer = this.conditionDebouncers.computeIfAbsent(
                     plan.id(), id -> new ConditionDebouncer(condition.debounceMs()));
 
+            if (this.disabledPlans.contains(plan.id())) {
+                debouncer.reset();
+                continue;
+            }
+
             if (!this.hostReports.isEnabled(plan.ceid())) {
                 debouncer.reset();
                 continue;
@@ -925,6 +1012,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * 保证链式事件不会绕过设备级限流。</p>
      */
     private void firePlan(String planId, int ceid, long atMs, long nowMs) {
+        if (this.disabledPlans.contains(planId)) {
+            return;
+        }
         if (!this.hostReports.isEnabled(ceid)) {
             this.skipped.incrementAndGet();
             return;
@@ -947,7 +1037,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private void recordFire(String planId, long atMs) {
         synchronized (this.pendingFires) {
             for (EventPlan plan : this.schedule.plans()) {
-                if (plan.trigger() instanceof Trigger.AfterEvent after
+                if (!this.disabledPlans.contains(plan.id())
+                        && plan.trigger() instanceof Trigger.AfterEvent after
                         && after.sourcePlan().equals(planId)) {
                     this.pendingFires.add(new PendingFire(atMs + after.delayMs(), plan.id(), plan.ceid()));
                 }

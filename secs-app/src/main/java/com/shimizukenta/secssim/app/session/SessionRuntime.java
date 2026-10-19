@@ -86,6 +86,26 @@ public interface SessionRuntime {
     }
 
     /**
+     * 事件编排列表（含启用状态）。
+     *
+     * @return JSON 文本
+     */
+    default String eventsJson() {
+        return "{\"events\":[]}";
+    }
+
+    /**
+     * 运行时启用/禁用一个编排计划。
+     *
+     * @param planId  计划标识
+     * @param enabled 是否启用
+     * @return 计划存在返回 {@code true}
+     */
+    default boolean setEventEnabled(String planId, boolean enabled) {
+        return false;
+    }
+
+    /**
      * 预览某一时间段的曲线（分桶 min/max/avg）。
      *
      * @param fromMs  起始

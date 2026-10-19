@@ -81,6 +81,21 @@ export interface WireMessage {
   at: number;
 }
 
+/** 事件编排计划（运行时视图）。 */
+export interface EventPlanView {
+  id: string;
+  ceid: number;
+  enabled: boolean;
+  triggerType: string;
+  atMs?: number;
+  periodMs?: number;
+  jitterMs?: number;
+  expression?: string;
+  debounceMs?: number;
+  sourcePlan?: string;
+  delayMs?: number;
+}
+
 /** 手动发送 SML 的结果。 */
 export interface SentMessageResult {
   ok: boolean;
@@ -227,6 +242,10 @@ export interface ApiClient {
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
+  /** 事件编排列表。 */
+  events(sessionId: string): Promise<EventPlanView[]>;
+  /** 运行时启用/禁用一个计划（operator 及以上）。 */
+  setEventEnabled(sessionId: string, planId: string, enabled: boolean): Promise<number>;
   /** 手动发送一条 SML 报文（operator 及以上）。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
@@ -348,6 +367,21 @@ export function createClient(token: string): ApiClient {
           method: 'POST',
           headers: auth,
         }),
+      );
+    },
+    async events(sessionId) {
+      const body = await json<{ events?: EventPlanView[] }>(
+        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`, { headers: auth }),
+      );
+      return body.events ?? [];
+    },
+    async setEventEnabled(sessionId, planId, enabled) {
+      const query = new URLSearchParams({ enabled: String(enabled) });
+      return command(
+        await fetch(
+          `/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`,
+          { method: 'POST', headers: auth },
+        ),
       );
     },
     async sendSml(sessionId, sml) {
