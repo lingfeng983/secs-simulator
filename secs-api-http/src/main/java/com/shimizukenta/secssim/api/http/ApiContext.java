@@ -119,6 +119,19 @@ public interface ApiContext {
     }
 
     /**
+     * 曲线预览的二进制正文。
+     *
+     * @param sessionId 会话标识
+     * @param fromMs    起始
+     * @param toMs      结束
+     * @param buckets   桶数
+     * @return 二进制正文；会话不存在或不支持时返回 {@code null}
+     */
+    default byte[] previewBinary(String sessionId, long fromMs, long toMs, int buckets) {
+        return null;
+    }
+
+    /**
      * 最近报文历史（JSON）。
      *
      * @param limit     最多返回条数

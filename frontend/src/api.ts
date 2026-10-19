@@ -225,6 +225,8 @@ export interface ApiClient {
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  /** 二进制曲线预览（SCSP v1，小端）。 */
+  previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
   /** 手动发送一条 SML 报文（operator 及以上）。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
@@ -415,6 +417,22 @@ export function createClient(token: string): ApiClient {
           { headers: auth },
         ),
       );
+    },
+    async previewBinary(sessionId, fromMs, toMs, buckets) {
+      const response = await fetch(
+        `/api/v1/preview.bin?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`,
+        { headers: auth },
+      );
+      if (response.status === 401) {
+        throw new Error('401 未授权：token 无效或缺失');
+      }
+      if (response.status === 403) {
+        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
+      }
+      if (!response.ok) {
+        throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
+      }
+      return response.blob();
     },
     async ticket() {
       const body = await json<{ ticket: string }>(

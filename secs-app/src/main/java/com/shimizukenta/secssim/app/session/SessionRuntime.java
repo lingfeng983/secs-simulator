@@ -98,6 +98,18 @@ public interface SessionRuntime {
     }
 
     /**
+     * 预览的二进制格式；不支持时返回 {@code null}。
+     *
+     * @param fromMs  起始
+     * @param toMs    结束
+     * @param buckets 桶数
+     * @return 二进制正文，格式见实现侧文档
+     */
+    default byte[] previewBinary(long fromMs, long toMs, int buckets) {
+        return null;
+    }
+
+    /**
      * 手动上报一个采集事件。
      *
      * <p>并非所有会话都支持（例如只做被动应答的场景），默认实现明确失败，

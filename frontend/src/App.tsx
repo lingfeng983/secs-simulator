@@ -651,6 +651,36 @@ export function App(): JSX.Element {
     }
   };
 
+  /** 下载当前时间窗的二进制预览；格式是 SCSP v1。 */
+  const onDownloadPreview = async () => {
+    if (client === null) {
+      return;
+    }
+    const target = sessions.find((session) => session.id === previewSession) ?? sessions[0];
+    if (target === undefined) {
+      return;
+    }
+
+    try {
+      const fresh = await client.health();
+      setHealth(fresh);
+      const to = Math.max(1, fresh.uptimeMs ?? 0);
+      const from = Math.max(0, to - windowMs);
+      const blob = await client.previewBinary(target.id, from, to, 120);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `preview-${target.id}-${Date.now()}.bin`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      append(`已下载 ${target.id} 的二进制曲线（${blob.size} 字节）`);
+    } catch (error) {
+      append(`下载二进制曲线失败: ${(error as Error).message}`);
+    }
+  };
+
   const onAlarm = async (set: boolean) => {
     if (client === null) {
       return;
@@ -1238,6 +1268,14 @@ export function App(): JSX.Element {
             </select>
             <button type="button" onClick={() => void onPreview()} disabled={sessions.length === 0}>
               刷新曲线
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDownloadPreview()}
+              disabled={sessions.length === 0}
+              title="SCSP v1：固定头 + 每条序列的 min/max/avg 双精度数组"
+            >
+              下载二进制
             </button>
           </div>
           {preview === null ? (

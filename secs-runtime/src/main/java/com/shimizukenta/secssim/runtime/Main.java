@@ -367,6 +367,13 @@ public final class Main {
         }
 
         @Override
+        public byte[] previewBinary(String sessionId, long fromMs, long toMs, int buckets) {
+            return this.sessions.find(sessionId)
+                    .map(session -> session.previewBinary(fromMs, toMs, buckets))
+                    .orElse(null);
+        }
+
+        @Override
         public TriggerOutcome triggerCeid(String sessionId, int ceid) {
             SessionRuntime session = this.sessions.find(sessionId).orElse(null);
 

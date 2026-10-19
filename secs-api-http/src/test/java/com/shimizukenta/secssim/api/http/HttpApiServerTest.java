@@ -128,6 +128,14 @@ class HttpApiServerTest {
             }
 
             @Override
+            public byte[] previewBinary(String sessionId, long fromMs, long toMs, int buckets) {
+                if ("missing".equals(sessionId)) {
+                    return null;
+                }
+                return new byte[] {1, 2, 3, 4};
+            }
+
+            @Override
             public String messagesJson(int limit, String sessionId, String direction) {
                 if (!HttpApiServerTest.this.messagesAvailable) {
                     return null;
@@ -434,6 +442,24 @@ class HttpApiServerTest {
     }
 
     @Test
+    void binaryPreviewReturnsOctetStreamAndChecksAuth() throws Exception {
+        HttpResponse<byte[]> response = getBytes(
+                "/api/v1/preview.bin?session=s1&from=0&to=1000&buckets=2", TOKEN);
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/octet-stream"),
+                response.headers().toString());
+        assertTrue(response.headers().firstValue("Content-Disposition").orElse("").contains("preview.bin"),
+                response.headers().toString());
+        assertEquals(List.of(1, 2, 3, 4), java.util.Arrays.stream(toInts(response.body())).boxed().toList());
+
+        assertEquals(401, getBytes("/api/v1/preview.bin?session=s1", null).statusCode());
+        assertEquals(404, getBytes("/api/v1/preview.bin?session=missing", TOKEN).statusCode());
+        assertEquals(405, post("/api/v1/preview.bin?session=s1", TOKEN).statusCode());
+        assertEquals(400, getBytes("/api/v1/preview.bin?session=s1&buckets=0", TOKEN).statusCode());
+    }
+
+    @Test
     void messagesRequireTokenAndGet() throws Exception {
         assertEquals(401, get("/api/v1/messages", null).statusCode());
         assertEquals(405, post("/api/v1/messages", TOKEN).statusCode());
@@ -569,6 +595,27 @@ class HttpApiServerTest {
     private HttpResponse<String> post(String path, String token) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(this.base + path))
                 .POST(HttpRequest.BodyPublishers.noBody()), token);
+    }
+
+    private HttpResponse<byte[]> getBytes(String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path))
+                .timeout(Duration.ofSeconds(10))
+                .GET();
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build()
+                .send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+    }
+
+    private static int[] toInts(byte[] bytes) {
+        int[] values = new int[bytes.length];
+        for (int i = 0; i < bytes.length; i++) {
+            values[i] = bytes[i] & 0xFF;
+        }
+        return values;
     }
 
     private HttpResponse<String> postSml(String path, String token, String sml) throws Exception {

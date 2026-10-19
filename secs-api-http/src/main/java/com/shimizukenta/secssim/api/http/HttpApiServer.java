@@ -80,6 +80,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
 
+    /** 曲线预览的二进制路径。 */
+    public static final String PATH_PREVIEW_BINARY = "/api/v1/preview.bin";
+
     /** 报文历史路径。 */
     public static final String PATH_MESSAGES = "/api/v1/messages";
 
@@ -328,6 +331,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_CONFIGS, api::handleConfigs);
         http.createContext(PATH_CONFIG_PREFIX, api::handleConfigPath);
         http.createContext(PATH_PREVIEW, api::handlePreview);
+        http.createContext(PATH_PREVIEW_BINARY, api::handlePreviewBinary);
         http.createContext(PATH_MESSAGES, api::handleMessages);
 
         if (api.webRoot != null) {
@@ -1188,6 +1192,51 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
+        PreviewRequest request = readPreviewRequest(ex);
+        if (request == null) {
+            return;
+        }
+
+        String body = this.context.previewJson(request.sessionId(), request.fromMs(),
+                request.toMs(), request.buckets());
+        if (body == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+            return;
+        }
+
+        respond(ex, 200, body);
+    }
+
+    /**
+     * 二进制曲线预览：{@code /api/v1/preview.bin?...}。
+     *
+     * <p>格式见 {@code SessionRuntime.previewBinary}：固定头 + 每条序列的
+     * svid 与 min/max/avg 双精度数组，小端。给大曲线或不走 JSON 的客户端用。</p>
+     */
+    private void handlePreviewBinary(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        PreviewRequest request = readPreviewRequest(ex);
+        if (request == null) {
+            return;
+        }
+
+        byte[] body = this.context.previewBinary(request.sessionId(), request.fromMs(),
+                request.toMs(), request.buckets());
+        if (body == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+            return;
+        }
+        respondBinary(ex, "application/octet-stream", "preview.bin", body);
+    }
+
+    private PreviewRequest readPreviewRequest(HttpExchange ex) throws IOException {
         Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
 
         Long fromMs = longParam(query, "from");
@@ -1199,7 +1248,7 @@ public final class HttpApiServer implements AutoCloseable {
                 || (query.containsKey("to") && toMs == null)
                 || (query.containsKey("buckets") && buckets == null)) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-number\"}");
-            return;
+            return null;
         }
 
         long from = fromMs == null ? 0L : fromMs;
@@ -1208,26 +1257,23 @@ public final class HttpApiServer implements AutoCloseable {
 
         if (to <= from) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-range\"}");
-            return;
+            return null;
         }
         if (count < PREVIEW_BUCKETS_MIN || count > PREVIEW_BUCKETS_MAX) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-buckets\"}");
-            return;
+            return null;
         }
 
         String sessionId = query.getOrDefault("session", "");
         if (sessionId.isEmpty()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"missing-session\"}");
-            return;
+            return null;
         }
 
-        String body = this.context.previewJson(sessionId, from, to, (int) count);
-        if (body == null) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-            return;
-        }
+        return new PreviewRequest(sessionId, from, to, (int) count);
+    }
 
-        respond(ex, 200, body);
+    private record PreviewRequest(String sessionId, long fromMs, long toMs, int buckets) {
     }
 
     /**
@@ -1462,6 +1508,18 @@ public final class HttpApiServer implements AutoCloseable {
         ex.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = ex.getResponseBody()) {
             out.write(bytes);
+        }
+    }
+
+    /** 回二进制正文；用于曲线预览等不适合 JSON 的负载。 */
+    private static void respondBinary(HttpExchange ex, String contentType,
+                                      String filename, byte[] body) throws IOException {
+        ex.getResponseHeaders().add("Content-Type", contentType);
+        ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+        ex.getResponseHeaders().add("Cache-Control", "no-store");
+        ex.sendResponseHeaders(200, body.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(body);
         }
     }
 

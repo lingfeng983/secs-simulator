@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.ServerSocket;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -73,6 +75,54 @@ class SessionPreviewTest {
     }
 
     @Test
+    void binaryPreviewMatchesJsonHeaderAndSeries() throws Exception {
+        int port = freePort();
+        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
+        CompilationResult compiled = EquipmentCompiler.compile(demo);
+        SessionSpec spec = new SessionSpec("pvb", true, "127.0.0.1", port, 10, 7L, demo);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+
+        JsonHub root = JsonHub.fromJson(session.previewJson(0L, 60_000L, 60));
+        JsonHub temperature = null;
+        for (int i = 0; i < root.get("series").length(); i++) {
+            if (root.get("series").get(i).get("svid").intValue() == 1001) {
+                temperature = root.get("series").get(i);
+            }
+        }
+        assertTrue(temperature != null);
+
+        byte[] binary = session.previewBinary(0L, 60_000L, 60);
+        assertEquals(48 + 10 * (4 + 3 * 60 * 8), binary.length, "固定头 + 10 条序列");
+
+        ByteBuffer buffer = ByteBuffer.wrap(binary).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals((byte) 'S', buffer.get());
+        assertEquals((byte) 'C', buffer.get());
+        assertEquals((byte) 'S', buffer.get());
+        assertEquals((byte) 'P', buffer.get());
+        assertEquals(1, buffer.getShort(), "格式版本");
+        assertEquals(0, buffer.getShort(), "flags 保留");
+        assertEquals(0L, buffer.getLong());
+        assertEquals(60_000L, buffer.getLong());
+        assertEquals(60, buffer.getInt());
+        assertEquals(1_000L, buffer.getLong(), "bucketMs");
+        assertEquals(10, buffer.getInt(), "svidTotal");
+        assertEquals(10, buffer.getInt(), "seriesCount");
+        assertEquals(0, buffer.getInt(), "reserved");
+
+        assertEquals(1001, buffer.getInt(), "按 SVID 升序");
+        for (int i = 0; i < 60; i++) {
+            assertEquals(temperature.get("min").get(i).doubleValue(), buffer.getDouble(), 1e-3,
+                    "二进制 min 与 JSON 一致（JSON 保留三位小数）");
+        }
+        for (int i = 0; i < 60; i++) {
+            assertEquals(temperature.get("max").get(i).doubleValue(), buffer.getDouble(), 1e-3);
+        }
+        for (int i = 0; i < 60; i++) {
+            assertEquals(temperature.get("avg").get(i).doubleValue(), buffer.getDouble(), 1e-3);
+        }
+    }
+
+    @Test
     void previewReportsTruncationInsteadOfSilentlyDroppingSeries() throws Exception {
         int port = freePort();
         List<UnitSpec> units = new ArrayList<>();
@@ -98,6 +148,11 @@ class SessionPreviewTest {
         assertEquals(35, root.get("svidTotal").intValue(), "7 个单元 × 5 个 SVID");
         assertTrue(root.get("truncated").booleanValue(), "超过 32 条必须显式标截断");
         assertEquals(32, root.get("series").length(), "预览最多返回 32 条序列");
+
+        ByteBuffer binary = ByteBuffer.wrap(session.previewBinary(0L, 60_000L, 60))
+                .order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(35, binary.getInt(36), "二进制头也要报告 svidTotal");
+        assertEquals(32, binary.getInt(40), "二进制头只含有 32 条序列");
     }
 
     @Test

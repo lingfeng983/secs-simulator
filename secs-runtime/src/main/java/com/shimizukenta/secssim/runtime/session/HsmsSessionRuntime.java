@@ -2,6 +2,8 @@ package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -93,6 +95,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private static final int MAX_TERMINAL_MESSAGES = 20;
     /** S6F11 等 ACK 的队列上限：主机不答 S6F12 时不能无限堆积。 */
     private static final int S6F11_ACK_QUEUE = 256;
+
+    /** 二进制预览格式版本与固定头长度。 */
+    private static final short PREVIEW_BINARY_VERSION = 1;
+    private static final int PREVIEW_BINARY_HEADER_BYTES = 48;
 
     private final SessionSpec spec;
     private final ResolvedEquipment model;
@@ -268,6 +274,86 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     @Override
     public String previewJson(long fromMs, long toMs, int buckets) {
+        PreviewData data = this.previewData(fromMs, toMs, buckets);
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        java.util.List<com.shimizukenta.jsonhub.JsonHub> series = new java.util.ArrayList<>();
+
+        for (PreviewSeries value : data.series()) {
+            series.add(b.object(
+                    b.pair("svid", value.svid()),
+                    b.pair("min", b.array(numbers(value.min(), b))),
+                    b.pair("max", b.array(numbers(value.max(), b))),
+                    b.pair("avg", b.array(numbers(value.avg(), b)))));
+        }
+
+        return b.object(
+                b.pair("from", data.fromMs()),
+                b.pair("to", data.toMs()),
+                b.pair("buckets", data.buckets()),
+                b.pair("bucketMs", data.bucketMs()),
+                b.pair("svidTotal", data.svidTotal()),
+                b.pair("truncated", data.svidTotal() > data.series().size()),
+                b.pair("series", b.array(series))).toJson();
+    }
+
+    /**
+     * 预览的二进制格式（小端）。
+     *
+     * <pre>
+     * magic 4 字节 "SCSP"
+     * version u16 = 1
+     * flags   u16 = 0
+     * from    i64
+     * to      i64
+     * buckets u32
+     * bucketMs u64
+     * svidTotal u32
+     * seriesCount u32
+     * reserved u32
+     * 每条序列：svid i32, min f64[buckets], max f64[buckets], avg f64[buckets]
+     * </pre>
+     *
+     * @param fromMs  起始
+     * @param toMs    结束
+     * @param buckets 桶数（1..500）
+     * @return 二进制正文
+     */
+    @Override
+    public byte[] previewBinary(long fromMs, long toMs, int buckets) {
+        PreviewData data = this.previewData(fromMs, toMs, buckets);
+        int count = data.buckets();
+        int seriesCount = data.series().size();
+        int size = PREVIEW_BINARY_HEADER_BYTES
+                + seriesCount * (Integer.BYTES + 3 * count * Double.BYTES);
+        ByteBuffer buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.put((byte) 'S').put((byte) 'C').put((byte) 'S').put((byte) 'P');
+        buffer.putShort(PREVIEW_BINARY_VERSION);
+        buffer.putShort((short) 0);
+        buffer.putLong(data.fromMs());
+        buffer.putLong(data.toMs());
+        buffer.putInt(count);
+        buffer.putLong(data.bucketMs());
+        buffer.putInt(data.svidTotal());
+        buffer.putInt(seriesCount);
+        buffer.putInt(0);
+
+        for (PreviewSeries value : data.series()) {
+            buffer.putInt(value.svid());
+            for (double v : value.min()) {
+                buffer.putDouble(v);
+            }
+            for (double v : value.max()) {
+                buffer.putDouble(v);
+            }
+            for (double v : value.avg()) {
+                buffer.putDouble(v);
+            }
+        }
+        return buffer.array();
+    }
+
+    private PreviewData previewData(long fromMs, long toMs, int buckets) {
         int count = Math.max(1, Math.min(500, buckets));
         long span = Math.max(1L, toMs - fromMs);
         long bucketMs = Math.max(1L, span / count);
@@ -275,8 +361,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         java.util.List<Integer> allSvids = this.values.svids().stream().sorted().toList();
         java.util.List<Integer> svids = allSvids.stream().limit(32).toList();
-        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
-        java.util.List<com.shimizukenta.jsonhub.JsonHub> series = new java.util.ArrayList<>();
+        java.util.List<PreviewSeries> series = new java.util.ArrayList<>();
 
         for (int svid : svids) {
             double[] min = new double[count];
@@ -309,21 +394,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 avg[i] = n == 0 ? 0.0 : sum / n;
             }
 
-            series.add(b.object(
-                    b.pair("svid", svid),
-                    b.pair("min", b.array(numbers(min, b))),
-                    b.pair("max", b.array(numbers(max, b))),
-                    b.pair("avg", b.array(numbers(avg, b)))));
+            series.add(new PreviewSeries(svid, min, max, avg));
         }
 
-        return b.object(
-                b.pair("from", fromMs),
-                b.pair("to", toMs),
-                b.pair("buckets", count),
-                b.pair("bucketMs", bucketMs),
-                b.pair("svidTotal", allSvids.size()),
-                b.pair("truncated", allSvids.size() > svids.size()),
-                b.pair("series", b.array(series))).toJson();
+        return new PreviewData(fromMs, toMs, count, bucketMs, allSvids.size(), series);
+    }
+
+    private record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
+                               int svidTotal, java.util.List<PreviewSeries> series) {
+    }
+
+    private record PreviewSeries(int svid, double[] min, double[] max, double[] avg) {
     }
 
     /**
