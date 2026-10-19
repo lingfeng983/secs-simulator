@@ -127,6 +127,20 @@ public interface SessionRuntime {
     }
 
     /**
+     * 手动发送一条 SML 报文。
+     *
+     * <p>默认实现明确失败：不是所有会话实现都支持任意报文发送，
+     * 静默忽略会让调用方以为报文已经发出。</p>
+     *
+     * @param sml SML 文本
+     * @return 发送结果 JSON（含是否等待回复、回复内容）
+     * @throws IOException 不支持、会话未打开或发送失败
+     */
+    default String sendSml(String sml) throws IOException {
+        throw new IOException("session does not support manual SML messages: " + this.id());
+    }
+
+    /**
      * 当前活动报警的 JSON 数组。
      *
      * @return JSON 数组文本

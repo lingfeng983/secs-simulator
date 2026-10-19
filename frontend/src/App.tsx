@@ -294,6 +294,10 @@ export function App(): JSX.Element {
   const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
   const [newConfig, setNewConfig] = useState('demo');
   const [catalogSession, setCatalogSession] = useState('');
+  const [smlSession, setSmlSession] = useState('');
+  const [smlDraft, setSmlDraft] = useState('S1F1 W.');
+  const [smlResult, setSmlResult] = useState('');
+  const [smlBusy, setSmlBusy] = useState(false);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
   const [configName, setConfigName] = useState('');
@@ -569,6 +573,19 @@ export function App(): JSX.Element {
     };
   }, [client, catalogSession]);
 
+  /* 会话列表变化后保证手动发送下拉框指向一个存在的会话 */
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (smlSession !== '') {
+        setSmlSession('');
+      }
+      return;
+    }
+    if (!sessions.some((session) => session.id === smlSession)) {
+      setSmlSession(sessions[0].id);
+    }
+  }, [sessions, smlSession]);
+
   /*
    * 配置目录列表：轮询。
    *
@@ -770,6 +787,60 @@ export function App(): JSX.Element {
       append(`已导出报文历史 ${text.trim().split('\n').length} 行`);
     } catch (error) {
       append(`导出报文失败: ${(error as Error).message}`);
+    }
+  };
+
+  /**
+   * 手动发送 SML。
+   *
+   * <p>会话没有对端时服务端回 409，这里只负责把结果讲清楚：
+   * "发出去了但主机没回"和"根本没发出去"是两件事。</p>
+   */
+  const onSendSml = async () => {
+    if (client === null || smlDraft.trim() === '') {
+      return;
+    }
+    const target = sessions.find((session) => session.id === smlSession) ?? sessions[0];
+    if (target === undefined) {
+      return;
+    }
+
+    setSmlBusy(true);
+    setSmlResult('');
+    try {
+      const result = await client.sendSml(target.id, smlDraft);
+      const lines = [
+        `发送 ${target.id}  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`,
+        result.sentSml === '' ? '（无 body）' : result.sentSml,
+      ];
+      if (result.replySml != null) {
+        lines.push(
+          '',
+          `回复 S${result.replyStream}F${result.replyFunction}${result.replyWbit ? ' W' : ''}`,
+          result.replySml,
+        );
+      } else if (result.timedOut) {
+        lines.push('', 'W 位报文已发出，但主机未在 T3 内回复');
+      } else {
+        lines.push('', '未请求回复（W=0）');
+      }
+      lines.push('', `耗时 ${result.elapsedMs} ms`);
+      setSmlResult(lines.join('\n'));
+      append(
+        `手动发送 ${target.id} S${result.stream}F${result.function}${
+          result.replySml != null
+            ? ` -> S${result.replyStream}F${result.replyFunction}`
+            : result.timedOut
+              ? ' -> 等待回复超时'
+              : ' -> 已发送'
+        }`,
+      );
+    } catch (error) {
+      const message = (error as Error).message;
+      setSmlResult(`发送失败：${message}`);
+      append(`手动发送失败: ${message}`);
+    } finally {
+      setSmlBusy(false);
     }
   };
 
@@ -1218,6 +1289,54 @@ export function App(): JSX.Element {
               )}
             </>
           )}
+        </section>
+
+        <section>
+          <h2>手动发送</h2>
+          <div className="preview-controls">
+            <select value={smlSession} onChange={(event) => setSmlSession(event.target.value)}>
+              {sessions.length === 0 && <option value="">（无会话）</option>}
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void onSendSml()}
+              disabled={!canOperate || smlBusy || smlDraft.trim() === ''}
+              title={canOperate ? '发送到选中的会话（W 位会等待回复）' : operateHint}
+            >
+              {smlBusy ? '发送中…' : '发送 SML'}
+            </button>
+            <button type="button" onClick={() => setSmlDraft('S1F1 W.')}>
+              示例 S1F1
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setSmlDraft(
+                  'S5F1 W\n<L\n  <B 0x81>\n  <U2 1001>\n  <A "ON FIRE">\n>.',
+                )
+              }
+            >
+              示例 S5F1
+            </button>
+          </div>
+          <textarea
+            className="sml-editor"
+            spellCheck={false}
+            value={smlDraft}
+            onChange={(event) => setSmlDraft(event.target.value)}
+          />
+          <p className="hint">
+            报文头写 <code>SxFy</code>，可带 <code>W</code>；数据项支持
+            <code>L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8</code>。W 位会等 T3，
+            没有对端时服务端回 409。
+            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，发送已禁用。`}
+          </p>
+          {smlResult !== '' && <pre className="sml-result">{smlResult}</pre>}
         </section>
 
         <section>

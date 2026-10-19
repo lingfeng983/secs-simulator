@@ -42,6 +42,7 @@ class HttpApiServerTest {
     private final List<String> closed = new ArrayList<>();
     private final List<String> reloaded = new ArrayList<>();
     private final List<String> messageQueries = new ArrayList<>();
+    private final List<String> sentSml = new ArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
     private boolean messagesAvailable = true;
 
@@ -143,6 +144,23 @@ class HttpApiServerTest {
                 }
                 HttpApiServerTest.this.messageQueries.add("jsonl:" + limit + ":" + sessionId + ":" + direction);
                 return "{\"sessionId\":\"s1\",\"direction\":\"in\"}\n";
+            }
+
+            @Override
+            public String sendSml(String sessionId, String sml) {
+                if ("missing".equals(sessionId)) {
+                    return null;
+                }
+                if ("closed".equals(sessionId)) {
+                    throw new IllegalStateException("not open");
+                }
+                if ("S1F1 BAD".equals(sml)) {
+                    throw new IllegalArgumentException("SML 解析失败: bad");
+                }
+                HttpApiServerTest.this.sentSml.add(sessionId + ":" + sml);
+                return "{\"ok\":true,\"stream\":1,\"function\":1,\"wbit\":true,"
+                        + "\"sentSml\":\"<A \\\"HI\\\">\",\"timedOut\":false,"
+                        + "\"replySml\":null}";
             }
 
             @Override
@@ -464,6 +482,30 @@ class HttpApiServerTest {
     }
 
     @Test
+    void sendMessageRequiresTokenAndPost() throws Exception {
+        assertEquals(401, postSml("/api/v1/sessions/s1/message", null, "S1F1 W.").statusCode());
+        assertEquals(405, get("/api/v1/sessions/s1/message", TOKEN).statusCode());
+        assertEquals(200, postSml("/api/v1/sessions/s1/message", TOKEN, "S1F1 W.").statusCode());
+    }
+
+    @Test
+    void sendMessagePassesRawSmlAndMapsErrors() throws Exception {
+        HttpResponse<String> ok = postSml("/api/v1/sessions/s1/message", TOKEN, "S1F1 W.");
+        assertEquals(200, ok.statusCode(), ok.body());
+        assertTrue(ok.body().contains("\"ok\":true"), ok.body());
+        assertEquals(List.of("s1:S1F1 W."), this.sentSml);
+
+        assertEquals(404, postSml("/api/v1/sessions/missing/message", TOKEN, "S1F1 W.").statusCode());
+        assertEquals(409, postSml("/api/v1/sessions/closed/message", TOKEN, "S1F1 W.").statusCode());
+        assertEquals(400, postSml("/api/v1/sessions/s1/message", TOKEN, "S1F1 BAD").statusCode());
+    }
+
+    @Test
+    void sendMessageRejectsEmptyBody() throws Exception {
+        assertEquals(400, postSml("/api/v1/sessions/s1/message", TOKEN, "   ").statusCode());
+    }
+
+    @Test
     void shutdownRequiresTokenAndPost() throws Exception {
         assertEquals(401, get("/api/v1/shutdown", null).statusCode());
         assertEquals(405, get("/api/v1/shutdown", TOKEN).statusCode());
@@ -527,6 +569,12 @@ class HttpApiServerTest {
     private HttpResponse<String> post(String path, String token) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(this.base + path))
                 .POST(HttpRequest.BodyPublishers.noBody()), token);
+    }
+
+    private HttpResponse<String> postSml(String path, String token, String sml) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(this.base + path))
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofString(sml, StandardCharsets.UTF_8)), token);
     }
 
     private HttpResponse<String> delete(String path, String token) throws Exception {

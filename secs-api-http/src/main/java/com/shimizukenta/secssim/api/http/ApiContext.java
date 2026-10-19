@@ -1,5 +1,6 @@
 package com.shimizukenta.secssim.api.http;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -138,6 +139,20 @@ public interface ApiContext {
      * @return 每行一个 JSON 对象；报文日志不可用时返回 {@code null}
      */
     default String messagesJsonl(int limit, String sessionId, String direction) {
+        return null;
+    }
+
+    /**
+     * 手动发送一条 SML 报文。
+     *
+     * @param sessionId 会话标识
+     * @param sml       SML 文本
+     * @return 发送结果 JSON；会话不存在时返回 {@code null}
+     * @throws IllegalArgumentException SML 语法错误
+     * @throws IllegalStateException    会话未打开或没有对端
+     * @throws IOException              发送失败
+     */
+    default String sendSml(String sessionId, String sml) throws IOException {
         return null;
     }
 

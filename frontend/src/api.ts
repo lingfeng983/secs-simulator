@@ -81,6 +81,23 @@ export interface WireMessage {
   at: number;
 }
 
+/** 手动发送 SML 的结果。 */
+export interface SentMessageResult {
+  ok: boolean;
+  stream: number;
+  function: number;
+  wbit: boolean;
+  /** 规范化后的发送内容（与请求原文可能只差空白）。 */
+  sentSml: string;
+  /** W 位发出但主机未在 T3 内回复。 */
+  timedOut: boolean;
+  replyStream?: number;
+  replyFunction?: number;
+  replyWbit?: boolean;
+  replySml?: string | null;
+  elapsedMs: number;
+}
+
 /** 报文历史：最多 limit 条，total 是过滤后的总数。 */
 export interface MessagePage {
   messages: WireMessage[];
@@ -208,6 +225,8 @@ export interface ApiClient {
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  /** 手动发送一条 SML 报文（operator 及以上）。 */
+  sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
   messages(sessionId: string, direction: string, limit: number): Promise<MessagePage>;
   /** 报文历史 JSON Lines，用于导出。 */
@@ -328,6 +347,28 @@ export function createClient(token: string): ApiClient {
           headers: auth,
         }),
       );
+    },
+    async sendSml(sessionId, sml) {
+      const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'text/plain; charset=utf-8' },
+        body: sml,
+      });
+      if (response.status === 401) {
+        throw new Error('401 未授权：token 无效或缺失');
+      }
+      if (response.status === 403) {
+        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
+      }
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status} ${text.slice(0, 300)}`);
+      }
+      try {
+        return JSON.parse(text) as SentMessageResult;
+      } catch {
+        throw new Error('发送响应不是合法 JSON');
+      }
     },
     async alarm(sessionId, alid, set, text, category) {
       const query = new URLSearchParams({

@@ -149,6 +149,9 @@ public final class HttpApiServer implements AutoCloseable {
      */
     private static final int MAX_CONFIG_BYTES = 256 * 1024;
 
+    /** 手动发送 SML 的正文上限。 */
+    private static final int MAX_SML_BYTES = 64 * 1024;
+
     private final HttpServer server;
     private final ExecutorService executor;
     private final ExecutorService sseExecutor;
@@ -1032,6 +1035,11 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
+        if ("message".equals(parts[1])) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
         String body = switch (parts[1]) {
             case "alarms" -> this.context.alarmsJson(parts[0]);
             case "terminal" -> this.context.terminalMessagesJson(parts[0]);
@@ -1063,6 +1071,11 @@ public final class HttpApiServer implements AutoCloseable {
                 case NOT_RELOADABLE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-reloadable\"}");
                 default -> respond(ex, 400, "{\"ok\":false,\"error\":\"reload-failed\"}");
             }
+            return;
+        }
+
+        if (parts.length == 2 && "message".equals(parts[1])) {
+            this.sendSml(ex, parts[0]);
             return;
         }
 
@@ -1122,6 +1135,41 @@ public final class HttpApiServer implements AutoCloseable {
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
             case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
             case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+        }
+    }
+
+    /**
+     * POST /api/v1/sessions/{id}/message：手动发送 SML。
+     *
+     * <p>请求体就是 SML 原文，不包 JSON——手写报文时多套一层转义只会更容易错。
+     * 解析失败 400，没有对端 409，协议层发送失败 500。</p>
+     */
+    private void sendSml(HttpExchange ex, String sessionId) throws IOException {
+        String sml = readBody(ex, MAX_SML_BYTES);
+        if (sml == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            return;
+        }
+        if (sml.isBlank()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"empty-sml\"}");
+            return;
+        }
+
+        try {
+            String body = this.context.sendSml(sessionId, sml);
+            if (body == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                return;
+            }
+            respond(ex, 200, body);
+        } catch (IllegalArgumentException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-sml\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
+        } catch (IllegalStateException e) {
+            respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
+        } catch (IOException e) {
+            Log.error("手动发送 SML 失败", e);
+            respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 

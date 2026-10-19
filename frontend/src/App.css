@@ -148,6 +148,33 @@ input {
   resize: vertical;
 }
 
+.sml-editor {
+  width: 100%;
+  min-height: 10rem;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem;
+  background: transparent;
+  color: var(--fg);
+  font: 12px/1.6 ui-monospace, Consolas, monospace;
+  tab-size: 2;
+  resize: vertical;
+}
+
+.sml-result {
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
 .problems {
   margin: 0.5rem 0;
   padding-left: 1.2rem;

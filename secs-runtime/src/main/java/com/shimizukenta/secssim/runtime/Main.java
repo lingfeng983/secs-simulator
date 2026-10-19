@@ -432,6 +432,12 @@ public final class Main {
         }
 
         @Override
+        public String sendSml(String sessionId, String sml) throws IOException {
+            SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+            return session == null ? null : session.sendSml(sml);
+        }
+
+        @Override
         public SessionOutcome createSession(String configName) {
             try {
                 String id = this.launcher.create(configName);

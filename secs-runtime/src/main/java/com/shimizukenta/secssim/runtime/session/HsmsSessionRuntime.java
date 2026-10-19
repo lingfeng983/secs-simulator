@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -25,7 +26,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.shimizukenta.secs.SecsCommunicator;
+import com.shimizukenta.secs.SecsException;
 import com.shimizukenta.secs.SecsMessage;
+import com.shimizukenta.secs.SecsWaitReplyMessageException;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicator;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
@@ -64,6 +67,9 @@ import com.shimizukenta.secssim.core.value.CurveValueSource;
 import com.shimizukenta.secssim.core.trace.TracePlan;
 import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.core.value.ValueStore;
+import com.shimizukenta.secssim.runtime.sml.SmlParseException;
+import com.shimizukenta.secssim.runtime.sml.SmlParser;
+import com.shimizukenta.secssim.runtime.sml.SmlRenderer;
 
 /**
  * 用 HSMS-SS 实现一个设备会话。
@@ -318,6 +324,65 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 b.pair("svidTotal", allSvids.size()),
                 b.pair("truncated", allSvids.size() > svids.size()),
                 b.pair("series", b.array(series))).toJson();
+    }
+
+    /**
+     * 手动发送一条 SML 报文。
+     *
+     * <p>解析失败是调用方的问题（400），会话没有对端是设备状态（409），
+     * 协议层发送失败才是 500。三者不能混成一个 "send failed"。</p>
+     *
+     * @param sml SML 文本
+     * @return 发送结果 JSON
+     * @throws IOException 发送失败
+     */
+    @Override
+    public String sendSml(String sml) throws IOException {
+        SecsCommunicator comm = this.communicator;
+        if (this.state() != SessionState.OPEN || comm == null || !this.communicatable) {
+            throw new IllegalStateException("会话未打开或尚未与主机建立通信");
+        }
+
+        SmlParser.Message message;
+        try {
+            message = SmlParser.parse(sml);
+        } catch (SmlParseException e) {
+            throw new IllegalArgumentException("SML 解析失败: " + e.getMessage(), e);
+        }
+
+        long startedAt = System.currentTimeMillis();
+        Optional<SecsMessage> reply;
+        boolean waitTimedOut = false;
+        try {
+            reply = comm.send(message.stream(), message.function(), message.wbit(), message.body());
+        } catch (SecsWaitReplyMessageException e) {
+            /* T3 超时不是"没发出去"：报文已经发了，只是主机没回 */
+            reply = Optional.empty();
+            waitTimedOut = true;
+        } catch (SecsException e) {
+            throw new IOException("发送失败: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("发送被中断", e);
+        }
+        long elapsedMs = System.currentTimeMillis() - startedAt;
+
+        String replySml = reply.map(value -> SmlRenderer.render(value.secs2())).orElse(null);
+        String sentSml = message.body().size() < 0 ? "" : SmlRenderer.render(message.body());
+        JsonHubBuilder b = JsonHub.getBuilder();
+        return b.object(
+                b.pair("ok", true),
+                b.pair("stream", message.stream()),
+                b.pair("function", message.function()),
+                b.pair("wbit", message.wbit()),
+                b.pair("sentSml", sentSml),
+                b.pair("timedOut", waitTimedOut || (message.wbit() && reply.isEmpty())),
+                b.pair("replyStream", reply.map(SecsMessage::getStream).orElse(0)),
+                b.pair("replyFunction", reply.map(SecsMessage::getFunction).orElse(0)),
+                b.pair("replyWbit", reply.map(SecsMessage::wbit).orElse(false)),
+                b.pair("replySml", replySml),
+                b.pair("elapsedMs", elapsedMs))
+                .toJson();
     }
 
     private static java.util.List<com.shimizukenta.jsonhub.JsonHub> numbers(double[] values,

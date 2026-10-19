@@ -22,7 +22,9 @@
 >
 > 同日继续 M12 item 10 的**报文落盘**：`<work-dir>/logs/messages.jsonl`（JSONL）、
 > 最近 5000 条历史接口 `GET /api/v1/messages`、JSONL 导出、前端「载入历史 / 导出」。
-> 当前 **474 个后端测试**（json 110 / protocol 45 / core 90 / app 29 / api-http 98 / runtime 50 / cli 52）
+> 随后完成**手动发送 SML**：`SmlParser` 受控子集、`POST /api/v1/sessions/{id}/message`、
+> 前端「手动发送」面板；W 位同步等 T3 并返回 `timedOut/replySml`（ADR-0010）。
+> 当前 **486 个后端测试**（json 110 / protocol 45 / core 90 / app 29 / api-http 101 / runtime 56 / cli 55）
 > + **22 个前端测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）全绿。
 
 本清单分三类：
@@ -93,7 +95,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **预览静默截断**：`previewJson` 新增 `svidTotal` / `truncated`，前端明说"共 N 个 SVID，只显示前 32 条"；buckets 上限仍为 500（界面显示桶宽）。
 - [ ] **前端只有 Canvas 包络 + 均值线**：已补悬停读数与拖动放大 / 双击重置；仍没有多轴、图例开关，也没有 uPlot。
 - [x] **报文不落盘**：已实现 `<work-dir>/logs/messages.jsonl`（JSONL，追加 + flush），内存保留最近 5000 条；`GET /api/v1/messages` 支持 `session/direction/limit/format=jsonl`；前端「报文」面板可载入历史、导出 JSONL。**没有自动轮转/保留策略**。
-- [ ] **没有手动发送 SML/SECS 报文**：`templates/sml/**` 样例未被任何代码/测试引用。
+- [x] **没有手动发送 SML/SECS 报文**：新增 `SmlParser`（受控子集）与 `POST /api/v1/sessions/{id}/message`（operator），前端新增「手动发送」面板；W 位同步等 T3 并返回 `timedOut/replySml`。见 ADR-0010。
 - [x] **没有 SVID/CEID/RPTID 目录接口**：已实现 `GET /api/v1/sessions/{id}/catalog`，投影 `ResolvedEquipment`（与 S1F11/S2F33 同一份数据，报告内 SVID 顺序与 S6F11 组包一致）；前端新增「设备目录」面板，CEID 可按名称填入上报框。号段按单元独立，目录按会话取并每 2 秒轮询（主机随时可能改定义）。
 - [x] **没有报警/终端消息/主机动态报告面板**：报警与终端消息面板上一轮已落地；主机动态报告并入「设备目录」——每条报告/事件标 `source`（local/host），CEID 标 `enabled`，并暴露 `hostReports` / `hostLinks` / `hostAllDisabled`。ADR-0006 要求的"报告来自本地还是主机"已兑现，且目录反映的是**实际发出去的那一份**（含主机新建、本地不存在的 RPTID）。
 - [x] **没有会话生命周期操作**：已实现创建 / 关闭 / 按配置重载，前端会话表有对应按钮。
@@ -143,6 +145,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] 打包后的 `start.cmd` 路径自检（`-CheckOnly`）；解压后真正拉起进程的全链路冒烟仍建议补进 CI。
 - [x] 前端组件/交互测试（Vitest 22 例：模板模型 13 + 服务端渲染 4 + 报文合并 5；CI 已跑 `npm test`）。
 - [x] 报文落盘（MessageLog 4 例：追加/重启回读/过滤/坏行/半截行修复）与 HTTP 历史接口（鉴权/过滤/JSONL/503）。
+- [x] 手动 SML：解析器 6 例（头/嵌套/各类型/转义/错误）、真实协议链路 3 例（W 位回复、W=0、无对端/坏 SML）、HTTP 映射 3 例。
 - [ ] 真实浏览器 UI E2E（打开配置 → 改模板表单 → 校验 / 保存的点击流程）。
 - [ ] 大规模预览性能与 400 SVID / 多客户端并发的压力测试（SVID > 32 的截断提示已补）。
 
@@ -162,7 +165,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 **M12：配置与前端**
 8. Schema v5 已完成（`templates` / `curves` / `instances` → `TemplateGraph` → `GraphValueSource`）；**配置读/校验/保存 API 与「配置编辑器」面板已完成**（原始 JSON 文本编辑，先校验再原子落盘）；**模板结构化表单**（曲线 / 组合模板 / 实例参数）与**曲线预览交互**（悬停读数、拖动放大、截断提示）也已完成。
 9. 会话生命周期 API 与热重载已完成（创建 / 关闭 / 重载，`--work-dir` 作为配置目录）；**配置本身的读取、校验、保存 API 与前端编辑器也已完成**（item 8 的第一步）。
-10. 二进制预览、uPlot 交互、手动 SML 发送仍未做；**报文落盘 + 历史 / 导出**、SVID/CEID 目录、报警/报告面板已完成。
+10. 二进制预览、uPlot 交互仍未做；**报文落盘 + 历史 / 导出**、**手动 SML 发送**、SVID/CEID 目录、报警/报告面板已完成。
 11. 前端测试与 E2E（单元/组件测试已接 Vitest；真实浏览器点击流程未做）。
 
 **M13：分发**
@@ -187,6 +190,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **配置读写 API 与「配置编辑器」**（`ConfigStore`：读原文 / 校验 / 原子落盘 / 新建骨架）。
 - **模板结构化表单**（曲线含 step/pwl 关键帧、组合模板输出表达式、实例 SVID 绑定与参数；引用同步、删除保护、未知键保留、2 空格重排）+ **曲线预览交互**（悬停读数、拖动放大 / 双击重置、`svidTotal`/`truncated` 截断提示）。
 - **报文历史**（`MessageLog` → `<work-dir>/logs/messages.jsonl`，最近 5000 条；`GET /api/v1/messages` + JSONL 导出 + 前端载入历史）。
+- **手动发送 SML**（受控子集解析 + W 位等待回复 + 前端面板，ADR-0010）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。

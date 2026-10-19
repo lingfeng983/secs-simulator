@@ -100,6 +100,7 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/sessions/{id}/catalog` | viewer | 设备目录：CEID / RPTID / SVID 的绝对 ID 与语义，按 ID 升序 |
 | `GET /api/v1/preview` | viewer | 曲线预览：`session/from/to/buckets`，返回分桶 min/max/avg + `svidTotal`/`truncated` |
 | `GET /api/v1/messages` | viewer | 最近报文历史：`session/direction/limit/format`；`format=jsonl` 下载 JSONL |
+| `POST /api/v1/sessions/{id}/message` | operator | 手动发送 SML 报文，体为 SML 原文（200 / 400 / 404 / 409 / 500） |
 | `GET /api/v1/configs` | viewer | 配置目录列表（文件名 / 字节数 / 修改时间） |
 | `POST /api/v1/configs` | operator | 新建配置，体为 `{"name":"设备.json"}`，内容是能直接编译的骨架（201 / 400 / 409） |
 | `GET /api/v1/configs/{name}` | viewer | 读配置**原文**（编辑器要看到用户写的每一个键） |
@@ -209,6 +210,22 @@ curl -H 'Authorization: Bearer T' -OJ \
 - 日志**没有自动轮转**，需要按现场磁盘规划归档或清理。
 - 同一个 `--work-dir` 不建议跑多个进程，否则多个进程会追加同一个文件。
 
+### 手动发送 SML
+
+设备侧可以手动发一条任意 SML 报文，不用等事件计划或主机请求：
+
+```bash
+curl -X POST -H 'Authorization: Bearer T' --data-binary @templates/sml/equip/s5f1-example.sml \
+     http://127.0.0.1:PORT/api/v1/sessions/line1/message
+```
+
+- 请求体就是 SML 原文，不包 JSON。支持 SxFy 头、`W` 位、`L/A/B/BOOLEAN/I*/U*/F*`；
+  不支持 JIS8 / UNICODE / 数组简写，解析失败回 **400 `bad-sml`**（带位置）。
+- 没有对端（主机未 select）回 **409 `session-not-open`**；协议层发送失败回 500。
+- 带 `W` 时同步等 T3；超时不等于没发出去，响应里 `timedOut=true`、`replySml=null`。
+- 成功响应包含规范化后的 `sentSml`、`replySml`、`replyStream/Function/Wbit`、`elapsedMs`。
+- 正文上限 64 KiB；只有 operator 及以上能发（会改变设备对主机的行为）。
+
 ### 设备目录
 
 `GET /api/v1/sessions/{id}/catalog` 把"绝对 ID → 语义"的映射摊开：
@@ -247,7 +264,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
 前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；CI 会跑）。
 
-界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（悬停读数 / 拖动放大 / 截断提示）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
+界面目前包含：会话表（状态/计数）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出，SML 文本）、事件流心跳、手动触发 CEID、报警置位/清除（S5F1）、**手动发送 SML**、活动报警与终端消息面板、设备目录（CEID/RPTID/SVID）、曲线预览（悬停读数 / 拖动放大 / 截断提示）、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）。
 
 ## 打包
 
@@ -276,6 +293,7 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [ADR 0007 · API 账号与角色分级](docs/adr/0007-api-roles.md)
 - [ADR 0008 · 配置编辑器走原始 JSON 文本](docs/adr/0008-config-editor-raw-text.md)
 - [ADR 0009 · 报文落盘用 JSON Lines](docs/adr/0009-message-log.md)
+- [ADR 0010 · 手动发送 SML 只实现受控子集](docs/adr/0010-manual-sml.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
