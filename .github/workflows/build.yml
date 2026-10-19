@@ -61,6 +61,23 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  openapi:
+    name: OpenAPI 契约校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装校验器
+        run: python -m pip install --quiet openapi-spec-validator==0.7.1
+      - name: 校验 docs/openapi.yaml
+        run: |
+          python - <<'PY'
+          from openapi_spec_validator import validate
+          from openapi_spec_validator.readers import read_from_filename
+          spec, _ = read_from_filename('docs/openapi.yaml')
+          validate(spec)
+          print('openapi valid')
+          PY
+
   ps1-bom:
     name: PowerShell BOM 检查
     runs-on: windows-latest

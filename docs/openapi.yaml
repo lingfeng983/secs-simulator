@@ -1,0 +1,866 @@
+openapi: 3.0.3
+info:
+  title: SECS Simulator HTTP API
+  version: 2.0.0-SNAPSHOT
+  description: |
+    SECS/GEM 模拟器的 REST + SSE 接口。
+
+    鉴权使用 `Authorization: Bearer <token>`。角色按能力递增：
+    `viewer` 只读，`operator` 可改变设备状态，`admin` 可停机与查看审计。
+    未认证回 401，认证通过但角色不够回 403。
+
+    SSE 不能设置请求头，先用 `POST /api/v1/ticket` 换一次性票据，
+    再连 `GET /api/v1/events?ticket=...`。
+servers:
+  - url: http://127.0.0.1:5000
+    description: 默认本机地址
+security:
+  - bearerAuth: []
+tags:
+  - name: health
+  - name: auth
+  - name: events
+  - name: sessions
+  - name: control
+  - name: preview
+  - name: messages
+  - name: configs
+  - name: audit
+  - name: admin
+paths:
+  /api/v1/health:
+    get:
+      tags: [health]
+      summary: 存活与运行信息
+      security: []
+      responses:
+        '200':
+          description: 服务存活。带凭据时额外返回版本、形态、会话数与身份。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/ticket:
+    post:
+      tags: [auth]
+      summary: 换取一次性 SSE 票据
+      description: 票据 30 秒有效、只能用一次；返回签发身份与角色。
+      responses:
+        '200':
+          description: 票据
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ticket, expiresInMs]
+                properties:
+                  ok: { type: boolean }
+                  ticket: { type: string }
+                  user: { type: string }
+                  role: { $ref: '#/components/schemas/Role' }
+                  expiresInMs: { type: integer, format: int64 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/v1/events:
+    get:
+      tags: [events]
+      summary: SSE 报文事件流
+      description: |
+        使用 `POST /api/v1/ticket` 的一次性票据；不接受长期 token 查询参数。
+        事件名：`message`（报文）、`heartbeat`（时间戳）。
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/sessions:
+    get:
+      tags: [sessions]
+      summary: 会话列表
+      responses:
+        '200':
+          description: 会话数组
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: '#/components/schemas/SessionSummary' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [sessions]
+      summary: 新建会话
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config:
+                  type: string
+                  description: "`demo` 或 --work-dir 下的配置文件名（不接受路径）"
+      responses:
+        '201':
+          description: 已创建
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/sessions/{id}:
+    delete:
+      tags: [sessions]
+      summary: 关闭并移除会话
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 已关闭
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/reload:
+    post:
+      tags: [sessions]
+      summary: 按配置重载会话
+      description: 配置有错时旧会话保持原样，只返回失败。
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 已重载
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 演示会话没有配置来源（not-reloadable）
+  /api/v1/sessions/{id}/ceid/{ceid}:
+    post:
+      tags: [control]
+      summary: 手动触发一次 S6F11
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: ceid
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '202':
+          description: 已接受
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 会话未打开或没有主机（session-not-open）
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/sessions/{id}/alarm/{alid}:
+    post:
+      tags: [control]
+      summary: 置位/清除报警（S5F1）
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: alid
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: set
+          in: query
+          schema: { type: boolean, default: true }
+        - name: text
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 7, default: 1 }
+      responses:
+        '202':
+          description: 已接受
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 会话未打开或没有主机（session-not-open）
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/sessions/{id}/alarms:
+    get:
+      tags: [sessions]
+      summary: 当前活动报警
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 报警数组
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Alarm' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/terminal:
+    get:
+      tags: [sessions]
+      summary: 最近终端消息（S10F3）
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 终端消息数组
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TerminalMessage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/catalog:
+    get:
+      tags: [sessions]
+      summary: SVID / RPTID / CEID 目录
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 目录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Catalog' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/events:
+    get:
+      tags: [control]
+      summary: 事件编排列表
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: 计划数组
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/EventPlan' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/events/{planId}:
+    post:
+      tags: [control]
+      summary: 运行时启用/禁用一个编排计划
+      description: 只影响当前进程；重载会恢复配置里的状态。禁用期间的事件不补发。
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: enabled
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: 已切换
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: unknown-session 或 unknown-plan
+  /api/v1/sessions/{id}/message:
+    post:
+      tags: [control]
+      summary: 手动发送一条 SML 报文
+      description: |
+        请求体就是 SML 原文。支持 SxFy/W、L/A/B/BOOLEAN、I*/U*/F*。
+        W 位同步等待 T3；超时返回 `timedOut=true` 而不是发送失败。
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              maxLength: 65536
+              example: |
+                S1F1 W.
+      responses:
+        '200':
+          description: 发送结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SentMessageResult' }
+        '400':
+          description: bad-sml / empty-sml / body-too-large
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 会话未打开或没有主机
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/preview:
+    get:
+      tags: [preview]
+      summary: 曲线预览（JSON，分桶 min/max/avg）
+      parameters:
+        - $ref: '#/components/parameters/SessionQuery'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Buckets'
+      responses:
+        '200':
+          description: 分桶预览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewData' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/preview.bin:
+    get:
+      tags: [preview]
+      summary: 曲线预览（SCSP v1 二进制）
+      description: |
+        小端；48 字节固定头 + 每条序列的 svid 与 min/max/avg f64 数组。
+        格式见 `docs/preview-binary.md`。
+      parameters:
+        - $ref: '#/components/parameters/SessionQuery'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Buckets'
+      responses:
+        '200':
+          description: 二进制正文
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/messages:
+    get:
+      tags: [messages]
+      summary: 最近报文历史
+      description: 内存保留最近 5000 条；`format=jsonl` 返回可下载的 JSON Lines。
+      parameters:
+        - name: session
+          in: query
+          schema: { type: string }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [in, out] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 500 }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, jsonl], default: json }
+      responses:
+        '200':
+          description: JSON 历史或 JSONL 附件
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePage' }
+            application/x-ndjson:
+              schema: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: 报文日志不可用
+  /api/v1/configs:
+    get:
+      tags: [configs]
+      summary: 配置目录列表
+      responses:
+        '200':
+          description: 配置文件数组
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configs]
+                properties:
+                  configs:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigEntry' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [configs]
+      summary: 新建配置骨架
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: line1.json }
+      responses:
+        '201':
+          description: 已创建
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/configs/{name}:
+    get:
+      tags: [configs]
+      summary: 读配置原文
+      parameters:
+        - $ref: '#/components/parameters/ConfigName'
+      responses:
+        '200':
+          description: 配置原文
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, text]
+                properties:
+                  name: { type: string }
+                  text: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [configs]
+      summary: 校验通过后原子保存配置
+      x-required-role: operator
+      parameters:
+        - $ref: '#/components/parameters/ConfigName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: string }
+      responses:
+        '200':
+          description: 已保存
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 配置校验失败，未落盘
+  /api/v1/configs/{name}/validate:
+    post:
+      tags: [configs]
+      summary: 只校验不落盘
+      parameters:
+        - $ref: '#/components/parameters/ConfigName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: string }
+      responses:
+        '200':
+          description: 校验结果（valid 为 false 时 problems 非空）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      summary: 最近审计记录
+      x-required-role: admin
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        '200':
+          description: 审计数组
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [audit]
+                properties:
+                  audit:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+                  limit: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          description: 审计日志不可用
+  /api/v1/shutdown:
+    post:
+      tags: [admin]
+      summary: 优雅停机
+      x-required-role: admin
+      responses:
+        '200':
+          description: 正在停机
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 访问令牌或账号口令
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    SessionQuery:
+      name: session
+      in: query
+      required: true
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      schema: { type: integer, format: int64, default: 0 }
+    To:
+      name: to
+      in: query
+      schema: { type: integer, format: int64, default: 60000 }
+    Buckets:
+      name: buckets
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 120 }
+    ConfigName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, example: line1.json }
+  responses:
+    Unauthorized:
+      description: 未认证（401）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: 角色不足（403）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 目标不存在（404）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 冲突（409）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: 请求不合法（400）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: 方法不允许（405）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: 内部错误（500）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Role:
+      type: string
+      enum: [viewer, operator, admin]
+    Error:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, example: false }
+        error: { type: string, example: forbidden }
+        required: { type: string, example: OPERATOR }
+        message: { type: string }
+    Health:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        version: { type: string }
+        mode: { type: string }
+        sessions: { type: integer }
+        uptimeMs: { type: integer, format: int64 }
+        user: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        vm: { type: string }
+        utf8: { type: boolean }
+    Counters:
+      type: object
+      additionalProperties: { type: integer, format: int64 }
+    SessionSummary:
+      type: object
+      required: [id, state, device, units]
+      properties:
+        id: { type: string }
+        state:
+          type: string
+          description: HSMS 会话状态
+          example: OPEN
+        controlState:
+          type: string
+          enum: [OFFLINE, COMMUNICATING, ONLINE]
+        device: { type: string }
+        units: { type: integer }
+        lastError: { type: string }
+        counters: { $ref: '#/components/schemas/Counters' }
+    Alarm:
+      type: object
+      required: [alid, category, text, atMillis]
+      properties:
+        alid: { type: integer }
+        category: { type: integer, minimum: 0, maximum: 7 }
+        text: { type: string }
+        atMillis: { type: integer, format: int64 }
+    TerminalMessage:
+      type: object
+      required: [tid, text, atMillis]
+      properties:
+        tid: { type: integer }
+        text: { type: string }
+        atMillis: { type: integer, format: int64 }
+    Catalog:
+      type: object
+      required: [ceids, reports, svids]
+      properties:
+        ceids:
+          type: array
+          items:
+            type: object
+            properties:
+              ceid: { type: integer }
+              owner: { type: string }
+              slot: { type: string }
+              reports:
+                type: array
+                items: { type: integer }
+              source: { type: string, enum: [local, host] }
+              enabled: { type: boolean }
+        reports:
+          type: array
+          items:
+            type: object
+            properties:
+              rptid: { type: integer }
+              owner: { type: string }
+              slot: { type: string }
+              svids:
+                type: array
+                items: { type: integer }
+              source: { type: string, enum: [local, host] }
+        svids:
+          type: array
+          items:
+            type: object
+            properties:
+              svid: { type: integer }
+              owner: { type: string }
+              slot: { type: string }
+              type: { type: string }
+              unit: { type: string }
+        hostReports: { type: integer }
+        hostLinks: { type: integer }
+        hostAllDisabled: { type: boolean }
+    EventPlan:
+      type: object
+      required: [id, ceid, enabled, triggerType]
+      properties:
+        id: { type: string }
+        ceid: { type: integer }
+        enabled: { type: boolean }
+        triggerType:
+          type: string
+          enum: [at, periodic, onCondition, afterEvent]
+        atMs: { type: integer, format: int64 }
+        periodMs: { type: integer, format: int64 }
+        jitterMs: { type: integer, format: int64 }
+        expression: { type: string }
+        debounceMs: { type: integer, format: int64 }
+        sourcePlan: { type: string }
+        delayMs: { type: integer, format: int64 }
+    PreviewSeries:
+      type: object
+      required: [svid, min, max, avg]
+      properties:
+        svid: { type: integer }
+        min:
+          type: array
+          items: { type: number, format: double }
+        max:
+          type: array
+          items: { type: number, format: double }
+        avg:
+          type: array
+          items: { type: number, format: double }
+    PreviewData:
+      type: object
+      required: [from, to, buckets, bucketMs, series]
+      properties:
+        from: { type: integer, format: int64 }
+        to: { type: integer, format: int64 }
+        buckets: { type: integer }
+        bucketMs: { type: integer, format: int64 }
+        svidTotal: { type: integer }
+        truncated: { type: boolean }
+        series:
+          type: array
+          items: { $ref: '#/components/schemas/PreviewSeries' }
+    MessagePage:
+      type: object
+      required: [messages, total, limit, truncated]
+      properties:
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              sessionId: { type: string }
+              direction: { type: string, enum: [in, out] }
+              stream: { type: integer }
+              function: { type: integer }
+              wbit: { type: boolean }
+              body: { type: string }
+              at: { type: integer, format: int64 }
+        total: { type: integer }
+        limit: { type: integer }
+        truncated: { type: boolean }
+    SentMessageResult:
+      type: object
+      required: [ok, stream, function, wbit, sentSml, timedOut, elapsedMs]
+      properties:
+        ok: { type: boolean }
+        stream: { type: integer }
+        function: { type: integer }
+        wbit: { type: boolean }
+        sentSml: { type: string }
+        timedOut: { type: boolean }
+        replyStream: { type: integer }
+        replyFunction: { type: integer }
+        replyWbit: { type: boolean }
+        replySml:
+          type: string
+          nullable: true
+        elapsedMs: { type: integer, format: int64 }
+    ConfigEntry:
+      type: object
+      required: [name, sizeBytes, modifiedMs]
+      properties:
+        name: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        modifiedMs: { type: integer, format: int64 }
+    ConfigProblems:
+      type: object
+      required: [valid, problems]
+      properties:
+        valid: { type: boolean }
+        problems:
+          type: array
+          items: { type: string }
+    AuditEntry:
+      type: object
+      required: [at, actor, role, action, target, detail]
+      properties:
+        at: { type: integer, format: int64 }
+        actor: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        action: { type: string }
+        target: { type: string }
+        detail: { type: string }

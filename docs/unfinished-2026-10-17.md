@@ -34,6 +34,8 @@
 > 关键操作与 403 都带 actor/role/target/detail。
 > 再补上**设备控制状态**：OFFLINE / COMMUNICATING / ONLINE，
 > 随 S1F13 / S1F15 / S1F17 与断链迁移，并在会话列表显示。
+> 最后补上 **OpenAPI 3.0.3 契约**（22 路径 / 16 schema），CI 用
+> `openapi-spec-validator` 校验。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）全绿。
 
@@ -112,7 +114,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **没有配置读写界面**：已实现「配置编辑器」面板——列目录、读原文、改、校验、保存、新建。保存是 operator 及以上（改配置属于"会改变设备状态"），读与校验是 viewer。改配置**不会**让已在跑的会话自动改变，要在会话表点「重载」才生效（服务端日志也会提醒）。
 - [x] **没有前端测试**：已接 Vitest（`npm test`），当前 22 例：模板 JSON 投影 / 编辑 / 表达式名校验 / BOM 13 例、模板表单服务端渲染 4 例、报文合并 5 例；CI 增加 `npm test`。**真实浏览器 UI E2E 仍未做**。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
-- [ ] **没有 OpenAPI 契约**：m0 承诺 M7 前落地，仓库里没有 `openapi.yaml`。
+- [x] **没有 OpenAPI 契约**：新增 `docs/openapi.yaml`（OpenAPI 3.0.3，覆盖 22 个路径/16 个 schema），CI 增加 `openapi-spec-validator` 校验。
 
 ## 4. P2：分发与工程化
 
@@ -129,7 +131,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **发布未闭环**：版本仍是 `2.0.0-SNAPSHOT`；只有 `v1.0` / `v1.1` 标签；本地 master 领先 origin 28 个提交。
 - [ ] **日志**：只有 stderr 单行日志，没有文件/轮转/级别；`HsmsSessionRuntime` 与 `SecsProbe` 已改用 `Log`，但 `Main` 在 `SECS_SIM_DEBUG` 下仍会打完整栈。
 - [ ] **下轮评审**：`secs-cli` 端到端宿主与 `scripts/`、`packaging/` 的 PowerShell 健壮性未深评。
-- [ ] **历史报告同步**：m6 报告仍写 S1F11 未做；m6b 仍写 S2F33/35/37 未做（m6c 已完成）；m0 的 OpenAPI 承诺仍未落地。README 与 RuntimeMode 的本轮同步已完成。
+- [ ] **历史报告同步**：m6 报告仍写 S1F11 未做；m6b 仍写 S2F33/35/37 未做（m6c 已完成）；m0 的 OpenAPI 承诺已落地（`docs/openapi.yaml`）。README 与 RuntimeMode 的本轮同步已完成。
 
 ## 5. 已知接受风险
 
@@ -209,6 +211,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **uPlot 预览引擎**（Canvas/uPlot 切换；图例开关、框选缩放、双击复位；浏览器冒烟 10 图 10 图例、无 pageerror）。
 - **审计日志**（JSONL + actor/role/action/target/detail；覆盖关键操作与 403；admin 查询与前端面板）。
 - **设备控制状态**（OFFLINE / COMMUNICATING / ONLINE，S1F13/S1F15/S1F17 与断链迁移；会话列表显示）。
+- **OpenAPI 3.0.3 契约**（22 路径 / 16 schema，CI 用 openapi-spec-validator 校验）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。

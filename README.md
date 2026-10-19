@@ -247,6 +247,11 @@ curl -X POST -H 'Authorization: Bearer T' --data-binary @templates/sml/equip/s5f
 - 成功响应包含规范化后的 `sentSml`、`replySml`、`replyStream/Function/Wbit`、`elapsedMs`。
 - 正文上限 64 KiB；只有 operator 及以上能发（会改变设备对主机的行为）。
 
+### OpenAPI
+
+HTTP API 的机器可读契约在 [docs/openapi.yaml](docs/openapi.yaml)（OpenAPI 3.0.3）。
+CI 会用 `openapi-spec-validator` 校验；改接口时请同步这个文件。
+
 ### 审计
 
 关键操作会追加到 `<work-dir>/logs/audit.jsonl`（一行一个 JSON），
@@ -354,6 +359,7 @@ scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 - [ADR 0010 · 手动发送 SML 只实现受控子集](docs/adr/0010-manual-sml.md)
 - [ADR 0011 · 事件编排的运行时启用/禁用](docs/adr/0011-event-runtime-control.md)
 - [ADR 0012 · 审计日志与业务日志分离](docs/adr/0012-audit-log.md)
+- [OpenAPI 3.0 契约](docs/openapi.yaml)
 - [二进制曲线预览格式](docs/preview-binary.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
