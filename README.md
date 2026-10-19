@@ -320,6 +320,16 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
 前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；CI 会跑）。
+浏览器 E2E 用 Playwright：
+
+```powershell
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+E2E 用 Vite preview + Playwright 路由拦截 API，不启动 Java 进程；CI 的
+`frontend-e2e` job 会安装 Chromium 并跑这 3 条用例。
 
 曲线预览有两种渲染引擎：
 
