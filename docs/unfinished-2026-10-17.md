@@ -38,6 +38,8 @@
 > `openapi-spec-validator` 校验。
 > 再补上 **Playwright E2E**：Mock API 3 例（uPlot / 模板编辑+校验保存 /
 > 事件切换+审计）与真实 Java 后端 1 例，CI 两个 job 均已接入。
+> 最后补上 **JVM 兜底包**：jlink runtime + jars + web，约 37 MB，
+> `start-jvm.cmd` 在不预装 JVM 的机器上可启动。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端单元/组件测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）
 > + **3 个 Mock E2E + 1 个真实后端 E2E** 全绿。
@@ -123,7 +125,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 
 - [ ] **代码签名**：未做；文档自己标了“正式分发前必须签，优先级最高”。
 - [ ] **安装器**：只有绿色 zip，没有 MSI/EXE 自解压/jpackage。
-- [ ] **JVM 兜底包**：未做；只有 native 镜像。
+- [x] **JVM 兜底包**：新增 `scripts/package-jvm.ps1` + `packaging/start-jvm.*`；jlink 运行时（java.base+jdk.httpserver）+ 应用 jar + web，约 37 MB；`start-jvm.cmd -CheckOnly`、真实启动/health/页面冒烟通过。
 - [ ] **自动更新**：未做。
 - [ ] **跨平台**：只能各平台各自构建；没有 Linux/macOS 产物。
 - [ ] **`secs-dist` 是空模块**：只有 pom，打包实际在 `scripts/package.ps1`。
@@ -189,7 +191,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 11. 前端测试与 E2E：Vitest 22 例 + Mock Playwright 3 例 + 真实后端 Playwright 1 例，CI 已接入。
 
 **M13：分发**
-12. 代码签名、安装器、JVM 兜底包、自动更新、Linux 服务端打包与 systemd 单元。
+12. 代码签名、安装器、自动更新、Linux 服务端打包与 systemd 单元。**JVM 兜底包已完成。**
 13. 2.0 发布：打 tag、写 release notes、把 `2.0.0-SNAPSHOT` 改为正式版本。
 
 ## 8. 已确认完成，不要重复做
@@ -217,6 +219,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **设备控制状态**（OFFLINE / COMMUNICATING / ONLINE，S1F13/S1F15/S1F17 与断链迁移；会话列表显示）。
 - **OpenAPI 3.0.3 契约**（22 路径 / 16 schema，CI 用 openapi-spec-validator 校验）。
 - **Playwright E2E**（Mock 3 条 + 真实 Java 后端 1 条；CI 安装 Chromium）。
+- **JVM 兜底包**（jlink runtime + jars + web，start-jvm；约 37 MB）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
