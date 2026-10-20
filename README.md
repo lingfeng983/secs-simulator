@@ -356,12 +356,17 @@ CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这�
 scripts\build-frontend.ps1     # 前端产物
 scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 scripts\package-jvm.ps1        # JVM 兜底包：jlink runtime + jars + web（约 37 MB）
+scripts\package-installer.ps1  # JVM 包 + install/uninstall -> setup zip（约 37.6 MB）
 ```
 
 - 原生包：`secs-sim.exe` + `web/` + `start.cmd`，双击即用（无需安装 JVM）。
 - JVM 兜底包：`runtime/` + `lib/*.jar` + `web/` + `start-jvm.cmd`，
   自带 jlink 运行时，目标机器同样不需要预装 JVM；适合原生镜像跑不起来的机器。
   需要 JDK 25 生成（`package-jvm.ps1` 会检查 `JAVA_HOME`）。
+- 安装包：解压 setup zip 后运行其中的 `install.ps1`，
+  默认安装到 `%LOCALAPPDATA%\SECS Simulator`，创建开始菜单/桌面快捷方式与
+  HKCU 卸载项；`-NoShortcuts -NoRegistry` 可用于便携/测试。
+  **这是脚本安装器，不是 MSI，也没有代码签名。**
 
 ## 四条铁律
 
