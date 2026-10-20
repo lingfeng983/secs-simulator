@@ -368,6 +368,27 @@ scripts\package-installer.ps1  # JVM 包 + install/uninstall -> setup zip（约 
   HKCU 卸载项；`-NoShortcuts -NoRegistry` 可用于便携/测试。
   **这是脚本安装器，不是 MSI，也没有代码签名。**
 
+### Docker / Linux
+
+```bash
+# 容器：HTTP 8080 / HSMS 5000 / /data 持久化
+docker compose -f packaging/docker/docker-compose.yml up --build
+```
+
+- 必须设置 `SECS_TOKEN`（compose 里是 `change-me`，生产请改）。
+- 默认装载 `packaging/docker/../linux/demo.json`，HSMS 绑定 `0.0.0.0:5000`。
+- 镜像构建需要访问 Maven/npm 仓库；本机未装 Docker，未实际构建镜像。
+
+Linux systemd 包：
+
+```bash
+./scripts/package-linux.sh
+# 产物 package/secs-sim-*-linux-x64.tar.gz
+```
+
+部署步骤、用户与环境文件见
+[packaging/systemd/README.md](packaging/systemd/README.md)。
+
 ## 四条铁律
 
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "session": {
+    "id": "demo",
+    "passive": true,
+    "bindHost": "0.0.0.0",
+    "port": 5000,
+    "deviceId": 10,
+    "seed": 7
+  },
+  "equipment": {
+    "name": "DEMO",
+    "idSpace": {},
+    "units": [
+      {
+        "unitId": 1,
+        "name": "CH1",
+        "injectUnitId": false,
+        "svids": [
+          { "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C", "min": 0, "max": 100 }
+        ],
+        "reports": [],
+        "ceids": []
+      }
+    ]
+  },
+  "events": { "maxPerSec": 5, "plans": [] }
+}

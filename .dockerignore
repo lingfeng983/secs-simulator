@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+.workbuddy
+target
+**/target
+frontend/node_modules
+frontend/dist
+package
+*.log

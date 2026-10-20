@@ -1,0 +1,16 @@
+services:
+  secs-sim:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    image: secs-sim:local
+    ports:
+      - "8080:8080"
+      - "5000:5000"
+    environment:
+      SECS_TOKEN: change-me
+    volumes:
+      - secs-sim-data:/data
+
+volumes:
+  secs-sim-data:
