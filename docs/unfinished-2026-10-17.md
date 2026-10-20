@@ -41,6 +41,8 @@
 > 最后补上 **JVM 兜底包**：jlink runtime + jars + web，约 37 MB，
 > `start-jvm.cmd` 在不预装 JVM 的机器上可启动；再补一个 PowerShell 脚本安装器。
 > 再补 **Linux 部署**：package-linux.sh + systemd unit/env + Dockerfile/compose。
+> 最后补 **自动更新**（manifest + SHA256 + 回滚）、**jpackage MSI**、
+> 以及 **原生 E2E 进 verify**（`mvn -Pnative verify`，NativeRuntimeIT 2 例）。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
 > + **22 个前端单元/组件测试**（模板模型 13 + 服务端渲染 4 + 报文合并 5）
 > + **3 个 Mock E2E + 1 个真实后端 E2E** 全绿。
@@ -125,12 +127,12 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 ## 4. P2：分发与工程化
 
 - [ ] **代码签名**：未做；文档自己标了“正式分发前必须签，优先级最高”。
-- [x] **安装器**：新增 `scripts/package-installer.ps1` + `packaging/install.ps1` / `uninstall.ps1`；安装到 `%LOCALAPPDATA%\SECS Simulator`，创建快捷方式与 HKCU 卸载项；实测安装/启动自检/卸载通过。**不是 MSI，也没有代码签名。**
+- [x] **安装器**：脚本安装器 + jpackage MSI。脚本 installer 已实测安装/启动自检/卸载；`scripts/package-msi.ps1` 用 jpackage + WiX 生成 39.1 MB MSI，admin 解包后 exe 启动/页面 200 通过。**MSI 未签名。**
 - [x] **JVM 兜底包**：新增 `scripts/package-jvm.ps1` + `packaging/start-jvm.*`；jlink 运行时（java.base+jdk.httpserver）+ 应用 jar + web，约 37 MB；`start-jvm.cmd -CheckOnly`、真实启动/health/页面冒烟通过。
-- [ ] **自动更新**：未做。
+- [x] **自动更新**：`packaging/update.ps1` / `check-update.cmd` + manifest（version/url/sha256）；校验 SHA256、旧目录备份、安装失败回滚；本地 2.0.0→2.0.1 实测通过。**面向脚本安装器目录；无后台自动检查服务，需手动/计划任务触发；MSI 不参与。**
 - [ ] **跨平台**：Linux 已有 `package-linux.sh` + systemd + Dockerfile；macOS 仍无产物，Linux 包也未在真实 Linux 上构建过。
 - [ ] **`secs-dist` 是空模块**：只有 pom，打包实际在 `scripts/package.ps1`。
-- [ ] **原生 E2E 没进 verify**：`NativeRuntimeIT` / `NativeSmokeIT` 是 `*IT`，Surefire 默认不跑；CI 的 native job 只在每周/手动触发，且只做 READY + health 冒烟。
+- [x] **原生 E2E 没进 verify**：`NativeRuntimeIT` 已修到当前 ticket/health/POST 语义，并通过 failsafe 绑定到 `mvn -Pnative verify`；本地构建原生镜像后 **2 个 IT 通过**。CI native job 已改为 `verify` 并构建前端。
 - [ ] **里程碑验收脚本只有 M0/M1**：M2–M9 没有对应 `accept-*.ps1`。
 - [ ] **构建前置未固化**：项目要求 JDK 25，本机默认 JDK 21；没有 Maven toolchains / enforcer。
 - [x] **服务端部署**：新增 `packaging/systemd/secs-sim.service` / env 示例 / 部署 README、`packaging/docker/Dockerfile` / compose / entrypoint、`scripts/package-linux.sh`；Linux demo 配置在 JVM 上启动/health/session/preview 冒烟通过。**Docker 本机不可用，未实际构建镜像。**
@@ -192,7 +194,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 11. 前端测试与 E2E：Vitest 22 例 + Mock Playwright 3 例 + 真实后端 Playwright 1 例，CI 已接入。
 
 **M13：分发**
-12. 代码签名、自动更新。**JVM 兜底包、脚本安装器、Linux systemd/Dockerfile 已完成。**
+12. 代码签名。**JVM 兜底包、脚本安装器、MSI、自动更新、Linux systemd/Dockerfile、原生 E2E 已完成。**
 13. 2.0 发布：打 tag、写 release notes、把 `2.0.0-SNAPSHOT` 改为正式版本。
 
 ## 8. 已确认完成，不要重复做
@@ -223,10 +225,13 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **JVM 兜底包**（jlink runtime + jars + web，start-jvm；约 37 MB）。
 - **脚本安装器**（JVM 包 + install/uninstall；快捷方式/卸载项；实测安装/卸载）。
 - **Linux 部署**（package-linux.sh + systemd unit/env + Dockerfile/compose；demo 配置冒烟通过）。
+- **自动更新**（manifest + SHA256 + 备份/回滚；2.0.0→2.0.1 实测）。
+- **jpackage MSI**（WiX；39.1 MB；解包后 exe 启动/页面 200）。
+- **原生 E2E**（failsafe；mvn -Pnative verify 跑 NativeRuntimeIT 2 例）。
 - **二进制曲线预览**（SCSP v1：48 字节头 + min/max/avg f64，前端下载；格式文档 `docs/preview-binary.md`）。
 - **前端 Vitest**（22 例，CI 已接入）。
 - **S2F33/F34、S2F35/F36、S2F37/F38** + `HostReportTable`（m6b 报告的“未做”已过时）。
 - S6F11 基本上报、S6F1 Trace、SML 渲染、曲线预览（JSON）。
 - M9-b/M9-c 的 SSE 独立线程池、一次性 ticket、静态 ETag、SSE 看门狗、预览时间窗、重连补偿。
 - core / json / protocol 的深评修复。
-- CI 的 backend / frontend / ps1-bom / 每周 native 冒烟。
+- CI 的 backend / frontend / frontend-e2e / frontend-e2e-real / openapi / ps1-bom / 每周 native verify。

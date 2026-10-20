@@ -89,6 +89,29 @@
               </execution>
             </executions>
           </plugin>
+          <!-- mvn -Pnative verify：原生镜像构建后在 failsafe 里跑 NativeRuntimeIT -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration>
+              <includes>
+                <include>**/NativeRuntimeIT.java</include>
+              </includes>
+              <systemPropertyVariables>
+                <secs.smoke.exe>${project.build.directory}/secs-sim.exe</secs.smoke.exe>
+              </systemPropertyVariables>
+            </configuration>
+            <executions>
+              <execution>
+                <id>native-e2e</id>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
         </plugins>
       </build>
     </profile>

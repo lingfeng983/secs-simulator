@@ -64,6 +64,7 @@ class NativeRuntimeIT {
 
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
+                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, health.statusCode(), health.body());
@@ -85,7 +86,8 @@ class NativeRuntimeIT {
             HttpResponse<String> shutdown = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
                             .header("Authorization", "Bearer " + token)
-                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                            .timeout(Duration.ofSeconds(10))
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, shutdown.statusCode(), shutdown.body());
 
@@ -129,6 +131,7 @@ class NativeRuntimeIT {
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
+                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertTrue(health.body().contains("\"sessions\":1"), health.body());
@@ -185,7 +188,8 @@ class NativeRuntimeIT {
 
             client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
                             .header("Authorization", "Bearer " + token)
-                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                            .timeout(Duration.ofSeconds(10))
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding());
 
             assertTrue(process.waitFor(15, TimeUnit.SECONDS), "native 进程没有退出");
@@ -210,9 +214,22 @@ class NativeRuntimeIT {
     }
 
     private static void assertSseStreams(int httpPort, String token, HttpClient client) throws Exception {
+        HttpResponse<String> ticketResponse = client.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/ticket"))
+                        .header("Authorization", "Bearer " + token)
+                        .timeout(Duration.ofSeconds(10))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, ticketResponse.statusCode(), ticketResponse.body());
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\"ticket\":\"([0-9a-f]+)\"").matcher(ticketResponse.body());
+        assertTrue(matcher.find(), "ticket 响应异常: " + ticketResponse.body());
+        String ticket = matcher.group(1);
+
         HttpResponse<InputStream> sse = client.send(
                 HttpRequest.newBuilder(URI.create(
-                        "http://127.0.0.1:" + httpPort + "/api/v1/events?token=" + token))
+                        "http://127.0.0.1:" + httpPort + "/api/v1/events?ticket=" + ticket))
                         .timeout(Duration.ofSeconds(10)).GET().build(),
                 HttpResponse.BodyHandlers.ofInputStream());
 
@@ -222,7 +239,9 @@ class NativeRuntimeIT {
             int read = body.read(buffer);
             assertTrue(read > 0, "SSE 没有收到任何数据");
             String chunk = new String(buffer, 0, read, StandardCharsets.UTF_8);
-            assertTrue(chunk.contains("event: heartbeat"), "SSE 首帧异常: " + chunk);
+            /* 建连后先发 ": connected" 注释帧，不代表没有心跳能力 */
+            assertTrue(chunk.contains(": connected") || chunk.contains("event: heartbeat"),
+                    "SSE 首帧异常: " + chunk);
         }
     }
 

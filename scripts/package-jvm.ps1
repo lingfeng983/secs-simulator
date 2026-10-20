@@ -66,6 +66,11 @@ Copy-Item (Join-Path $root 'packaging/start-jvm.ps1') $stage
 Copy-Item (Join-Path $root 'packaging/start-jvm.cmd') $stage
 Copy-Item (Join-Path $root 'packaging/README-jvm.txt') $stage
 Copy-Item (Join-Path $root 'docs/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
+Copy-Item (Join-Path $root 'packaging/update.ps1') $stage
+Copy-Item (Join-Path $root 'packaging/check-update.cmd') $stage
+Copy-Item (Join-Path $root 'packaging/README-update.txt') $stage
+Copy-Item (Join-Path $root 'packaging/update-manifest.example.json') $stage
+Set-Content -Path (Join-Path $stage 'VERSION') -Value $version -Encoding ASCII
 
 $startCheck = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $stage 'start-jvm.ps1') -CheckOnly 2>&1
 if ($LASTEXITCODE -ne 0) {

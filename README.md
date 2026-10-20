@@ -29,7 +29,12 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 ```powershell
 $env:JAVA_HOME = 'E:\Java\graalvm-jdk-25.0.4+7.1'
 mvn -B verify
+mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 frontend/dist）
 ```
+
+`-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
+`NativeRuntimeIT`（API、SSE ticket、HSMS S1F1、S1F3、优雅停机）。
+CI 的 `native` job 每周/手动运行同一命令。
 
 里程碑验收脚本：
 
@@ -357,16 +362,23 @@ scripts\build-frontend.ps1     # 前端产物
 scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
 scripts\package-jvm.ps1        # JVM 兜底包：jlink runtime + jars + web（约 37 MB）
 scripts\package-installer.ps1  # JVM 包 + install/uninstall -> setup zip（约 37.6 MB）
+scripts\package-msi.ps1        # jpackage MSI（需要 WiX 3.x）
 ```
 
 - 原生包：`secs-sim.exe` + `web/` + `start.cmd`，双击即用（无需安装 JVM）。
 - JVM 兜底包：`runtime/` + `lib/*.jar` + `web/` + `start-jvm.cmd`，
   自带 jlink 运行时，目标机器同样不需要预装 JVM；适合原生镜像跑不起来的机器。
   需要 JDK 25 生成（`package-jvm.ps1` 会检查 `JAVA_HOME`）。
-- 安装包：解压 setup zip 后运行其中的 `install.ps1`，
+- 脚本安装器：解压 setup zip 后运行其中的 `install.ps1`，
   默认安装到 `%LOCALAPPDATA%\SECS Simulator`，创建开始菜单/桌面快捷方式与
   HKCU 卸载项；`-NoShortcuts -NoRegistry` 可用于便携/测试。
-  **这是脚本安装器，不是 MSI，也没有代码签名。**
+- MSI：`scripts\package-msi.ps1` 用 jpackage + WiX 生成
+  `secs-sim-*-win-x64.msi`（约 39 MB）；桌面快捷方式默认带 demo 会话。
+  **MSI 与脚本安装器都未签名。**
+- 自动更新：包内 `check-update.cmd` + `update.ps1` 读取 manifest
+  （version/url/sha256），先备份旧目录再安装，失败自动回滚。
+  示例见 [packaging/README-update.txt](packaging/README-update.txt)。
+  **面向脚本安装器（install.ps1）目录；MSI 仍用卸载/重装，不参与自动更新。**
 
 ### Docker / Linux
 
