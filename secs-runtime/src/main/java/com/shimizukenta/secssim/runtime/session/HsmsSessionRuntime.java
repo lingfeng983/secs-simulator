@@ -58,6 +58,7 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.core.EngineClock;
+import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
 import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
@@ -1046,6 +1047,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private void startTicker() {
         this.lastFireMs = this.clock.nowMs();
 
+        /* 手动时钟（ManualEngineClock）意味着"时间由调用方推进"。
+           这时再起一个按真实时间 100ms 的心跳，会与调用方的 pumpNow 抢着推进：
+           调用方把时钟拨到 t=1s，心跳先跑完了触发，调用方再 pumpNow 就什么都不做，
+           表现为"拨到点却没发"。确定性必须由时钟本身保证，而不是靠调度器碰运气。 */
+        if (this.clock instanceof ManualEngineClock) {
+            return;
+        }
+
         ScheduledExecutorService service = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "events-" + this.spec.id());
             thread.setDaemon(true);
@@ -1276,20 +1285,24 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     return;
                 }
                 case 113 -> {
-                    this.communicator.gem().s1f14(primary, COMMACK.OK);
                     if (this.controlState == EquipmentControlState.OFFLINE) {
                         this.controlState = EquipmentControlState.COMMUNICATING;
                     }
+                    this.communicator.gem().s1f14(primary, COMMACK.OK);
                     return;
                 }
                 case 115 -> {
-                    this.communicator.gem().s1f16(primary);
+                    /* 同理：应答到达时"已离线"必须已生效，否则主机以为下线了，设备还在报 */
                     this.controlState = EquipmentControlState.OFFLINE;
+                    this.communicator.gem().s1f16(primary);
                     return;
                 }
                 case 117 -> {
-                    this.communicator.gem().s1f18(primary, ONLACK.OK);
+                    /* 先迁状态再回应答：主机收到 S1F18 时，"设备已 ONLINE" 必须已经成立。
+                       反过来（先回后迁）存在一个窗口——主机收到应答立刻做 S1F13 之后的动作，
+                       设备这边还是 COMMUNICATING，主动上报会被状态门槛挡掉。 */
                     this.controlState = EquipmentControlState.ONLINE;
+                    this.communicator.gem().s1f18(primary, ONLACK.OK);
                     return;
                 }
                 case 217 -> {

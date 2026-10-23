@@ -57,6 +57,15 @@ class SseStallTest {
             InputStream in = socket.getInputStream();
             byte[] head = new byte[64];
             assertTrue(in.read(head) > 0, "至少应收到 SSE 注释帧");
+
+            /* 读到首个字节只说明响应头已经发出来了；服务端把这条流登记进 activeStreams
+               是另外一步，两者之间有时间窗。直接断言等于赌时序，应等它出现。
+               （本用例要验证的是"卡死会被看门狗踢掉"，不是"登记是原子的"——
+               所以这里等就绪，不改变用例意图。） */
+            long registeredBy = System.currentTimeMillis() + 5_000L;
+            while (System.currentTimeMillis() < registeredBy && server.activeStreams() != 1) {
+                Thread.sleep(10L);
+            }
             assertEquals(1, server.activeStreams(), "连接应已登记");
 
             /* 用大报文体灌满窗口：2000 字符 × 1200 条 ≈ 2.4MB */
