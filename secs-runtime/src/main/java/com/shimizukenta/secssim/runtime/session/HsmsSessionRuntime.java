@@ -44,6 +44,8 @@ import com.shimizukenta.secs.secs2.Secs2Builder;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.secs.secs2.Secs2Exception;
+import com.shimizukenta.secs.secs2.Secs2Item;
+import com.shimizukenta.secs.secs2.Secs2IrregalDataFormatException;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
 import com.shimizukenta.secssim.app.log.Log;
@@ -1426,7 +1428,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         int code = 0;
 
         try {
-            Secs2 reportList = primary.secs2().get(0);
+            Secs2 reportList = reportListOf(primary.secs2());
 
             if (reportList.size() == 0) {
                 this.hostReports.clearReports();
@@ -1447,14 +1449,112 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * 从 S2F33 报文体取出报告列表。
+     *
+     * <p>E5 的标准形状是 {@code L[2]{U4 DATAID, L[n]{L[2]{U4 RPTID, L[m]{U4 VID}}}}}
+     * —— 报告列表在<b>第 2 个</b>元素。早期夹具和少数实现的省略写法是
+     * {@code L{L{...}, L{}}}，报告列表在第 1 个元素。两种都要能吃下：
+     * 只认一种的后果是标准主机发来时把 DATAID 标量当成列表，
+     * 取元素抛 {@code Secs2IrregalDataFormatException} → 恒回 DRACK=1，动态报告彻底不可用。</p>
+     *
+     * <p><b>判定顺序必须先标准、后兼容</b>：标准形状的 DATAID 是 U4 标量，非标形状的第 1 个元素
+     * 是列表，两者按类型就能分开。不能反过来“先看第 2 个元素是不是 L[0] 就当成兼容形状”——
+     * 标准形状的“清空全部”（{@code L[2]{DATAID=0, L[0]}}）正是这个样子，
+     * 抢判会把 DATAID 当成“报告 0”写进覆盖层，主机后面的事件就发不出来了。</p>
+     *
+     * <p>标准形状里 DATAID 不是 U4（例如主机把 DATAID 也写成列表）时，按标准解析失败，
+     * 再回退到非标形状解析——这是唯一会被两种形状同时命中的情形。</p>
+     *
+     * @param body S2F33 报文体
+     * @return 报告列表（可能是 {@code L[0]}）
+     * @throws Secs2Exception 形状无法识别
+     */
+    private static Secs2 reportListOf(Secs2 body) throws Secs2Exception {
+        if (body.size() == 0) {
+            throw new Secs2IrregalDataFormatException("S2F33 报文体为空");
+        }
+
+        if (body.size() >= 2) {
+            Secs2 dataId = body.get(0);
+            Secs2 second = body.get(1);
+
+            if (!isList(dataId) && isList(second)
+                    && (second.size() == 0 || isReportEntry(second.get(0)))) {
+                return second;
+            }
+        }
+
+        Secs2 first = body.get(0);
+
+        if (isList(first) && (first.size() == 0 || isReportEntry(first.get(0)))) {
+            return first;
+        }
+
+        throw new Secs2IrregalDataFormatException("S2F33 报文体里没有报告列表");
+    }
+
+    /**
+     * 从 S2F35 报文体取出「事件 → 报告」链接列表。
+     *
+     * <p>形状判断与 {@link #reportListOf(Secs2)} 同一套规则：标准形状
+     * {@code L[2]{DATAID, L[n]{L[2]{CEID, L[m] RPTID}}}} 优先，省略 DATAID 的
+     * {@code L{L{...}, L{}}} 兼容保留。</p>
+     *
+     * @param body S2F35 报文体
+     * @return 链接列表（可能是 {@code L[0]}）
+     * @throws Secs2Exception 形状无法识别
+     */
+    private static Secs2 linkListOf(Secs2 body) throws Secs2Exception {
+        if (body.size() == 0) {
+            throw new Secs2IrregalDataFormatException("S2F35 报文体为空");
+        }
+
+        if (body.size() >= 2) {
+            Secs2 dataId = body.get(0);
+            Secs2 second = body.get(1);
+
+            if (!isList(dataId) && isList(second)
+                    && (second.size() == 0 || isLinkEntry(second.get(0)))) {
+                return second;
+            }
+        }
+
+        Secs2 first = body.get(0);
+
+        if (isList(first) && (first.size() == 0 || isLinkEntry(first.get(0)))) {
+            return first;
+        }
+
+        throw new Secs2IrregalDataFormatException("S2F35 报文体里没有事件链接列表");
+    }
+
+    /** {@code L[2]{U4 CEID, L[m] RPTID}} */
+    private static boolean isLinkEntry(Secs2 item) throws Secs2Exception {
+        return isScalarAndList(item);
+    }
+
+    /** {@code L[2]{U4 RPTID, L[m] VID}} */
+    private static boolean isReportEntry(Secs2 item) throws Secs2Exception {
+        return isScalarAndList(item);
+    }
+
+    /** 是否为 {@code L[2]{U4 标量, L[m]}}：S2F33 / S2F35 的条目都长这样。 */
+    private static boolean isScalarAndList(Secs2 item) throws Secs2Exception {
+        return isList(item) && item.size() == 2 && !isList(item.get(0)) && isList(item.get(1));
+    }
+
+    private static boolean isList(Secs2 item) {
+        return item.secs2Item() == Secs2Item.LIST;
+    }
+
+    /**
      * S2F35：主机建立"事件 → 报告"的链接。
      */
     private void handleLinkEventReport(SecsMessage primary) throws Exception {
         int code = 0;
 
         try {
-            Secs2 body = primary.secs2();
-            Secs2 links = body.size() >= 2 ? body.get(1) : body.get(0);
+            Secs2 links = linkListOf(primary.secs2());
 
             if (links.size() == 0) {
                 this.hostReports.clearLinks();

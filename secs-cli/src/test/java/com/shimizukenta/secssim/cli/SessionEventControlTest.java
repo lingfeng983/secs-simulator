@@ -21,6 +21,7 @@ import com.shimizukenta.secs.SecsMessage;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicator;
 import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
+import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
@@ -55,6 +56,11 @@ class SessionEventControlTest {
                 }
             });
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
+            /* 主机上线流程：E30 要求 S1F13 建立通信、S1F17 请求 ONLINE；
+               主动上报（S6F11/S6F1）只允许在 ONLINE 之后 */
+            client.send(1, 13, true, Secs2.getBuilder().list());
+            client.send(1, 17, true, Secs2.getBuilder().list());
 
             JsonHub before = JsonHub.fromJson(session.eventsJson());
             assertEquals(1, before.get("events").length());

@@ -204,6 +204,11 @@ class SessionTraceTest {
                 }
             });
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
+
+            /* 主动上报只允许在 ONLINE 之后（E30）：先走 S1F13 → S1F17 */
+            this.client.send(1, 13, true, Secs2.getBuilder().list());
+            this.client.send(1, 17, true, Secs2.getBuilder().list());
         }
 
         int startTrace(int trid, int totsmp, int repgsz, int... svids) throws Exception {

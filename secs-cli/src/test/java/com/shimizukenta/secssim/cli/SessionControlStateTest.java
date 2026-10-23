@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,9 @@ import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.core.event.EventPlan;
+import com.shimizukenta.secssim.core.event.EventSchedule;
+import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
@@ -89,6 +93,33 @@ class SessionControlStateTest {
         }
     }
 
+    /**
+     * S2F31 时间格式非法必须回 TIACK=1。
+     *
+     * <p>恒回 0 等于告诉主机"已同步"，而设备时钟根本没被改——主机的对时流程
+     * 带着这个假成功继续往下走，后面所有时间戳都不可信。</p>
+     */
+    @Test
+    void invalidTimeSetIsRejected() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertEquals(1, Secs2Read.asByte(f.send(2, 31, Secs2.getBuilder().ascii("2024-06-01")).secs2()),
+                    "带分隔符 → TIACK=1");
+            assertEquals(1, Secs2Read.asByte(f.send(2, 31, Secs2.getBuilder().ascii("2024060112300")).secs2()),
+                    "13 位 → TIACK=1");
+            assertEquals(1, Secs2Read.asByte(f.send(2, 31, Secs2.getBuilder().ascii("2024060112300X")).secs2()),
+                    "含非数字 → TIACK=1");
+        }
+    }
+
+    /** A12（12 位）也是合法 TIME，不能误判。 */
+    @Test
+    void a12TimeSetIsAccepted() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertEquals(0, Secs2Read.asByte(f.send(2, 31, Secs2.getBuilder().ascii("240601123000")).secs2()),
+                    "A12 应接受");
+        }
+    }
+
     @Test
     void tracksCommunicatingOnlineAndOffline() throws Exception {
         try (Fixture f = new Fixture()) {
@@ -123,11 +154,55 @@ class SessionControlStateTest {
         }
     }
 
+    /**
+     * E30：<b>计划驱动的</b>主动上报（S6F11 / S6F1）只在 ONLINE 之后允许。
+     *
+     * <p>修复前 {@code controlState} 只用于界面显示：链路一选上就发事件，
+     * 主机还没 S1F13/S1F17 就先收到一堆 S6F11，S1F15 下线后事件照发。
+     * 严格的 GEM 主机会按违规处理。</p>
+     *
+     * <p>注意手动 {@code emitCeid} 是操作员的显式动作，不受此限（见方法注释）——
+     * 这里用计划驱动，才能验证"设备自己决定什么时候发"的那条路径。</p>
+     */
+    @Test
+    void scheduledReportsWaitForOnline() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.session.enableSchedule(new EventSchedule(List.of(
+                    new EventPlan("beat", 2001, new Trigger.Periodic(1_000L, 0L)))), 10);
+
+            assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
+                    "刚选上链路，主机还没建立通信");
+
+            f.tick();
+            assertEquals(0L, f.session.counters().get("emitted"), "未 ONLINE 时不得发出计划驱动的 S6F11");
+
+            f.send(1, 13, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
+                    "S1F13 只建立通信，不等于 ONLINE");
+
+            f.tick();
+            assertEquals(0L, f.session.counters().get("emitted"), "仅 COMMUNICATING 仍然不得上报");
+
+            f.send(1, 17, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.ONLINE, f.session.controlState());
+
+            f.tick();
+            assertEquals(1L, f.session.counters().get("emitted"), "ONLINE 后计划应恢复上报");
+
+            f.send(1, 15, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.OFFLINE, f.session.controlState());
+
+            f.tick();
+            assertEquals(1L, f.session.counters().get("emitted"), "S1F15 下线后不得继续上报");
+        }
+    }
+
     /** 会话 + 客户端夹具。 */
     private static final class Fixture implements AutoCloseable {
 
         private final HsmsSessionRuntime session;
         private final SecsCommunicator client;
+        private final ManualEngineClock clock;
 
         Fixture() throws Exception {
             int port = freePort();
@@ -135,7 +210,8 @@ class SessionControlStateTest {
             CompilationResult compiled = EquipmentCompiler.compile(demo);
 
             SessionSpec spec = new SessionSpec("cs", true, "127.0.0.1", port, 10, 1L, demo);
-            this.session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+            this.clock = new ManualEngineClock(0L);
+            this.session = new HsmsSessionRuntime(spec, compiled.equipment(), this.clock);
             this.session.open();
 
             HsmsSsCommunicatorConfig cfg = new HsmsSsCommunicatorConfig();
@@ -144,6 +220,13 @@ class SessionControlStateTest {
             cfg.deviceId(10);
             this.client = HsmsSsCommunicator.open(cfg);
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
+        }
+
+        /** 推进 1 秒并跑一次心跳：让计划到期的 S6F11 有机会发出。 */
+        void tick() {
+            this.clock.advanceMs(1_000L);
+            this.session.pumpNow();
         }
 
         SecsMessage send(int stream, int function, Secs2 body) throws Exception {
