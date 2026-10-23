@@ -69,4 +69,26 @@ class HsmsSsMessageTest {
 
         assertThrows(IllegalStateException.class, control::deviceId);
     }
+
+    /**
+     * 空报文的 toString() 不该多出一行空白。
+     *
+     * <p>原实现用 {@code String.isEmpty()} 判断，对任意 {@code toString()} 结果恒为 false，
+     * 于是每条空报文都在日志里渲染成 "S1F2 W" 后面跟一个空行 + "."。改用
+     * {@code Secs2.isEmpty()} 后空报文只有一行。</p>
+     */
+    @Test
+    @DisplayName("toString does not render an empty body line")
+    void toStringOmitsEmptyBody() {
+        HsmsSsMessage empty = dataMessage(1);
+        assertEquals("[00 01|01 01|00 00|00 00 00 01]"
+                + System.lineSeparator() + "S1F1.", empty.toString(),
+                "空报文只应有头部与 S/F 行");
+
+        HsmsSsMessage withBody = new HsmsSsMessage(new byte[] {
+                0, 1, 1, 1, 0, 0, 0, 0, 0, 1
+        }, com.shimizukenta.secs.secs2.Secs2.ascii("PING"));
+
+        assertTrue(withBody.toString().contains("PING"), "有报文体的消息必须渲染出来");
+    }
 }

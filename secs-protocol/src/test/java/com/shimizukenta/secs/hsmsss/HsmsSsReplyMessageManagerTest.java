@@ -23,14 +23,56 @@ import org.junit.jupiter.api.Test;
  */
 class HsmsSsReplyMessageManagerTest {
 
+    /**
+     * 一条 S1F2（secondary）。应答判定要求偶数 function，原来的夹具用 S1F1（primary）
+     * 冒充"应答"，恰好掩盖了 P1-5 那个碰撞风险：primary 和 secondary 被同等对待。
+     */
     private static HsmsSsMessage dataMessage(int systemBytes) {
+        return functionMessage(1, 2, systemBytes);
+    }
+
+    private static HsmsSsMessage functionMessage(int stream, int function, int systemBytes) {
         return new HsmsSsMessage(new byte[] {
-                0, 0, 1, 1, 0, 0,
+                0, 1, (byte) stream, (byte) function, 0, 0,
                 (byte)(systemBytes >> 24),
                 (byte)(systemBytes >> 16),
                 (byte)(systemBytes >> 8),
                 (byte)(systemBytes)
         });
+    }
+
+    /**
+     * 同 SystemBytes 的 primary 不能被当成应答吞掉。
+     *
+     * <p>等 S6F12 时主机若发来 SystemBytes 恰好相同的 S6F11，只比 key 的实现会把这条
+     * primary 交给等待者：主机消息凭空消失，等待方还把 S6F11 当 S6F12 解析。</p>
+     */
+    @Test
+    @DisplayName("a primary with colliding system-bytes is not consumed as a reply")
+    void collidingPrimaryIsNotConsumedAsReply() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage primary = functionMessage(6, 11, 7);
+        mgr.entry(primary);
+
+        assertTrue(mgr.put(functionMessage(6, 11, 7)).isPresent(),
+                "同 SystemBytes 的 primary 必须留在接收路径上");
+        assertTrue(mgr.reply(primary, 100L, TimeUnit.MILLISECONDS).isEmpty(), "不应把 primary 当应答");
+
+        assertTrue(mgr.put(functionMessage(6, 12, 7)).isEmpty(), "真正的 S6F12 仍要被消费");
+        assertTrue(mgr.reply(primary, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
+    @Test
+    @DisplayName("control frames are not routed into reply matching")
+    void controlFrameIsNotTreatedAsReply() {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        /* Select.req 没有 stream/function（-1），不能被任何 Pack 消费 */
+        HsmsSsMessage selectReq = new HsmsSsMessage(new byte[] {
+                (byte) 0xFF, (byte) 0xFF, 0, 0, 0, 1, 0, 0, 0, 1
+        });
+        assertTrue(mgr.put(selectReq).isPresent());
     }
 
     @Test

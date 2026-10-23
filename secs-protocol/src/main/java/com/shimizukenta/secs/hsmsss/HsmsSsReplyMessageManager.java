@@ -86,6 +86,14 @@ public class HsmsSsReplyMessageManager {
 	 */
 	public Optional<HsmsSsMessage> put(HsmsSsMessage msg) {
 		
+		/* 只有 secondary（偶数 function）能当应答消费。SystemBytes 只有 4 字节且由
+		   发送端自增，和我们等待中的 W 位请求撞号完全可能；碰撞时只比 key 会
+		   把主机的 primary 当成"应答"吞掉。控制帧 getStream()/getFunction() 为 -1，
+		   不属于 secondary，直接走原路径。 */
+		if ( msg.getStream() >= 0 && msg.getFunction() >= 0 && (msg.getFunction() % 2) != 0 ) {
+			return Optional.of(msg);
+		}
+		
 		final Pack p = getPack(msg);
 		
 		if ( p == null ) {

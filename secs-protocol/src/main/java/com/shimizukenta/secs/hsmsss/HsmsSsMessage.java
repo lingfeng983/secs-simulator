@@ -102,10 +102,11 @@ public class HsmsSsMessage extends AbstractSecsMessage {
 				sb.append(" W");
 			}
 			
-			String body = secs2().toString();
-			
-			if ( ! body.isEmpty() ) {
-				sb.append(BR).append(body);
+			/* 空判断要用 Secs2.isEmpty()：原写法 String.isEmpty() 对任意
+			   toString() 结果恒为 false，空报文也会被渲染成一个空行；
+			   日志里"报文带一行空白"就是这么来的。 */
+			if ( ! secs2().isEmpty() ) {
+				sb.append(BR).append(secs2().toString());
 			}
 			
 			sb.append(".");
