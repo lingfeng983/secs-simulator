@@ -122,13 +122,13 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **无热重载**：`POST /api/v1/sessions/{id}/reload` 按来源配置重新装载。**先编译再动旧会话**——配置有错时旧会话原样跑着。内置演示会话无配置来源，回 409 `not-reloadable`。
 - [x] **无配置管理 API/界面**：已实现。`ConfigStore` 负责读原文、校验、原子写盘；`GET /api/v1/configs` 列目录、`POST` 新建骨架、`GET /api/v1/configs/{name}` 读原文、`POST .../validate` 只校验不落盘、`PUT` 校验通过后落盘；前端新增「配置编辑器」面板（读 / 改 / 校验 / 保存 / 新建）。**编辑器操作原始 JSON 文本**，不走模型往返（`toJson` 会静默丢掉未知键）；**先校验再落盘**，校验不过时原文件一个字节不动。**模板结构化编辑已落地**：曲线（含 step/pwl 关键帧）、组合模板输出表达式、实例 SVID 绑定与参数都能在表单里改；表单读当前原文解析出的 JSON，改模板 id / 实例 id 会同步引用，删除仍被引用的模板会被拒绝。**代价**：表单改动会把整份文件重排成 2 空格缩进（未知键保留），纯文本编辑仍逐字节保真。
 - [x] **无事件编排控制**：`GET /api/v1/sessions/{id}/events` 列计划（id/CEID/触发规则/启用状态），`POST .../events/{planId}?enabled=` 运行时启用/禁用；禁用清条件去抖与延迟队列，不补发；前端新增「事件编排」面板。**运行时状态不写回配置，重载会恢复。**
-- [ ] **`work-dir` 未真正使用**：**已作为配置目录与报文日志目录投入使用**（配置在根下，报文写到 `logs/messages.jsonl`；`ConfigStore` 只列普通文件）；README 承诺的**模板目录**仍未落地，运行日志仍写 stderr。
+- [ ] **模板目录未落地**：`work-dir` 已作为配置目录与报文日志目录投入使用（配置在根下，报文写到 `logs/messages.jsonl`）；README 承诺的**模板目录**仍未接入。运行日志见下一条。
 - [x] **无设备控制状态模型**：新增 `EquipmentControlState`（OFFLINE / COMMUNICATING / ONLINE）。HSMS selected 或 S1F13 → COMMUNICATING，S1F17 → ONLINE，S1F15 或断开 → OFFLINE；会话列表与前端显示。这是操作级简化模型，不是完整 E5 状态机。
 - [x] **无审计**：新增 `AuditLog`（`<work-dir>/logs/audit.jsonl`）与 HTTP `AuditSink`；手动 CEID、报警、会话/配置/手动 SML/事件切换/停机/403 拒绝都有 actor+role+target+detail；`GET /api/v1/audit` 仅 admin；前端 admin 审计面板。见 ADR-0012。
 
 ## 3. P1：API 与前端
 
-- [ ] **WebSocket**：README / pom / package-info 声称有，实际只有 SSE。
+- [x] **WebSocket**：已核实 README / pom / package-info 均无 WebSocket 声明，实际只有 SSE，无需处理。
 - [x] **二进制曲线流**：新增 `GET /api/v1/preview.bin`（SCSP v1，小端，48 字节头 + min/max/avg f64），与 JSON 预览共用 `previewData`；前端「下载二进制」。格式见 `docs/preview-binary.md`。
 - [x] **预览静默截断**：`previewJson` 新增 `svidTotal` / `truncated`，前端明说"共 N 个 SVID，只显示前 32 条"；buckets 上限仍为 500（界面显示桶宽）。
 - [x] **前端只有 Canvas 包络 + 均值线**：Canvas / uPlot / 多轴三种模式；uPlot 支持图例开关、框选缩放、双击复位与光标读数；多轴按单位分配 y 轴（左右交替），只画 avg。
@@ -152,12 +152,12 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [ ] **`secs-dist` 是空模块**：只有 pom，打包实际在 `scripts/package.ps1`。
 - [x] **原生 E2E 没进 verify**：`NativeRuntimeIT` 已修到当前 ticket/health/POST 语义，并通过 failsafe 绑定到 `mvn -Pnative verify`；本地构建原生镜像后 **2 个 IT 通过**。CI native job 已改为 `verify` 并构建前端。
 - [ ] **里程碑验收脚本只有 M0/M1**：M2–M9 没有对应 `accept-*.ps1`。
-- [ ] **构建前置未固化**：项目要求 JDK 25，本机默认 JDK 21；没有 Maven toolchains / enforcer。
+- [x] **构建前置**：已加 `maven-enforcer-plugin`（`require-java-version`），JDK < 25 在 `validate` 阶段即失败并给出明确提示；不再等到编译阶段报"无效的目标发行版"。
 - [~] **服务端部署**：**已移除**（`bb4b617`）。桌面壳不覆盖容器化服务端场景；需要时从历史版本恢复。
-- [ ] **发布未闭环**：版本仍是 `2.0.0-SNAPSHOT`；只有 `v1.0` / `v1.1` 标签；本地 master 领先 origin 28 个提交。
-- [ ] **日志**：只有 stderr 单行日志，没有文件/轮转/级别；`HsmsSessionRuntime` 与 `SecsProbe` 已改用 `Log`，但 `Main` 在 `SECS_SIM_DEBUG` 下仍会打完整栈。
+- [ ] **发布未闭环**：版本仍是 `2.0.0-SNAPSHOT`；只有 `v1.0` / `v1.1` 标签；本地 master 已推送，与 origin 同步。
+- [x] **日志**：已落盘到 `<work-dir>/logs/app.log`（同时写 stderr）。时间戳带日期、按 8MB 轮转保留 3 份、写盘失败自动退化为只写 stderr。级别为 INFO/WARN/ERROR，未做可配置级别（现场需要的是"有没有"，不是"多细"）。
 - [ ] **下轮评审**：`secs-cli` 端到端宿主与 `scripts/`、`packaging/` 的 PowerShell 健壮性未深评。
-- [ ] **历史报告同步**：m6 报告仍写 S1F11 未做；m6b 仍写 S2F33/35/37 未做（m6c 已完成）；m0 的 OpenAPI 承诺已落地（`docs/openapi.yaml`）。README 与 RuntimeMode 的本轮同步已完成。
+- [x] **历史报告同步**：m0/m6/m6b 已在文首加"后续进展"注记指向现状，正文保留原样作为里程碑记录（改写历史报告会让"当时的判断"无法追溯）。
 
 ## 5. 已知接受风险
 

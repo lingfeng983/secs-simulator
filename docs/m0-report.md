@@ -1,5 +1,8 @@
 # M0 验收报告
 
+> **后续进展（2026-10-23 注）**：本文提到的 API 契约已落地于
+> [`openapi.yaml`](openapi.yaml)（OpenAPI 3.0.3，CI 用 `openapi-spec-validator` 校验）。
+
 日期：M0 完成时
 环境：Windows 11 / Oracle GraalVM 25.0.4+7.1 / Maven 3.6.3 / JDK release 25
 

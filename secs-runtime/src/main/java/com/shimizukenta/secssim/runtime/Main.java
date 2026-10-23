@@ -108,6 +108,10 @@ public final class Main {
         AccessControl access = credentials.access();
         String token = credentials.token();
 
+        /* 尽早启用文件日志：进程一关 stderr 就没了，而现场最需要"当时"的日志。
+           放在报文日志/审计日志之前，这样它们打开失败的原因也能落进文件。 */
+        Log.toFile(options.workDir().resolve("logs").resolve("app.log"));
+
         boolean utf8Ok = utf8RoundTrip(options.workDir());
         CountDownLatch stopped = new CountDownLatch(1);
 
