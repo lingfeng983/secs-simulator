@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Launcher window only; the remote web UI needs no IPC.",
+  "windows": ["launcher"],
+  "permissions": ["core:default"]
+}
