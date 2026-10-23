@@ -67,6 +67,41 @@
   </dependencyManagement>
 
   <build>
+    <plugins>
+      <!--
+        构建前置检查：项目要求 JDK 25（maven.compiler.release 也是 25）。
+
+        没有这道检查时，用 JDK 21 构建的失败信息是
+        "Fatal error compiling: 无效的目标发行版: 25"——它不会告诉你
+        "是 JDK 版本不对"，只会在编译阶段毫无上下文地失败。
+        这里在 validate 阶段就拦下，并直接给出要求版本与当前版本。
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>require-jdk-25</id>
+            <phase>validate</phase>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[25,)</version>
+                  <message>
+                    本项目需要 JDK 25 或更高版本（maven.compiler.release=25）。
+                    当前 JDK 不满足要求，请设置 JAVA_HOME 指向 JDK 25 后重试。
+                  </message>
+                </requireJavaVersion>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+
     <pluginManagement>
       <plugins>
         <plugin>
