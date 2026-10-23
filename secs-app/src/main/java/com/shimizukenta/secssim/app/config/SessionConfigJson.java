@@ -20,6 +20,7 @@ import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalCeidDef;
+import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
 import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
 import com.shimizukenta.secssim.core.domain.IdRange;
 import com.shimizukenta.secssim.core.domain.IdSpacePolicy;
@@ -193,11 +194,27 @@ public final class SessionConfigJson {
                     b.pair("reports", b.array(strings(def.reportNames(), b)))));
         }
 
+        /* 设备常量要原样写回：S2F15 落盘后如果这段没保存，
+           "重载后保留"就成了假的——文件里根本没有这些值。 */
+        List<JsonHub> constants = new ArrayList<>();
+        for (EquipmentConstantDef def : equipment.constants()) {
+            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
+            pairs.add(b.pair("id", def.id()));
+            pairs.add(b.pair("name", def.name()));
+            pairs.add(b.pair("type", def.type().name()));
+            pairs.add(b.pair("value", def.value()));
+            if (! def.unit().isEmpty()) {
+                pairs.add(b.pair("unit", def.unit()));
+            }
+            constants.add(b.object(pairs));
+        }
+
         return b.object(
                 b.pair("name", equipment.name()),
                 b.pair("idSpace", idSpaceJson(equipment.idSpace(), b)),
                 b.pair("globalSvids", b.array(globals)),
                 b.pair("globalCeids", b.array(globalCeids)),
+                b.pair("constants", b.array(constants)),
                 b.pair("units", b.array(units)));
     }
 
@@ -361,6 +378,26 @@ public final class SessionConfigJson {
             }
         }
 
+        /* 设备常量（ECV）：可选段，旧配置没有就当"没有常量"，
+           不必升级 schemaVersion——S2F13 回空列表、S2F15 一律拒绝即可。 */
+        List<EquipmentConstantDef> constants = new ArrayList<>();
+        if (equipment.containsKey("constants")) {
+            List<JsonHub> items = JsonAccess.elements(
+                    JsonAccess.array(equipment, "constants", path), path + ".constants");
+            for (int i = 0; i < items.size(); i++) {
+                String itemPath = path + ".constants[" + i + "]";
+                JsonHub item = items.get(i);
+                constants.add(new EquipmentConstantDef(
+                        JsonAccess.integer(item, "id", itemPath),
+                        JsonAccess.string(item, "name", itemPath),
+                        parseType(JsonAccess.string(item, "type", itemPath), itemPath + ".type"),
+                        JsonAccess.optionalDouble(item, "value", itemPath)
+                                .orElseThrow(() -> new ConfigException(itemPath + ".value",
+                                        "设备常量必须给 value")),
+                        JsonAccess.optionalString(item, "unit", itemPath).orElse("")));
+            }
+        }
+
         List<JsonHub> unitItems = JsonAccess.elements(
                 JsonAccess.array(equipment, "units", path), path + ".units");
 
@@ -373,7 +410,7 @@ public final class SessionConfigJson {
             units.add(parseUnit(unitItems.get(i), path + ".units[" + i + "]"));
         }
 
-        return new EquipmentSpec(name, deviceId, units, globalSvids, globalCeids, idSpace);
+        return new EquipmentSpec(name, deviceId, units, globalSvids, globalCeids, idSpace, constants);
     }
 
     private static IdSpacePolicy parseIdSpace(JsonHub jh, String path) {

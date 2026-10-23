@@ -8,6 +8,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,6 +58,8 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.core.EngineClock;
+import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
+import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
@@ -110,6 +114,24 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final EngineClock clock;
     private final HostReportTable hostReports = new HostReportTable();
     private final S6F11Assembler assembler;
+
+    /**
+     * 设备常量（ECV）当前值，按 ECID 索引。
+     *
+     * <p>初值来自配置；主机 S2F15 写入后这里是"新值"，并由 {@link #constantSaver}
+     * 写回配置文件，所以重载/重启后仍然保留。</p>
+     */
+    private final Map<Integer, EquipmentConstantDef> constants;
+
+    /**
+     * 常量落盘回调。
+     *
+     * <p>为什么用回调而不是让会话直接写文件：会话层不该知道"配置文件在哪"，
+     * 那是 {@code SessionLauncher} 的职责（它才持有 sources 映射）。
+     * 为 null 表示这个会话没有来源文件（例如内置演示会话或测试会话），
+     * 此时写入只留在内存里。</p>
+     */
+    private volatile ConstantSaver constantSaver;
     private final TraceManager traces;
     private final Rng eventRng;
 
@@ -188,6 +210,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.spec = spec;
         this.model = model;
         this.clock = clock;
+
+        Map<Integer, EquipmentConstantDef> init = new LinkedHashMap<>();
+        for (EquipmentConstantDef def : spec.equipment().constants()) {
+            init.put(def.id(), def);
+        }
+        this.constants = java.util.Collections.synchronizedMap(init);
         this.store = new ValueStore(spec.seed());
 
         if (values == null) {
@@ -904,6 +932,46 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * 常量落盘回调：把当前常量表交给上层写回配置文件。
+     *
+     * <p>实现方负责"写到哪个文件 + 原子替换"；会话层只保证传出的是一份快照。</p>
+     */
+    @FunctionalInterface
+    public interface ConstantSaver {
+
+        /**
+         * 保存常量。
+         *
+         * @param constants ECID → 常量
+         * @throws IOException 写盘失败
+         */
+        void save(Map<Integer, EquipmentConstantDef> constants) throws IOException;
+    }
+
+    /**
+     * 设置常量落盘回调（由 {@code SessionLauncher} 在启动会话时接入）。
+     *
+     * @param saver 回调；{@code null} 表示不落盘
+     */
+    public void constantSaver(ConstantSaver saver) {
+        this.constantSaver = saver;
+    }
+
+    /**
+     * 当前设备常量快照（按 ECID 升序）。
+     *
+     * @return 常量列表
+     */
+    public List<EquipmentConstantDef> constants() {
+        List<EquipmentConstantDef> list;
+        synchronized (this.constants) {
+            list = new ArrayList<>(this.constants.values());
+        }
+        list.sort(java.util.Comparator.comparingInt(EquipmentConstantDef::id));
+        return list;
+    }
+
+    /**
      * 是否允许主动发送（S6F11 / S6F1 这类 unsolicited）。
      *
      * <p>E30 的两条约束，本项目历史上只满足第一条：</p>
@@ -1254,6 +1322,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     handleEnableEventReport(primary);
                     return;
                 }
+                case 213 -> {
+                    replyS2F14(primary);
+                    return;
+                }
+                case 215 -> {
+                    handleConstantSet(primary);
+                    return;
+                }
                 case 241 -> {
                     handleRemoteCommand(primary);
                     return;
@@ -1526,6 +1602,213 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             this.lastError = e.toString();
             return false;
         }
+    }
+
+    /**
+     * S2F13：主机查询设备常量。回 S2F14。
+     *
+     * <p>E5 形状：{@code S2F13 L[n]{ECID}} → {@code S2F14 L[n]{ECV}}。
+     * 应答必须<b>与请求一一对应</b>：主机按自己请求的顺序解释返回值，
+     * 顺序错了会把超时当成温度。所以这里严格按请求顺序取值，不认识的回 0。</p>
+     *
+     * <p>请求空列表 = 全部常量（E5 允许这种"枚举全部"），与 S1F3 的处理一致。</p>
+     */
+    private void replyS2F14(SecsMessage primary) throws Exception {
+        List<EquipmentConstantDef> known = this.constants();
+        List<Secs2> values = new ArrayList<>();
+
+        List<Integer> requested = new ArrayList<>();
+        for (Secs2 item : requestSvids(primary)) {
+            requested.add(Secs2Read.asInt(item));
+        }
+
+        Secs2Builder b = Secs2.getBuilder();
+
+        if (requested.isEmpty()) {
+            for (EquipmentConstantDef def : known) {
+                values.add(this.constantItem(def));
+            }
+        } else {
+            Map<Integer, EquipmentConstantDef> byId = new HashMap<>();
+            for (EquipmentConstantDef def : known) {
+                byId.put(def.id(), def);
+            }
+
+            for (int ecid : requested) {
+                EquipmentConstantDef def = byId.get(ecid);
+                /* 未知 ECID 回 0：不回会让主机等 T3，而设备其实"听到了但没这个常量" */
+                values.add(def == null ? b.uint4(0) : this.constantItem(def));
+            }
+        }
+
+        this.communicator.send(primary, 2, 14, false, b.list(values));
+    }
+
+    /**
+     * 把一个常量按配置的类型写成 SECS-II 数据项。
+     *
+     * @param def 常量
+     * @return 数据项
+     * @throws Secs2Exception 构造失败
+     */
+    private Secs2 constantItem(EquipmentConstantDef def) throws Secs2Exception {
+        return switch (def.type()) {
+            case U1 -> Secs2.getBuilder().uint1((long) def.value());
+            case U2 -> Secs2.getBuilder().uint2((long) def.value());
+            case U4 -> Secs2.getBuilder().uint4((long) def.value());
+            case U8 -> Secs2.getBuilder().uint8((long) def.value());
+            case I1 -> Secs2.getBuilder().int1((long) def.value());
+            case I2 -> Secs2.getBuilder().int2((long) def.value());
+            case I4 -> Secs2.getBuilder().int4((long) def.value());
+            case I8 -> Secs2.getBuilder().int8((long) def.value());
+            case F4 -> Secs2.getBuilder().float4((float) def.value());
+            case F8 -> Secs2.getBuilder().float8(def.value());
+            /* 常量不该是这些类型；落到这里说明配置写错了，回 0 而不是抛异常让主机等 T3 */
+            default -> Secs2.getBuilder().uint4(0);
+        };
+    }
+
+    /**
+     * S2F15：主机写设备常量。回 S2F16。
+     *
+     * <p>E5 形状：{@code S2F15 L[2]{DATAID, L[n]{L[2]{ECID, ECV}}}} → {@code S2F16 B EAC}。</p>
+     *
+     * <p>EAC 语义：</p>
+     * <ul>
+     *   <li>{@code 0} 接受，全部写入；</li>
+     *   <li>{@code 1} 至少一个常量不存在（<b>整批不生效</b>，不做部分写入）；</li>
+     *   <li>{@code 2} 值越界或类型不对；</li>
+     *   <li>{@code 3} 当前不允许写（未 ONLINE）。</li>
+     * </ul>
+     *
+     * <p><b>为什么整批不生效</b>：主机发一批常量时通常期待"要么都成，要么都不成"。
+     * 部分写入会让设备停留在一个主机以为写成了、其实只写了一半的状态，
+     * 比直接拒绝更难排查。</p>
+     *
+     * <p>写成功后如果接了 {@link ConstantSaver}，会立刻写回配置文件——
+     * 这就是"重载/重启后保留"的实现点。</p>
+     */
+    private void handleConstantSet(SecsMessage primary) throws Exception {
+        int eac;
+
+        try {
+            eac = this.applyConstants(primary.secs2());
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            eac = 2;
+        }
+
+        this.communicator.send(primary, 2, 16, false, Secs2.getBuilder().binary((byte) eac));
+    }
+
+    /**
+     * 校验并应用一批常量写入。
+     *
+     * @param body S2F15 报文体
+     * @return EAC
+     * @throws Secs2Exception 形状不可解析
+     */
+    private int applyConstants(Secs2 body) throws Secs2Exception {
+        if (this.controlState != EquipmentControlState.ONLINE) {
+            /* E30：不在 ONLINE 时不允许改设备参数 */
+            return 3;
+        }
+
+        /* E5 标准形状 L[2]{DATAID, L[n]{L[2]{ECID, ECV}}}：
+           第 1 个元素是 DATAID 标量，第 2 个是常量对列表。
+           省略 DATAID 的非标形状 L{L{...}} 也兼容——判定顺序与 S2F33 一致：
+           先按标准形状（第 1 元素不是列表）认，认不出来再按非标形状。 */
+        if (body.size() == 0) {
+            return 2;
+        }
+
+        Secs2 pairs;
+        if (! isList(body.get(0))) {
+            if (body.size() < 2 || ! isList(body.get(1))) {
+                return 2;
+            }
+            pairs = body.get(1);
+        } else {
+            pairs = body;
+        }
+
+        Map<Integer, EquipmentConstantDef> next = new LinkedHashMap<>();
+        synchronized (this.constants) {
+            next.putAll(this.constants);
+        }
+
+        for (int i = 0; i < pairs.size(); i++) {
+            Secs2 pair;
+            try {
+                pair = pairs.get(i);
+            } catch (Exception e) {
+                this.lastError = e.toString();
+                return 2;
+            }
+
+            if (pair.size() != 2) {
+                return 2;
+            }
+
+            int ecid;
+            double value;
+            try {
+                ecid = Secs2Read.asInt(pair.get(0));
+                value = pair.get(1).getDouble(0);
+            } catch (Exception e) {
+                this.lastError = e.toString();
+                return 2;
+            }
+
+            EquipmentConstantDef def = next.get(ecid);
+            if (def == null) {
+                /* 不认识的 ECID：整批拒绝，让主机知道这批没生效 */
+                return 1;
+            }
+            if (! Double.isFinite(value)) {
+                return 2;
+            }
+            if (! isInRange(def.type(), value)) {
+                return 2;
+            }
+
+            next.put(ecid, def.withValue(value));
+        }
+
+        /* 先落盘再改内存：写盘失败时内存保持旧值，
+           避免出现"设备显示新值、重启后变回旧值"这种最难解释的状态 */
+        ConstantSaver saver = this.constantSaver;
+        if (saver != null) {
+            try {
+                saver.save(java.util.Collections.unmodifiableMap(next));
+            } catch (IOException e) {
+                this.lastError = "常量落盘失败: " + e.getMessage();
+                Log.error("会话 " + this.spec.id() + " 常量落盘失败", e);
+                return 2;
+            }
+        }
+
+        synchronized (this.constants) {
+            this.constants.clear();
+            this.constants.putAll(next);
+        }
+        return 0;
+    }
+
+    /** 整型常量必须是整数且落在类型范围内；浮点只要有限即可。 */
+    private static boolean isInRange(ValueType type, double value) {
+        return switch (type) {
+            case U1 -> value >= 0 && value <= 255 && value == Math.rint(value);
+            case U2 -> value >= 0 && value <= 65535 && value == Math.rint(value);
+            case U4 -> value >= 0 && value <= 4294967295L && value == Math.rint(value);
+            case U8 -> value >= 0 && value == Math.rint(value);
+            case I1 -> value >= -128 && value <= 127 && value == Math.rint(value);
+            case I2 -> value >= -32768 && value <= 32767 && value == Math.rint(value);
+            case I4 -> value >= Integer.MIN_VALUE && value <= Integer.MAX_VALUE && value == Math.rint(value);
+            case I8 -> value == Math.rint(value);
+            case F4, F8 -> true;
+            default -> false;
+        };
     }
 
     /**

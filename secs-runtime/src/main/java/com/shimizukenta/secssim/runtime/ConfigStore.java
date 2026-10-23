@@ -17,7 +17,10 @@ import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.log.Log;
+import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
+import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
+import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 
 /**
  * 配置文件的读取、校验与保存。
@@ -253,6 +256,54 @@ public final class ConfigStore {
             Log.error("配置保存失败: " + file.getFileName(), e);
             return ConfigResult.failed("写盘失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 把设备常量写回配置文件。
+     *
+     * <p>用于 S2F15（主机写 ECV）：主机改的是设备的"调机参数"，现场预期是
+     * <b>重启/重载后仍然保留</b>，所以必须落盘，而不是只留在内存里。</p>
+     *
+     * <p>做法是"读原文 → 只换 equipment.constants → 重新序列化 → 原子替换"：
+     * 这样配置里的其它段（单元、模板、事件编排）一个字节都不会被这次写入改动，
+     * 避免主机写一个温度值把人工调过的模板冲掉。</p>
+     *
+     * @param file      配置文件
+     * @param constants ECID → 常量（调用方传入的是快照）
+     * @throws IOException 读不了或写不了
+     */
+    public static void writeConstants(Path file, java.util.Map<Integer, EquipmentConstantDef> constants) throws IOException {
+        String text;
+        try {
+            text = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IOException("读不了配置 " + file.getFileName() + ": " + e.getMessage(), e);
+        }
+
+        SessionConfig config;
+        try {
+            config = SessionConfigJson.parse(text);
+        } catch (RuntimeException e) {
+            /* ConfigException 也是 RuntimeException：解析失败就不覆盖，宁可写失败 */
+            throw new IOException("配置无法解析，拒绝覆盖 " + file.getFileName() + ": " + e.getMessage(), e);
+        }
+
+        EquipmentSpec equipment = config.spec().equipment();
+        List<EquipmentConstantDef> ordered = new java.util.ArrayList<>(constants.values());
+        ordered.sort(java.util.Comparator.comparingInt(EquipmentConstantDef::id));
+
+        EquipmentSpec updated = new EquipmentSpec(equipment.name(), equipment.deviceId(),
+                equipment.units(), equipment.globalSvids(), equipment.globalCeids(),
+                equipment.idSpace(), ordered);
+
+        SessionSpec spec = config.spec();
+        SessionSpec newSpec = new SessionSpec(spec.id(), spec.passive(), spec.bindHost(),
+                spec.port(), spec.deviceId(), spec.seed(), updated);
+
+        SessionConfig newConfig = new SessionConfig(newSpec, config.schedule(),
+                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), config.templates());
+
+        writeAtomically(file, SessionConfigJson.toJson(newConfig));
     }
 
     /**

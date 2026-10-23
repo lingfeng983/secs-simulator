@@ -134,7 +134,7 @@ public final class SessionLauncher {
         this.close(id);
 
         try {
-            HsmsSessionRuntime opened = prepared.open(this.bus);
+            HsmsSessionRuntime opened = prepared.open(this.bus, file);
             this.sessions.register(opened);
             this.sources.put(id, file);
             return true;
@@ -181,7 +181,7 @@ public final class SessionLauncher {
      * @throws IOException     端口绑定失败
      */
     public HsmsSessionRuntime startFromFile(Path file, int defaultPort) throws ConfigException, IOException {
-        HsmsSessionRuntime runtime = prepare(file, defaultPort).open(this.bus);
+        HsmsSessionRuntime runtime = prepare(file, defaultPort).open(this.bus, file);
         this.sessions.register(runtime);
         /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
            而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
@@ -266,10 +266,26 @@ public final class SessionLauncher {
         }
 
         HsmsSessionRuntime open(EventBus bus) throws IOException {
+            return this.open(bus, null);
+        }
+
+        /**
+         * 打开会话，并把常量落盘接到 {@code source}。
+         *
+         * @param bus    事件总线
+         * @param source 配置来源文件；{@code null} 表示这个会话没有来源（演示会话），
+         *               常量只留在内存
+         * @return 已打开的会话
+         * @throws IOException 打开失败
+         */
+        HsmsSessionRuntime open(EventBus bus, Path source) throws IOException {
             HsmsSessionRuntime runtime = new HsmsSessionRuntime(this.spec, this.model,
                     EngineClock.system(), this.values);
             if (bus != null) {
                 runtime.eventBus(bus);
+            }
+            if (source != null) {
+                runtime.constantSaver(constants -> ConfigStore.writeConstants(source, constants));
             }
             runtime.enableSchedule(this.schedule, this.maxPerSec);
             runtime.collectionEventWbit(this.s6f11Wbit);

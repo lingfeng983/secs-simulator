@@ -119,3 +119,29 @@ Schema v5 = Schema v4 + `templates` 段。设备、ID 空间、事件编排的�
 - 改模板 `id` 会同步实例的 `template`；改实例 `id` 会同步表达式里的 `in.<实例>.`；
   删除仍被实例引用的模板会被拒绝。
 - 表单不绕过校验：保存前仍走 `ConfigStore.validate` 的同一条启动路径。
+
+## equipment.constants（设备常量 / ECV）
+
+可选段。声明设备常量供主机用 S2F13/F14 查询、S2F15/F16 写入。
+
+```json
+"constants": [
+  { "id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 5.0, "unit": "C" },
+  { "id": 502, "name": "BATCH_SIZE", "type": "U2", "value": 100 }
+]
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `id` | 是 | 绝对 ECID（≥1，同一设备内唯一） |
+| `name` | 是 | 名称，S2F14 里不带出，仅用于配置可读性 |
+| `type` | 是 | `U1/U2/U4/U8/I1/I2/I4/I8/F4/F8` |
+| `value` | 是 | 初始值；整型类型要求是整数且不越界 |
+| `unit` | 否 | 单位，仅用于配置可读性 |
+
+**没有这段的旧配置照常工作**：S2F13 回空列表（或对指定 ECID 回 `U4 0`），S2F15 回 `EAC=1`。
+因此不需要升级 `schemaVersion`。
+
+**写入语义**（S2F15）：主机写入后立即覆盖配置文件里的 `equipment.constants` 段并原子替换文件，
+其余段（单元、模板、编排）保持不变。EAC 取值：`0` 全部接受、`1` 有未知 ECID、`2` 值越界或形状非法、
+`3` 未 ONLINE。**整批不生效**，不做部分写入。
