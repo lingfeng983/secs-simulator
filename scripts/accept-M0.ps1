@@ -4,8 +4,13 @@ param([switch]$SkipNative)
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
-$graal = 'E:\Java\graalvm-jdk-25.0.4+7.1'
-if (Test-Path $graal) { $env:JAVA_HOME = $graal }
+# JDK 25 由调用方通过 JAVA_HOME 提供；仅当环境里没设时才尝试 GraalVM 常见安装位置。
+# 原来这里写死了某个人的本机路径，换台机器就跑不起来。
+if (-not $env:JAVA_HOME) {
+    $graal = 'C:\Program Files\Java\graalvm-jdk-25'
+    if (Test-Path $graal) { $env:JAVA_HOME = $graal }
+}
+if (-not $env:JAVA_HOME) { Write-Host '需要 JDK 25：请先设置 JAVA_HOME' -ForegroundColor Red; exit 1 }
 
 Set-Location (Join-Path $PSScriptRoot '..')
 

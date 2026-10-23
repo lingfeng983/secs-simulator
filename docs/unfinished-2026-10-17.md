@@ -149,7 +149,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [~] **JVM 兜底包**：**已移除**（随旧 Windows 分发一起下线）。
 - [~] **自动更新**：**已移除**。原实现含 manifest 校验/SHA256/备份回滚。若后续需要，应从 `289d300` 之前恢复或改由桌面壳的更新器承担。
 - [ ] **跨平台**：Linux 部署脚本（docker/systemd/package-linux）**已移除**（见 `bb4b617`），当前无 Linux 分发；macOS 无产物。
-- [ ] **`secs-dist` 是空模块**：只有 pom，打包实际在 `scripts/package.ps1`。
+- [x] **`secs-dist` 空模块**：已删除（只有 pom、无源码，打包实际在 `scripts/package.ps1`）。
 - [x] **原生 E2E 没进 verify**：`NativeRuntimeIT` 已修到当前 ticket/health/POST 语义，并通过 failsafe 绑定到 `mvn -Pnative verify`；本地构建原生镜像后 **2 个 IT 通过**。CI native job 已改为 `verify` 并构建前端。
 - [ ] **里程碑验收脚本只有 M0/M1**：M2–M9 没有对应 `accept-*.ps1`。
 - [x] **构建前置**：已加 `maven-enforcer-plugin`（`require-java-version`），JDK < 25 在 `validate` 阶段即失败并给出明确提示；不再等到编译阶段报"无效的目标发行版"。

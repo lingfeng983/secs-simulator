@@ -84,16 +84,6 @@ public final class S6F11Assembler {
     }
 
     /**
-     * 该 CEID 是否可用（本地定义或主机定义任一存在）。
-     *
-     * @param ceid CEID
-     * @return 可用返回 {@code true}
-     */
-    public boolean knows(int ceid) {
-        return this.hostReports.reportsFor(ceid).isPresent() || this.model.ceids().containsKey(ceid);
-    }
-
-    /**
      * 组装报文体。
      *
      * @param ceid CEID

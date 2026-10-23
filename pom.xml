@@ -28,7 +28,6 @@
     <module>secs-api-http</module>
     <module>secs-runtime</module>
     <module>secs-cli</module>
-    <module>secs-dist</module>
   </modules>
 
   <properties>

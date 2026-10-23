@@ -18,7 +18,6 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 | `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |
 | `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |
 | `secs-cli` | 端到端测试宿主 | runtime |
-| `secs-dist` | 打包模块（当前占位；实际打包脚本在 `scripts/package.ps1`） | runtime + cli |
 
 依赖方向由 `ArchitectureTest` 强制，越界即构建失败。
 
