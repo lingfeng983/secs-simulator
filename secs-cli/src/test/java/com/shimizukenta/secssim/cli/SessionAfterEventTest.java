@@ -29,6 +29,7 @@ import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
+import com.shimizukenta.secs.secs2.Secs2;
 
 /**
  * AfterEvent：A 在 t=1000 触发，B 在 t=1500，C 在 t=1700。
@@ -58,6 +59,11 @@ class SessionAfterEventTest {
                 }
             });
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
+            /* 主机上线流程：E30 要求 S1F13 建立通信、S1F17 请求 ONLINE；
+               主动上报（S6F11/S6F1）只允许在 ONLINE 之后 */
+            client.send(1, 13, true, Secs2.getBuilder().list());
+            client.send(1, 17, true, Secs2.getBuilder().list());
             awaitPeer(session);
 
             clock.advanceMs(1_000L);
@@ -84,7 +90,7 @@ class SessionAfterEventTest {
     private static int nextCeid(BlockingQueue<SecsMessage> events) throws Exception {
         SecsMessage message = events.poll(3L, TimeUnit.SECONDS);
         assertNotNull(message, "应收到 S6F11");
-        return Secs2Read.asInt(message.secs2().get(0));
+        return Secs2Read.asInt(message.secs2().get(1));
     }
 
     private static void awaitPeer(HsmsSessionRuntime session) throws InterruptedException {

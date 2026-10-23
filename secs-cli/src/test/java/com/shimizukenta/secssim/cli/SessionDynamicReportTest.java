@@ -46,7 +46,7 @@ class SessionDynamicReportTest {
             assertEquals(0, f.defineReport(3001, List.of(1001)), "DRACK 应为 OK");
 
             f.session.emitCeid(2001);
-            Secs2 report = f.nextS6F11().get(1).get(0);
+            Secs2 report = f.nextS6F11().get(2).get(0);
 
             assertEquals(3001, Secs2Read.asInt(report.get(0)));
             assertEquals(1, report.get(1).size(), "主机定义优先：既没有 PRESS，也不注入 UNIT_ID");
@@ -60,7 +60,7 @@ class SessionDynamicReportTest {
             assertEquals(0, f.linkEvent(2001, List.of(3100)), "LRACK=0");
 
             f.session.emitCeid(2001);
-            Secs2 reports = f.nextS6F11().get(1);
+            Secs2 reports = f.nextS6F11().get(2);
 
             assertEquals(1, reports.size(), "主机链接只挂了一个报告");
             assertEquals(3100, Secs2Read.asInt(reports.get(0).get(0)));
@@ -91,12 +91,12 @@ class SessionDynamicReportTest {
         try (Fixture f = new Fixture()) {
             f.defineReport(3001, List.of(1001));
             f.session.emitCeid(2001);
-            assertEquals(1, f.nextS6F11().get(1).get(0).get(1).size(), "主机定义生效");
+            assertEquals(1, f.nextS6F11().get(2).get(0).get(1).size(), "主机定义生效");
 
             assertEquals(0, f.defineReport(-1, List.of()), "用空报告列表清空全部定义");
 
             f.session.emitCeid(2001);
-            assertEquals(3, f.nextS6F11().get(1).get(0).get(1).size(), "清空后回落到本地配置（含 UNIT_ID）");
+            assertEquals(3, f.nextS6F11().get(2).get(0).get(1).size(), "清空后回落到本地配置（含 UNIT_ID）");
         }
     }
 
@@ -156,6 +156,52 @@ class SessionDynamicReportTest {
         }
     }
 
+    /**
+     * S2F37 的 CEED 按 {@code B[1]}（0/1）发也要收。
+     *
+     * <p>E30 定义是 BOOLEAN，但现场确有主机用 B。严格实现会抛类型异常 → ERACK=1，
+     * 主机以为设备不支持事件开关。</p>
+     */
+    @Test
+    void acceptsBinaryCeedInS2F37() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Secs2Builder b = Secs2.getBuilder();
+            assertEquals(0, f.ackRaw(b.list(b.binary((byte) 0), b.list(b.uint4(2001))), 2, 37, 38),
+                    "B[1] 形式的 CEED 应 ERACK=0");
+
+            f.session.emitCeid(2001);
+            assertTrue(f.drain().isEmpty(), "CEED=0 应禁用该事件");
+        }
+    }
+
+    /** 标准形状与省略 DATAID 的非标形状都要能吃下（P0-1 回归）。 */
+    @Test
+    void acceptsBothStandardAndLegacyS2F33Shapes() throws Exception {
+        try (Fixture f = new Fixture()) {
+            int legacyCode = f.defineReportLegacyShape(3001, List.of(1001));
+            assertEquals(0, legacyCode, "非标形状仍应 DRACK=0, lastError=" + f.session.lastError());
+
+            f.session.emitCeid(2001);
+            assertEquals(1, f.nextS6F11().get(2).get(0).get(1).size(), "非标形状的定义已生效");
+
+            assertEquals(0, f.defineReport(3001, List.of(1001, 1003)), "标准形状 DRACK=0");
+
+            f.session.emitCeid(2001);
+            assertEquals(2, f.nextS6F11().get(2).get(0).get(1).size(), "标准形状的定义已覆盖旧定义");
+        }
+    }
+
+    /** 报文体是垃圾时回 DRACK=1，而不是抛出去让主机等到 T3。 */
+    @Test
+    void malformedS2F33IsRejectedWithDrackOne() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Secs2Builder b = Secs2.getBuilder();
+            assertEquals(1, f.ackRaw(b.list(b.uint4(0), b.uint4(1)), 2, 33, 34),
+                    "第二个元素不是列表 → DRACK=1");
+            assertEquals(1, f.ackRaw(b.uint4(7), 2, 33, 34), "整体不是列表 → DRACK=1");
+        }
+    }
+
     /** 会话 + 客户端夹具。 */
     private static final class Fixture implements AutoCloseable {
 
@@ -183,6 +229,7 @@ class SessionDynamicReportTest {
                 }
             });
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
         }
 
         int defineReport(int rptid, List<Integer> vids) throws Exception {
@@ -192,6 +239,16 @@ class SessionDynamicReportTest {
             if (rptid > 0) {
                 reports.add(b.list(b.uint4(rptid), b.list(uints(vids, b))));
             }
+
+            /* E5 标准形状：L[2]{DATAID, L[n]{L[2]{RPTID, L[m] VID}}} */
+            return this.ack(b.list(b.uint4(0), b.list(reports)), 2, 33, 34);
+        }
+
+        /** 省略 DATAID 的非标形状 {@code L{L{...}, L{}}}：现场有主机这么发，必须继续支持。 */
+        int defineReportLegacyShape(int rptid, List<Integer> vids) throws Exception {
+            Secs2Builder b = Secs2.getBuilder();
+            List<Secs2> reports = new ArrayList<>();
+            reports.add(b.list(b.uint4(rptid), b.list(uints(vids, b))));
 
             return this.ack(b.list(b.list(reports), b.list()), 2, 33, 34);
         }
@@ -204,7 +261,7 @@ class SessionDynamicReportTest {
                 links.add(b.list(b.uint4(ceid), b.list(uints(rptids, b))));
             }
 
-            return this.ack(b.list(b.list(), b.list(links)), 2, 35, 36);
+            return this.ack(b.list(b.uint4(0), b.list(links)), 2, 35, 36);
         }
 
         int setEnabled(boolean enabled, List<Integer> ceids) throws Exception {
@@ -220,6 +277,10 @@ class SessionDynamicReportTest {
                 list.add(b.uint4(value));
             }
             return list;
+        }
+
+        int ackRaw(Secs2 body, int stream, int function, int replyFunction) throws Exception {
+            return this.ack(body, stream, function, replyFunction);
         }
 
         private int ack(Secs2 body, int stream, int function, int replyFunction) throws Exception {

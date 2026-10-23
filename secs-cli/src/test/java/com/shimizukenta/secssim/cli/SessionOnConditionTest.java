@@ -34,6 +34,7 @@ import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
+import com.shimizukenta.secs.secs2.Secs2;
 
 /**
  * OnCondition：条件连续成立 debounceMs 才发一次 S6F11。
@@ -64,6 +65,11 @@ class SessionOnConditionTest {
                 }
             });
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
+            /* 主机上线流程：E30 要求 S1F13 建立通信、S1F17 请求 ONLINE；
+               主动上报（S6F11/S6F1）只允许在 ONLINE 之后 */
+            client.send(1, 13, true, Secs2.getBuilder().list());
+            client.send(1, 17, true, Secs2.getBuilder().list());
             awaitPeer(session);
 
             values.value = 200.0;
@@ -78,7 +84,7 @@ class SessionOnConditionTest {
             session.pumpNow();
             SecsMessage first = events.poll(3L, TimeUnit.SECONDS);
             assertNotNull(first, "t=1s 应触发一次 S6F11");
-            assertEquals(2001, Secs2Read.asInt(first.secs2().get(0)));
+            assertEquals(2001, Secs2Read.asInt(first.secs2().get(1)));
 
             values.value = 100.0;
             session.pumpNow();

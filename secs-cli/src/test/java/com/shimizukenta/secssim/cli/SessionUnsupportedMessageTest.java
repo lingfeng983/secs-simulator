@@ -65,6 +65,36 @@ class SessionUnsupportedMessageTest {
         }
     }
 
+    /**
+     * E5：S9F5 只能针对无法识别的 <b>primary</b> 发送；迟到的 secondary 必须静默丢弃。
+     *
+     * <p>这是真实产线上很容易踩的一脚：默认 {@code s6f11Wbit=false} 时我们不登记应答管理器，
+     * 主机按惯例回的 S6F12 找不到匹配，会一路进到会话层的 primary 分发。
+     * 修复前它会换来一条 SystemBytes 与主机应答相同的 S9F5，严格的主机会因此断链。</p>
+     */
+    @Test
+    void secondaryIsSilentlyDroppedInsteadOfS9F5() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.client.send(6, 12, false, Secs2.getBuilder().list(Secs2.getBuilder().uint1(0)));
+
+            assertNull(f.received.poll(700L, TimeUnit.MILLISECONDS),
+                    "偶数 function 是 secondary，不得回 S9F5");
+        }
+    }
+
+    /** 主机回给我们的迟到应答同理：S6F2 / S1F2 / S2F34 都不该换来 S9Fx。 */
+    @Test
+    void lateRepliesToOurRequestsAreNotTreatedAsPrimary() throws Exception {
+        try (Fixture f = new Fixture()) {
+            for (int function : new int[] {2, 34, 36, 38}) {
+                f.client.send(2, function, false, Secs2.getBuilder().list(Secs2.getBuilder().uint1(0)));
+            }
+
+            assertNull(f.received.poll(700L, TimeUnit.MILLISECONDS),
+                    "应答报文一律不得触发 S9Fx");
+        }
+    }
+
     private static int freePort() throws Exception {
         try (ServerSocket socket = new ServerSocket(0)) {
             socket.setReuseAddress(true);
@@ -94,6 +124,7 @@ class SessionUnsupportedMessageTest {
             this.client = HsmsSsCommunicator.open(cfg);
             this.client.addSecsMessageReceiveListener(this.received::add);
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
         }
 
         @Override

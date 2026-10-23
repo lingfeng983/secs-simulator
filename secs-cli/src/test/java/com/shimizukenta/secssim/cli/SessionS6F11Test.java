@@ -49,15 +49,17 @@ class SessionS6F11Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             CompletableFuture<SecsMessage> received = captureS6F11(client);
 
             session.emitCeid(2001);
             Secs2 body = awaitBody(received);
 
-            assertEquals(2, body.size(), "S6F11 报文体是 L[2]");
-            assertEquals(2001, Secs2Read.asInt(body.get(0)), "第一个元素是 CEID");
+            assertEquals(3, body.size(), "S6F11 报文体是 L[3]{DATAID, CEID, L{报告}}");
+            assertEquals(0, Secs2Read.asInt(body.get(0)), "DATAID 固定为 0");
+            assertEquals(2001, Secs2Read.asInt(body.get(1)), "第二个元素是 CEID");
 
-            Secs2 reports = body.get(1);
+            Secs2 reports = body.get(2);
             assertEquals(1, reports.size(), "该 CEID 挂了一个报告");
 
             Secs2 report = reports.get(0);
@@ -98,6 +100,7 @@ class SessionS6F11Test {
                 }
             });
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             session.emitCeid(2001);
 
@@ -122,10 +125,11 @@ class SessionS6F11Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             CompletableFuture<SecsMessage> received = captureS6F11(client);
 
             session.emitCeid(2003);
-            Secs2 report = awaitBody(received).get(1).get(0);
+            Secs2 report = awaitBody(received).get(2).get(0);
 
             assertEquals(3002, Secs2Read.asInt(report.get(0)));
             assertEquals(3, report.get(1).size(), "MEASURE 原本只有两个值，注入 UNIT_ID 后为三个");

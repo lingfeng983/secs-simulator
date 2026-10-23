@@ -22,13 +22,19 @@ import com.shimizukenta.secssim.core.value.ValueSource;
  *
  * <p>E30 的结构是：</p>
  * <pre>
- * S6F11 W: &lt;L[2]
+ * S6F11 W: &lt;L[3]
+ *             &lt;U4 DATAID&gt;
  *             &lt;U4 CEID&gt;
  *             &lt;L[n]
  *               &lt;L[2] &lt;U4 RPTID&gt; &lt;L[m] &lt;V 值…&gt;&gt;
  *             &gt;
  *           &gt;
  * </pre>
+ *
+ * <p>{@code DATAID} 用于在同一 CEID 的多次上报之间建立关联（主机侧多腔/多批次区分）。
+ * 本项目不维护事务型 DATAID，固定填 {@code 0}——这是 E30 允许的“不使用 DATAID”写法：
+ * 字段必须在，值恒为 0。少这一层会让按 L[3] 解析的标准主机把 CEID 当 DATAID、
+ * 报告列表当 CEID，整条报文错位。</p>
  *
  * <p>报告里的值<b>不带 SVID</b>，主机只能按 S2F33/S2F35 定义的顺序解释。
  * 因此组装时必须先问 {@link HostReportTable}：主机是否在运行时改过这条 CEID 的链接或这个
@@ -38,6 +44,9 @@ import com.shimizukenta.secssim.core.value.ValueSource;
  * 但<b>主机自定义的报告绝不能注入</b>——多一个值会让整条报文错位。</p>
  */
 public final class S6F11Assembler {
+
+    /** 事件报文的 DATAID：不区分事务时固定为 0。 */
+    public static final int DATAID = 0;
 
     private final ResolvedEquipment model;
     private final ValueSource values;
@@ -103,7 +112,10 @@ public final class S6F11Assembler {
                     builder.list(this.valuesOf(asset, tMs))));
         }
 
-        return builder.list(builder.uint4(ceid), builder.list(reports));
+        return builder.list(
+                builder.uint4(DATAID),
+                builder.uint4(ceid),
+                builder.list(reports));
     }
 
     private List<Integer> reportIdsFor(int ceid) {
