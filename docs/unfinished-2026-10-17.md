@@ -141,6 +141,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - [x] **没有前端测试**：已接 Vitest 22 例 + Playwright 3 例（mock API）+ 1 例（真实 Java 后端）；CI 有 `npm test`、`frontend-e2e`、`frontend-e2e-real` 三个 job。
 - [x] **前端不认角色**：`/api/v1/health` 与 `POST /api/v1/ticket` 回显 `user` / `role`；界面顶部显示「身份」，只读身份下「上报 / 置位 / 清除 / CEID / 目录填入」全部禁用并给出原因提示；401 与 403 在界面上分开报。**浏览器端到端验证本轮未做**（认证凭据需用户本人输入），只做了 `tsc --noEmit` + `vite build`。
 - [x] **没有 OpenAPI 契约**：新增 `docs/openapi.yaml`（OpenAPI 3.0.3，覆盖 22 个路径/16 个 schema），CI 增加 `openapi-spec-validator` 校验。
+- [x] **前端只有一个 1900 行的 App.tsx、九个面板纵向堆叠**（2026-10-23 重构）：拆成 `src/state/`（`useBackend` 统一轮询与写操作、`useEventStream` 抽 SSE 重连、`usePreferences` 持久化界面偏好、`useToasts` 通知）、`src/panels/`（十个面板各自成文件）、`src/ui/`（`DataTable` 通用表格、`CommandPalette`、`ToastHost`、`Modal`、`useHotkeys`）、`src/charts/`、`src/lib/`（纯函数，可单测）。**行为变化**：①界面改成侧边栏导航 + 单面板显示，切换即刷新，不再无限滚动；②操作结果改为右下角提示条，旧「事件流」面板退居查账；③新增命令面板（Ctrl+K，含面板跳转与目录里的 CEID/SVID 直达）、表格搜索/排序/CSV 导出、报文按会话/方向/正文过滤与暂停接收、曲线窗口统计表、浅色/深色/紧凑密度切换、面板与筛选偏好跨刷新保留；④五个轮询定时器收成一个调度器，页面切到后台暂停、回到前台立即补一次；⑤Canvas 迷你图按 devicePixelRatio 绘制，高分屏不再糊。**代价**：e2e 用例需先点侧边栏切面板，Mock E2E 从 3 例增到 9 例。
 
 ## 4. P2：分发与工程化
 

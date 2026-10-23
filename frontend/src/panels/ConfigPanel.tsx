@@ -1,0 +1,269 @@
+import { useEffect, useState } from 'react';
+import { TemplateEditor } from '../TemplateEditor';
+import { Panel, StatCard } from '../ui/Panel';
+import type { PanelBaseProps } from './types';
+
+/**
+ * 配置编辑器面板。
+ *
+ * <p>编辑的是<b>原始 JSON 文本</b>：不动模板表单时保存逐字节写回，
+ * 多写的键、空格和缩进都不会被动过。模板表单改动会保留未知键，
+ * 但会把整份文件重排成 2 空格缩进——这一点在界面上说清楚，
+ * 别让人以为文件被"改坏了"。</p>
+ */
+export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
+  const { configList, canOperate, operateHint, refreshConfigs } = backend;
+
+  const [configName, setConfigName] = useState('');
+  const [draft, setDraft] = useState('');
+  const [baseline, setBaseline] = useState('');
+  const [problems, setProblems] = useState<string[]>([]);
+  const [notice, setNotice] = useState('');
+  const [newName, setNewName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  /** 编辑区里的内容相对磁盘有没有变。 */
+  const dirty = draft !== baseline;
+
+  /* 配置列表变了以后，如果当前打开的配置已经被删掉，就关掉它 */
+  useEffect(() => {
+    if (configName !== '' && !configList.some((entry) => entry.name === configName)) {
+      setConfigName('');
+      setDraft('');
+      setBaseline('');
+      setProblems([]);
+      setNotice('配置已不存在，编辑器已关闭');
+    }
+  }, [configList, configName]);
+
+  const openConfig = async (name: string) => {
+    /* 有未保存改动时先问一句：悄悄丢掉别人正在写的东西最招人烦 */
+    if (dirty && !window.confirm(`${configName} 有未保存的改动，切换会丢掉。继续？`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const text = await backend.readConfig(name);
+      if (text === null) {
+        return;
+      }
+      setConfigName(name);
+      setDraft(text);
+      setBaseline(text);
+      setProblems([]);
+      setNotice(`已打开 ${name}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 丢掉本地改动，重新拉磁盘上的原文。 */
+  const reloadConfig = async () => {
+    if (configName === '') {
+      return;
+    }
+    setBusy(true);
+    try {
+      const text = await backend.readConfig(configName);
+      if (text === null) {
+        return;
+      }
+      setDraft(text);
+      setBaseline(text);
+      setProblems([]);
+      setNotice(`已重新载入 ${configName}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 只校验不落盘：用户想确认改动能不能编译，不该被迫先覆盖一份能用的配置。 */
+  const onValidate = async () => {
+    if (configName === '') {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await backend.validateConfig(configName, draft);
+      if (result === null) {
+        return;
+      }
+      setProblems(result.problems);
+      setNotice(result.valid ? '校验通过' : '校验未通过');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSave = async () => {
+    if (configName === '') {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await backend.saveConfig(configName, draft);
+      if (result === null) {
+        return;
+      }
+      if (result.status === 200) {
+        setProblems([]);
+        setBaseline(draft);
+        setNotice(`已保存 ${configName}（已在运行的会话需要重载才生效）`);
+        void refreshConfigs();
+      } else {
+        setProblems(result.problems);
+        setNotice(result.status === 422 ? '保存被拒：配置有问题，未落盘' : `保存失败（HTTP ${result.status}）`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 新建：让后端生成一份能直接编译的骨架。 */
+  const onNewConfig = async () => {
+    const name = newName.trim();
+    if (name === '') {
+      return;
+    }
+    if (!name.toLowerCase().endsWith('.json')) {
+      setNotice('文件名必须以 .json 结尾');
+      return;
+    }
+    if (dirty && !window.confirm(`${configName} 有未保存的改动，新建会丢掉。继续？`)) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const status = await backend.createConfig(name);
+      if (status !== 201) {
+        return;
+      }
+      const text = await backend.readConfig(name);
+      if (text === null) {
+        return;
+      }
+      setConfigName(name);
+      setDraft(text);
+      setBaseline(text);
+      setProblems([]);
+      setNotice(`已新建 ${name}，改完点「保存」才会落盘`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel
+      id="panel-config"
+      title="配置编辑器"
+      description="读 / 改 / 校验 / 保存 / 新建。校验按真实启动路径走（解析 → 编译设备模型 → 建模板图），过了才会落盘。"
+      stats={
+        <>
+          <StatCard label="目录内配置" value={configList.length} />
+          <StatCard
+            label="当前状态"
+            value={configName === '' ? '未打开' : dirty ? '有未保存改动' : '与磁盘一致'}
+            tone={configName !== '' && dirty ? 'warn' : undefined}
+          />
+        </>
+      }
+      actions={
+        <>
+          <label className="field">
+            新文件名
+            <input
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder="新文件名.json"
+              disabled={!canOperate}
+            />
+          </label>
+          <button type="button" onClick={() => void onNewConfig()} disabled={newName.trim() === '' || !canOperate || busy}>
+            新建
+          </button>
+          <button type="button" onClick={() => void reloadConfig()} disabled={configName === '' || busy}>
+            重新载入
+          </button>
+          <button type="button" onClick={() => void onValidate()} disabled={configName === '' || busy}>
+            校验
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void onSave()}
+            disabled={configName === '' || !canOperate || busy}
+            title={canOperate ? '校验通过后原子落盘' : operateHint}
+          >
+            保存
+          </button>
+        </>
+      }
+    >
+      <div className="preview-controls">
+        <label className="field">
+          配置
+          <select
+            value={configList.some((entry) => entry.name === configName) ? configName : ''}
+            onChange={(event) => {
+              if (event.target.value !== '') {
+                void openConfig(event.target.value);
+              }
+            }}
+          >
+            <option value="">（选择配置）</option>
+            {configList.map((entry) => (
+              <option key={entry.name} value={entry.name}>
+                {entry.name}（{entry.sizeBytes} 字节）
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {configName === '' ? (
+        <p className="hint">
+          从上面挑一份配置，或输入新文件名点「新建」。配置只认 <code>--work-dir</code> 下的文件名。
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            {configName}
+            {dirty ? '（有未保存的改动）' : '（与磁盘一致）'}
+            {notice !== '' ? `　${notice}` : ''}
+          </p>
+          <textarea
+            className="config-editor"
+            spellCheck={false}
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setProblems([]);
+            }}
+            aria-label="配置 JSON 原文"
+          />
+          <TemplateEditor
+            text={draft}
+            onChange={(next) => {
+              setDraft(next);
+              setProblems([]);
+              setNotice('结构化编辑已修改草稿，保存前请校验');
+            }}
+          />
+          {problems.length > 0 && (
+            <ul className="problems">
+              {problems.map((problem, index) => (
+                <li key={index}>{problem}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      <p className="hint">
+        编辑的是原始 JSON 文本；不动模板表单时保存逐字节写回，多写的键、空格和缩进都不会被动过。
+        模板表单改动会保留未知键，但会把整份文件重排成 2 空格缩进。
+        {canOperate ? '' : ` 当前角色不足，保存已禁用。`}
+      </p>
+    </Panel>
+  );
+}

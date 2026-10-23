@@ -31,6 +31,8 @@ dist/
 frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
+# 本地截图（人工/临时 Playwright 脚本产出，不是源码）
+frontend/shots/
 
 # ---- local state & logs ----
 logs/

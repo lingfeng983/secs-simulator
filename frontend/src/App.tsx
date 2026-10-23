@@ -1,2131 +1,435 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
-import uPlot from 'uplot';
-import {
-  createClient,
-  hasRole,
-  readToken,
-  roleLabel,
-  saveToken,
-  type AlarmState,
-  type AuditEntryView,
-  type Catalog,
-  type ConfigEntry,
-  type EventPlanView,
-  type Health,
-  type SessionSummary,
-  type TerminalMessage,
-  type PreviewData,
-  type PreviewSeries,
-  type WireMessage,
-} from './api';
-import { TemplateEditor } from './TemplateEditor';
-import { mergeMessages, type MessageEntry } from './messageHistory';
+import { createClient, readToken, roleLabel, saveToken } from './api';
+import { useBackend } from './state/useBackend';
+import { usePreferences, type ThemePreference } from './state/usePreferences';
+import { useToasts } from './state/useToasts';
+import { useEventStream, streamStateLabel, type StreamState } from './state/useEventStream';
+import { ToastHost } from './ui/ToastHost';
+import { CommandPalette } from './ui/CommandPalette';
+import { ShortcutHelp, type ShortcutHint } from './ui/ShortcutHelp';
+import { useHotkeys } from './ui/useHotkeys';
+import type { CommandItem } from './lib/command';
 
-interface LogLine {
-  at: string;
-  text: string;
+import { SessionsPanel } from './panels/SessionsPanel';
+import { AlarmsPanel } from './panels/AlarmsPanel';
+import { PreviewPanel } from './panels/PreviewPanel';
+import { CatalogPanel } from './panels/CatalogPanel';
+import { EventsPanel } from './panels/EventsPanel';
+import { SendPanel } from './panels/SendPanel';
+import { MessagesPanel } from './panels/MessagesPanel';
+import { ConfigPanel } from './panels/ConfigPanel';
+import { AuditPanel } from './panels/AuditPanel';
+import { ConsolePanel } from './panels/ConsolePanel';
+
+/** 一个面板的入口。 */
+interface TabDef {
+  id: string;
+  label: string;
+  group: string;
+  /** 侧边栏上的小图标。 */
+  icon: string;
 }
 
-const MAX_LOG = 400;
-const MAX_MESSAGES = 200;
-
-/** 事件编排的触发规则摘要。 */
-function triggerLabel(plan: EventPlanView): string {
-  switch (plan.triggerType) {
-    case 'at':
-      return `一次性 @ ${plan.atMs ?? 0} ms`;
-    case 'periodic':
-      return `每 ${plan.periodMs ?? 0} ms${plan.jitterMs ? ` ± ${plan.jitterMs} ms` : ''}`;
-    case 'onCondition':
-      return `${plan.expression ?? ''}（连续 ${plan.debounceMs ?? 0} ms）`;
-    case 'afterEvent':
-      return `${plan.sourcePlan ?? '?'} 之后 ${plan.delayMs ?? 0} ms`;
-    default:
-      return plan.triggerType;
-  }
-}
-
-/** 可选的时间窗：后端引擎时钟从进程启动起算，时间窗要相对"现在"而不是 0。 */
-const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
-  { label: '最近 1 分钟', ms: 60_000 },
-  { label: '最近 5 分钟', ms: 300_000 },
-  { label: '最近 15 分钟', ms: 900_000 },
+/**
+ * 面板清单。
+ *
+ * <p>分组是给人看的：设备 / 数据 / 工具三块，
+ * 面板多起来以后还能靠分组找到位置。</p>
+ */
+const TABS: readonly TabDef[] = [
+  { id: 'sessions', label: '会话', group: '设备', icon: '▦' },
+  { id: 'alarms', label: '报警', group: '设备', icon: '⚠' },
+  { id: 'events', label: '事件编排', group: '设备', icon: '↻' },
+  { id: 'preview', label: '曲线预览', group: '数据', icon: '∿' },
+  { id: 'catalog', label: '设备目录', group: '数据', icon: '☰' },
+  { id: 'messages', label: '报文', group: '数据', icon: '⇄' },
+  { id: 'send', label: '手动发送', group: '工具', icon: '➤' },
+  { id: 'config', label: '配置编辑器', group: '工具', icon: '⚙' },
+  { id: 'audit', label: '审计', group: '工具', icon: '☑' },
+  { id: 'console', label: '事件流', group: '工具', icon: '▷' },
 ];
 
-/** 预览图里选中的桶区间；跨所有 SVID 共享，便于对齐读数。 */
-interface ZoomRange {
-  start: number;
-  end: number;
-}
-
-interface SparklineProps {
-  series: PreviewSeries;
-  fromMs: number;
-  bucketMs: number;
-  zoom: ZoomRange | null;
-  onZoom: (zoom: ZoomRange | null) => void;
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
-}
-
-function clampZoom(zoom: ZoomRange | null, count: number): { start: number; end: number } {
-  if (count <= 1) {
-    return { start: 0, end: 0 };
-  }
-  const start = clamp(zoom?.start ?? 0, 0, count - 1);
-  const end = clamp(zoom?.end ?? count - 1, start + 1, count - 1);
-  return { start, end };
-}
-
-function formatValue(value: number): string {
-  if (!Number.isFinite(value)) {
-    return '-';
-  }
-  if (Math.abs(value) >= 1000) {
-    return value.toFixed(1);
-  }
-  return value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function formatSeconds(seconds: number): string {
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}m${(seconds - minutes * 60).toFixed(1)}s`;
-  }
-  return `${seconds.toFixed(2)}s`;
-}
+/** 快捷键说明表。 */
+const SHORTCUTS: readonly ShortcutHint[] = [
+  { keys: 'Ctrl+K', description: '打开命令面板：跳面板、找 CEID、执行动作' },
+  { keys: '1..9', description: '直接跳到第 N 个面板（0 是第 10 个）' },
+  { keys: 'R', description: '立即刷新所有数据' },
+  { keys: '/', description: '聚焦当前面板的搜索框' },
+  { keys: '?', description: '打开这张快捷键表' },
+  { keys: 'Esc', description: '关闭浮层' },
+];
 
 /**
- * 单条 SVID 的曲线：min/max 包络 + avg 线。
+ * 应用外壳。
  *
- * <p>悬停读数与拖动放大都在浏览器里做：预览数据已经按桶取回，
- * 放大只是换一个可见桶区间，不需要再打一次后端。</p>
+ * <p>这里只做三件事：把数据接起来、把面板摆好、把快捷键接上。
+ * 具体逻辑都在 {@link useBackend} 与各个面板里，
+ * 加一个面板只要在这里登记一行。</p>
  */
-function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineProps): JSX.Element {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  const dragAnchor = useRef<number | null>(null);
-  const [hover, setHover] = useState<number | null>(null);
-  const [drag, setDrag] = useState<ZoomRange | null>(null);
-
-  const count = series.avg.length;
-  const visible = clampZoom(zoom, count);
-  const viewStart = visible.start;
-  const viewEnd = visible.end;
-
-  useEffect(() => {
-    const canvas = ref.current;
-    const context = canvas?.getContext('2d');
-    if (canvas == null || context == null) {
-      return;
-    }
-
-    const width = canvas.width;
-    const height = canvas.height;
-    context.clearRect(0, 0, width, height);
-
-    if (count === 0) {
-      return;
-    }
-
-    let low = Number.POSITIVE_INFINITY;
-    let high = Number.NEGATIVE_INFINITY;
-    for (let index = viewStart; index <= viewEnd; index += 1) {
-      low = Math.min(low, series.min[index]);
-      high = Math.max(high, series.max[index]);
-    }
-    if (!Number.isFinite(low) || !Number.isFinite(high)) {
-      return;
-    }
-    if (!(high > low)) {
-      high = low + 1;
-    }
-
-    const span = Math.max(1, viewEnd - viewStart);
-    const x = (index: number) => ((index - viewStart) / span) * (width - 1);
-    const y = (value: number) => height - 2 - ((value - low) / (high - low)) * (height - 4);
-
-    /* 三条水平参考线：没有刻度也要让人看出"高/中/低" */
-    context.strokeStyle = 'rgba(128, 128, 128, 0.22)';
-    context.lineWidth = 1;
-    for (let line = 0; line <= 3; line += 1) {
-      const at = 2 + (line / 3) * (height - 4);
-      context.beginPath();
-      context.moveTo(0, at);
-      context.lineTo(width, at);
-      context.stroke();
-    }
-
-    context.beginPath();
-    for (let index = viewStart; index <= viewEnd; index += 1) {
-      const value = series.max[index];
-      if (index === viewStart) {
-        context.moveTo(x(index), y(value));
-      } else {
-        context.lineTo(x(index), y(value));
-      }
-    }
-    for (let index = viewEnd; index >= viewStart; index -= 1) {
-      context.lineTo(x(index), y(series.min[index]));
-    }
-    context.closePath();
-    context.fillStyle = 'rgba(68, 147, 248, 0.22)';
-    context.fill();
-
-    context.beginPath();
-    for (let index = viewStart; index <= viewEnd; index += 1) {
-      const value = series.avg[index];
-      if (index === viewStart) {
-        context.moveTo(x(index), y(value));
-      } else {
-        context.lineTo(x(index), y(value));
-      }
-    }
-    context.strokeStyle = '#4493f8';
-    context.lineWidth = 1.5;
-    context.stroke();
-
-    if (drag !== null) {
-      const from = Math.min(drag.start, drag.end);
-      const to = Math.max(drag.start, drag.end);
-      const left = clamp(x(from), 0, width);
-      const right = clamp(x(to), 0, width);
-      context.fillStyle = 'rgba(68, 147, 248, 0.16)';
-      context.fillRect(left, 0, Math.max(1, right - left), height);
-    }
-
-    if (hover !== null) {
-      const index = clamp(hover, viewStart, viewEnd);
-      const atX = x(index);
-      context.strokeStyle = 'rgba(128, 128, 128, 0.75)';
-      context.lineWidth = 1;
-      context.beginPath();
-      context.moveTo(atX, 0);
-      context.lineTo(atX, height);
-      context.stroke();
-
-      context.fillStyle = '#4493f8';
-      context.beginPath();
-      context.arc(atX, y(series.avg[index]), 3, 0, Math.PI * 2);
-      context.fill();
-    }
-  }, [series, hover, drag, viewStart, viewEnd, count]);
-
-  const bucketAt = (event: ReactPointerEvent<HTMLCanvasElement>): number | null => {
-    const canvas = ref.current;
-    if (canvas === null) {
-      return null;
-    }
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0) {
-      return null;
-    }
-    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-    return Math.round(viewStart + ratio * Math.max(0, viewEnd - viewStart));
-  };
-
-  const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const index = bucketAt(event);
-    if (index === null) {
-      return;
-    }
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragAnchor.current = index;
-    setDrag({ start: index, end: index });
-    setHover(index);
-  };
-
-  const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const index = bucketAt(event);
-    if (index === null) {
-      return;
-    }
-    setHover(index);
-    if (dragAnchor.current !== null) {
-      setDrag({ start: dragAnchor.current, end: index });
-    }
-  };
-
-  const finishDrag = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const anchor = dragAnchor.current;
-    const index = bucketAt(event);
-    dragAnchor.current = null;
-    setDrag(null);
-
-    if (anchor !== null && index !== null && Math.abs(index - anchor) >= 3) {
-      onZoom({ start: Math.min(anchor, index), end: Math.max(anchor, index) });
-    }
-  };
-
-  const hovered = hover === null ? null : clamp(hover, viewStart, viewEnd);
-  const readout =
-    hovered === null
-      ? '悬停读数'
-      : `${formatSeconds((fromMs + hovered * bucketMs) / 1000)}  min ${formatValue(series.min[hovered])}  max ${formatValue(series.max[hovered])}  avg ${formatValue(series.avg[hovered])}`;
-
-  return (
-    <div className="spark">
-      <span className="spark-id">{series.svid}</span>
-      <canvas
-        ref={ref}
-        width={760}
-        height={72}
-        title="悬停看读数；横向拖动选择区间放大；双击重置缩放"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={finishDrag}
-        onPointerCancel={() => {
-          dragAnchor.current = null;
-          setDrag(null);
-        }}
-        onPointerLeave={() => {
-          if (dragAnchor.current === null) {
-            setHover(null);
-          }
-        }}
-        onDoubleClick={() => onZoom(null)}
-      />
-      <span className="spark-readout">{readout}</span>
-    </div>
-  );
-}
-
-const MULTI_AXIS_COLORS = ['#4493f8', '#f0883e', '#3fb950', '#db61a2', '#a371f7', '#d29922', '#39c5cf', '#ff7b72'];
-
-/** 多轴：同一张图里按单位分配 y 轴，左右交替排列；只画 avg。 */
-function MultiAxisChart({ series, fromMs, bucketMs }: {
-  series: PreviewSeries[];
-  fromMs: number;
-  bucketMs: number;
-}): JSX.Element {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const plotRef = useRef<uPlot | null>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (host === null || series.length === 0) {
-      return;
-    }
-
-    const unitOf = (item: PreviewSeries) => (item.unit ?? '').trim() || '无单位';
-    const units = [...new Set(series.map(unitOf))];
-    const unitIndex = new Map(units.map((unit, index) => [unit, index]));
-    const x = series[0].avg.map((_, index) => (fromMs + index * bucketMs) / 1000);
-    const data = [x, ...series.map((item) => item.avg)] as uPlot.AlignedData;
-
-    const scales: uPlot.Scales = { x: { time: false } };
-    for (let i = 0; i < units.length; i += 1) {
-      scales[`y${i}`] = {};
-    }
-
-    const axes: uPlot.Axis[] = [
-      { stroke: '#8b949e', grid: { stroke: 'rgba(128, 128, 128, 0.18)' } },
-      ...units.map((unit, index) => ({
-        scale: `y${index}`,
-        side: index % 2 === 0 ? (3 as const) : (1 as const),
-        label: unit,
-        stroke: MULTI_AXIS_COLORS[index % MULTI_AXIS_COLORS.length],
-        grid: { show: index === 0, stroke: 'rgba(128, 128, 128, 0.14)' },
-      })),
-    ];
-
-    const seriesOptions: uPlot.Series[] = [
-      { label: 't(s)' },
-      ...series.map((item, index) => ({
-        label: `${item.svid} ${unitOf(item)}`,
-        stroke: MULTI_AXIS_COLORS[index % MULTI_AXIS_COLORS.length],
-        width: 1.5,
-        scale: `y${unitIndex.get(unitOf(item)) ?? 0}`,
-        points: { show: false },
-      })),
-    ];
-
-    const plot = new uPlot(
-      {
-        width: Math.max(320, host.clientWidth || 900),
-        height: 300,
-        padding: [14, 14, 4, 4],
-        cursor: { drag: { x: true, y: false, setScale: true }, points: { show: false } },
-        legend: { show: true, live: true },
-        scales,
-        series: seriesOptions,
-        axes,
-      },
-      data,
-      host,
-    );
-    plotRef.current = plot;
-
-    const resize = () => {
-      const width = host.clientWidth;
-      if (width > 0 && plotRef.current !== null) {
-        plotRef.current.setSize({ width, height: 300 });
-      }
-    };
-    resize();
-
-    let observer: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(resize);
-      observer.observe(host);
-    }
-
-    return () => {
-      observer?.disconnect();
-      plot.destroy();
-      plotRef.current = null;
-    };
-  }, [series, fromMs, bucketMs]);
-
-  return (
-    <div className="multi-axis-block">
-      <div className="uplot-title">多轴（按单位分配 y 轴，avg 曲线）</div>
-      <div className="multi-axis-host" ref={hostRef} />
-    </div>
-  );
-}
-
-interface UplotSeriesProps {
-  series: PreviewSeries;
-  fromMs: number;
-  bucketMs: number;
-}
-
-/**
- * uPlot 版本的单条曲线。
- *
- * <p>Canvas 版本适合轻量总览；uPlot 提供图例开关、框选缩放、双击复位和光标读数。
- * 两条路径共享同一份 {@link PreviewData}，切换只影响渲染，不重新请求后端。</p>
- */
-function UplotSeries({ series, fromMs, bucketMs }: UplotSeriesProps): JSX.Element {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const plotRef = useRef<uPlot | null>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (host === null) {
-      return;
-    }
-
-    const x = series.avg.map((_, index) => (fromMs + index * bucketMs) / 1000);
-    const data: uPlot.AlignedData = [x, series.min, series.max, series.avg];
-    const plot = new uPlot(
-      {
-        width: Math.max(320, host.clientWidth || 760),
-        height: 220,
-        padding: [12, 12, 4, 4],
-        cursor: {
-          drag: { x: true, y: false, setScale: true },
-          points: { show: false },
-        },
-        legend: { show: true, live: true },
-        scales: { x: { time: false } },
-        series: [
-          { label: 't(s)' },
-          { label: 'min', stroke: 'rgba(68, 147, 248, 0.35)', width: 1, points: { show: false } },
-          { label: 'max', stroke: 'rgba(68, 147, 248, 0.35)', width: 1, points: { show: false } },
-          { label: 'avg', stroke: '#4493f8', width: 1.8, points: { show: false } },
-        ],
-        bands: [{ series: [1, 2], fill: 'rgba(68, 147, 248, 0.18)' }],
-        axes: [
-          { stroke: '#8b949e', grid: { stroke: 'rgba(128, 128, 128, 0.18)' } },
-          { stroke: '#8b949e', grid: { stroke: 'rgba(128, 128, 128, 0.18)' } },
-        ],
-      },
-      data,
-      host,
-    );
-    plotRef.current = plot;
-
-    const resize = () => {
-      const width = host.clientWidth;
-      if (width > 0 && plotRef.current !== null) {
-        plotRef.current.setSize({ width, height: 220 });
-      }
-    };
-    resize();
-
-    let observer: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(resize);
-      observer.observe(host);
-    }
-
-    return () => {
-      observer?.disconnect();
-      plot.destroy();
-      plotRef.current = null;
-    };
-  }, [series, fromMs, bucketMs]);
-
-  return (
-    <div className="uplot-block">
-      <div className="uplot-title">SVID {series.svid}</div>
-      <div className="uplot-host" ref={hostRef} />
-    </div>
-  );
-}
-
-/** E5 简化控制状态的中文标签。 */
-function controlStateLabel(state: string | undefined): string {
-  switch (state) {
-    case 'OFFLINE':
-      return '离线';
-    case 'COMMUNICATING':
-      return '通信中';
-    case 'ONLINE':
-      return '在线';
-    default:
-      return state ?? '-';
-  }
-}
-
 export function App(): JSX.Element {
   const [token, setToken] = useState<string>(() => readToken());
   const [draftToken, setDraftToken] = useState('');
-  const [health, setHealth] = useState<Health | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [ceid, setCeid] = useState(2001);
-  const [log, setLog] = useState<LogLine[]>([]);
-  const [streamState, setStreamState] = useState('未连接');
-  const [messages, setMessages] = useState<MessageEntry[]>([]);
-  const [preview, setPreview] = useState<PreviewData | null>(null);
-  const [previewSession, setPreviewSession] = useState('');
-  const [windowMs, setWindowMs] = useState(WINDOWS[0].ms);
-  const [chartMode, setChartMode] = useState<'canvas' | 'uplot' | 'multi'>('canvas');
-  const [zoom, setZoom] = useState<ZoomRange | null>(null);
-  const [alarmSession, setAlarmSession] = useState('');
-  const [alid, setAlid] = useState(1001);
-  const [alarmText, setAlarmText] = useState('TEMP HIGH');
-  const [alarmCategory, setAlarmCategory] = useState(1);
-  const [alarms, setAlarms] = useState<AlarmState[]>([]);
-  const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
-  const [newConfig, setNewConfig] = useState('demo');
-  const [catalogSession, setCatalogSession] = useState('');
-  const [smlSession, setSmlSession] = useState('');
-  const [smlDraft, setSmlDraft] = useState('S1F1 W.');
-  const [smlResult, setSmlResult] = useState('');
-  const [smlBusy, setSmlBusy] = useState(false);
-  const [eventSession, setEventSession] = useState('');
-  const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
-  const [auditEntries, setAuditEntries] = useState<AuditEntryView[]>([]);
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [configList, setConfigList] = useState<ConfigEntry[]>([]);
-  const [configName, setConfigName] = useState('');
-  const [configDraft, setConfigDraft] = useState('');
-  const [configBaseline, setConfigBaseline] = useState('');
-  const [configProblems, setConfigProblems] = useState<string[]>([]);
-  const [configNotice, setConfigNotice] = useState('');
-  const [newConfigName, setNewConfigName] = useState('');
-  const logRef = useRef<HTMLPreElement | null>(null);
-  const nextMessageKey = useRef(0);
-  const openedOnce = useRef(false);
-  const lastStreamErrorAt = useRef(0);
+  const [streamState, setStreamState] = useState<StreamState>('idle');
+  const [streamDetail, setStreamDetail] = useState('未连接');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
+  const notifier = useToasts();
+  const { preferences, update, resolvedTheme } = usePreferences();
   const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
+  const backend = useBackend(client, notifier);
 
-  /*
-   * 会改变设备状态的操作（触发 CEID、报警置位/清除）至少要 operator。
-   * 角色未知时按"没有权限"处理：按钮灰掉并说明原因，好过让人点了才吃 403。
-   * 后端仍然最终裁决，这里只是不制造无谓的尝试。
-   */
-  const role = health?.role;
-  const canOperate = hasRole(role, 'operator');
-  const isAdmin = hasRole(role, 'admin');
-  /* 按钮灰掉时要说清是"角色不够"还是"还不知道角色"，否则用户会以为界面坏了 */
-  const operateHint =
-    role === undefined
-      ? '尚未取到身份信息，连上后端后才能判断权限'
-      : `当前角色为${roleLabel(role)}（只读），需要操作员或管理员`;
+  const { appendLog, pushMessages, activeSession } = backend;
 
-  const append = useCallback((text: string) => {
-    setLog((previous) => {
-      const next = [...previous, { at: new Date().toLocaleTimeString(), text }];
-      return next.length > MAX_LOG ? next.slice(next.length - MAX_LOG) : next;
-    });
-  }, []);
+  /* 事件流：状态、提示与报文都转发给控制器 */
+  useEventStream(
+    client,
+    preferences.pauseStream,
+    {
+      onFlush: useCallback(
+        (messages: import('./api').WireMessage[]) => {
+          pushMessages(messages);
+        },
+        [pushMessages],
+      ),
+      onState: useCallback((state: StreamState, detail: string) => {
+        setStreamState(state);
+        setStreamDetail(detail);
+      }, []),
+      onNotice: useCallback(
+        (text: string) => {
+          appendLog(text);
+        },
+        [appendLog],
+      ),
+    },
+  );
 
-  useEffect(() => {
-    if (client === null) {
-      return;
-    }
+  const activeTab = TABS.some((tab) => tab.id === preferences.activeTab) ? preferences.activeTab : TABS[0].id;
 
-    let cancelled = false;
+  const goTo = useCallback(
+    (id: string) => {
+      update({ activeTab: id });
+    },
+    [update],
+  );
 
-    const refresh = async () => {
-      const [healthResult, sessionsResult] = await Promise.allSettled([client.health(), client.sessions()]);
-
-      if (cancelled) {
-        return;
-      }
-
-      if (healthResult.status === 'fulfilled') {
-        setHealth(healthResult.value);
-      } else {
-        append(`健康检查失败: ${(healthResult.reason as Error).message}`);
-      }
-
-      if (sessionsResult.status === 'fulfilled') {
-        setSessions(sessionsResult.value);
-      } else {
-        append(`会话列表刷新失败: ${(sessionsResult.reason as Error).message}`);
-      }
-    };
-
-    refresh();
-    const timer = window.setInterval(refresh, 2000);
-
-    let stream: EventSource | null = null;
-    let retryTimer = 0;
-    let disposed = false;
-    let lastTicketErrorAt = 0;
-
-    const scheduleReconnect = () => {
-      if (disposed || retryTimer !== 0) {
-        return;
-      }
-      retryTimer = window.setTimeout(() => {
-        retryTimer = 0;
-        void connect();
-      }, 2000);
-    };
-
-    const connect = async () => {
-      if (disposed) {
-        return;
-      }
-
-      try {
-        /* 票据是一次性的：每次（重）连都要重新换一张，不能复用 URL */
-        const ticket = await client.ticket();
-        if (disposed) {
-          return;
-        }
-
-        const source = new EventSource(client.eventsUrl(ticket));
-        stream = source;
-
-        source.addEventListener('open', () => {
-          setStreamState('已连接');
-          if (openedOnce.current) {
-            /* 断线期间的报文后端不补发，界面必须明说，否则用户会以为中间没有报文 */
-            append('事件流已重连：断线期间的报文不会补发');
-            void refresh();
-          }
-          openedOnce.current = true;
-        });
-        source.addEventListener('heartbeat', (event) => {
-          const at = Number(event.data);
-          setStreamState(Number.isFinite(at) ? `心跳 ${new Date(at).toLocaleTimeString()}` : '心跳');
-        });
-        source.addEventListener('message', (event) => {
-          try {
-            const parsed = JSON.parse(event.data) as WireMessage;
-            const key = nextMessageKey.current;
-            nextMessageKey.current += 1;
-            setMessages((previous) => {
-              const next = [...previous, { key, msg: parsed }];
-              return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
-            });
-          } catch {
-            append('收到无法解析的报文事件');
-          }
-        });
-        source.addEventListener('error', () => {
-          const state = source.readyState === EventSource.CLOSED ? '已关闭' : '连接中断';
-          setStreamState(`断开（${state}）`);
-
-          const now = Date.now();
-          if (now - lastStreamErrorAt.current > 5000) {
-            lastStreamErrorAt.current = now;
-            append(`事件流断开（${state}），2 秒后用新票据重连`);
-          }
-
-          /* 票据只能用一次，自动重连会带着旧票据被 401，必须自己换票重连 */
-          source.close();
-          if (stream === source) {
-            stream = null;
-          }
-          scheduleReconnect();
-        });
-      } catch (error) {
-        const now = Date.now();
-        if (now - lastTicketErrorAt > 10_000) {
-          lastTicketErrorAt = now;
-          append(`获取事件流票据失败: ${(error as Error).message}`);
-        }
-        setStreamState('等待重连');
-        scheduleReconnect();
-      }
-    };
-
-    void connect();
-
-    return () => {
-      cancelled = true;
-      disposed = true;
-      window.clearInterval(timer);
-      if (retryTimer !== 0) {
-        window.clearTimeout(retryTimer);
-      }
-      stream?.close();
-    };
-  }, [client, append]);
+  /* 切面板时立刻拉一次新数据：不要让用户盯着上一个面板的旧值。
+     用 ref 取最新的 refreshAll，避免闭包里钉住旧的 activeSession。 */
+  const refreshRef = useRef(backend.refreshAll);
+  refreshRef.current = backend.refreshAll;
 
   useEffect(() => {
-    if (logRef.current !== null) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [log]);
+    void refreshRef.current();
+  }, [activeTab, client]);
 
-  /* 会话列表变化后保证预览下拉框指向一个存在的会话 */
-  useEffect(() => {
-    if (sessions.length === 0) {
-      if (previewSession !== '') {
-        setPreviewSession('');
-      }
-      return;
-    }
-    if (!sessions.some((session) => session.id === previewSession)) {
-      setPreviewSession(sessions[0].id);
-    }
-  }, [sessions, previewSession]);
+  /* ---------- 命令面板 ---------- */
 
-  /* 会话列表变化后保证报警下拉框指向一个存在的会话 */
-  useEffect(() => {
-    if (sessions.length === 0) {
-      if (alarmSession !== '') {
-        setAlarmSession('');
-      }
-      return;
-    }
-    if (!sessions.some((session) => session.id === alarmSession)) {
-      setAlarmSession(sessions[0].id);
-    }
-  }, [sessions, alarmSession]);
+  const commands = useMemo<CommandItem[]>(() => {
+    const items: CommandItem[] = [];
 
-  /* 活动报警 / 终端消息轮询：只在选中会话时跑 */
-  useEffect(() => {
-    if (client === null || alarmSession === '') {
-      setAlarms([]);
-      setTerminalMessages([]);
-      return;
-    }
-
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const [nextAlarms, nextTerminal] = await Promise.all([
-          client.alarms(alarmSession),
-          client.terminalMessages(alarmSession),
-        ]);
-        if (!cancelled) {
-          setAlarms(nextAlarms);
-          setTerminalMessages(nextTerminal);
-        }
-      } catch {
-        /* 会话可能刚好被关闭，下一轮再试 */
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [client, alarmSession]);
-
-  /* 会话列表变化后保证目录下拉框指向一个存在的会话 */
-  useEffect(() => {
-    if (sessions.length === 0) {
-      if (catalogSession !== '') {
-        setCatalogSession('');
-      }
-      return;
-    }
-    if (!sessions.some((session) => session.id === catalogSession)) {
-      setCatalogSession(sessions[0].id);
-    }
-  }, [sessions, catalogSession]);
-
-  /*
-   * 设备目录：CEID 的号段按单元独立，跨会话复用编号会指错事件，
-   * 所以目录必须跟着选中的会话换。
-   *
-   * 而且要轮询：主机随时可能用 S2F33/S2F35/S2F37 改定义，
-   * 只在切换时拉一次的话，"来源"列会一直停在"本地"，
-   * 恰好在最需要它的时候说谎。
-   */
-  useEffect(() => {
-    if (client === null || catalogSession === '') {
-      setCatalog(null);
-      return;
-    }
-
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await client.catalog(catalogSession);
-        if (!cancelled) {
-          setCatalog(next);
-        }
-      } catch {
-        if (!cancelled) {
-          setCatalog(null);
-        }
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [client, catalogSession]);
-
-  /* 会话列表变化后保证手动发送下拉框指向一个存在的会话 */
-  useEffect(() => {
-    if (sessions.length === 0) {
-      if (smlSession !== '') {
-        setSmlSession('');
-      }
-      return;
-    }
-    if (!sessions.some((session) => session.id === smlSession)) {
-      setSmlSession(sessions[0].id);
-    }
-  }, [sessions, smlSession]);
-
-  /* 会话列表变化后保证事件编排下拉框指向一个存在的会话 */
-  useEffect(() => {
-    if (sessions.length === 0) {
-      if (eventSession !== '') {
-        setEventSession('');
-      }
-      return;
-    }
-    if (!sessions.some((session) => session.id === eventSession)) {
-      setEventSession(sessions[0].id);
-    }
-  }, [sessions, eventSession]);
-
-  /*
-   * 事件编排列表：轮询。
-   *
-   * <p>运行时的启用状态不属于配置：主机/操作员随时可能改，
-   * 只在切换会话时拉一次会让界面一直显示旧状态。</p>
-   */
-  useEffect(() => {
-    if (client === null || eventSession === '') {
-      setEventPlans([]);
-      return;
-    }
-
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await client.events(eventSession);
-        if (!cancelled) {
-          setEventPlans(next);
-        }
-      } catch {
-        if (!cancelled) {
-          setEventPlans([]);
-        }
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [client, eventSession]);
-
-  /*
-   * 审计：只有 admin 能看；低频轮询即可。
-   */
-  useEffect(() => {
-    if (client === null || !isAdmin) {
-      setAuditEntries([]);
-      return;
-    }
-
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await client.audit(200);
-        if (!cancelled) {
-          setAuditEntries(next);
-        }
-      } catch {
-        if (!cancelled) {
-          setAuditEntries([]);
-        }
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [client, isAdmin]);
-
-  /*
-   * 配置目录列表：轮询。
-   *
-   * <p>只轮询列表，不轮询正文——正文正在编辑时自动刷新会把用户正在写的东西冲掉。
-   * 列表本身很少变，5 秒一次足够。
-   * </p>
-   */
-  const refreshConfigs = useCallback(async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      setConfigList(await client.configs());
-    } catch {
-      /* 读不到目录先不打扰用户，下一轮再试 */
-    }
-  }, [client]);
-
-  useEffect(() => {
-    if (client === null) {
-      setConfigList([]);
-      return;
-    }
-
-    void refreshConfigs();
-    const timer = window.setInterval(() => void refreshConfigs(), 5000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [client, refreshConfigs]);
-
-  const onSaveToken = () => {
-    const value = draftToken.trim();
-    if (value === '') {
-      return;
-    }
-    saveToken(value);
-    setToken(value);
-    append('token 已保存');
-  };
-
-  const onPreview = async () => {
-    if (client === null) {
-      return;
-    }
-
-    const target = sessions.find((session) => session.id === previewSession) ?? sessions[0];
-    if (target === undefined) {
-      return;
-    }
-
-    try {
-      /* 先取一次 uptime，时间窗才是"最近 N 分钟"而不是"开局 N 秒" */
-      const fresh = await client.health();
-      setHealth(fresh);
-      const to = Math.max(1, fresh.uptimeMs ?? 0);
-      const from = Math.max(0, to - windowMs);
-      setPreview(await client.preview(target.id, from, to, 120));
-      setZoom(null);
-      append(`已刷新 ${target.id} 的曲线（${Math.round((to - from) / 1000)} 秒窗口）`);
-    } catch (error) {
-      append(`预览失败: ${(error as Error).message}`);
-    }
-  };
-
-  /** 下载当前时间窗的二进制预览；格式是 SCSP v1。 */
-  const onDownloadPreview = async () => {
-    if (client === null) {
-      return;
-    }
-    const target = sessions.find((session) => session.id === previewSession) ?? sessions[0];
-    if (target === undefined) {
-      return;
-    }
-
-    try {
-      const fresh = await client.health();
-      setHealth(fresh);
-      const to = Math.max(1, fresh.uptimeMs ?? 0);
-      const from = Math.max(0, to - windowMs);
-      const blob = await client.previewBinary(target.id, from, to, 120);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `preview-${target.id}-${Date.now()}.bin`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      append(`已下载 ${target.id} 的二进制曲线（${blob.size} 字节）`);
-    } catch (error) {
-      append(`下载二进制曲线失败: ${(error as Error).message}`);
-    }
-  };
-
-  const onAlarm = async (set: boolean) => {
-    if (client === null) {
-      return;
-    }
-
-    const target = sessions.find((session) => session.id === alarmSession) ?? sessions[0];
-    if (target === undefined) {
-      return;
-    }
-
-    try {
-      const status = await client.alarm(target.id, alid, set, alarmText, alarmCategory);
-      append(`报警${set ? '置位' : '清除'} ${target.id} ALID ${alid} -> HTTP ${status}`);
-    } catch (error) {
-      append(`报警失败: ${(error as Error).message}`);
-    }
-  };
-
-  const onTrigger = async (session: SessionSummary) => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const status = await client.trigger(session.id, ceid);
-      append(`触发 ${session.id} CEID ${ceid} -> HTTP ${status}`);
-    } catch (error) {
-      append(`触发失败: ${(error as Error).message}`);
-    }
-  };
-
-  /**
-   * 会话生命周期操作的状态码文案。
-   *
-   * <p>服务端已经在日志里记了原因，这里只负责把状态码说成人话：
-   * 400 分成"配置有问题"和"名字不合法"两种可能，光一个 400 谁也看不出该改哪。
-   * </p>
-   */
-  const lifecycleMessage = (status: number, what: string): string => {
-    switch (status) {
-      case 400:
-        return `${what}失败（配置不合法或读不到，详见服务端日志）`;
-      case 404:
-        return `${what}失败：会话不存在`;
-      case 409:
-        return `${what}失败：标识已被占用，或该会话没有配置来源`;
-      default:
-        return `${what} -> HTTP ${status}`;
-    }
-  };
-
-  const onCreateSession = async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const status = await client.createSession(newConfig.trim());
-      append(lifecycleMessage(status, '新建会话'));
-    } catch (error) {
-      append(`新建会话失败: ${(error as Error).message}`);
-    }
-  };
-
-  const onCloseSession = async (session: SessionSummary) => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const status = await client.closeSession(session.id);
-      append(lifecycleMessage(status, `关闭会话 ${session.id}`));
-    } catch (error) {
-      append(`关闭会话失败: ${(error as Error).message}`);
-    }
-  };
-
-  const onReloadSession = async (session: SessionSummary) => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const status = await client.reloadSession(session.id);
-      append(lifecycleMessage(status, `重载会话 ${session.id}`));
-    } catch (error) {
-      append(`重载会话失败: ${(error as Error).message}`);
-    }
-  };
-
-  /**
-   * 载入历史报文，补上 SSE 断线/刷新期间缺的那一段。
-   *
-   * <p>按全部字段去重后按时间合并，避免"历史覆盖实时"。
-   * 只保留面板上限 {@link MAX_MESSAGES} 条，完整历史在服务端文件里。</p>
-   */
-  const onLoadHistory = async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const page = await client.messages('', '', 1_000);
-      setMessages((previous) => {
-        const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
-        nextMessageKey.current = merged.nextKey;
-        return merged.entries;
+    for (const tab of TABS) {
+      items.push({
+        id: `tab:${tab.id}`,
+        label: `前往 ${tab.label}`,
+        group: '跳转面板',
+        hint: tab.group,
+        keywords: [tab.id, tab.label],
+        run: () => goTo(tab.id),
       });
-      append(
-        page.truncated
-          ? `已载入最近 ${page.messages.length} 条历史（共 ${page.total} 条，面板只保留最近 ${MAX_MESSAGES} 条）`
-          : `已载入历史 ${page.messages.length} 条`,
-      );
-    } catch (error) {
-      append(`载入历史失败: ${(error as Error).message}`);
     }
+
+    items.push(
+      {
+        id: 'action:refresh',
+        label: '刷新全部数据',
+        group: '操作',
+        hint: 'R',
+        run: () => void backend.refreshAll(),
+      },
+      {
+        id: 'action:history',
+        label: '载入报文历史',
+        group: '操作',
+        run: () => void backend.loadHistory(),
+      },
+      {
+        id: 'action:export',
+        label: '导出报文 JSONL',
+        group: '操作',
+        run: () => void backend.exportMessages(),
+      },
+      {
+        id: 'action:theme',
+        label: '切换主题（浅色 / 深色 / 跟随系统）',
+        group: '操作',
+        hint: resolvedTheme === 'dark' ? '当前深色' : '当前浅色',
+        run: () => {
+          const order: ThemePreference[] = ['light', 'dark', 'system'];
+          const next = order[(order.indexOf(preferences.theme) + 1) % order.length];
+          update({ theme: next });
+        },
+      },
+      {
+        id: 'action:density',
+        label: '切换表格密度（紧凑 / 宽松）',
+        group: '操作',
+        hint: preferences.density === 'compact' ? '当前紧凑' : '当前宽松',
+        run: () => {
+          update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' });
+        },
+      },
+      {
+        id: 'action:shortcuts',
+        label: '查看快捷键',
+        group: '操作',
+        hint: '?',
+        run: () => setHelpOpen(true),
+      },
+    );
+
+    /* 目录里的 CEID / SVID 直接变成命令：不用先切面板再找 */
+    for (const ceid of backend.catalog?.ceids ?? []) {
+      items.push({
+        id: `ceid:${ceid.ceid}`,
+        label: `上报 CEID ${ceid.ceid}${ceid.slot ? ` · ${ceid.slot}` : ''}`,
+        group: '设备目录',
+        hint: ceid.owner,
+        keywords: ['ceid', String(ceid.ceid), ceid.slot ?? ''],
+        run: () => {
+          backend.setCeid(ceid.ceid);
+          goTo('sessions');
+          notifier.info(`已把 CEID 填成 ${ceid.ceid}`);
+        },
+      });
+    }
+
+    for (const svid of backend.catalog?.svids ?? []) {
+      items.push({
+        id: `svid:${svid.svid}`,
+        label: `查看 SVID ${svid.svid}${svid.slot ? ` · ${svid.slot}` : ''}`,
+        group: '设备目录',
+        hint: svid.unit,
+        keywords: ['svid', String(svid.svid), svid.slot ?? ''],
+        run: () => goTo('catalog'),
+      });
+    }
+
+    return items;
+  }, [backend, goTo, notifier, preferences.density, preferences.theme, resolvedTheme, update]);
+
+  /* ---------- 快捷键 ---------- */
+
+  useHotkeys(
+    [
+      { combo: 'mod+k', description: '命令面板', handler: () => setPaletteOpen(true) },
+      { combo: '?', description: '快捷键表', handler: () => setHelpOpen((previous) => !previous) },
+      { combo: 'r', description: '刷新', handler: () => void backend.refreshAll() },
+      { combo: '/', description: '聚焦搜索', handler: () => focusSearch() },
+      {
+        combo: 'escape',
+        description: '关闭浮层',
+        handler: () => {
+          setPaletteOpen(false);
+          setHelpOpen(false);
+        },
+      },
+      ...TABS.map((tab, index) => ({
+        /* 第十个面板用 0：单字符键位才留得住 */
+        combo: index === 9 ? '0' : String(index + 1),
+        description: `跳到 ${tab.label}`,
+        handler: () => goTo(tab.id),
+      })),
+    ],
+    true,
+  );
+
+  /* ---------- 顶栏 ---------- */
+
+  const connTone =
+    streamState === 'connected' ? 'ok' : streamState === 'reconnecting' ? 'warn' : streamState === 'idle' ? 'muted' : 'danger';
+
+  const badgeFor = (id: string): number | null => {
+    if (id === 'alarms') {
+      return backend.alarms.length;
+    }
+    if (id === 'messages') {
+      return backend.messages.length;
+    }
+    return null;
   };
 
-  /** 从服务端导出 JSONL：不受面板 200 条上限影响，最多 5000 条。 */
-  const onExportMessages = async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const text = await client.messagesJsonl('', '', 5_000);
-      if (text.trim() === '') {
-        append('没有可导出的报文');
-        return;
-      }
-      const blob = new Blob([text], { type: 'application/x-ndjson;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `messages-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      append(`已导出报文历史 ${text.trim().split('\n').length} 行`);
-    } catch (error) {
-      append(`导出报文失败: ${(error as Error).message}`);
-    }
-  };
-
-  /**
-   * 手动发送 SML。
-   *
-   * <p>会话没有对端时服务端回 409，这里只负责把结果讲清楚：
-   * "发出去了但主机没回"和"根本没发出去"是两件事。</p>
-   */
-  const onSendSml = async () => {
-    if (client === null || smlDraft.trim() === '') {
-      return;
-    }
-    const target = sessions.find((session) => session.id === smlSession) ?? sessions[0];
-    if (target === undefined) {
-      return;
-    }
-
-    setSmlBusy(true);
-    setSmlResult('');
-    try {
-      const result = await client.sendSml(target.id, smlDraft);
-      const lines = [
-        `发送 ${target.id}  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`,
-        result.sentSml === '' ? '（无 body）' : result.sentSml,
-      ];
-      if (result.replySml != null) {
-        lines.push(
-          '',
-          `回复 S${result.replyStream}F${result.replyFunction}${result.replyWbit ? ' W' : ''}`,
-          result.replySml,
-        );
-      } else if (result.timedOut) {
-        lines.push('', 'W 位报文已发出，但主机未在 T3 内回复');
-      } else {
-        lines.push('', '未请求回复（W=0）');
-      }
-      lines.push('', `耗时 ${result.elapsedMs} ms`);
-      setSmlResult(lines.join('\n'));
-      append(
-        `手动发送 ${target.id} S${result.stream}F${result.function}${
-          result.replySml != null
-            ? ` -> S${result.replyStream}F${result.replyFunction}`
-            : result.timedOut
-              ? ' -> 等待回复超时'
-              : ' -> 已发送'
-        }`,
-      );
-    } catch (error) {
-      const message = (error as Error).message;
-      setSmlResult(`发送失败：${message}`);
-      append(`手动发送失败: ${message}`);
-    } finally {
-      setSmlBusy(false);
-    }
-  };
-
-  /** 运行时启用/禁用一个编排计划；不写回配置，重载会恢复配置里的状态。 */
-  const onToggleEvent = async (plan: EventPlanView) => {
-    if (client === null || eventSession === '') {
-      return;
-    }
-    try {
-      const status = await client.setEventEnabled(eventSession, plan.id, !plan.enabled);
-      append(
-        status === 200
-          ? `事件计划 ${plan.id} 已${plan.enabled ? '禁用' : '启用'}`
-          : status === 404
-            ? `事件计划 ${plan.id} 操作失败：会话或计划不存在`
-            : `事件计划 ${plan.id} 操作失败（HTTP ${status}）`,
-      );
-      if (status === 200) {
-        setEventPlans(await client.events(eventSession));
-      }
-    } catch (error) {
-      append(`事件计划操作失败: ${(error as Error).message}`);
-    }
-  };
-
-  /** 编辑区里的内容相对磁盘有没有变。 */
-  const configDirty = configDraft !== configBaseline;
-
-  /** 打开一份配置。有未保存改动时先问一句：悄悄丢掉别人正在写的东西最招人烦。 */
-  const openConfig = async (name: string) => {
-    if (client === null) {
-      return;
-    }
-    if (configDirty && !window.confirm(`${configName} 有未保存的改动，切换会丢掉。继续？`)) {
-      return;
-    }
-
-    try {
-      const text = await client.configText(name);
-      setConfigName(name);
-      setConfigDraft(text);
-      setConfigBaseline(text);
-      setConfigProblems([]);
-      setConfigNotice(`已打开 ${name}`);
-    } catch (error) {
-      append(`打开配置失败: ${(error as Error).message}`);
-    }
-  };
-
-  /** 丢掉本地改动，重新拉磁盘上的原文。 */
-  const reloadConfig = async () => {
-    if (client === null || configName === '') {
-      return;
-    }
-    try {
-      const text = await client.configText(configName);
-      setConfigDraft(text);
-      setConfigBaseline(text);
-      setConfigProblems([]);
-      setConfigNotice(`已重新载入 ${configName}`);
-    } catch (error) {
-      append(`重新载入失败: ${(error as Error).message}`);
-    }
-  };
-
-  /** 只校验不落盘：用户想确认改动能不能编译，不该被迫先覆盖一份能用的配置。 */
-  const validateConfig = async () => {
-    if (client === null || configName === '') {
-      return;
-    }
-    try {
-      const result = await client.validateConfig(configName, configDraft);
-      setConfigProblems(result.problems);
-      setConfigNotice(result.valid ? '校验通过' : '校验未通过');
-    } catch (error) {
-      append(`校验失败: ${(error as Error).message}`);
-    }
-  };
-
-  const saveConfig = async () => {
-    if (client === null || configName === '') {
-      return;
-    }
-    try {
-      const result = await client.saveConfig(configName, configDraft);
-      if (result.status === 200) {
-        setConfigProblems([]);
-        setConfigBaseline(configDraft);
-        setConfigNotice(`已保存 ${configName}（已在运行的会话需要重载才生效）`);
-        append(`配置已保存: ${configName}`);
-        void refreshConfigs();
-        return;
-      }
-
-      setConfigProblems(result.problems);
-      setConfigNotice(result.status === 422 ? '保存被拒：配置有问题，未落盘' : `保存失败（HTTP ${result.status}）`);
-    } catch (error) {
-      append(`保存失败: ${(error as Error).message}`);
-    }
-  };
-
-  /**
-   * 新建：让后端生成一份能直接编译的骨架。
-   *
-   * <p>骨架不在前端写死：只有一份判据，才不会出现"界面上给的模板起不来"。
-   * </p>
-   */
-  const onNewConfig = async () => {
-    if (client === null) {
-      return;
-    }
-
-    const name = newConfigName.trim();
-    if (name === '') {
-      return;
-    }
-    if (!name.toLowerCase().endsWith('.json')) {
-      setConfigNotice('文件名必须以 .json 结尾');
-      return;
-    }
-    if (configDirty && !window.confirm(`${configName} 有未保存的改动，新建会丢掉。继续？`)) {
-      return;
-    }
-
-    try {
-      const status = await client.createConfig(name);
-      if (status === 409) {
-        setConfigNotice('已经有同名的配置了，直接从上面选它来改');
-        return;
-      }
-      if (status !== 201) {
-        setConfigNotice(`新建失败（HTTP ${status}）`);
-        return;
-      }
-
-      const text = await client.configText(name);
-      setConfigName(name);
-      setConfigDraft(text);
-      setConfigBaseline(text);
-      setConfigProblems([]);
-      setConfigNotice(`已新建 ${name}，改完点「保存」才会落盘`);
-      void refreshConfigs();
-    } catch (error) {
-      append(`新建配置失败: ${(error as Error).message}`);
-    }
+  const panelProps = {
+    backend,
+    notifier,
+    preferences,
+    updatePreferences: update,
   };
 
   return (
     <div className="app">
-      <header>
-        <h1>SECS Simulator</h1>
+      <header className="topbar">
+        <div className="topbar-brand">
+          <h1>SECS Simulator</h1>
+          <span className="version">{backend.health?.version ?? '-'}</span>
+        </div>
+
         <dl className="health">
           <dt>形态</dt>
-          <dd>{health?.mode ?? '-'}</dd>
-          <dt>版本</dt>
-          <dd>{health?.version ?? '-'}</dd>
-          <dt>会话</dt>
-          <dd>{health?.sessions ?? sessions.length}</dd>
+          <dd>{backend.health?.mode ?? '-'}</dd>
           <dt>身份</dt>
           <dd>
-            {role === undefined
+            {backend.role === undefined
               ? '-'
-              : `${health?.user ?? '?'}（${roleLabel(role)}）`}
+              : `${backend.health?.user ?? '?'}（${roleLabel(backend.role)}）`}
           </dd>
           <dt>事件流</dt>
-          <dd>{streamState}</dd>
+          <dd>
+            <span className={`conn-dot ${connTone}`} />
+            {streamStateLabel(streamState, streamDetail)}
+          </dd>
         </dl>
+
+        <span className="topbar-spacer" />
+
+        <div className="topbar-actions">
+          <div className="session-picker">
+            <label htmlFor="active-session">会话</label>
+            <select
+              id="active-session"
+              value={activeSession}
+              onChange={(event) => backend.setActiveSession(event.target.value)}
+              disabled={backend.sessions.length === 0}
+            >
+              {backend.sessions.length === 0 && <option value="">（无会话）</option>}
+              {backend.sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void backend.refreshAll()}
+            disabled={backend.refreshing}
+            title="立即刷新所有数据（R）"
+          >
+            {backend.refreshing ? '刷新中…' : '刷新'}
+          </button>
+          <button type="button" onClick={() => setPaletteOpen(true)} title="命令面板（Ctrl+K）">
+            ⌘ 命令
+          </button>
+          <button
+            type="button"
+            onClick={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
+            title="切换浅色 / 深色"
+            aria-label="切换主题"
+          >
+            {resolvedTheme === 'dark' ? '☀' : '☾'}
+          </button>
+          <button
+            type="button"
+            onClick={() => update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' })}
+            title="切换表格密度"
+          >
+            {preferences.density === 'compact' ? '≡ 紧凑' : '≡ 宽松'}
+          </button>
+          <button type="button" onClick={() => setHelpOpen(true)} title="快捷键（?）">
+            ?
+          </button>
+        </div>
       </header>
 
-      {token === '' && (
-        <section className="token-panel">
-          <p className="hint">
-            需要访问令牌（启动时打印在 <code>READY</code> 行里，或由桌面壳注入）。
-            用 <code>--auth-users</code> 启动时填账号口令，不是那条 token。
-          </p>
-          <input
-            type="password"
-            placeholder="token"
-            value={draftToken}
-            onChange={(event) => setDraftToken(event.target.value)}
-          />
-          <button type="button" onClick={onSaveToken}>
-            保存
-          </button>
-        </section>
-      )}
-
-      <main>
-        <section>
-          <h2>会话</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>id</th>
-                <th>状态</th>
-                <th>控制</th>
-                <th>设备</th>
-                <th>单元</th>
-                <th>已上报</th>
-                <th>限流丢弃</th>
-                <th>禁用跳过</th>
-                <th>S6F1</th>
-                <th>上报</th>
-                <th>生命周期</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((session) => (
-                <tr key={session.id}>
-                  <td>{session.id}</td>
-                  <td>{session.state}</td>
-                  <td>{controlStateLabel(session.controlState)}</td>
-                  <td>{session.device || '-'}</td>
-                  <td>{session.units}</td>
-                  <td>{session.counters.emitted ?? 0}</td>
-                  <td>{session.counters.rejected ?? 0}</td>
-                  <td>{session.counters.skipped ?? 0}</td>
-                  <td>{session.counters.traceFrames ?? 0}</td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => void onTrigger(session)}
-                      disabled={!canOperate}
-                      title={canOperate ? '手动触发一次 S6F11' : operateHint}
-                    >
-                      上报
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => void onReloadSession(session)}
-                      disabled={!canOperate}
-                      title={canOperate ? '按配置文件重新装载（配置有问题时旧会话不受影响）' : operateHint}
-                    >
-                      重载
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void onCloseSession(session)}
-                      disabled={!canOperate}
-                      title={canOperate ? '关闭并移除该会话（端口立即解绑）' : operateHint}
-                    >
-                      关闭
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {sessions.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="hint">
-                    暂无会话（用 --demo-session / --config 启动，或在下方新建）
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          <div className="preview-controls">
-            <input
-              placeholder="demo 或 work-dir 下的配置文件名"
-              value={newConfig}
-              onChange={(event) => setNewConfig(event.target.value)}
-              disabled={!canOperate}
-            />
-            <button type="button" onClick={() => void onCreateSession()} disabled={!canOperate || newConfig.trim() === ''}>
-              新建会话
-            </button>
-            <span className="hint">
-              配置只认 <code>--work-dir</code> 下的文件名，不接受路径。
-            </span>
-          </div>
-
-          <label className="ceid">
-            CEID
-            <input
-              type="number"
-              min={1}
-              value={ceid}
-              onChange={(event) => setCeid(Number(event.target.value) || 1)}
-              disabled={!canOperate}
-            />
-          </label>
-          {!canOperate && <p className="hint">当前为只读身份：上报与报警操作需要操作员或管理员。</p>}
-          {canOperate && <p className="hint">CEID 可在下方"设备目录"里按名称挑选，不用背数字。</p>}
-        </section>
-
-        <section>
-          <h2>报警</h2>
-          <div className="preview-controls">
-            <select value={alarmSession} onChange={(event) => setAlarmSession(event.target.value)}>
-              {sessions.length === 0 && <option value="">（无会话）</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
-            <label className="ceid">
-              ALID
-              <input
-                type="number"
-                min={1}
-                value={alid}
-                onChange={(event) => setAlid(Number(event.target.value) || 1)}
-              />
-            </label>
-            <label className="ceid">
-              类别
-              <input
-                type="number"
-                min={0}
-                max={7}
-                value={alarmCategory}
-                onChange={(event) => setAlarmCategory(Number(event.target.value) || 0)}
-              />
-            </label>
-            <input
-              placeholder="报警文本"
-              value={alarmText}
-              onChange={(event) => setAlarmText(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => void onAlarm(true)}
-              disabled={sessions.length === 0 || !canOperate}
-              title={canOperate ? '置位报警（S5F1）' : operateHint}
-            >
-              置位
-            </button>
-            <button
-              type="button"
-              onClick={() => void onAlarm(false)}
-              disabled={sessions.length === 0 || !canOperate}
-              title={canOperate ? '清除报警（S5F1）' : operateHint}
-            >
-              清除
-            </button>
-          </div>
-          <p className="hint">
-            置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。
-            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，操作已禁用。`}
-          </p>
-
-          <h3>活动报警</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>ALID</th>
-                <th>类别</th>
-                <th>文本</th>
-                <th>置位时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alarms.map((alarm) => (
-                <tr key={alarm.alid}>
-                  <td>{alarm.alid}</td>
-                  <td>{alarm.category}</td>
-                  <td>{alarm.text}</td>
-                  <td>{new Date(alarm.atMillis).toLocaleTimeString()}</td>
-                </tr>
-              ))}
-              {alarms.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="hint">
-                    暂无活动报警
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          <h3>终端消息</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>TID</th>
-                <th>文本</th>
-                <th>收到时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {terminalMessages.map((message, index) => (
-                <tr key={`${message.atMillis}-${index}`}>
-                  <td>{message.tid}</td>
-                  <td>{message.text}</td>
-                  <td>{new Date(message.atMillis).toLocaleTimeString()}</td>
-                </tr>
-              ))}
-              {terminalMessages.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="hint">
-                    暂无终端消息
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <section>
-          <h2>曲线预览</h2>
-          <div className="preview-controls">
-            <select value={previewSession} onChange={(event) => setPreviewSession(event.target.value)}>
-              {sessions.length === 0 && <option value="">（无会话）</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
-            <select value={windowMs} onChange={(event) => setWindowMs(Number(event.target.value))}>
-              {WINDOWS.map((item) => (
-                <option key={item.ms} value={item.ms}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <label className="ceid">
-              图表
-              <select
-                value={chartMode}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setChartMode(value === 'uplot' ? 'uplot' : value === 'multi' ? 'multi' : 'canvas');
-                }}
-              >
-                <option value="canvas">Canvas</option>
-                <option value="uplot">uPlot</option>
-                <option value="multi">多轴</option>
-              </select>
-            </label>
-            <button type="button" onClick={() => void onPreview()} disabled={sessions.length === 0}>
-              刷新曲线
-            </button>
-            <button
-              type="button"
-              onClick={() => void onDownloadPreview()}
-              disabled={sessions.length === 0}
-              title="SCSP v1：固定头 + 每条序列的 min/max/avg 双精度数组"
-            >
-              下载二进制
-            </button>
-          </div>
-          {preview === null ? (
-            <p className="hint">选好会话与时间窗后点"刷新曲线"，按当前配置算出 min/max 包络 + avg 线。</p>
-          ) : (
-            <>
-              <div className="preview-meta">
-                <span className="hint">
-                  {preview.series.length} 条曲线 · {preview.buckets} 桶 × {preview.bucketMs} ms
-                  {preview.from !== undefined ? ` · 窗口 ${Math.round((preview.to - preview.from) / 1000)} 秒` : ''}
-                </span>
-                {chartMode === 'canvas' && zoom !== null && (
-                  <>
-                    <span className="hint">
-                      已放大：桶 {zoom.start}–{zoom.end}
-                      （约 {Math.round(((zoom.end - zoom.start + 1) * preview.bucketMs) / 1000)} 秒）
+      <div className="shell">
+        <nav className="sidenav" aria-label="面板导航">
+          {(['设备', '数据', '工具'] as const).map((group) => (
+            <div key={group}>
+              <div className="nav-group-title">{group}</div>
+              {TABS.filter((tab) => tab.group === group).map((tab) => {
+                const badge = badgeFor(tab.id);
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`nav-item${activeTab === tab.id ? ' active' : ''}`}
+                    onClick={() => goTo(tab.id)}
+                    aria-current={activeTab === tab.id ? 'page' : undefined}
+                  >
+                    <span className="nav-icon" aria-hidden="true">
+                      {tab.icon}
                     </span>
-                    <button type="button" onClick={() => setZoom(null)}>
-                      重置缩放
-                    </button>
-                  </>
-                )}
-              </div>
-              {preview.truncated === true && (
-                <p className="hint">
-                  后端只返回前 {preview.series.length} 条曲线
-                  {preview.svidTotal !== undefined ? `（共 ${preview.svidTotal} 个 SVID）` : ''}。
-                  这是预览上限，不是曲线消失了。
-                </p>
-              )}
-              {preview.series.length === 0 ? (
-                <p className="hint">该会话没有可预览的 SVID。</p>
-              ) : (
-                <>
-                  <p className="hint">
-                    {chartMode === 'uplot'
-                      ? '拖动框选放大，双击复位；点击图例可隐藏/显示 min/max/avg。'
-                      : chartMode === 'multi'
-                        ? '按单位分配 y 轴，左右交替；只画 avg，点击图例可隐藏/显示单条 SVID。'
-                        : '悬停看读数；在曲线上横向拖动选择区间放大；双击或点「重置缩放」恢复。'}
-                  </p>
-                  {chartMode === 'uplot' ? (
-                    <div className="uplots">
-                      {preview.series.map((series) => (
-                        <UplotSeries
-                          key={series.svid}
-                          series={series}
-                          fromMs={preview.from}
-                          bucketMs={preview.bucketMs}
-                        />
-                      ))}
-                    </div>
-                  ) : chartMode === 'multi' ? (
-                    <MultiAxisChart
-                      series={preview.series}
-                      fromMs={preview.from}
-                      bucketMs={preview.bucketMs}
-                    />
-                  ) : (
-                    <div className="sparks">
-                      {preview.series.map((series) => (
-                        <Sparkline
-                          key={series.svid}
-                          series={series}
-                          fromMs={preview.from}
-                          bucketMs={preview.bucketMs}
-                          zoom={zoom}
-                          onZoom={setZoom}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </section>
+                    <span>{tab.label}</span>
+                    {badge !== null && badge > 0 && (
+                      <span className={`nav-badge${tab.id === 'alarms' ? ' alert' : ''}`}>{badge}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
 
-        <section>
-          <h2>手动发送</h2>
-          <div className="preview-controls">
-            <select value={smlSession} onChange={(event) => setSmlSession(event.target.value)}>
-              {sessions.length === 0 && <option value="">（无会话）</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void onSendSml()}
-              disabled={!canOperate || smlBusy || smlDraft.trim() === ''}
-              title={canOperate ? '发送到选中的会话（W 位会等待回复）' : operateHint}
-            >
-              {smlBusy ? '发送中…' : '发送 SML'}
-            </button>
-            <button type="button" onClick={() => setSmlDraft('S1F1 W.')}>
-              示例 S1F1
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setSmlDraft(
-                  'S5F1 W\n<L\n  <B 0x81>\n  <U2 1001>\n  <A "ON FIRE">\n>.',
-                )
-              }
-            >
-              示例 S5F1
-            </button>
-          </div>
-          <textarea
-            className="sml-editor"
-            spellCheck={false}
-            value={smlDraft}
-            onChange={(event) => setSmlDraft(event.target.value)}
-          />
-          <p className="hint">
-            报文头写 <code>SxFy</code>，可带 <code>W</code>；数据项支持
-            <code>L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8</code>。W 位会等 T3，
-            没有对端时服务端回 409。
-            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，发送已禁用。`}
-          </p>
-          {smlResult !== '' && <pre className="sml-result">{smlResult}</pre>}
-        </section>
-
-        <section>
-          <h2>事件编排</h2>
-          <div className="preview-controls">
-            <select value={eventSession} onChange={(event) => setEventSession(event.target.value)}>
-              {sessions.length === 0 && <option value="">（无会话）</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
-            <span className="hint">
-              这里改的是运行时状态，不写回配置；重载会话会恢复配置里的启用状态。
-            </span>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>计划</th>
-                <th>CEID</th>
-                <th>触发规则</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {eventPlans.map((plan) => (
-                <tr key={plan.id}>
-                  <td>{plan.id}</td>
-                  <td>{plan.ceid}</td>
-                  <td>{triggerLabel(plan)}</td>
-                  <td>{plan.enabled ? '启用' : '禁用'}</td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => void onToggleEvent(plan)}
-                      disabled={!canOperate}
-                      title={
-                        canOperate
-                          ? plan.enabled
-                            ? '禁用后不再触发；已排队的延迟事件会清掉'
-                            : '重新启用；禁用期间的事件不补发'
-                          : operateHint
-                      }
-                    >
-                      {plan.enabled ? '禁用' : '启用'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {eventPlans.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    {sessions.length === 0 ? '暂无会话' : '该会话没有事件编排计划'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <section>
-          <h2>审计</h2>
-          {!isAdmin ? (
-            <p className="hint">审计记录包含账号与操作目标，只有管理员可以查看。</p>
-          ) : (
-            <>
+        <main className="content">
+          {token === '' ? (
+            <section className="token-panel">
+              <h2>需要访问令牌</h2>
               <p className="hint">
-                最近 200 条操作记录；完整历史在 <code>--work-dir/logs/audit.jsonl</code>。
+                启动时打印在 <code>READY</code> 行里，或由桌面壳注入。
+                用 <code>--auth-users</code> 启动时填账号口令，不是那条 token。
               </p>
-              <table>
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>操作者</th>
-                    <th>角色</th>
-                    <th>动作</th>
-                    <th>目标</th>
-                    <th>细节</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditEntries.map((entry, index) => (
-                    <tr key={`${entry.at}-${index}`}>
-                      <td>{new Date(entry.at).toLocaleString()}</td>
-                      <td>{entry.actor}</td>
-                      <td>{entry.role}</td>
-                      <td>{entry.action}</td>
-                      <td>{entry.target}</td>
-                      <td className="audit-detail">{entry.detail}</td>
-                    </tr>
-                  ))}
-                  {auditEntries.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="hint">
-                        暂无审计记录
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </>
-          )}
-        </section>
-
-        <section>
-          <h2>设备目录</h2>
-          <div className="preview-controls">
-            <select value={catalogSession} onChange={(event) => setCatalogSession(event.target.value)}>
-              {sessions.length === 0 && <option value="">（无会话）</option>}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
-            <span className="hint">
-              CEID / RPTID / SVID 的号段按单元独立，不同会话之间不能照搬。
-            </span>
-          </div>
-          {catalog !== null && (catalog.hostReports! > 0 || catalog.hostLinks! > 0 || catalog.hostAllDisabled) && (
-            <p className="hint">
-              主机已下发 {catalog.hostReports} 条报告定义、{catalog.hostLinks} 条事件链接
-              {catalog.hostAllDisabled ? '，并把全部事件上报关掉了（S2F37）' : ''}；
-              下面标了「主机」的条目就是主机覆盖过的配置（ADR-0006）。
-            </p>
-          )}
-
-          <h3>采集事件（CEID）</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>CEID</th>
-                <th>归属</th>
-                <th>名称</th>
-                <th>携带报告</th>
-                <th>来源</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(catalog?.ceids ?? []).map((entry) => (
-                <tr key={entry.ceid}>
-                  <td>{entry.ceid}</td>
-                  <td>{entry.owner || '-'}</td>
-                  <td>{entry.slot || '-'}</td>
-                  <td>{entry.reports.join(', ') || '-'}</td>
-                  <td>
-                    {entry.source === 'host' ? '主机' : '本地'}
-                    {entry.enabled === false ? '（已禁用）' : ''}
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => setCeid(entry.ceid)}
-                      disabled={!canOperate}
-                      title={canOperate ? '填入上方的 CEID 框' : operateHint}
-                    >
-                      填入
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {(catalog === null || catalog.ceids.length === 0) && (
-                <tr>
-                  <td colSpan={6} className="hint">
-                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义采集事件'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          <h3>报告（RPTID）</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>RPTID</th>
-                <th>归属</th>
-                <th>名称</th>
-                <th>变量</th>
-                <th>来源</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(catalog?.reports ?? []).map((entry) => (
-                <tr key={entry.rptid}>
-                  <td>{entry.rptid}</td>
-                  <td>{entry.owner || '-'}</td>
-                  <td>{entry.slot || '-'}</td>
-                  <td>{entry.svids.join(', ') || '-'}</td>
-                  <td>{entry.source === 'host' ? '主机' : '本地'}</td>
-                </tr>
-              ))}
-              {(catalog === null || catalog.reports.length === 0) && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义报告'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          <h3>状态变量（SVID）</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>SVID</th>
-                <th>归属</th>
-                <th>名称</th>
-                <th>类型</th>
-                <th>单位</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(catalog?.svids ?? []).map((entry) => (
-                <tr key={entry.svid}>
-                  <td>{entry.svid}</td>
-                  <td>{entry.owner}</td>
-                  <td>{entry.slot}</td>
-                  <td>{entry.type}</td>
-                  <td>{entry.unit || '-'}</td>
-                </tr>
-              ))}
-              {(catalog === null || catalog.svids.length === 0) && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    {catalog === null ? '该会话没有提供目录' : '该会话没有定义状态变量'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <section>
-          <h2>配置编辑器</h2>
-          <div className="preview-controls">
-            <select
-              value={configList.some((entry) => entry.name === configName) ? configName : ''}
-              onChange={(event) => {
-                if (event.target.value !== '') {
-                  void openConfig(event.target.value);
-                }
-              }}
-            >
-              <option value="">（选择配置）</option>
-              {configList.map((entry) => (
-                <option key={entry.name} value={entry.name}>
-                  {entry.name}（{entry.sizeBytes} 字节）
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="新文件名.json"
-              value={newConfigName}
-              onChange={(event) => setNewConfigName(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => void onNewConfig()}
-              disabled={newConfigName.trim() === '' || !canOperate}
-              title={canOperate ? '新建一份能直接编译的配置骨架' : operateHint}
-            >
-              新建
-            </button>
-            <button type="button" onClick={() => void reloadConfig()} disabled={configName === ''}>
-              重新载入
-            </button>
-            <button type="button" onClick={() => void validateConfig()} disabled={configName === ''}>
-              校验
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveConfig()}
-              disabled={configName === '' || !canOperate}
-              title={canOperate ? '校验通过后原子落盘' : operateHint}
-            >
-              保存
-            </button>
-          </div>
-
-          {configName === '' ? (
-            <p className="hint">
-              从上面挑一份配置，或输入新文件名点「新建」。配置只认 <code>--work-dir</code> 下的文件名。
-            </p>
-          ) : (
-            <>
-              <p className="hint">
-                {configName}
-                {configDirty ? '（有未保存的改动）' : '（与磁盘一致）'}
-                {configNotice !== '' ? `　${configNotice}` : ''}
-              </p>
-              <textarea
-                className="config-editor"
-                spellCheck={false}
-                value={configDraft}
-                onChange={(event) => {
-                  setConfigDraft(event.target.value);
-                  setConfigProblems([]);
-                }}
+              <input
+                type="password"
+                placeholder="token"
+                value={draftToken}
+                onChange={(event) => setDraftToken(event.target.value)}
+                aria-label="访问令牌"
               />
-              <TemplateEditor
-                text={configDraft}
-                onChange={(next) => {
-                  setConfigDraft(next);
-                  setConfigProblems([]);
-                  setConfigNotice('结构化编辑已修改草稿，保存前请校验');
-                }}
-              />
-              {configProblems.length > 0 && (
-                <ul className="problems">
-                  {configProblems.map((problem, index) => (
-                    <li key={index}>{problem}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-          <p className="hint">
-            编辑的是原始 JSON 文本；不动模板表单时保存逐字节写回，多写的键、空格和缩进都不会被动过。
-            模板表单改动会保留未知键，但会把整份文件重排成 2 空格缩进。
-            校验按真实启动路径走（解析 → 编译设备模型 → 建模板图），过了才会落盘。
-            {canOperate ? '' : ` 当前${role === undefined ? '身份未确认' : `角色为${roleLabel(role)}`}，保存已禁用。`}
-          </p>
-        </section>
-
-        <section>
-          <h2>
-            报文
-            <span className="message-actions">
-              <button type="button" onClick={() => void onLoadHistory()}>
-                载入历史
-              </button>
-              <button type="button" onClick={() => void onExportMessages()}>
-                导出 JSONL
-              </button>
               <button
                 type="button"
-                onClick={() => setMessages([])}
-                title="只清界面；服务端日志文件不动"
+                onClick={() => {
+                  const value = draftToken.trim();
+                  if (value === '') {
+                    return;
+                  }
+                  saveToken(value);
+                  setToken(value);
+                  notifier.success('token 已保存');
+                }}
               >
-                清空
+                保存
               </button>
-            </span>
-          </h2>
-          <p className="hint">
-            SSE 只推“现在”；断线或刷新后点「载入历史」补齐。落盘位置是
-            <code>--work-dir/logs/messages.jsonl</code>，每个进程最多回看最近 5000 条。
-          </p>
-          <table className="messages">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>会话</th>
-                <th>方向</th>
-                <th>报文</th>
-                <th>报文体</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.map((entry) => (
-                <tr key={entry.key}>
-                  <td>{new Date(entry.msg.at).toLocaleTimeString()}</td>
-                  <td>{entry.msg.sessionId}</td>
-                  <td>{entry.msg.direction === 'in' ? '← 收' : '→ 发'}</td>
-                  <td>
-                    S{entry.msg.stream}F{entry.msg.function}
-                    {entry.msg.wbit ? ' W' : ''}
-                  </td>
-                  <td className="body" title={entry.msg.body}>
-                    {entry.msg.body.length > 120 ? `${entry.msg.body.slice(0, 120)}…` : entry.msg.body}
-                  </td>
-                </tr>
-              ))}
-              {messages.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="hint">
-                    暂无报文（主机连上并收发报文后会出现在这里）
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
+            </section>
+          ) : (
+            <>
+              {activeTab === 'sessions' && <SessionsPanel {...panelProps} />}
+              {activeTab === 'alarms' && <AlarmsPanel {...panelProps} />}
+              {activeTab === 'events' && <EventsPanel {...panelProps} />}
+              {activeTab === 'preview' && <PreviewPanel {...panelProps} />}
+              {activeTab === 'catalog' && <CatalogPanel {...panelProps} />}
+              {activeTab === 'messages' && <MessagesPanel {...panelProps} />}
+              {activeTab === 'send' && <SendPanel {...panelProps} />}
+              {activeTab === 'config' && <ConfigPanel {...panelProps} />}
+              {activeTab === 'audit' && <AuditPanel {...panelProps} />}
+              {activeTab === 'console' && <ConsolePanel {...panelProps} />}
+            </>
+          )}
+        </main>
+      </div>
 
-        <section>
-          <h2>事件流</h2>
-          <pre className="log" ref={logRef}>
-            {log.map((line, index) => `[${line.at}] ${line.text}`).join('\n')}
-          </pre>
-        </section>
-      </main>
+      <ToastHost toasts={notifier.toasts} onDismiss={notifier.dismiss} onDismissAll={notifier.dismissAll} />
+
+      <CommandPalette open={paletteOpen} items={commands} onClose={() => setPaletteOpen(false)} />
+
+      <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} hints={SHORTCUTS} />
     </div>
   );
+}
+
+/** 聚焦当前面板里第一个搜索框。 */
+function focusSearch(): void {
+  const input = document.querySelector<HTMLInputElement>('.content input[type="search"]');
+  input?.focus();
+  input?.select();
 }
