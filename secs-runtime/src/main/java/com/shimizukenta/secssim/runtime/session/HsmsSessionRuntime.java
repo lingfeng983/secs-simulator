@@ -115,6 +115,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final HostReportTable hostReports = new HostReportTable();
     private final S6F11Assembler assembler;
 
+    /** 保护一次 pump 的完整状态推进，见 {@link #pumpNow()}。 */
+    private final Object pumpLock = new Object();
+
     /**
      * 设备常量（ECV）当前值，按 ECID 索引。
      *
@@ -671,18 +674,28 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * <p>正常情况下由 100ms 心跳驱动；暴露出来是为了让测试与"确定性步进"场景
      * 能精确控制推进节奏，而不是靠 sleep 赌时序。
      * </p>
+     *
+     * <p><b>整体互斥</b>：心跳线程与外部线程（测试、确定性步进）可能同时调用本方法。
+     * 它要改 {@code lastFireMs}、条件去抖状态、延迟队列——这些状态彼此关联，
+     * 分开加锁挡不住交错。典型症状是"到点却没发"：心跳线程先推进了去抖状态，
+     * 外部线程再来时看到已触发，于是谁都没发。</p>
+     *
+     * <p>锁内只做状态推进与投递，不做等待式 IO：S6F11 的 W 位等待走独立 ACK 队列，
+     * 不会把心跳卡在 T3 上。</p>
      */
     public void pumpNow() {
-        /* 采样照常推进（值来源是纯函数，不需要链路），只是链路不通时不发 */
-        this.pumpTraces();
+        synchronized (this.pumpLock) {
+            /* 采样照常推进（值来源是纯函数，不需要链路），只是链路不通时不发 */
+            this.pumpTraces();
 
-        if (!this.canSendUnsolicited()) {
-            this.lastFireMs = this.clock.nowMs();
-            this.resetConditions();
-            return;
+            if (!this.canSendUnsolicited()) {
+                this.lastFireMs = this.clock.nowMs();
+                this.resetConditions();
+                return;
+            }
+
+            this.pumpEvents();
         }
-
-        this.pumpEvents();
     }
 
     /**
