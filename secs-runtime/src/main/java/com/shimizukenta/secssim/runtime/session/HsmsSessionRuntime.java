@@ -1242,6 +1242,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     handleEnableEventReport(primary);
                     return;
                 }
+                case 241 -> {
+                    handleRemoteCommand(primary);
+                    return;
+                }
                 case 1003 -> {
                     handleTerminalDisplay(primary);
                     return;
@@ -1447,6 +1451,65 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @param atMillis 收到时的墙钟毫秒
      */
     public record TerminalMessage(int tid, String text, long atMillis) {    }
+
+    /**
+     * S2F41：主机下发远程命令。回 S2F42。
+     *
+     * <p>E30 的形状：</p>
+     * <pre>
+     * S2F41 W  &lt;L[2] &lt;A RCMD&gt; &lt;L[n] &lt;L[2] &lt;A CPNAME&gt; &lt;V CPVAL&gt;&gt;&gt;&gt;
+     * S2F42    &lt;L[2] &lt;B HCACK&gt; &lt;L[n] &lt;L[2] &lt;A CPNAME&gt; &lt;V CPACK&gt;&gt;&gt;&gt;
+     * </pre>
+     *
+     * <p>HCACK 语义按 E30 §执行条件：</p>
+     * <ul>
+     *   <li>{@code 0} 接受并已执行；</li>
+     *   <li>{@code 1} 命令存在但参数非法（本实现的命令集不带参数，因此只在形状非法时出现）；</li>
+     *   <li>{@code 2} 当前无法执行（不在 ONLINE / 控制器处于 LOCAL）；</li>
+     *   <li>{@code 3} 命令不存在；</li>
+     *   <li>{@code 4} 需要初始化（S1F13 未完成）。</li>
+     * </ul>
+     *
+     * <p><b>能力边界</b>：模拟器不对 RCMD 做任何设备动作（没有真实的 START/STOP 语义），
+     * 只回结构正确的 S2F42。这样主机上线流程里"探测命令支持"的一步能走通，
+     * 而不是落 S9F5 —— 对主机来说"不支持命令"与"设备故障"是两回事，
+     * 回 S9F5 会让它走异常分支。真实动作需要下游给出命令集与副作用定义后再接。</p>
+     */
+    private void handleRemoteCommand(SecsMessage primary) throws Exception {
+        int hcack;
+
+        try {
+            Secs2 body = primary.secs2();
+
+            if (body.size() == 0) {
+                /* 体为空：形状不合法，回 1。不能让 get(0) 抛下标越界后再混进同一个 catch，
+                   否则日志里看不出"主机发了空报文"还是"RCMD 类型错"。 */
+                throw new Secs2IrregalDataFormatException("S2F41 报文体为空");
+            }
+
+            String rcmd = body.get(0).getAscii();
+
+            if (rcmd == null || rcmd.isBlank()) {
+                hcack = 1;
+            } else if (this.controlState == EquipmentControlState.OFFLINE
+                    || this.controlState == EquipmentControlState.COMMUNICATING) {
+                /* 通信尚未建立或已离线：E30 要求回 4（需初始化），而不是假装执行了 */
+                hcack = 4;
+            } else {
+                /* ONLINE：模拟器没有真实设备动作，命令"被接受"但不产生副作用 */
+                hcack = 0;
+            }
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            hcack = 1;
+        }
+
+        Secs2Builder b = Secs2.getBuilder();
+        this.communicator.send(primary, 2, 42, false, b.list(
+                b.binary((byte) hcack),
+                /* 本项目所有命令都不带参数，参数级确认列表为空 */
+                b.list()));
+    }
 
     /**
      * S2F33：主机定义报告（RPTID → VID 列表）。
