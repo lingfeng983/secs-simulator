@@ -11,6 +11,8 @@ import java.nio.file.attribute.FileTime;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -103,6 +105,15 @@ public final class HttpApiServer implements AutoCloseable {
 
     /** 票据有效期：够浏览器建连即可，短到即使泄漏也基本无用。 */
     private static final Duration TICKET_TTL = Duration.ofSeconds(30L);
+
+    /**
+     * 单账号未消费票据上限。
+     *
+     * <p>过期清理只在签发时触发；若客户端反复申请却从不建 SSE，map 会在 TTL 窗口内
+     * 无限增长。限制单账号未用票据数，超了就淘汰该账号最旧的一张——正常前端
+     * （申请一张就立刻建连）永远不会碰到这个上限。</p>
+     */
+    private static final int MAX_TICKETS_PER_USER = 8;
 
     /** 心跳间隔：15 秒足够穿过常见代理的空闲超时，又不至于把界面刷爆。 */
     private static final Duration SSE_HEARTBEAT = Duration.ofSeconds(15L);
@@ -492,12 +503,38 @@ public final class HttpApiServer implements AutoCloseable {
 
         String ticket = newTicket();
         AccessControl.Principal principal = this.authenticate(ex);
+        this.evictOldestTicketOf(principal, MAX_TICKETS_PER_USER - 1);
         this.tickets.put(ticket, new Ticket(now + TICKET_TTL.toMillis(), principal));
 
         respond(ex, 200, "{\"ok\":true,\"ticket\":\"" + ticket + "\""
                 + ",\"user\":\"" + json(principal.name()) + "\""
                 + ",\"role\":\"" + json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
                 + ",\"expiresInMs\":" + TICKET_TTL.toMillis() + "}");
+    }
+
+    /**
+     * 把某个账号的未消费票据压到 {@code keepAtMost} 张以内（淘汰最旧的）。
+     *
+     * @param principal  账号
+     * @param keepAtMost 保留张数
+     */
+    private void evictOldestTicketOf(AccessControl.Principal principal, int keepAtMost) {
+        List<Map.Entry<String, Ticket>> mine = new ArrayList<>();
+        for (Map.Entry<String, Ticket> entry : this.tickets.entrySet()) {
+            if (entry.getValue().principal().name().equals(principal.name())) {
+                mine.add(entry);
+            }
+        }
+
+        int excess = mine.size() - keepAtMost;
+        if (excess <= 0) {
+            return;
+        }
+
+        mine.sort(Comparator.comparingLong(entry -> entry.getValue().expiresAtMs()));
+        for (int i = 0; i < excess; i++) {
+            this.tickets.remove(mine.get(i).getKey());
+        }
     }
 
     /**

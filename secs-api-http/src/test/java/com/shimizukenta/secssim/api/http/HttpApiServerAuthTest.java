@@ -186,6 +186,34 @@ class HttpApiServerAuthTest {
         assertEquals(200, post("/api/v1/ticket", VIEWER_PASS).statusCode());
     }
 
+    /**
+     * 反复申请票据但从不建 SSE 时，单账号未消费票据不能无限增长。
+     *
+     * <p>过期清理只在签发时触发；前端正常流程是"申请一张立刻建连"，
+     * 所以上限只要宽于正常并发即可，这里用 8。</p>
+     */
+    @Test
+    void ticketIssuanceIsBoundedPerUser() throws Exception {
+        for (int i = 0; i < 30; i++) {
+            assertEquals(200, post("/api/v1/ticket", VIEWER_PASS).statusCode());
+        }
+
+        /* 票据本身不对外枚举，这里只验证：签发 30 次之后仍然可用（没有被自己的上限锁死），
+           并且最早的一张已被淘汰——用最早那张去建 SSE 应当失败。 */
+        String first = null;
+        HttpResponse<String> response = post("/api/v1/ticket", VIEWER_PASS);
+        assertEquals(200, response.statusCode(), response.body());
+        first = response.body().replaceAll(".*\"ticket\":\"([0-9a-f]+)\".*", "$1");
+        assertTrue(first.length() == 64, first);
+
+        for (int i = 0; i < 8; i++) {
+            post("/api/v1/ticket", VIEWER_PASS);
+        }
+
+        assertEquals(401, get("/api/v1/events?ticket=" + first, null).statusCode(),
+                "被淘汰的票据不能再建 SSE");
+    }
+
     @Test
     void viewerCannotChangeDeviceState() throws Exception {
         HttpResponse<String> ceid = post("/api/v1/sessions/s1/ceid/2001", VIEWER_PASS);

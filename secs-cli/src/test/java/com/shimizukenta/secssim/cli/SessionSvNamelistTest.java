@@ -51,7 +51,9 @@ class SessionSvNamelistTest {
             assertEquals("", rows.get(1).get(2).getAscii(), "没有单位就是空串");
 
             assertEquals(9999, Secs2Read.asInt(rows.get(2).get(0)));
-            assertEquals("", rows.get(2).get(1).getAscii(), "未知 SVID 返回空名，但行不能少");
+            assertEquals("UNKNOWN", rows.get(2).get(1).getAscii(),
+                    "未知 SVID 用 UNKNOWN 占位，行不能少——空名会让现场无法区分"
+                            + "'变量没命名'和'设备不认识这个 SVID'");
         }
     }
 
@@ -87,6 +89,7 @@ class SessionSvNamelistTest {
             cfg.deviceId(10);
             this.client = HsmsSsCommunicator.open(cfg);
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
         }
 
         Secs2 request(Secs2 body) throws Exception {

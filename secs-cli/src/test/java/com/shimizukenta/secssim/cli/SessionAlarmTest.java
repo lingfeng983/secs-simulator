@@ -2,6 +2,7 @@ package com.shimizukenta.secssim.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
@@ -31,6 +32,37 @@ import com.shimizukenta.secssim.runtime.session.Secs2Read;
  * S5F1 报警：置位/清除，主机回 S5F2 后才计成功。
  */
 class SessionAlarmTest {
+
+    /**
+     * ALCD 类别 0 在 E30 里没有定义（低 3 位是 bit 组合），必须拒绝。
+     *
+     * <p>放行的话主机侧会收到一个"没有类别"的报警，报警视图无法归类。</p>
+     */
+    @Test
+    void categoryZeroIsRejected() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThrows(Exception.class, () -> f.session.emitAlarm(1001, true, "X", 0),
+                    "类别 0 无定义，应拒绝");
+            assertThrows(Exception.class, () -> f.session.emitAlarm(1001, true, "X", 8),
+                    "类别只有低 3 位，8 越界");
+            assertThrows(Exception.class, () -> f.session.emitAlarm(1001, true, "X", -1));
+        }
+    }
+
+    /**
+     * ALTX 是非 ASCII（中文）时必须在入口拒绝。
+     *
+     * <p>修复前：编码失败发生在异步 ACK 线程，HTTP 已回 202、主机收不到，
+     * 现场只看到"接口成功但设备没反应"。</p>
+     */
+    @Test
+    void nonAsciiAlarmTextIsRejectedAtEntry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Exception e = assertThrows(Exception.class,
+                    () -> f.session.emitAlarm(1001, true, "温度超限", 1));
+            assertTrue(e.getMessage().contains("ASCII"), "错误信息应指出 ASCII 限制: " + e.getMessage());
+        }
+    }
 
     @Test
     void setAndClearAlarmAreAcknowledged() throws Exception {
@@ -104,6 +136,7 @@ class SessionAlarmTest {
                 }
             });
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
         }
 
         @Override

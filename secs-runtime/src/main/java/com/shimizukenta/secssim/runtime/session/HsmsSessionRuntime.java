@@ -461,7 +461,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         long elapsedMs = System.currentTimeMillis() - startedAt;
 
         String replySml = reply.map(value -> SmlRenderer.render(value.secs2())).orElse(null);
-        String sentSml = message.body().size() < 0 ? "" : SmlRenderer.render(message.body());
+        /* 原写法 size() < 0 恒为 false（死条件），空报文体照样去渲染。
+           空体没有可渲染的内容，直接给空串，避免日志里出现 "{}" 之类的占位。 */
+        String sentSml = message.body().isEmpty() ? "" : SmlRenderer.render(message.body());
         JsonHubBuilder b = JsonHub.getBuilder();
         return b.object(
                 b.pair("ok", true),
@@ -729,13 +731,21 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         if (alid < 1) {
             throw new IOException("ALID 必须 >= 1: " + alid);
         }
-        if (category < 0 || category > 7) {
-            throw new IOException("报警类别必须在 0..7: " + category);
+        /* E30：ALCD 低 3 位是类别 bit 组合（1 安全 / 2 控制 / 4 故障…），0 无定义。
+           原来的 0..7 放行了 0，主机侧会收到一个"没有类别"的报警，难以归类展示。 */
+        if (category < 1 || category > 7) {
+            throw new IOException("报警类别必须在 1..7（0 无定义）: " + category);
         }
 
         String altx = text == null || text.isBlank()
                 ? (set ? "ALARM " + alid : "CLEAR " + alid)
                 : text;
+        /* SECS-II 的 A 是 US-ASCII。含中文等非 ASCII 字符时编码会失败，
+           而真正的发送在异步 ACK 队列里：HTTP 已回 202、主机却收不到，
+           现场只会看到"接口成功但设备没反应"。所以在入口就挡掉。 */
+        if (!isAsciiEncodable(altx)) {
+            throw new IOException("ALTX 只能包含 US-ASCII 字符: " + altx);
+        }
         byte alcd = (byte) ((set ? 0x80 : 0x00) | category);
         Secs2 body = Secs2.getBuilder().list(
                 Secs2.getBuilder().binary(alcd),
@@ -1206,7 +1216,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     return;
                 }
                 case 231 -> {
-                    this.communicator.gem().s2f32(primary, TIACK.OK);
+                    /* E30：时间格式非法应回 TIACK=1，恒回 0 等于告诉主机"已同步"，
+                       而设备时钟其实没被改，主机的对时流程会带着错误继续往下走。 */
+                    this.communicator.gem().s2f32(primary, this.isValidTimeSet(primary) ? TIACK.OK : TIACK.NotDone);
                     return;
                 }
                 default -> {
@@ -1453,6 +1465,70 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     public record TerminalMessage(int tid, String text, long atMillis) {    }
 
     /**
+     * 字符串能否用 US-ASCII 编码（SECS-II 的 {@code A} 项）。
+     *
+     * @param text 文本
+     * @return 全部字符都在 ASCII 范围内返回 {@code true}
+     */
+    private static boolean isAsciiEncodable(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) > 0x7F) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 校验 S2F31 的时间格式。
+     *
+     * <p>E5 的 TIME 有两种：A16 {@code yyyyMMddHHmmsscc}（16 位数字）与
+     * A12 {@code yyMMddHHmmss}（12 位数字）。这里只做形状校验（位数 + 全数字），
+     * 不校验日历合法性——设备侧不做对时，形状错了就没必要再往下走。</p>
+     *
+     * @param primary S2F31
+     * @return 形状合法返回 {@code true}
+     */
+    private boolean isValidTimeSet(SecsMessage primary) {
+        try {
+            Secs2 body = primary.secs2();
+
+            /* 这里有坑：Secs2Ascii.size() 返回的是**字符数**，不是元素数。
+               S2F31 的体通常就是一个 A16 项（size()==16），不能用 size()!=1 去判"体里几个元素"，
+               那个条件对任何非空字符串恒成立、对空串恒假。 */
+            if (body.secs2Item() == Secs2Item.LIST) {
+                if (body.size() != 1) {
+                    return false;
+                }
+                body = body.get(0);
+            }
+
+            String time = body.getAscii();
+
+            if (time == null) {
+                return false;
+            }
+
+            int len = time.length();
+
+            if (len != 12 && len != 16) {
+                return false;
+            }
+
+            for (int i = 0; i < len; i++) {
+                if (! Character.isDigit(time.charAt(i))) {
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (Exception e) {
+            this.lastError = e.toString();
+            return false;
+        }
+    }
+
+    /**
      * S2F41：主机下发远程命令。回 S2F42。
      *
      * <p>E30 的形状：</p>
@@ -1676,7 +1752,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         try {
             Secs2 body = primary.secs2();
-            boolean enabled = body.get(0).getBoolean(0);
+            boolean enabled = readCeed(body.get(0));
             List<Integer> ceids = body.size() >= 2 ? this.intList(body.get(1)) : List.of();
 
             this.hostReports.setEnabled(enabled, ceids);
@@ -1686,6 +1762,25 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
 
         this.ackDynamicReport(primary, 38, code);
+    }
+
+    /**
+     * 读取 S2F37 的 CEED。
+     *
+     * <p>E30 定义为 BOOLEAN，但现场确实有主机按 {@code B[1]}（0/1）发。严格的
+     * {@code getBoolean} 在 B 上会抛类型异常 → 恒回 ERACK=1，主机以为设备不支持
+     * 事件开关。这里两种都收：BOOLEAN 直接取，B 按"非 0 即真"。</p>
+     *
+     * @param item CEED 数据项
+     * @return 是否启用
+     * @throws Secs2Exception 类型既不是 BOOLEAN 也不是 B
+     */
+    private static boolean readCeed(Secs2 item) throws Secs2Exception {
+        if (item.secs2Item() == Secs2Item.BINARY) {
+            return Secs2Read.asByte(item) != 0;
+        }
+
+        return item.getBoolean(0);
     }
 
     private List<Integer> intList(Secs2 list) throws Exception {
@@ -1728,14 +1823,20 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         for (int svid : requested) {
             ResolvedSvid definition = this.model.svids().get(svid);
 
+            /* 未定义的 SVID 用 "UNKNOWN" 而不是空串：主机拿到空名字无法区分
+               "这是个没命名的变量"和"设备在糊弄我"；而 S1F3/F4 对未知 SVID 一律回 U4 0
+               （见 P2-1），类型也可能对不上，名字至少要让现场一眼看出是哪一档。 */
             rows.add(b.list(
                     b.uint4(svid),
-                    b.ascii(definition == null ? "" : definition.svName()),
+                    b.ascii(definition == null ? UNKNOWN_SVID_NAME : definition.svName()),
                     b.ascii(definition == null ? "" : definition.unitSymbol())));
         }
 
         this.communicator.send(primary, 1, 12, false, b.list(rows));
     }
+
+    /** S1F12 里未定义 SVID 的名字占位。 */
+    private static final String UNKNOWN_SVID_NAME = "UNKNOWN";
 
     /**
      * S2F23：主机点播一条周期采样。
