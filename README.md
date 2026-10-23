@@ -359,51 +359,37 @@ CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这�
 
 ```powershell
 scripts\build-frontend.ps1     # 前端产物
-scripts\package.ps1            # 原生镜像 + 组装 + zip（约 5.4 MB）
-scripts\package-jvm.ps1        # JVM 兜底包：jlink runtime + jars + web（约 37 MB）
-scripts\package-installer.ps1  # JVM 包 + install/uninstall -> setup zip（约 37.6 MB）
-scripts\package-msi.ps1        # jpackage MSI（需要 WiX 3.x）
+scripts\package.ps1            # 原生镜像 + 组装 + zip
 ```
 
-- 原生包：`secs-sim.exe` + `web/` + `start.cmd`，双击即用（无需安装 JVM）。
-- JVM 兜底包：`runtime/` + `lib/*.jar` + `web/` + `start-jvm.cmd`，
-  自带 jlink 运行时，目标机器同样不需要预装 JVM；适合原生镜像跑不起来的机器。
-  需要 JDK 25 生成（`package-jvm.ps1` 会检查 `JAVA_HOME`）。
-- 脚本安装器：解压 setup zip 后运行其中的 `install.ps1`，
-  默认安装到 `%LOCALAPPDATA%\SECS Simulator`，创建开始菜单/桌面快捷方式与
-  HKCU 卸载项；`-NoShortcuts -NoRegistry` 可用于便携/测试。
-- MSI：`scripts\package-msi.ps1` 用 jpackage + WiX 生成
-  `secs-sim-*-win-x64.msi`（约 39 MB）；桌面快捷方式默认带 demo 会话。
-  **MSI 与脚本安装器都未签名。**
-- 自动更新：包内 `check-update.cmd` + `update.ps1` 读取 manifest
-  （version/url/sha256），先备份旧目录再安装，失败自动回滚。
-  示例见 [packaging/README-update.txt](packaging/README-update.txt)。
-  **面向脚本安装器（install.ps1）目录；MSI 仍用卸载/重装，不参与自动更新。**
+- 产物：`package/secs-sim-<version>-win-x64.zip`，内含 `secs-sim.exe`、`web/`、
+  `start.cmd`/`start.ps1`、`README.txt`、配置格式说明与 `VERSION`。
+- 双击 `start.cmd` 即用，目标机器无需安装 JVM。
+- 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）；`package.ps1` 会调用
+  `mvn -Pnative` 生成原生镜像，可用 `-SkipBuild` 复用已有的 `secs-cli/target/secs-sim.exe`。
 
-### Docker / Linux
+## 能力边界
 
-```bash
-# 容器：HTTP 8080 / HSMS 5000 / /data 持久化
-docker compose -f packaging/docker/docker-compose.yml up --build
-```
+主机侧对接时常会问"你们支持到哪一步"。下面这些是**有意不做**或**只做了协议面**的，
+写清楚是为了避免现场按"支持"理解：
 
-- 必须设置 `SECS_TOKEN`（compose 里是 `change-me`，生产请改）。
-- 默认装载 `packaging/docker/../linux/demo.json`，HSMS 绑定 `0.0.0.0:5000`。
-- 镜像构建需要访问 Maven/npm 仓库；本机未装 Docker，未实际构建镜像。
-
-Linux systemd 包：
-
-```bash
-./scripts/package-linux.sh
-# 产物 package/secs-sim-*-linux-x64.tar.gz
-```
-
-部署步骤、用户与环境文件见
-[packaging/systemd/README.md](packaging/systemd/README.md)。
+| 能力 | 现状 | 说明 |
+|---|---|---|
+| S2F41/F42 远程命令 | 结构完整，**不做设备动作** | 按 E30 执行条件回 HCACK（未 ONLINE 回 4、ONLINE 回 0、RCMD 非法回 1），CPACK 恒空。模拟器没有真实 START/STOP 语义，不会改变任何状态 |
+| S2F13–F16 设备常量（ECV） | **未实现**，落 S9F5 | 需要先定"常量是否可写、写到哪里、重载后是否保留"，未定之前不做 |
+| 未知 SVID 的 S1F3/F4 取值 | 恒回 `U4 0` | 类型可能与主机的 SVID 表不一致；S1F11 里名字给 `UNKNOWN` 可区分 |
+| 报警 ALTX | 仅 US-ASCII | 入口即拒（400），不会出现"接口成功但主机收不到" |
+| 未建立通信时的主动上报 | 不发 | S6F11/S6F1 只在 ONLINE 之后发送；手动"上报"按钮是操作员显式动作，不受此限 |
+| Spooling（S2F43–F48） | 未实现 | 不补发；断线期间的事件不缓存 |
+| 单会话 Trace | 1 条、每条 ≤10 SVID | 多条需按 TRID 分别点播，容量上限见配置校验 |
 
 ## 四条铁律
 
-1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它（除非协议规范变更）。
+1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它。
+   例外只有一种：**对照 E4/E5/E37.1 原文确认为实现缺陷**（不是风格问题），
+   且必须在提交信息里写清条文依据。已发生的例外：
+   [应答匹配只接受 secondary](docs/code-review-2026-10-20.md)（E37.1 的应答判定要求
+   "同 SystemBytes + 对应 secondary"）。
 2. **禁止 `--enable-preview`**。预览特性会把 class 文件绑死到具体 JDK，且与 native-image 不兼容。
 3. **曲线是时间的纯函数**：不允许在曲线内部累加状态（见 [ADR 0003](docs/adr/0003-pure-curves.md)）。
 4. **模板图是纯函数图**：`Template.evaluate` 不得有副作用；一个 SVID 只能有一个生产者（见 [ADR 0004](docs/adr/0004-template-dag.md)）。
@@ -426,6 +412,8 @@ Linux systemd 包：
 - [二进制曲线预览格式](docs/preview-binary.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
+- [全量代码评审 2026-10-20（协议符合性专项）](docs/code-review-2026-10-20.md)
+- [SECS/GEM 标准参考资料](docs/reference/README.md)（E4/E5/E30/E37 中文整理 + 项目对照）
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
 - [配置格式 Schema v5](docs/schema-v5.md)（v4 仍兼容）
 - [配置格式 Schema v4](docs/schema-v4.md)
