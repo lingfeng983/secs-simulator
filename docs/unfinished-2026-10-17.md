@@ -40,7 +40,7 @@
 > 事件切换+审计）与真实 Java 后端 1 例，CI 两个 job 均已接入。
 > 最后补上 **JVM 兜底包**：jlink runtime + jars + web，约 37 MB，
 > `start-jvm.cmd` 在不预装 JVM 的机器上可启动；再补一个 PowerShell 脚本安装器。
-> 再补 **Linux 部署**：package-linux.sh + systemd unit/env + Dockerfile/compose。
+> （**注**：Linux 部署脚本与旧的 Windows 分发脚本其后被移除，见 `bb4b617` / `289d300`。）
 > 最后补 **自动更新**（manifest + SHA256 + 回滚）、**jpackage MSI**、
 > 以及 **原生 E2E 进 verify**（`mvn -Pnative verify`，NativeRuntimeIT 2 例）。
 > 当前 **496 个后端测试**（json 110 / protocol 45 / core 90 / app 32 / api-http 105 / runtime 56 / cli 58）
@@ -145,15 +145,15 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 ## 4. P2：分发与工程化
 
 - [ ] **代码签名**：未做；文档自己标了“正式分发前必须签，优先级最高”。
-- [x] **安装器**：脚本安装器 + jpackage MSI。脚本 installer 已实测安装/启动自检/卸载；`scripts/package-msi.ps1` 用 jpackage + WiX 生成 39.1 MB MSI，admin 解包后 exe 启动/页面 200 通过。**MSI 未签名。**
-- [x] **JVM 兜底包**：新增 `scripts/package-jvm.ps1` + `packaging/start-jvm.*`；jlink 运行时（java.base+jdk.httpserver）+ 应用 jar + web，约 37 MB；`start-jvm.cmd -CheckOnly`、真实启动/health/页面冒烟通过。
-- [x] **自动更新**：`packaging/update.ps1` / `check-update.cmd` + manifest（version/url/sha256）；校验 SHA256、旧目录备份、安装失败回滚；本地 2.0.0→2.0.1 实测通过。**面向脚本安装器目录；无后台自动检查服务，需手动/计划任务触发；MSI 不参与。**
-- [ ] **跨平台**：Linux 已有 `package-linux.sh` + systemd + Dockerfile；macOS 仍无产物，Linux 包也未在真实 Linux 上构建过。
+- [~] **安装器**：脚本安装器与 jpackage MSI **已移除**（改由 Tauri 桌面壳承担 Windows 分发）。原实现见 `289d300` 之前的版本。
+- [~] **JVM 兜底包**：**已移除**（随旧 Windows 分发一起下线）。
+- [~] **自动更新**：**已移除**。原实现含 manifest 校验/SHA256/备份回滚。若后续需要，应从 `289d300` 之前恢复或改由桌面壳的更新器承担。
+- [ ] **跨平台**：Linux 部署脚本（docker/systemd/package-linux）**已移除**（见 `bb4b617`），当前无 Linux 分发；macOS 无产物。
 - [ ] **`secs-dist` 是空模块**：只有 pom，打包实际在 `scripts/package.ps1`。
 - [x] **原生 E2E 没进 verify**：`NativeRuntimeIT` 已修到当前 ticket/health/POST 语义，并通过 failsafe 绑定到 `mvn -Pnative verify`；本地构建原生镜像后 **2 个 IT 通过**。CI native job 已改为 `verify` 并构建前端。
 - [ ] **里程碑验收脚本只有 M0/M1**：M2–M9 没有对应 `accept-*.ps1`。
 - [ ] **构建前置未固化**：项目要求 JDK 25，本机默认 JDK 21；没有 Maven toolchains / enforcer。
-- [x] **服务端部署**：新增 `packaging/systemd/secs-sim.service` / env 示例 / 部署 README、`packaging/docker/Dockerfile` / compose / entrypoint、`scripts/package-linux.sh`；Linux demo 配置在 JVM 上启动/health/session/preview 冒烟通过。**Docker 本机不可用，未实际构建镜像。**
+- [~] **服务端部署**：**已移除**（`bb4b617`）。桌面壳不覆盖容器化服务端场景；需要时从历史版本恢复。
 - [ ] **发布未闭环**：版本仍是 `2.0.0-SNAPSHOT`；只有 `v1.0` / `v1.1` 标签；本地 master 领先 origin 28 个提交。
 - [ ] **日志**：只有 stderr 单行日志，没有文件/轮转/级别；`HsmsSessionRuntime` 与 `SecsProbe` 已改用 `Log`，但 `Main` 在 `SECS_SIM_DEBUG` 下仍会打完整栈。
 - [ ] **下轮评审**：`secs-cli` 端到端宿主与 `scripts/`、`packaging/` 的 PowerShell 健壮性未深评。
@@ -242,7 +242,7 @@ cmd /c "package\secs-sim-2.0.0-SNAPSHOT\start.cmd -CheckOnly"
 - **Playwright E2E**（Mock 3 条 + 真实 Java 后端 1 条；CI 安装 Chromium）。
 - **JVM 兜底包**（jlink runtime + jars + web，start-jvm；约 37 MB）。
 - **脚本安装器**（JVM 包 + install/uninstall；快捷方式/卸载项；实测安装/卸载）。
-- **Linux 部署**（package-linux.sh + systemd unit/env + Dockerfile/compose；demo 配置冒烟通过）。
+- ~~Linux 部署（package-linux.sh + systemd + Dockerfile/compose）~~：**已移除**，见 `bb4b617`。
 - **自动更新**（manifest + SHA256 + 备份/回滚；2.0.0→2.0.1 实测）。
 - **jpackage MSI**（WiX；39.1 MB；解包后 exe 启动/页面 200）。
 - **原生 E2E**（failsafe；mvn -Pnative verify 跑 NativeRuntimeIT 2 例）。
