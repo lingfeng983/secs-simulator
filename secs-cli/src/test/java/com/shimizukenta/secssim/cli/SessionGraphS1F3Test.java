@@ -68,6 +68,7 @@ class SessionGraphS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             Secs2Builder b = Secs2.getBuilder();
 
             double[] atZero = query(client, b, 1001, 1002);

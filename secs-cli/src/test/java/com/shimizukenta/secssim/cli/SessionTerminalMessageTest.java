@@ -88,6 +88,7 @@ class SessionTerminalMessageTest {
             cfg.deviceId(10);
             this.client = HsmsSsCommunicator.open(cfg);
             this.client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(this.session);
         }
 
         @Override

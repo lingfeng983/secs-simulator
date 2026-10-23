@@ -111,6 +111,7 @@ class ConfigDrivenSessionTest {
 
         try (SecsCommunicator client = connect(port, configured.deviceId())) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Secs2Builder b = Secs2.getBuilder();
             Optional<SecsMessage> reply = client.send(1, 3, true, b.list(b.uint4(1001L), b.uint4(1002L)));
@@ -145,6 +146,7 @@ class ConfigDrivenSessionTest {
 
         try (SecsCommunicator client = connect(port, configured.deviceId())) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Secs2Builder b = Secs2.getBuilder();
             Optional<SecsMessage> reply = client.send(1, 3, true, b.list(b.uint4(1001L), b.uint4(1090L)));

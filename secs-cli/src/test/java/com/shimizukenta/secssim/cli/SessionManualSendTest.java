@@ -39,6 +39,7 @@ class SessionManualSendTest {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             /* 设备侧手动发 S1F1，主机侧要真的回 S1F2，才能验证"捕获回复" */
             client.addSecsMessageReceiveListener(message -> {
                 try {
@@ -75,6 +76,7 @@ class SessionManualSendTest {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             JsonHub result = JsonHub.fromJson(session.sendSml("S1F1"));
             assertFalse(result.get("wbit").booleanValue());
             assertFalse(result.get("timedOut").booleanValue());
@@ -105,6 +107,7 @@ class SessionManualSendTest {
         session2.open();
         try (SecsCommunicator client = connect(port2)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session2);
             assertThrows(IllegalArgumentException.class, () -> session2.sendSml("S1F1\n<L <U4 1>"));
         } finally {
             session2.close();

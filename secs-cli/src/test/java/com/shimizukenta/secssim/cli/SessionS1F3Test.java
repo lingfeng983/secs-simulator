@@ -57,6 +57,7 @@ class SessionS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Optional<SecsMessage> linktest = client.send(1, 1, true);
             assertTrue(linktest.isPresent(), "S1F1 没有应答");
@@ -94,6 +95,7 @@ class SessionS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Secs2Builder b = Secs2.getBuilder();
             Optional<SecsMessage> reply = client.send(1, 3, true, b.list(b.uint4(9999L)));
@@ -121,6 +123,7 @@ class SessionS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             Secs2Builder b = Secs2.getBuilder();
 
             double first = Secs2Read.asDouble(client.send(1, 3, true, b.list(b.uint4(1001L)))
@@ -150,6 +153,7 @@ class SessionS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Optional<SecsMessage> reply = client.send(1, 3, true, Secs2.getBuilder().list());
             assertTrue(reply.isPresent(), "S1F3 空列表没有应答");
@@ -185,6 +189,7 @@ class SessionS1F3Test {
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
 
             Optional<SecsMessage> reply = client.send(1, 3, true,
                     Secs2.getBuilder().list(Secs2.getBuilder().uint4(9001L)));

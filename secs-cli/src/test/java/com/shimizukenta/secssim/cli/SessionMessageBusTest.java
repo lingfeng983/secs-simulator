@@ -51,6 +51,7 @@ class SessionMessageBusTest {
 
         try (SecsCommunicator client = HsmsSsCommunicator.open(cfg)) {
             client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
             client.send(1, 11, true, com.shimizukenta.secs.secs2.Secs2.getBuilder().list());
 
             long deadline = System.currentTimeMillis() + 5_000L;
