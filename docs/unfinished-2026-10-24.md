@@ -27,9 +27,7 @@
 
 ## P2：工程化
 
-- [ ] **OpenAPI 同步**：`docs/openapi.yaml` 还没有 `POST /api/v1/sessions/bulk`、
-  会话创建的 overrides 字段（sessionId/port/bindHost/deviceId）。CI 校验器会过
-  （它只校验已有内容），但契约落后于实现。
+- [x] **OpenAPI 同步**（2026-10-24：补 bulk 端点、会话创建 overrides 字段、log-level 端点与三个 schema；openapi-spec-validator 通过）
 - [ ] **E2E 覆盖新功能**：批量新建弹窗、批量操作、连接设置、压测面板都没有 e2e；
   现有 mock e2e 9 例 + real 1 例的规模需要扩。
 - [ ] **原生镜像 CI 与双包产物**：`package.ps1` / `package-runtime.ps1` 都依赖本地

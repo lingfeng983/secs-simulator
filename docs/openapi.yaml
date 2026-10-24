@@ -111,12 +111,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [config]
-              properties:
-                config:
-                  type: string
-                  description: "`demo` 或 --work-dir 下的配置文件名（不接受路径）"
+              $ref: '#/components/schemas/SessionCreateRequest'
       responses:
         '201':
           description: 已创建
@@ -128,6 +123,68 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/sessions/bulk:
+    post:
+      tags: [sessions]
+      summary: 批量新建会话
+      description: 从一份设备配置模板批量开多台；第 i 台会话 id = 前缀+i、端口 = 起始+i−1、device-id = 起始+i−1。逐台独立创建，部分失败回 207。
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionBulkRequest'
+      responses:
+        '201':
+          description: 全部创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionBulkResult'
+        '207':
+          description: 部分失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/log-level:
+    get:
+      tags: [system]
+      summary: 当前日志级别
+      x-required-role: viewer
+      responses:
+        '200':
+          description: 级别
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  level:
+                    type: string
+                    enum: [error, info, debug]
+    put:
+      tags: [system]
+      summary: 运行时切换日志级别（记审计）
+      x-required-role: operator
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level]
+              properties:
+                level:
+                  type: string
+                  enum: [error, info, debug]
+      responses:
+        '200':
+          description: 已切换
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/sessions/{id}:
     delete:
       tags: [sessions]
@@ -866,3 +923,59 @@ components:
         action: { type: string }
         target: { type: string }
         detail: { type: string }
+
+    SessionCreateRequest:
+      type: object
+      required: [config]
+      properties:
+        config:
+          type: string
+          description: "`demo` 或 --work-dir 下的配置文件名（不接受路径）"
+        sessionId:
+          type: string
+          description: 部署期覆盖：会话 id；不填用配置里的
+        bindHost:
+          type: string
+          description: 部署期覆盖：绑定地址
+        port:
+          type: integer
+          description: 部署期覆盖：HSMS 端口（1-65535）
+        deviceId:
+          type: integer
+          description: 部署期覆盖：device-id
+    SessionBulkRequest:
+      type: object
+      required: [config, count]
+      properties:
+        config:
+          type: string
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        sessionIdPrefix:
+          type: string
+          default: dev-
+        portBase:
+          type: integer
+          description: 0 表示都用配置里的端口
+        deviceIdBase:
+          type: integer
+        bindHost:
+          type: string
+    SessionBulkResult:
+      type: object
+      properties:
+        created:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              error:
+                type: string
