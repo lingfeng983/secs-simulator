@@ -125,6 +125,20 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
       render: (row) => formatCount(row.counters.skipped),
     },
     {
+      key: 's9',
+      header: 'S9Fx',
+      align: 'right',
+      sortValue: (row) => row.counters.s9Replies ?? 0,
+      render: (row) =>
+        row.counters.s9Replies ? (
+          <span className="badge badge-warn" title="主机发了设备不认识的报文，设备回了 S9F3/S9F5">
+            {formatCount(row.counters.s9Replies)}
+          </span>
+        ) : (
+          0
+        ),
+    },
+    {
       key: 'trace',
       header: 'S6F1',
       align: 'right',
@@ -243,6 +257,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           { header: '限流丢弃', value: (row) => row.counters.rejected ?? 0 },
           { header: '禁用跳过', value: (row) => row.counters.skipped ?? 0 },
           { header: 'S6F1', value: (row) => row.counters.traceFrames ?? 0 },
+          { header: 'S9Fx', value: (row) => row.counters.s9Replies ?? 0 },
         ]}
       />
 

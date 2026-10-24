@@ -150,6 +150,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final AtomicLong terminalReceived = new AtomicLong();
     private final Deque<TerminalMessage> terminalMessages = new ArrayDeque<>();
     private final AtomicLong alarmsSent = new AtomicLong();
+    /** 设备回 S9Fx 的次数（主机发了设备不认识的报文）。 */
+    private final AtomicLong s9Replies = new AtomicLong();
+    /** 最近一次 S9Fx 的描述，界面显示用；空串表示没有。 */
+    private volatile String lastS9 = "";
     private final AtomicLong alarmDropped = new AtomicLong();
     private final Map<Integer, AlarmState> activeAlarms = new ConcurrentHashMap<>();
     private final Map<String, ConditionDebouncer> conditionDebouncers = new ConcurrentHashMap<>();
@@ -1084,7 +1088,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 Map.entry("traceFrames", this.traceFrames.get()),
                 Map.entry("activeTraces", (long) this.traces.activeCount()),
                 Map.entry("hostReports", (long) this.hostReports.reportCount()),
-                Map.entry("hostLinks", (long) this.hostReports.linkCount()));
+                Map.entry("hostLinks", (long) this.hostReports.linkCount()),
+                Map.entry("s9Replies", this.s9Replies.get()));
     }
 
     @Override
@@ -1447,9 +1452,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         try {
             if (isKnownStream(stream)) {
                 this.communicator.gem().s9f5(primary);
+                this.lastS9 = "S9F5 ← S" + stream + "F" + primary.getFunction() + "（功能不支持）";
             } else {
                 this.communicator.gem().s9f3(primary);
+                this.lastS9 = "S9F3 ← S" + stream + "F" + primary.getFunction() + "（流不支持）";
             }
+            this.s9Replies.incrementAndGet();
         } catch (Exception e) {
             this.lastError = e.toString();
             Log.error("会话 " + this.spec.id() + " 回复 S9Fx 失败", e);

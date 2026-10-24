@@ -44,6 +44,8 @@ export interface Counters {
   activeTraces?: number;
   hostReports?: number;
   hostLinks?: number;
+  /** 设备回 S9Fx 的次数（主机发了设备不认识的报文）。 */
+  s9Replies?: number;
 }
 
 export interface SessionSummary {
