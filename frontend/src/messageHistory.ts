@@ -1,5 +1,8 @@
 import type { WireMessage } from './api';
 
+/** 面板里保留的报文条数上限。 */
+export const MAX_MESSAGES = 200;
+
 /** 报文表的一行：key 只增不减，避免 slice 之后 index 位移导致整表重建。 */
 export interface MessageEntry {
   key: number;

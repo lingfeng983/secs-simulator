@@ -19,6 +19,8 @@ import {
 import { mergeMessages, type MessageEntry } from '../messageHistory';
 import type { Notifier } from './useToasts';
 import { useSessionCommands } from './useSessionCommands';
+import { useConfigCommands } from './useConfigCommands';
+import { useDataCommands } from './useDataCommands';
 
 /** 面板里保留的报文条数上限。 */
 export const MAX_MESSAGES = 200;
@@ -147,6 +149,14 @@ export interface BackendController {
   refreshPreview: (windowMs: number) => Promise<void>;
   pushMessages: (messages: import('../api').WireMessage[]) => void;
   clearMessages: () => void;
+
+  /** 主机模拟器连接状态（随会话明细轮询）。 */
+  hostSimOpen: boolean;
+  hostSimTarget: string;
+  openHostSim: (sessionId: string) => Promise<void>;
+  closeHostSim: (sessionId: string) => Promise<void>;
+  /** 以主机角色发送 SML；返回发送结果。 */
+  sendHostSml: (sessionId: string, sml: string) => Promise<import('../api').SentMessageResult | null>;
 }
 
 /**
@@ -199,6 +209,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [lastRefresh, setLastRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
+  const [hostSimOpen, setHostSimOpen] = useState(false);
+  const [hostSimTarget, setHostSimTarget] = useState('');
 
   const nextMessageKey = useRef(0);
   const notifierRef = useRef(notifier);
@@ -233,7 +245,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }
   }, [client]);
 
-  /** 拉某个会话的报警 / 终端消息 / 目录 / 事件计划。 */  const refreshSessionDetail = useCallback(
+  /** 拉某个会话的报警 / 终端消息 / 目录 / 事件计划。 */
+  const refreshSessionDetail = useCallback(
     async (sessionId: string) => {
       if (client === null || sessionId === '') {
         return;
@@ -255,6 +268,13 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       }
       if (eventsResult.status === 'fulfilled') {
         setEventPlans(eventsResult.value);
+      }
+      try {
+        const sim = await client.hostSimState(sessionId);
+        setHostSimOpen(sim?.open ?? false);
+        setHostSimTarget(sim?.target ?? '');
+      } catch {
+        /* 老后端没有主机模拟端点 */
       }
     },
     [client],
@@ -417,6 +437,20 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
 
   /* ---------- 写操作（会话域拆分至 useSessionCommands） ---------- */
   const sessionCommands = useSessionCommands({ client, notifier, refreshSessions, refreshSessionDetail });
+  const configCommands = useConfigCommands({ client, notifier, refreshConfigs });
+  const dataCommands = useDataCommands({
+    client,
+    notifier,
+    setMessages,
+    setMessageTotal,
+    nextMessageKey,
+    setComparePreviewData,
+    setCompareSessionId,
+    setPreview,
+    setPreviewSession,
+    setHealth,
+    activeSession,
+  });
 
 
 
@@ -427,6 +461,59 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
 
 
 
+
+  const openHostSim = useCallback(
+    async (sessionId: string) => {
+      if (client === null) {
+        return;
+      }
+      const status = await client.openHostSim(sessionId).catch(() => 0);
+      if (status === 201) {
+        notifierRef.current.success('主机模拟器已连接');
+      } else if (status === 409) {
+        notifierRef.current.error('连接失败', '设备已有主机连接，或模拟器已开启');
+      } else {
+        notifierRef.current.error(`主机模拟器连接失败（HTTP ${status}）`);
+      }
+      await refreshSessionDetail(sessionId);
+    },
+    [client, refreshSessionDetail],
+  );
+
+  const closeHostSim = useCallback(
+    async (sessionId: string) => {
+      if (client === null) {
+        return;
+      }
+      await client.closeHostSim(sessionId).catch(() => 0);
+      notifierRef.current.info('主机模拟器已断开');
+      await refreshSessionDetail(sessionId);
+    },
+    [client, refreshSessionDetail],
+  );
+
+  const sendHostSml = useCallback(
+    async (sessionId: string, sml: string): Promise<import('../api').SentMessageResult | null> => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        const result = await client.sendHostSml(sessionId, sml);
+        const summary =
+          result.replySml != null
+            ? `S${result.stream}F${result.function} -> S${result.replyStream}F${result.replyFunction}`
+            : result.timedOut
+              ? `S${result.stream}F${result.function} -> 等待回复超时`
+              : `S${result.stream}F${result.function} -> 已发送`;
+        notifierRef.current.success(summary, `耗时 ${result.elapsedMs} ms`);
+        return result;
+      } catch (error) {
+        notifierRef.current.error('主机模拟发送失败', (error as Error).message);
+        return null;
+      }
+    },
+    [client],
+  );
 
   const setAlarm = useCallback(
     async (sessionId: string, alid: number, set: boolean, text: string, category: number) => {
@@ -494,155 +581,11 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
-  /**
-   * 重连后补拉断线期间的增量：取最近 1000 条历史，
-   * 只收时间戳比面板里最新一条新的。
-   *
-   * <p>SSE 断线期间后端不补发，这条补拉把缺口接上；
-   * 历史被轮转掉时拿不全，提示里说明。</p>
-   */
-  const backfillAfterReconnect = useCallback(async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const page = await client.messages('', '', 1000);
-      setMessages((previous) => {
-        if (previous.length === 0) {
-          /* 面板本来就是空的：整页并入 */
-          const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
-          nextMessageKey.current = merged.nextKey;
-          return merged.entries;
-        }
-        const newestAt = previous.reduce((max, item) => Math.max(max, item.msg.at), 0);
-        const fresh = page.messages.filter((msg) => msg.at > newestAt);
-        if (fresh.length === 0) {
-          return previous;
-        }
-        const merged = mergeMessages(previous, fresh, nextMessageKey.current, MAX_MESSAGES);
-        nextMessageKey.current = merged.nextKey;
-        return merged.entries;
-      });
-      setMessageTotal(page.total);
-      if (page.truncated) {
-        notifierRef.current.info('重连补拉被截断：断线过久时中间可能有缺口，可手动「载入历史」');
-      }
-    } catch {
-      /* 补拉失败不影响实时流；手动「载入历史」仍是兜底 */
-      notifierRef.current.warn('重连后补拉增量失败，可手动「载入历史」补齐');
-    }
-  }, [client]);
 
-  const loadHistory = useCallback(async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const page = await client.messages('', '', 1000);
-      setMessages((previous) => {
-        const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
-        nextMessageKey.current = merged.nextKey;
-        return merged.entries;
-      });
-      setMessageTotal(page.total);
-      notifierRef.current.success(
-        page.truncated
-          ? `已载入最近 ${page.messages.length} 条历史（共 ${page.total} 条）`
-          : `已载入历史 ${page.messages.length} 条`,
-      );
-    } catch (error) {
-      notifierRef.current.error('载入历史失败', (error as Error).message);
-    }
-  }, [client]);
 
-  const exportMessages = useCallback(async () => {
-    if (client === null) {
-      return;
-    }
-    try {
-      const text = await client.messagesJsonl('', '', 5000);
-      if (text.trim() === '') {
-        notifierRef.current.info('没有可导出的报文');
-        return;
-      }
-      const blob = new Blob([text], { type: 'application/x-ndjson;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `messages-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      notifierRef.current.success(`已导出报文历史 ${text.trim().split('\n').length} 行`);
-    } catch (error) {
-      notifierRef.current.error('导出报文失败', (error as Error).message);
-    }
-  }, [client]);
 
-  const fetchPreview = useCallback(
-    async (sessionId: string, fromMs: number, toMs: number) => {
-      if (client === null) {
-        return;
-      }
-      try {
-        const data = await client.preview(sessionId, fromMs, toMs, PREVIEW_BUCKETS);
-        setPreview(data);
-        setPreviewSession(sessionId);
-      } catch (error) {
-        notifierRef.current.error('预览失败', (error as Error).message);
-      }
-    },
-    [client],
-  );
 
-  const setComparePreview = useCallback(
-    async (sessionId: string, fromMs: number, toMs: number) => {
-      if (client === null) {
-        return;
-      }
-      if (sessionId === '') {
-        setComparePreviewData(null);
-        setCompareSessionId('');
-        return;
-      }
-      try {
-        const data = await client.preview(sessionId, fromMs, toMs, PREVIEW_BUCKETS);
-        setComparePreviewData(data);
-        setCompareSessionId(sessionId);
-      } catch (error) {
-        notifierRef.current.error('拉取对比曲线失败', (error as Error).message);
-      }
-    },
-    [client],
-  );
 
-  const downloadPreview = useCallback(
-    async (windowMs: number) => {
-      if (client === null || activeSession === '') {
-        return;
-      }
-      try {
-        const fresh = await client.health();
-        setHealth(fresh);
-        const to = Math.max(1, fresh.uptimeMs ?? 0);
-        const from = Math.max(0, to - windowMs);
-        const blob = await client.previewBinary(activeSession, from, to, PREVIEW_BUCKETS);
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `preview-${activeSession}-${Date.now()}.bin`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 0);
-        notifierRef.current.success(`已下载 ${activeSession} 的二进制曲线（${blob.size} 字节）`);
-      } catch (error) {
-        notifierRef.current.error('下载二进制曲线失败', (error as Error).message);
-      }
-    },
-    [client, activeSession],
-  );
 
   /**
    * 按时间窗刷新曲线。
@@ -660,92 +603,19 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         setHealth(fresh);
         const to = Math.max(1, fresh.uptimeMs ?? 0);
         const from = Math.max(0, to - windowMs);
-        await fetchPreview(activeSession, from, to);
+        await dataCommands.fetchPreview(activeSession, from, to);
       } catch (error) {
         notifierRef.current.error('预览失败', (error as Error).message);
       }
     },
-    [client, activeSession, fetchPreview],
+    [client, activeSession, dataCommands],
   );
 
   /* ---------- 配置目录 ---------- */
 
-  const createConfig = useCallback(
-    async (name: string): Promise<number> => {
-      if (client === null) {
-        return 0;
-      }
-      try {
-        const status = await client.createConfig(name);
-        if (status === 201) {
-          notifierRef.current.success(`已新建 ${name}，改完点「保存」才会落盘`);
-        } else if (status === 409) {
-          notifierRef.current.warn('已经有同名的配置了，直接从上面选它来改');
-        } else {
-          notifierRef.current.error(`新建失败（HTTP ${status}）`);
-        }
-        await refreshConfigs();
-        return status;
-      } catch (error) {
-        notifierRef.current.error('新建配置失败', (error as Error).message);
-        return 0;
-      }
-    },
-    [client, refreshConfigs],
-  );
 
-  const readConfig = useCallback(
-    async (name: string): Promise<string | null> => {
-      if (client === null) {
-        return null;
-      }
-      try {
-        return await client.configText(name);
-      } catch (error) {
-        notifierRef.current.error(`打开配置 ${name} 失败`, (error as Error).message);
-        return null;
-      }
-    },
-    [client],
-  );
 
-  const validateConfig = useCallback(
-    async (name: string, text: string): Promise<ConfigProblems | null> => {
-      if (client === null) {
-        return null;
-      }
-      try {
-        return await client.validateConfig(name, text);
-      } catch (error) {
-        notifierRef.current.error('校验失败', (error as Error).message);
-        return null;
-      }
-    },
-    [client],
-  );
 
-  const saveConfig = useCallback(
-    async (name: string, text: string): Promise<ConfigSaveResult | null> => {
-      if (client === null) {
-        return null;
-      }
-      try {
-        const result = await client.saveConfig(name, text);
-        if (result.status === 200) {
-          notifierRef.current.success(`已保存 ${name}（已在运行的会话需要重载才生效）`);
-        } else if (result.status === 422) {
-          notifierRef.current.error('保存被拒：配置有问题，未落盘');
-        } else {
-          notifierRef.current.error(`保存失败（HTTP ${result.status}）`);
-        }
-        return result;
-      } catch (error) {
-        notifierRef.current.error('保存失败', (error as Error).message);
-        return null;
-      }
-    },
-    [client],
-  );
 
   /* ---------- 报文 ---------- */
 
@@ -782,6 +652,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   return useMemo<BackendController>(
     () => ({
       ...sessionCommands,
+      ...configCommands,
+      ...dataCommands,
       health,
       sessions,
       activeSession,
@@ -809,24 +681,19 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       logLevel,
       backendError,
       setLogLevel,
-      createConfig,
-      readConfig,
-      validateConfig,
-      saveConfig,
       setAlarm,
       toggleEvent,
       sendSml,
-      loadHistory,
-      backfillAfterReconnect,
-      exportMessages,
-      downloadPreview,
-      fetchPreview,
       comparePreview,
       compareSession,
-      setComparePreview,
       refreshPreview,
       pushMessages,
       clearMessages,
+      hostSimOpen,
+      hostSimTarget,
+      openHostSim,
+      closeHostSim,
+      sendHostSml,
     }),
     [
       health,
@@ -854,21 +721,11 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       logLevel,
       backendError,
       setLogLevel,
-      createConfig,
-      readConfig,
-      validateConfig,
-      saveConfig,
       setAlarm,
       toggleEvent,
       sendSml,
-      loadHistory,
-      backfillAfterReconnect,
-      exportMessages,
-      downloadPreview,
-      fetchPreview,
       comparePreview,
       compareSession,
-      setComparePreview,
       refreshPreview,
       pushMessages,
       clearMessages,

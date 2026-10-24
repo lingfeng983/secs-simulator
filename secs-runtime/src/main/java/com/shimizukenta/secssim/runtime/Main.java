@@ -523,6 +523,62 @@ public final class Main {
             return this.launcher.close(sessionId) ? SessionOutcome.OK : SessionOutcome.UNKNOWN_SESSION;
         }
 
+        private final java.util.concurrent.ConcurrentMap<String, com.shimizukenta.secssim.runtime.session.HostSimulator> hostSims =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public SessionOutcome openHostSim(String sessionId) {
+            com.shimizukenta.secssim.app.session.SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+            if (session == null) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            if (this.hostSims.containsKey(sessionId) && this.hostSims.get(sessionId).isOpen()) {
+                return SessionOutcome.CONFLICT;
+            }
+            try {
+                this.hostSims.put(sessionId, com.shimizukenta.secssim.runtime.session.HostSimulator.open(session));
+                Log.info("主机模拟器已连接会话 " + sessionId);
+                return SessionOutcome.OK;
+            } catch (IOException e) {
+                Log.error("主机模拟器连接失败（会话 " + sessionId + "）: " + e.getMessage(), null);
+                return SessionOutcome.FAILED;
+            } catch (IllegalArgumentException e) {
+                Log.error("主机模拟器连接失败（设备已有主机）: " + e.getMessage(), null);
+                return SessionOutcome.CONFLICT;
+            }
+        }
+
+        @Override
+        public SessionOutcome closeHostSim(String sessionId) {
+            com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.remove(sessionId);
+            if (sim == null) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            sim.close();
+            return SessionOutcome.OK;
+        }
+
+        @Override
+        public String hostSimJson(String sessionId) {
+            com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(sessionId);
+            if (this.sessions.find(sessionId).isEmpty()) {
+                return null;
+            }
+            if (sim == null) {
+                return "{\"open\":false}";
+            }
+            return sim.stateJson();
+        }
+
+        @Override
+        public String sendHostSml(String sessionId, String sml) throws IOException {
+            com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(sessionId);
+            if (sim == null || this.sessions.find(sessionId).isEmpty()) {
+                return null;
+            }
+            return sim.sendSml(sml);
+        }
+
         @Override
         public SessionOutcome reloadSession(String sessionId) {
             if (this.sessions.find(sessionId).isEmpty()) {

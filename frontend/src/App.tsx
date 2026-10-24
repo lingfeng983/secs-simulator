@@ -21,6 +21,7 @@ import { MessagesPanel } from './panels/MessagesPanel';
 import { ConfigPanel } from './panels/ConfigPanel';
 import { AuditPanel } from './panels/AuditPanel';
 import { ConsolePanel } from './panels/ConsolePanel';
+import { HostSimPanel } from './panels/HostSimPanel';
 
 /** 一个面板的入口。 */
 interface TabDef {
@@ -48,6 +49,7 @@ const TABS: readonly TabDef[] = [
   { id: 'config', label: '配置编辑器', group: '工具', icon: '⚙' },
   { id: 'audit', label: '审计', group: '工具', icon: '☑' },
   { id: 'console', label: '事件流', group: '工具', icon: '▷' },
+  { id: 'hostsim', label: '主机模拟', group: '设备', icon: '⇋' },
 ];
 
 /** 快捷键说明表。 */
@@ -424,6 +426,7 @@ export function App(): JSX.Element {
           {activeTab === 'config' && <ConfigPanel {...panelProps} />}
           {activeTab === 'audit' && <AuditPanel {...panelProps} />}
           {activeTab === 'console' && <ConsolePanel {...panelProps} />}
+          {activeTab === 'hostsim' && <HostSimPanel {...panelProps} />}
         </main>
       </div>
 

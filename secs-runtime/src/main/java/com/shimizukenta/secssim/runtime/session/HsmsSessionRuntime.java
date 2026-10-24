@@ -1069,6 +1069,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     @Override
+    public com.shimizukenta.secssim.app.session.HsmsConnectionTarget hostTarget() {
+        return new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(
+                this.spec.bindHost(), this.spec.port(), this.spec.deviceId());
+    }
+
+    @Override
     public boolean hasPeer() {
         return this.communicatable;
     }

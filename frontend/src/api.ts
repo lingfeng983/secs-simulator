@@ -283,6 +283,14 @@ export interface ApiClient {
   logLevel(): Promise<string>;
   /** 切换日志级别。 */
   setLogLevel(level: string): Promise<boolean>;
+  /** 主机模拟器状态；会话不存在返回 null。 */
+  hostSimState(sessionId: string): Promise<{ open: boolean; target?: string } | null>;
+  /** 打开主机模拟器连接。 */
+  openHostSim(sessionId: string): Promise<number>;
+  /** 关闭主机模拟器连接。 */
+  closeHostSim(sessionId: string): Promise<number>;
+  /** 以主机角色发送 SML。 */
+  sendHostSml(sessionId: string, sml: string): Promise<SentMessageResult>;
 }
 
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
@@ -568,6 +576,38 @@ export function createClient(): ApiClient {
         body: level,
       });
       return response.ok;
+    },
+    async hostSimState(sessionId) {
+      try {
+        const body = await json<{ open?: boolean; target?: string }>(
+          await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`)),
+        );
+        return { open: body.open ?? false, target: body.target };
+      } catch {
+        return null;
+      }
+    },
+    async openHostSim(sessionId) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'POST' }));
+    },
+    async closeHostSim(sessionId) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
+    },
+    async sendHostSml(sessionId, sml) {
+      const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: sml,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status} ${text.slice(0, 300)}`);
+      }
+      try {
+        return JSON.parse(text) as SentMessageResult;
+      } catch {
+        throw new Error('响应不是合法 JSON');
+      }
     },
   };
 }

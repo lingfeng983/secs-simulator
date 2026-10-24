@@ -1199,6 +1199,16 @@ public final class HttpApiServer implements AutoCloseable {
      * </p>
      */
     private void closeSession(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+        if (path.endsWith("/host-sim")) {
+            String id = path.substring(PATH_SESSION_PREFIX.length(), path.length() - "/host-sim".length());
+            SessionOutcome outcome = this.context.closeHostSim(id);
+            audit(ex, "host-sim-close", id, "outcome=" + outcome);
+            respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
+                    outcome == SessionOutcome.OK ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not-open\"}");
+            return;
+        }
+
         String id = sessionIdFromPath(ex);
         if (id == null) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
@@ -1230,6 +1240,18 @@ public final class HttpApiServer implements AutoCloseable {
      * GET /api/v1/sessions/{id}/alarms、/terminal 或 /catalog。
      */
     private void handleSessionQuery(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+        if (path.endsWith("/host-sim")) {
+            String id = path.substring(PATH_SESSION_PREFIX.length(), path.length() - "/host-sim".length());
+            String json = this.context.hostSimJson(id);
+            if (json == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                return;
+            }
+            respond(ex, 200, json);
+            return;
+        }
+
         String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
         String[] parts = rest.split("/");
 
@@ -1283,6 +1305,46 @@ public final class HttpApiServer implements AutoCloseable {
                 default -> respond(ex, 400, "{\"ok\":false,\"error\":\"reload-failed\"}");
             }
             return;
+        }
+
+        /* 主机模拟器：打开连接 / 以主机角色发报文 */
+        if (parts.length >= 2 && "host-sim".equals(parts[1])) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            if (parts.length == 2) {
+                SessionOutcome outcome = this.context.openHostSim(parts[0]);
+                audit(ex, "host-sim-open", parts[0], "outcome=" + outcome);
+                switch (outcome) {
+                    case OK -> respond(ex, 201, "{\"ok\":true}");
+                    case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"host-busy-or-sim-open\"}");
+                    case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                    default -> respond(ex, 502, "{\"ok\":false,\"error\":\"open-failed\"}");
+                }
+                return;
+            }
+            if (parts.length == 3 && "send".equals(parts[2])) {
+                String body = readBody(ex);
+                if (body == null || body.trim().isEmpty()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                try {
+                    String result = this.context.sendHostSml(parts[0], body);
+                    if (result == null) {
+                        respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                        return;
+                    }
+                    respond(ex, 200, result);
+                } catch (IllegalArgumentException e) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"SML 解析失败: " + json(e.getMessage()) + "\"}");
+                } catch (IllegalStateException e) {
+                    respond(ex, 409, "{\"ok\":false,\"error\":\"host-sim-not-open\"}");
+                } catch (IOException e) {
+                    respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed: " + json(e.getMessage()) + "\"}");
+                }
+                return;
+            }
         }
 
         if (parts.length == 2 && "message".equals(parts[1])) {

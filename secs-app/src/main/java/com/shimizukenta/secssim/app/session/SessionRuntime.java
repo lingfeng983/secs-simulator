@@ -182,6 +182,15 @@ public interface SessionRuntime {
     }
 
     /**
+     * 主机模拟器连接本会话要用的目标信息；不支持时返回 {@code null}。
+     *
+     * @return 绑定地址 / 端口 / device-id
+     */
+    default HsmsConnectionTarget hostTarget() {
+        return null;
+    }
+
+    /**
      * 当前活动报警的 JSON 数组。
      *
      * @return JSON 数组文本

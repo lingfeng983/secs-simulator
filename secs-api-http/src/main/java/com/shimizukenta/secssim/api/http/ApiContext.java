@@ -274,6 +274,48 @@ public interface ApiContext {
     }
 
     /**
+     * 打开会话的主机模拟器连接（host 角色，用于发 S2F33/35/37 等主机方向报文）。
+     *
+     * @param sessionId 会话标识
+     * @return 结果
+     */
+    default SessionOutcome openHostSim(String sessionId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * 关闭会话的主机模拟器连接。
+     *
+     * @param sessionId 会话标识
+     * @return 结果
+     */
+    default SessionOutcome closeHostSim(String sessionId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * 主机模拟器状态 JSON。
+     *
+     * @param sessionId 会话标识
+     * @return {@code {"open":...}}；会话不存在返回 {@code null}
+     */
+    default String hostSimJson(String sessionId) {
+        return null;
+    }
+
+    /**
+     * 以主机角色发送一条 SML。
+     *
+     * @param sessionId 会话标识
+     * @param sml       SML 文本
+     * @return 结果 JSON；会话不存在返回 {@code null}
+     * @throws IOException 发送失败
+     */
+    default String sendHostSml(String sessionId, String sml) throws IOException {
+        return null;
+    }
+
+    /**
      * 配置目录里的配置文件名列表 JSON。
      *
      * @return JSON 数组文本
