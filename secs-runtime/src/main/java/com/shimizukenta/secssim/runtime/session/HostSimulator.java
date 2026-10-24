@@ -65,6 +65,14 @@ public final class HostSimulator {
         SecsCommunicator comm = HsmsSsCommunicator.open(config);
         comm.addSecsMessageReceiveListener(sim::onPrimary);
         sim.communicator = comm;
+        try {
+            /* 连接与 SELECT 是异步的：不等通信建立就发会撞 NotConnected */
+            comm.openAndWaitUntilCommunicating();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            comm.close();
+            throw new IOException("主机模拟器等待通信建立被中断", e);
+        }
         sim.open.set(true);
         Log.info("主机模拟器已连接会话 " + runtime.id() + "（" + target.bindHost() + ":" + target.port() + "）");
         return sim;
@@ -115,7 +123,10 @@ public final class HostSimulator {
             reply = Optional.empty();
             waitTimedOut = true;
         } catch (com.shimizukenta.secs.SecsSendMessageException e) {
-            throw new IOException("发送失败: " + e.getMessage(), e);
+            /* 发送失败常见于设备重载后端口重绑：标记断开，让调用方可重开 */
+            this.lastError = e.toString();
+            this.open.set(false);
+            throw new IOException("发送失败（连接可能已断，可重新打开主机模拟）: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("发送被中断", e);

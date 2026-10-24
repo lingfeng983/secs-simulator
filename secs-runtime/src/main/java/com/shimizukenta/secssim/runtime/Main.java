@@ -576,7 +576,29 @@ public final class Main {
             if (sim == null || this.sessions.find(sessionId).isEmpty()) {
                 return null;
             }
-            return sim.sendSml(sml);
+            try {
+                return sim.sendSml(sml);
+            } catch (IOException e) {
+                /* 设备重载后端口重绑会让 host 连接死亡：自动重开一次再发，
+                   让"改配置→重载→继续用主机模拟"不需要手动断开重连 */
+                if (!sim.isOpen()) {
+                    Log.info("主机模拟器连接已断（会话 " + sessionId + "），自动重连后重试");
+                    com.shimizukenta.secssim.app.session.SessionRuntime session =
+                            this.sessions.find(sessionId).orElse(null);
+                    if (session == null) {
+                        throw e;
+                    }
+                    com.shimizukenta.secssim.runtime.session.HostSimulator reopened;
+                    try {
+                        reopened = com.shimizukenta.secssim.runtime.session.HostSimulator.open(session);
+                    } catch (IOException reconnectError) {
+                        throw e;
+                    }
+                    this.hostSims.put(sessionId, reopened);
+                    return reopened.sendSml(sml);
+                }
+                throw e;
+            }
         }
 
         @Override
