@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MessageEntry } from '../messageHistory';
 import { Panel, PanelFootnote } from '../ui/Panel';
+import { highlightSml } from '../lib/smlHighlight';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { formatClock, formatDateTime } from '../lib/format';
@@ -102,9 +103,16 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
       className: 'body',
       sortValue: (row) => row.msg.body,
       render: (row) => (
-        <button type="button" className="link-button" onClick={() => setDetail(row)} title="查看完整报文体">
-          {row.msg.body.length > 120 ? `${row.msg.body.slice(0, 120)}…` : row.msg.body}
-        </button>
+        <button
+          type="button"
+          className="link-button sml-cell"
+          onClick={() => setDetail(row)}
+          title="查看完整报文体"
+          /* 高亮输出已整体转义，不可能注入 */
+          dangerouslySetInnerHTML={{
+            __html: highlightSml(row.msg.body.length > 120 ? `${row.msg.body.slice(0, 120)}…` : row.msg.body),
+          }}
+        />
       ),
     },
   ];

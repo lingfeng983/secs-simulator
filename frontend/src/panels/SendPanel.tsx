@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { SentMessageResult } from '../api';
 import { Panel } from '../ui/Panel';
 import { NumberField } from '../ui/CommitFields';
+import { highlightSml } from '../lib/smlHighlight';
 import type { PanelBaseProps } from './types';
 
 /** 常用的示例报文；点一下就能改，不用手打。 */
@@ -212,7 +213,13 @@ export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
       {error !== '' && (
         <pre className="sml-result error-result">发送失败：{error}</pre>
       )}
-      {result !== null && <pre className="sml-result">{lines.join('\n')}</pre>}
+      {result !== null && (
+        <pre
+          className="sml-result"
+          /* 高亮输出已整体转义，不可能注入 */
+          dangerouslySetInnerHTML={{ __html: highlightSml(lines.join('\n')) }}
+        />
+      )}
 
       <h3 className="sub-title">压测</h3>
       <div className="form-row">
