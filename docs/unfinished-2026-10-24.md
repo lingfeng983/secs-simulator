@@ -41,13 +41,8 @@
 
 ## 已知技术债
 
-- `Main.java` 的 Context 实现类接近千行，会话/配置/审计的转发逻辑可以按
-  `ApiContext` 的能力分面拆掉。
-- `HsmsSessionRuntime` 2100+ 行：**拆分前置的单元测试已补**（2026-10-24 晚：HsmsSessionRuntimeTest 3 例，手动时钟驱动——热生效原地替换、counters 契约、值来源回落），可以开始拆了；
-- 前端 `useBackend` 是单一大控制器（800+ 行），轮询与写操作集中；面板继续增加时
-  按域拆成多个 hook（会话域 / 配置域 / 报文域）。
-- 前端 e2e 的 mock API 与真实后端行为存在漂移风险（202 状态码那次就是 mock 测不出来的）；
-  考虑让 mock e2e 直接复用 OpenAPI 契约生成。
+- `Main.java` Context 实现类：**评估后不拆**（2026-10-24 晚：实测全文件 677 行、Context 约 310 行、32 个纯转发方法，javadoc 也写明"只做转发，不含业务逻辑"——原清单"接近千行"的说法过时；再拆只会加无谓的间接层）
+- `HsmsSessionRuntime` 2181 行：**第一批拆分已落地**（2026-10-24 晚：PreviewSupport 曲线分桶/序列化、SessionJsonViews 事件与报警视图移出；前置单元测试 HsmsSessionRuntimeTest 3 例在位）。剩余可拆块（onPrimary 协议回调分发、ECV 常量管理）与 communicator/事件总线耦合较深，ROI 下降，建议待有真实改动需求时再动；
 
 ## 本轮已落地（2026-10-24 第二批）
 
