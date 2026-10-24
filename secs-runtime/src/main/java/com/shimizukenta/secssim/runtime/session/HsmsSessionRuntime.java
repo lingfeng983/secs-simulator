@@ -111,7 +111,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final SessionSpec spec;
     private final ResolvedEquipment model;
     private final ValueStore store;
-    private final ValueSource values;
+    /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
+    private final ValueSourceHandle values;
     private final EngineClock clock;
     private final HostReportTable hostReports = new HostReportTable();
     private final S6F11Assembler assembler;
@@ -222,12 +223,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.constants = java.util.Collections.synchronizedMap(init);
         this.store = new ValueStore(spec.seed());
 
+        ValueSource initial;
         if (values == null) {
             DefaultCurves.bind(this.store, spec.equipment(), model);
-            this.values = new CurveValueSource(this.store);
+            initial = new CurveValueSource(this.store);
         } else {
-            this.values = values;
+            initial = values;
         }
+        this.values = new ValueSourceHandle(initial);
 
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
         this.traces = new TraceManager(model, this.values, Instant.now());
@@ -550,6 +553,55 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             if (plan.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
             }
+        }
+    }
+
+    /** 把配置里的 HSMS 超时（可选段）落到协议层；null 的键保留协议层默认。 */
+    private static void applyTimeouts(com.shimizukenta.secs.SecsTimeout timeout,
+                                      com.shimizukenta.secssim.app.session.HsmsTimeouts timeouts) {
+        if (timeouts.t3() != null) {
+            timeout.t3(timeouts.t3().floatValue());
+        }
+        if (timeouts.t5() != null) {
+            timeout.t5(timeouts.t5().floatValue());
+        }
+        if (timeouts.t6() != null) {
+            timeout.t6(timeouts.t6().floatValue());
+        }
+        if (timeouts.t7() != null) {
+            timeout.t7(timeouts.t7().floatValue());
+        }
+        if (timeouts.t8() != null) {
+            timeout.t8(timeouts.t8().floatValue());
+        }
+    }
+
+    /**
+     * 不断连热生效：整体替换事件编排、限流、W 位与值来源。
+     *
+     * <p>只允许在"会话结构与连接标识都没变"的重载场景调用（见
+     * {@link com.shimizukenta.secssim.runtime.SessionLauncher} 的指纹比较）；
+     * 设备模型变了必须走关旧开新。运行中的 ticker 不动——编排表是
+     * volatile 引用，下一个 pump 周期自动看到新计划。</p>
+     *
+     * @param schedule        新编排表
+     * @param maxEventsPerSec 新限流
+     * @param s6f11Wbit       S6F11 W 位
+     * @param s6f1Wbit        S6F1 W 位
+     * @param values          新值来源；{@code null} 表示没有 templates 段，
+     *                        回落到设备默认曲线（重新绑定后替换）
+     */
+    public void applyHot(EventSchedule schedule, int maxEventsPerSec,
+                         boolean s6f11Wbit, boolean s6f1Wbit, ValueSource values) {
+        this.collectionEventWbit(s6f11Wbit);
+        this.traceWbit(s6f1Wbit);
+        this.enableSchedule(schedule, maxEventsPerSec);
+        if (values != null) {
+            this.values.set(values);
+        } else {
+            /* 从模板图切回默认曲线：默认曲线要先重新绑进值存储 */
+            DefaultCurves.bind(this.store, this.spec.equipment(), this.model);
+            this.values.set(new CurveValueSource(this.store));
         }
     }
 
@@ -880,6 +932,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         config.socketAddress(new InetSocketAddress(this.spec.bindHost(), this.spec.port()));
         config.deviceId(this.spec.deviceId());
         config.isEquip(true);
+        applyTimeouts(config.timeout(), this.spec.timeouts());
 
         try {
             SecsCommunicator comm = HsmsSsCommunicator.open(config);

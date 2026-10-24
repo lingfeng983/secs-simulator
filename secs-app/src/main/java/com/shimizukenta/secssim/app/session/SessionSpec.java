@@ -14,9 +14,18 @@ import com.shimizukenta.secssim.core.domain.EquipmentSpec;
  * @param deviceId  SECS device-id
  * @param seed      数据种子
  * @param equipment 设备配置
+ * @param timeouts  HSMS 超时；null 用协议层默认
  */
 public record SessionSpec(String id, boolean passive, String bindHost, int port, int deviceId,
-                          long seed, EquipmentSpec equipment) {
+                          long seed, EquipmentSpec equipment, HsmsTimeouts timeouts) {
+
+    /**
+     * 便捷构造：超时用协议层默认值。
+     */
+    public SessionSpec(String id, boolean passive, String bindHost, int port, int deviceId,
+                       long seed, EquipmentSpec equipment) {
+        this(id, passive, bindHost, port, deviceId, seed, equipment, HsmsTimeouts.DEFAULTS);
+    }
 
     /**
      * 校验并创建。
@@ -41,6 +50,7 @@ public record SessionSpec(String id, boolean passive, String bindHost, int port,
         if (deviceId < 0 || deviceId > 32767) {
             throw new IllegalArgumentException("deviceId out of range: " + deviceId);
         }
+        timeouts = timeouts == null ? HsmsTimeouts.DEFAULTS : timeouts;
     }
 
     /**

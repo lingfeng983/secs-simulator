@@ -79,6 +79,7 @@
 | `events.s6f1Wbit` | 可选，默认 `false`。为 `true` 时 S6F1 带 W 位并等待 S6F2；发送走独立单线程队列，不阻塞 Trace 采样 |
 | `events.plans[].trigger.type` | `at` / `periodic` / `onCondition` / `afterEvent`。`onCondition` 额外字段：`expression`（支持 `t` 与 `svid.<id>`，比较运算返回 0/1）、`debounceMs`（条件连续成立多久才触发，默认 0）；`afterEvent` 额外字段：`sourcePlan`（源计划 id）、`delayMs`（延迟毫秒，默认 0） |
 | `reserve` | 禁止占用的号段（默认 1..999 留给标准消息） |
+| `session.timeouts` | 可选。HSMS-SS 超时（秒，>0）：`{"t3":60,"t7":15}`；没写的键用协议层默认（T3=45/T5=10/T6=5/T7=10/T8=6）。改超时属于会话结构变化，重载时走重建（主机会断连） |
 
 ## 错误定位
 

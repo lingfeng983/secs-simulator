@@ -1,6 +1,9 @@
 package com.shimizukenta.secssim.app.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +16,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import com.shimizukenta.secssim.app.session.SessionSpec;
+import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
 import com.shimizukenta.secssim.core.curve.Rng;
@@ -316,4 +320,47 @@ class SessionConfigJsonTest {
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
         assertEquals("$.events.plans[0].trigger.type", e.path());
     }
+    @Test
+    void parsesOptionalHsmsTimeouts() {
+        SessionConfig parsed = SessionConfigJson.parse("""
+                {"schemaVersion": 5,
+                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                             "timeouts": {"t3": 60, "t7": 15}},
+                 "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
+                 "events": {"plans": []}}
+                """);
+
+        assertEquals(60.0, parsed.spec().timeouts().t3());
+        assertEquals(15.0, parsed.spec().timeouts().t7());
+        assertNull(parsed.spec().timeouts().t5());
+        assertNull(parsed.spec().timeouts().t6());
+        assertNull(parsed.spec().timeouts().t8());
+    }
+
+    @Test
+    void timeoutsSectionIsOptional() {
+        SessionConfig parsed = SessionConfigJson.parse("""
+                {"schemaVersion": 5,
+                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
+                 "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
+                 "events": {"plans": []}}
+                """);
+
+        assertEquals(HsmsTimeouts.DEFAULTS, parsed.spec().timeouts());
+    }
+
+    @Test
+    void rejectsNonPositiveTimeout() {
+        com.shimizukenta.secssim.app.config.ConfigException error =
+                assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
+                        () -> SessionConfigJson.parse("""
+                                {"schemaVersion": 5,
+                                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                                             "timeouts": {"t3": 0}},
+                                 "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
+                                 "events": {"plans": []}}
+                                """));
+        assertTrue(error.getMessage().contains("必须大于 0"), error.getMessage());
+    }
+
 }

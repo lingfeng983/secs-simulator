@@ -17,6 +17,7 @@ import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.jsonhub.JsonObjectPair;
 import com.shimizukenta.secssim.app.session.SessionSpec;
+import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalCeidDef;
@@ -91,8 +92,46 @@ public final class SessionConfigJson {
         boolean s6f1Wbit = parseS6f1Wbit(root);
         TemplateConfig templates = TemplateConfigJson.parse(root);
 
-        SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment);
+        HsmsTimeouts timeouts = parseTimeouts(session, sessionPath);
+        SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment, timeouts);
         return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, templates);
+    }
+
+
+    /**
+     * 读 session.timeouts 段（可选）：HSMS-SS 超时，秒，必须大于 0。
+     *
+     * <p>形如 {@code "timeouts": {"t3": 60, "t7": 15}}；没写的键用协议层默认。</p>
+     */
+    private static HsmsTimeouts parseTimeouts(JsonHub session, String path) {
+        if (!session.containsKey("timeouts")) {
+            return HsmsTimeouts.DEFAULTS;
+        }
+        JsonHub timeouts = JsonAccess.object(session, "timeouts", path + ".timeouts");
+        Double t3 = optionalPositiveSeconds(timeouts, "t3", path + ".timeouts");
+        Double t5 = optionalPositiveSeconds(timeouts, "t5", path + ".timeouts");
+        Double t6 = optionalPositiveSeconds(timeouts, "t6", path + ".timeouts");
+        Double t7 = optionalPositiveSeconds(timeouts, "t7", path + ".timeouts");
+        Double t8 = optionalPositiveSeconds(timeouts, "t8", path + ".timeouts");
+        try {
+            return new HsmsTimeouts(t3, t5, t6, t7, t8);
+        } catch (IllegalArgumentException e) {
+            throw new ConfigException(path + ".timeouts", e.getMessage());
+        }
+    }
+
+    private static Double optionalPositiveSeconds(JsonHub timeouts, String key, String path) {
+        return JsonAccess.optionalDouble(timeouts, key, path + "." + key)
+                .stream()
+                .boxed()
+                .findFirst()
+                .map(value -> {
+                    if (value <= 0) {
+                        throw new ConfigException(path + "." + key, "必须大于 0（秒）");
+                    }
+                    return value;
+                })
+                .orElse(null);
     }
 
     /**

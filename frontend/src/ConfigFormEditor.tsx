@@ -225,12 +225,59 @@ function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Elem
           被动监听
         </label>
       </div>
+      <TimeoutFields session={session} set={set} />
       <p className="hint">
         被动监听 = 设备开端口等主机连；取消勾选则由设备主动连主机。
-        会话 id 唯一，端口不能和正在运行的会话冲突。
+        会话 id 唯一，端口不能和正在运行的会话冲突。超时单位是秒，留空用协议层默认
+        （T3=45、T5=10、T6=5、T7=10、T8=6）；改超时会让会话重建、主机断连。
       </p>
     </div>
   );
+}
+
+/** HSMS 超时（秒，可选）：写进 session.timeouts；清空删除键，用协议层默认。 */
+function TimeoutFields({ session, set }: { session: JsonObject; set: (key: string, value: unknown) => void }): JSX.Element {
+  const timeouts = isJsonObject(session.timeouts) ? session.timeouts : {};
+  const fields: ReadonlyArray<{ key: string; label: string }> = [
+    { key: 't3', label: 'T3 回复' },
+    { key: 't5', label: 'T5 重连' },
+    { key: 't6', label: 'T6 事务' },
+    { key: 't7', label: 'T7 选择' },
+    { key: 't8', label: 'T8 字符间' },
+  ];
+
+  const commit = (key: string, value: number | undefined) => {
+    editTimeout(set, timeouts, key, value);
+  };
+
+  return (
+    <div className="form-row">
+      {fields.map((field) => (
+        <label className="field" key={field.key}>
+          {field.label}
+          <NumberField
+            value={numberField(timeouts, field.key)}
+            onCommit={(next) => commit(field.key, next)}
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function editTimeout(
+  set: (key: string, value: unknown) => void,
+  timeouts: JsonObject,
+  key: string,
+  value: number | undefined,
+): void {
+  if (value === undefined) {
+    const remaining = { ...timeouts };
+    delete remaining[key];
+    set('timeouts', Object.keys(remaining).length === 0 ? undefined : remaining);
+    return;
+  }
+  set('timeouts', { ...timeouts, [key]: value });
 }
 
 /* ---------- 设备 ---------- */

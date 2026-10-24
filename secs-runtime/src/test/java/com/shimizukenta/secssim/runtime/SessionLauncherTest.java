@@ -1,6 +1,8 @@
 package com.shimizukenta.secssim.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -125,6 +127,43 @@ class SessionLauncherTest {
         assertTrue(this.sessions.find("line1").orElseThrow().deviceName().contains("AFTER"));
     }
 
+    /** 只动事件编排：热生效，会话实例不变、主机连接不断。 */
+    @Test
+    void reloadWithOnlyEventChangeKeepsSameSessionInstance() throws Exception {
+        write("line1.json", config("line1", "V1"));
+        this.launcher.create("line1.json");
+
+        com.shimizukenta.secssim.app.session.SessionRuntime before =
+                this.sessions.find("line1").orElseThrow();
+
+        write("line1.json", configWithPlan("line1", "V1", "beat", 9000));
+        assertTrue(this.launcher.reload("line1"));
+
+        com.shimizukenta.secssim.app.session.SessionRuntime after =
+                this.sessions.find("line1").orElseThrow();
+        assertSame(before, after, "结构与连接标识都没变：必须原地热生效而不是重建");
+        String events = ((com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime) after).eventsJson();
+        assertTrue(events.contains("9000"), "新编排要可见: " + events);
+    }
+
+    /** 设备结构变了必须重建：会话实例要换新。 */
+    @Test
+    void reloadWithStructureChangeReplacesSession() throws Exception {
+        write("line1.json", config("line1", "BEFORE"));
+        this.launcher.create("line1.json");
+
+        com.shimizukenta.secssim.app.session.SessionRuntime before =
+                this.sessions.find("line1").orElseThrow();
+
+        write("line1.json", config("line1", "AFTER"));
+        assertTrue(this.launcher.reload("line1"));
+
+        com.shimizukenta.secssim.app.session.SessionRuntime after =
+                this.sessions.find("line1").orElseThrow();
+        assertNotSame(before, after, "设备结构变了：必须关旧开新");
+        assertTrue(after.deviceName().contains("AFTER"));
+    }
+
     /** 配置坏了要保住旧会话：一个手滑的逗号不该让设备凭空消失。 */
     @Test
     void brokenConfigLeavesOldSessionRunning() throws Exception {
@@ -144,6 +183,14 @@ class SessionLauncherTest {
 
     private void write(String name, String content) throws IOException {
         Files.writeString(this.workDir.resolve(name), content, StandardCharsets.UTF_8);
+    }
+
+    /** 同 config，但带一个周期事件计划（热生效测试用）。 */
+    private static String configWithPlan(String id, String marker, String planId, int periodMs) {
+        return config(id, marker).replace(
+                "\"plans\": []",
+                "\"plans\": [{ \"id\": \"" + planId + "\", \"ceid\": 2001, "
+                        + "\"trigger\": { \"type\": \"periodic\", \"periodMs\": " + periodMs + ", \"jitterMs\": 0 } }]");
     }
 
     /**

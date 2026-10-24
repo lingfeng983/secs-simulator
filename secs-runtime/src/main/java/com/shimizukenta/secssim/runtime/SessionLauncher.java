@@ -59,8 +59,18 @@ public final class SessionLauncher {
     /** 会话标识 -> 它的配置来源；演示会话没有来源，故不出现在这里。 */
     private final ConcurrentMap<String, SessionSource> sources = new ConcurrentHashMap<>();
 
-    /** 配置来源文件 + 部署期覆盖；重载时两者都要原样带上。 */
-    private record SessionSource(Path file, SessionOverrides overrides) {
+    /**
+     * 配置来源文件 + 部署期覆盖 + 结构指纹；重载时三者都要原样带上。
+     *
+     * @param file        配置文件
+     * @param overrides   部署期覆盖
+     * @param fingerprint session+equipment 的规范 JSON 指纹；null 表示算不了（老来源或解析失败）
+     */
+    private record SessionSource(Path file, SessionOverrides overrides, String fingerprint) {
+
+        SessionSource withFingerprint(String fp) {
+            return new SessionSource(this.file, this.overrides, fp);
+        }
     }
 
     /**
@@ -153,13 +163,27 @@ public final class SessionLauncher {
         /* 先构造新的：编译不过时旧会话还好端端地跑着。
            部署覆盖与来源文件一起带上——否则重载第 2 台会抢第 1 台的端口。 */
         Prepared prepared = prepare(source.file(), this.defaultHsmsPort, source.overrides());
+        String fingerprint = structureFingerprint(source.file());
+        SessionRuntime current = this.sessions.find(id).orElse(null);
+
+        /* 热生效路径：会话结构与连接标识都没变（只动了事件/模板/W 位/限流），
+           原地替换编排与值来源，主机连接保持不断。 */
+        if (current instanceof HsmsSessionRuntime running
+                && fingerprint != null && fingerprint.equals(source.fingerprint())) {
+            running.applyHot(prepared.schedule, prepared.maxPerSec,
+                    prepared.s6f11Wbit, prepared.s6f1Wbit, prepared.values);
+            this.sources.put(id, source.withFingerprint(fingerprint));
+            Log.info("会话 " + id + " 已热生效（编排/模板原地替换，主机连接未断）");
+            return true;
+        }
 
         this.close(id);
 
         try {
             HsmsSessionRuntime opened = prepared.open(this.bus, source.file());
             this.sessions.register(opened);
-            this.sources.put(id, source);
+            this.sources.put(id, new SessionSource(source.file(), source.overrides(), fingerprint));
+            Log.info("会话 " + id + " 已重建（结构或连接标识变化，主机需重连）");
             return true;
         } catch (IOException | RuntimeException e) {
             Log.error("重载会话 " + id + " 失败（配置已编译通过，但端口绑定失败）: " + source.file(), e);
@@ -223,7 +247,7 @@ public final class SessionLauncher {
         this.sessions.register(runtime);
         /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
            而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
-        this.sources.put(runtime.id(), new SessionSource(file, overrides));
+        this.sources.put(runtime.id(), new SessionSource(file, overrides, structureFingerprint(file)));
         return runtime;
     }
 
@@ -254,7 +278,7 @@ public final class SessionLauncher {
                 : configured.port() == 0 ? defaultPort : configured.port();
         int deviceId = overrides.deviceId() != null ? overrides.deviceId() : configured.deviceId();
         SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
-                configured.seed(), configured.equipment());
+                configured.seed(), configured.equipment(), configured.timeouts());
 
         ValueSource values = null;
         if (!config.templates().isEmpty()) {
@@ -340,5 +364,74 @@ public final class SessionLauncher {
     /** 取某会话的配置来源文件（诊断用）。 */
     public Optional<Path> sourceOf(String id) {
         return Optional.ofNullable(this.sources.get(id)).map(SessionSource::file);
+    }
+
+    /**
+     * 结构指纹：session + equipment 两段的规范 JSON 文本。
+     *
+     * <p>这两段决定"会话怎么连、设备长什么样"，变了必须关旧开新；
+     * 其余（events/templates 常量初值之外的部分）都可以热生效。
+     * 解析失败返回 {@code null}，重载一律走重建。</p>
+     */
+    private static String structureFingerprint(Path file) {
+        try {
+            String text = java.nio.file.Files.readString(file);
+            if (!text.isEmpty() && text.charAt(0) == '﻿') {
+                text = text.substring(1);
+            }
+            com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(text);
+            if (!root.isObject() || !root.containsKey("session") || !root.containsKey("equipment")) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            appendCanonical(sb, root.get("session"));
+            sb.append('|');
+            appendCanonical(sb, root.get("equipment"));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 规范化输出：键排序、数组保序；缺段输出 {@code null}。 */
+    private static final String QUOTE = "\"";
+    private static final String QUOTE_COLON = "\":";
+
+    private static void appendCanonical(StringBuilder sb, com.shimizukenta.jsonhub.JsonHub node) {
+        if (node == null || node.isNull()) {
+            sb.append("null");
+            return;
+        }
+        if (node.isArray()) {
+            sb.append('[');
+            for (int i = 0; i < node.length(); i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                appendCanonical(sb, node.get(i));
+            }
+            sb.append(']');
+            return;
+        }
+        if (node.isObject()) {
+            sb.append('{');
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            for (com.shimizukenta.jsonhub.JsonString key : node.keySet()) {
+                keys.add(key.unescaped());
+            }
+            java.util.Collections.sort(keys);
+            boolean first = true;
+            for (String key : keys) {
+                if (!first) {
+                    sb.append(',');
+                }
+                first = false;
+                sb.append(QUOTE).append(key).append(QUOTE_COLON);
+                appendCanonical(sb, node.get(key));
+            }
+            sb.append('}');
+            return;
+        }
+        sb.append(node.toJson());
     }
 }
