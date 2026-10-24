@@ -208,6 +208,23 @@ public interface ApiContext {
      * @return 结果
      */
     default SessionOutcome createSession(String configName) {
+        return createSession(SessionCreateRequest.of(configName));
+    }
+
+    /**
+     * 新建一个会话，允许用部署期覆盖替换配置里的连接标识。
+     *
+     * <p>默认实现忽略覆盖、按配置原文建——不支持覆盖的形态（如 CLI 演示）自然退化。</p>
+     *
+     * @param request 配置名 + 部署期覆盖
+     * @return 结果
+     */
+    default SessionOutcome createSession(SessionCreateRequest request) {
+        /* 不带覆盖时委托给旧的 String 重载：已有实现（含测试桩）不用跟着改 */
+        if (request.sessionId() == null && request.bindHost() == null
+                && request.port() == null && request.deviceId() == null) {
+            return createSession(request.config());
+        }
         return SessionOutcome.FAILED;
     }
 

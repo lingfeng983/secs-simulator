@@ -56,3 +56,31 @@ export function StatCard({
     </div>
   );
 }
+
+/** 面板脚注条目：右下角一行的"名称 数值"。 */
+export interface FootnoteItem {
+  label: string;
+  value: ReactNode;
+  tone?: 'ok' | 'warn' | 'danger';
+}
+
+/**
+ * 右下角一行轻量统计。
+ *
+ * <p>面板级的统计统一放这里，和会话面板同款：
+ * 纯计数不再占一排指标卡，视线落在内容上，数字退到角落。</p>
+ */
+export function PanelFootnote({ items }: { items: readonly FootnoteItem[] }): JSX.Element | null {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <p className="panel-footnote">
+      {items.map((item) => (
+        <span key={item.label} className={item.tone === undefined ? undefined : `tone-${item.tone}`}>
+          {item.label} {item.value}
+        </span>
+      ))}
+    </p>
+  );
+}

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
+import { ConfigFormEditor } from '../ConfigFormEditor';
 import { TemplateEditor } from '../TemplateEditor';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
 import type { PanelBaseProps } from './types';
+
+/** 编辑视图：表单优先，原文兜底。 */
+type ConfigView = 'form' | 'json';
 
 /**
  * 配置编辑器面板。
@@ -12,7 +16,7 @@ import type { PanelBaseProps } from './types';
  * 别让人以为文件被"改坏了"。</p>
  */
 export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
-  const { configList, canOperate, operateHint, refreshConfigs } = backend;
+  const { configList, refreshConfigs } = backend;
 
   const [configName, setConfigName] = useState('');
   const [draft, setDraft] = useState('');
@@ -21,6 +25,7 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
   const [notice, setNotice] = useState('');
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<ConfigView>('form');
 
   /** 编辑区里的内容相对磁盘有没有变。 */
   const dirty = draft !== baseline;
@@ -159,14 +164,11 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
       title="配置编辑器"
       description="读 / 改 / 校验 / 保存 / 新建。校验按真实启动路径走（解析 → 编译设备模型 → 建模板图），过了才会落盘。"
       stats={
-        <>
-          <StatCard label="目录内配置" value={configList.length} />
-          <StatCard
-            label="当前状态"
-            value={configName === '' ? '未打开' : dirty ? '有未保存改动' : '与磁盘一致'}
-            tone={configName !== '' && dirty ? 'warn' : undefined}
-          />
-        </>
+        <StatCard
+          label="当前状态"
+          value={configName === '' ? '未打开' : dirty ? '有未保存改动' : '与磁盘一致'}
+          tone={configName !== '' && dirty ? 'warn' : undefined}
+        />
       }
       actions={
         <>
@@ -176,10 +178,9 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
               placeholder="新文件名.json"
-              disabled={!canOperate}
             />
           </label>
-          <button type="button" onClick={() => void onNewConfig()} disabled={newName.trim() === '' || !canOperate || busy}>
+          <button type="button" onClick={() => void onNewConfig()} disabled={newName.trim() === '' || busy}>
             新建
           </button>
           <button type="button" onClick={() => void reloadConfig()} disabled={configName === '' || busy}>
@@ -192,8 +193,8 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
             type="button"
             className="primary"
             onClick={() => void onSave()}
-            disabled={configName === '' || !canOperate || busy}
-            title={canOperate ? '校验通过后原子落盘' : operateHint}
+            disabled={configName === '' || busy}
+            title='校验通过后原子落盘'
           >
             保存
           </button>
@@ -232,24 +233,53 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
             {dirty ? '（有未保存的改动）' : '（与磁盘一致）'}
             {notice !== '' ? `　${notice}` : ''}
           </p>
-          <textarea
-            className="config-editor"
-            spellCheck={false}
-            value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              setProblems([]);
-            }}
-            aria-label="配置 JSON 原文"
-          />
-          <TemplateEditor
-            text={draft}
-            onChange={(next) => {
-              setDraft(next);
-              setProblems([]);
-              setNotice('结构化编辑已修改草稿，保存前请校验');
-            }}
-          />
+          <div className="segmented" role="group" aria-label="编辑视图">
+            <button
+              type="button"
+              className={`segment${view === 'form' ? ' active' : ''}`}
+              onClick={() => setView('form')}
+            >
+              表单
+            </button>
+            <button
+              type="button"
+              className={`segment${view === 'json' ? ' active' : ''}`}
+              onClick={() => setView('json')}
+            >
+              JSON 原文
+            </button>
+          </div>
+          {view === 'json' ? (
+            <textarea
+              className="config-editor"
+              spellCheck={false}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setProblems([]);
+              }}
+              aria-label="配置 JSON 原文"
+            />
+          ) : (
+            <>
+              <ConfigFormEditor
+                text={draft}
+                onChange={(next) => {
+                  setDraft(next);
+                  setProblems([]);
+                  setNotice('结构化编辑已修改草稿，保存前请校验');
+                }}
+              />
+              <TemplateEditor
+                text={draft}
+                onChange={(next) => {
+                  setDraft(next);
+                  setProblems([]);
+                  setNotice('结构化编辑已修改草稿，保存前请校验');
+                }}
+              />
+            </>
+          )}
           {problems.length > 0 && (
             <ul className="problems">
               {problems.map((problem, index) => (
@@ -260,10 +290,11 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
         </>
       )}
       <p className="hint">
-        编辑的是原始 JSON 文本；不动模板表单时保存逐字节写回，多写的键、空格和缩进都不会被动过。
-        模板表单改动会保留未知键，但会把整份文件重排成 2 空格缩进。
-        {canOperate ? '' : ` 当前角色不足，保存已禁用。`}
+        「表单」覆盖 session / equipment / events / templates；「JSON 原文」适合粘贴整份配置或修原文里的语法错。
+        不动表单时保存逐字节写回，多写的键、空格和缩进都不会被动过；表单改动会保留未知键，
+        但整份文件重排成 2 空格缩进。
       </p>
+          <PanelFootnote items={[{ label: '目录内配置', value: configList.length }]} />
     </Panel>
   );
 }

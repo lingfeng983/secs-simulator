@@ -83,9 +83,8 @@ public final class Main {
 
         if (options.mode() == RuntimeMode.SERVER
                 && options.token().isBlank() && options.authUsers() == null) {
-            Log.error("server 模式必须显式提供 --token 或 --auth-users"
-                    + "（不能每次启动随机生成，否则所有客户端都会掉线）", null);
-            return 2;
+            /* 内部工具默认开放访问；这里只提醒，不再强制凭据 */
+            Log.warn("server 模式未配置 --token / --auth-users：API 将开放访问（内网工具场景）");
         }
 
         SSLContext tls = null;
@@ -257,8 +256,12 @@ public final class Main {
             return new Credentials(AccessControl.load(options.authUsers()), "");
         }
 
-        String token = options.token().isBlank() ? newToken() : options.token();
-        return new Credentials(AccessControl.singleToken(token), token);
+        String token = options.token().isBlank() ? "" : options.token();
+        if (!token.isEmpty()) {
+            return new Credentials(AccessControl.singleToken(token), token);
+        }
+        /* 未配置任何凭据：开放访问，浏览器打开就用，READY 行不再有 token */
+        return new Credentials(AccessControl.open(), "");
     }
 
     /**
@@ -492,10 +495,13 @@ public final class Main {
         }
 
         @Override
-        public SessionOutcome createSession(String configName) {
+        public SessionOutcome createSession(com.shimizukenta.secssim.api.http.SessionCreateRequest request) {
             try {
-                String id = this.launcher.create(configName);
-                Log.info("新建会话 " + id + "（配置 " + configName + "）");
+                SessionOverrides overrides = new SessionOverrides(
+                        request.sessionId(), request.bindHost(), request.port(), request.deviceId());
+                String id = this.launcher.create(request.config(),
+                        overrides.isEmpty() ? SessionOverrides.NONE : overrides);
+                Log.info("新建会话 " + id + "（配置 " + request.config() + "）");
                 return SessionOutcome.OK;
             } catch (ConfigException e) {
                 /* 配置名非法、文件读不了、内容编译不过——都是"这台设备起不来" */

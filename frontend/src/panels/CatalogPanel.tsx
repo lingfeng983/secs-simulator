@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { CatalogCeid, CatalogReport, CatalogSvid } from '../api';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import type { PanelBaseProps } from './types';
 
@@ -23,7 +23,7 @@ const TABS: ReadonlyArray<{ id: CatalogTab; label: string }> = [
  */
 export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
   const [tab, setTab] = useState<CatalogTab>('ceids');
-  const { catalog, activeSession, canOperate, operateHint, setCeid } = backend;
+  const { catalog, activeSession, setCeid } = backend;
 
   const ceids = catalog?.ceids ?? [];
   const reports = catalog?.reports ?? [];
@@ -73,8 +73,7 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
         <button
           type="button"
           onClick={() => setCeid(row.ceid)}
-          disabled={!canOperate}
-          title={canOperate ? '填入会话面板的 CEID 框' : operateHint}
+          title='填入会话面板的 CEID 框'
         >
           填入
         </button>
@@ -117,14 +116,6 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
       id="panel-catalog"
       title="设备目录"
       description="把「绝对 ID → 语义」的映射摊开：CEID、RPTID、SVID 各自的归属、名称与来源。"
-      stats={
-        <>
-          <StatCard label="CEID" value={ceids.length} />
-          <StatCard label="RPTID" value={reports.length} />
-          <StatCard label="SVID" value={svids.length} />
-          <StatCard label="主机覆盖" value={hostOverrides} tone={hostOverrides > 0 ? 'warn' : undefined} />
-        </>
-      }
     >
       {catalog !== null && (catalog.hostReports! > 0 || catalog.hostLinks! > 0 || catalog.hostAllDisabled) && (
         <p className="hint">
@@ -204,6 +195,14 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
       )}
 
       <p className="hint">CEID / RPTID / SVID 的号段按单元独立，不同会话之间不能照搬。</p>
+          <PanelFootnote
+        items={[
+          { label: 'CEID', value: ceids.length },
+          { label: 'RPTID', value: reports.length },
+          { label: 'SVID', value: svids.length },
+          { label: '主机覆盖', value: hostOverrides, tone: hostOverrides > 0 ? 'warn' : undefined },
+        ]}
+      />
     </Panel>
   );
 }

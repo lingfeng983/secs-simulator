@@ -129,6 +129,13 @@ export type ParseConfigResult = { ok: true; config: ParsedConfig } | { ok: false
 export type ReadTemplatesResult = { ok: true; templates: TemplateView } | { ok: false; error: string };
 export type EditTemplatesResult = { ok: true; text: string } | { ok: false; error: string };
 
+/** 后端 ValueType 枚举接受的全部类型（secs-core ValueType）。 */
+export const SECS_TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4', 'F8', 'ASCII', 'BOOLEAN'] as const;
+
+/** 事件计划的触发类型（docs/schema-v4.md）。 */
+export const TRIGGER_TYPES = ['at', 'periodic', 'onCondition', 'afterEvent'] as const;
+export type TriggerType = (typeof TRIGGER_TYPES)[number];
+
 export function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -248,6 +255,8 @@ function readObjectArray(parent: JsonObject, key: string, path: string): JsonObj
   return value as JsonObject[];
 }
 
+export { readObjectArray };
+
 /** 把整份文档写回文本。结构化编辑会统一成 2 空格缩进。 */
 export function stringifyConfig(root: JsonObject): string {
   return `${JSON.stringify(root, null, 2)}
@@ -304,6 +313,26 @@ function cloneJson(root: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(root)) as JsonObject;
 }
 
+/**
+ * 在原文之上做一次<b>整文档</b>编辑（session / equipment / events 等任意段）。
+ *
+ * <p>与 {@link editTemplates} 同一套纪律：编辑函数拿到克隆后的根对象，
+ * 异常转成错误文案，未知键保留，写回统一 2 空格缩进。</p>
+ */
+export function editDocument(text: string, mutate: (root: JsonObject) => void): EditTemplatesResult {
+  const parsed = parseConfigDocument(text);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  const root = cloneJson(parsed.config.root);
+  try {
+    mutate(root);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  return { ok: true, text: stringifyConfig(root) };
+}
+
 /** 生成不与 existing 冲突的 id。 */
 export function uniqueId(existing: ReadonlyArray<unknown>, base: string): string {
   const used = new Set(existing.map((item) => String(item)));
@@ -357,6 +386,52 @@ export function collectSvids(root: JsonObject): SvidChoice[] {
   }
 
   for (const rawDef of arrayField(equipment, 'globalSvids')) {
+    if (!isJsonObject(rawDef)) {
+      continue;
+    }
+    const id = numberField(rawDef, 'id');
+    if (id !== undefined) {
+      choices.push({ svid: id, owner: 'GLOBAL', slot: stringField(rawDef, 'name') });
+    }
+  }
+
+  const unique = new Map<number, SvidChoice>();
+  for (const choice of choices) {
+    if (!unique.has(choice.svid)) {
+      unique.set(choice.svid, choice);
+    }
+  }
+  return [...unique.values()].sort((left, right) => left.svid - right.svid);
+}
+
+/** 当前配置里的 CEID 候选（解析规则与 collectSvids 相同，含 globalCeids）。 */
+export function collectCeids(root: JsonObject): SvidChoice[] {
+  const equipment = objectField(root, 'equipment');
+  const idSpace = objectField(equipment, 'idSpace');
+  const ceidBase = numberField(idSpace, 'ceidBase') ?? 2000;
+  const ceidStride = numberField(idSpace, 'ceidStride') ?? 100;
+
+  const choices: SvidChoice[] = [];
+  const units = arrayField(equipment, 'units');
+  for (const [index, rawUnit] of units.entries()) {
+    if (!isJsonObject(rawUnit)) {
+      continue;
+    }
+    const owner = stringField(rawUnit, 'name', `unit${index + 1}`);
+    const base = ceidBase + index * ceidStride;
+    for (const rawDef of arrayField(rawUnit, 'ceids')) {
+      if (!isJsonObject(rawDef)) {
+        continue;
+      }
+      const offset = numberField(rawDef, 'offset');
+      if (offset === undefined) {
+        continue;
+      }
+      choices.push({ svid: base + offset, owner, slot: stringField(rawDef, 'slot') });
+    }
+  }
+
+  for (const rawDef of arrayField(equipment, 'globalCeids')) {
     if (!isJsonObject(rawDef)) {
       continue;
     }

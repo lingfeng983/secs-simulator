@@ -1,5 +1,5 @@
 import type { AuditEntryView } from '../api';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { formatDateTime } from '../lib/format';
 import type { PanelBaseProps } from './types';
@@ -12,15 +12,7 @@ import type { PanelBaseProps } from './types';
  * 否则用户会以为这个功能坏了。</p>
  */
 export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
-  const { auditEntries, isAdmin } = backend;
-
-  if (!isAdmin) {
-    return (
-      <Panel id="panel-audit" title="审计" description="谁在什么时候动了什么。">
-        <p className="hint">审计记录包含账号与操作目标，只有管理员可以查看。</p>
-      </Panel>
-    );
-  }
+  const { auditEntries } = backend;
 
   const columns: Column<AuditEntryView>[] = [
     {
@@ -52,7 +44,6 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
       id="panel-audit"
       title="审计"
       description="谁在什么时候动了什么。完整历史在服务端日志文件里。"
-      stats={<StatCard label="最近记录" value={auditEntries.length} />}
     >
       <DataTable
         columns={columns}
@@ -72,6 +63,7 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
         ]}
       />
       <p className="hint">最近 200 条操作记录；完整历史在 <code>--work-dir/logs/audit.jsonl</code>。</p>
+          <PanelFootnote items={[{ label: '最近记录', value: auditEntries.length }]} />
     </Panel>
   );
 }

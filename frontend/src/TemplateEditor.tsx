@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { NumberField, TextField } from './ui/CommitFields';
 import {
   CURVE_TYPES,
   arrayField,
@@ -969,89 +970,4 @@ function renameKey(source: JsonObject, oldName: string, next: string): JsonObjec
     result[key === oldName ? next : key] = value;
   }
   return result;
-}
-
-interface TextFieldProps {
-  value: string;
-  allowBlank?: boolean;
-  wide?: boolean;
-  onCommit: (next: string) => void;
-}
-
-/** 失焦/回车才提交的文本框：避免每敲一个字就重写整份配置。 */
-function TextField({ value, allowBlank = false, wide = false, onCommit }: TextFieldProps): JSX.Element {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  const commit = () => {
-    if (!allowBlank && draft.trim() === '') {
-      setDraft(value);
-      return;
-    }
-    if (draft !== value) {
-      onCommit(draft);
-    }
-  };
-
-  return (
-    <input
-      className={wide ? 'template-input-wide' : undefined}
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.currentTarget.blur();
-        }
-      }}
-    />
-  );
-}
-
-interface NumberFieldProps {
-  value: number | undefined;
-  integer?: boolean;
-  step?: number;
-  list?: string;
-  onCommit: (next: number) => void;
-}
-
-/** 失焦/回车才提交的数字框；非法输入恢复原值，避免把 NaN 写进 JSON。 */
-function NumberField({ value, integer = false, step, list, onCommit }: NumberFieldProps): JSX.Element {
-  const external = value === undefined ? '' : String(value);
-  const [draft, setDraft] = useState(external);
-
-  useEffect(() => {
-    setDraft(external);
-  }, [external]);
-
-  const commit = () => {
-    const parsed = Number(draft);
-    if (draft.trim() === '' || !Number.isFinite(parsed) || (integer && !Number.isInteger(parsed))) {
-      setDraft(external);
-      return;
-    }
-    if (parsed !== value) {
-      onCommit(parsed);
-    }
-  };
-
-  return (
-    <input
-      type="number"
-      list={list}
-      step={step ?? (integer ? 1 : 'any')}
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.currentTarget.blur();
-        }
-      }}
-    />
-  );
 }

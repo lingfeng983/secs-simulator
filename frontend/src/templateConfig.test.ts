@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  collectCeids,
   collectSvids,
+  editDocument,
   editTemplates,
   parseConfigDocument,
   readTemplates,
@@ -204,4 +206,53 @@ describe('template helpers', () => {
   it('serializes with a trailing newline', () => {
     expect(stringifyConfig({ a: 1 })).toBe('{\n  "a": 1\n}\n');
   });
+
+  it('edits the whole document while preserving unknown keys', () => {
+    const result = editDocument(CONFIG, (root) => {
+      objectField(root, 'session').port = 6000;
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const parsed = parseConfigDocument(result.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.config.root.session).toMatchObject({ id: 'line1', port: 6000, custom: { keep: true } });
+  });
+
+  it('rejects edits to unparseable text and rethrows mutate errors', () => {
+    expect(editDocument('not json', () => undefined)).toMatchObject({ ok: false });
+    const boom = editDocument(CONFIG, () => {
+      throw new Error('boom');
+    });
+    expect(boom).toMatchObject({ ok: false, error: 'boom' });
+  });
+
+  it('collects ceids with unit segments and globals', () => {
+    const parsed = parseConfigDocument(`{
+      "equipment": {
+        "idSpace": { "ceidBase": 2000, "ceidStride": 100 },
+        "units": [
+          { "unitId": 1, "name": "CH1", "ceids": [{ "offset": 1, "slot": "START" }] },
+          { "unitId": 2, "name": "CH2", "ceids": [{ "offset": 2, "slot": "STOP" }] }
+        ],
+        "globalCeids": [{ "id": 1001, "name": "GLOBAL", "reports": [] }]
+      }
+    }`);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(collectCeids(parsed.config.root).map((choice) => choice.svid)).toEqual([1001, 2001, 2102]);
+    expect(collectCeids(parsed.config.root)[2]).toMatchObject({ owner: 'CH2', slot: 'STOP' });
+  });
 });
+
+/** 测试里要用的小工具（与 templateConfig 导出同语义）。 */
+function objectField(value: JsonObject, key: string): JsonObject {
+  const child = value[key];
+  return typeof child === 'object' && child !== null && !Array.isArray(child) ? (child as JsonObject) : {};
+}

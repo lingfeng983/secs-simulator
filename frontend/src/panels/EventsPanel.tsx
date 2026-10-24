@@ -1,5 +1,5 @@
 import type { EventPlanView } from '../api';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import type { PanelBaseProps } from './types';
 
@@ -26,7 +26,7 @@ export function triggerLabel(plan: EventPlanView): string {
  * 这一点必须在界面上说清楚，否则用户会以为改配置没生效。</p>
  */
 export function EventsPanel({ backend }: PanelBaseProps): JSX.Element {
-  const { eventPlans, activeSession, canOperate, operateHint } = backend;
+  const { eventPlans, activeSession } = backend;
   const enabled = eventPlans.filter((plan) => plan.enabled).length;
 
   const columns: Column<EventPlanView>[] = [
@@ -48,14 +48,8 @@ export function EventsPanel({ backend }: PanelBaseProps): JSX.Element {
         <button
           type="button"
           onClick={() => void backend.toggleEvent(row)}
-          disabled={!canOperate || activeSession === ''}
-          title={
-            canOperate
-              ? row.enabled
-                ? '禁用后不再触发；已排队的延迟事件会清掉'
-                : '重新启用；禁用期间的事件不补发'
-              : operateHint
-          }
+          disabled={activeSession === ''}
+          title={row.enabled ? '禁用后不再触发；已排队的延迟事件会清掉' : '重新启用；禁用期间的事件不补发'}
         >
           {row.enabled ? '禁用' : '启用'}
         </button>
@@ -68,12 +62,6 @@ export function EventsPanel({ backend }: PanelBaseProps): JSX.Element {
       id="panel-events"
       title="事件编排"
       description="周期、条件或延迟触发的事件计划。启停只影响当前运行实例。"
-      stats={
-        <>
-          <StatCard label="计划数" value={eventPlans.length} />
-          <StatCard label="启用中" value={enabled} tone={enabled > 0 ? 'ok' : undefined} />
-        </>
-      }
     >
       <DataTable
         columns={columns}
@@ -90,6 +78,12 @@ export function EventsPanel({ backend }: PanelBaseProps): JSX.Element {
         ]}
       />
       <p className="hint">这里改的是运行时状态，不写回配置；重载会话会恢复配置里的启用状态。</p>
+          <PanelFootnote
+        items={[
+          { label: '计划数', value: eventPlans.length },
+          { label: '启用中', value: enabled, tone: enabled > 0 ? 'ok' : undefined },
+        ]}
+      />
     </Panel>
   );
 }

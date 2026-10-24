@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Sparkline, type ZoomRange } from '../charts/Sparkline';
 import { UplotSeries } from '../charts/UplotSeries';
@@ -134,25 +134,14 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
         </>
       }
       stats={
-        preview === null ? undefined : (
-          <>
-            <StatCard label="曲线" value={`${visible.length}/${series.length}`} />
-            <StatCard label="桶" value={`${preview.buckets} × ${preview.bucketMs} ms`} />
-            <StatCard
-              label="窗口"
-              value={`${Math.round((preview.to - preview.from) / 1000)} s`}
-              hint={previewSession === '' ? undefined : previewSession}
-            />
-            {preview.truncated === true && (
-              <StatCard
-                label="被截断"
-                value={`${preview.svidTotal ?? '?'} 个 SVID`}
-                tone="warn"
-                hint="只返回前若干条曲线"
-              />
-            )}
-          </>
-        )
+        preview !== null && preview.truncated === true ? (
+          <StatCard
+            label="被截断"
+            value={`${preview.svidTotal ?? '?'} 个 SVID`}
+            tone="warn"
+            hint="只返回前若干条曲线"
+          />
+        ) : undefined
       }
     >
       {preview === null ? (
@@ -252,6 +241,20 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
           )}
         </>
       )}
+          <PanelFootnote
+        items={
+          preview === null
+            ? []
+            : [
+                { label: '曲线', value: `${visible.length}/${series.length}` },
+                { label: '桶', value: `${preview.buckets} × ${preview.bucketMs} ms` },
+                {
+                  label: '窗口',
+                  value: `${Math.round((preview.to - preview.from) / 1000)} s${previewSession === '' ? '' : `（${previewSession}）`}`,
+                },
+              ]
+        }
+      />
     </Panel>
   );
 }

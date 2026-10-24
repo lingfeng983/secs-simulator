@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 5,
+  "session": {
+    "id": "pri-01",
+    "passive": true,
+    "bindHost": "127.0.0.1",
+    "port": 5000,
+    "deviceId": 100,
+    "seed": 20240601
+  },
+  "equipment": {
+    "name": "PRI-01",
+    "idSpace": {
+      "svidBase": 1000,
+      "ceidBase": 2000,
+      "reportBase": 3000,
+      "svidStride": 100,
+      "ceidStride": 100,
+      "reportStride": 100,
+      "reserve": [[1, 999]]
+    },
+    "globalSvids": [
+      { "id": 9001, "name": "FACILITY_TEMP", "type": "F4", "min": 18, "max": 26 }
+    ],
+    "globalCeids": [
+      { "id": 1001, "name": "CONTROL_STATE_CHANGE", "reports": ["CH1.STATUS"] }
+    ],
+    "constants": [
+      { "id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 5.0, "unit": "C" },
+      { "id": 502, "name": "BATCH_SIZE", "type": "U2", "value": 100 }
+    ],
+    "units": [
+      {
+        "unitId": 1,
+        "name": "CH1",
+        "injectUnitId": true,
+        "svids": [
+          { "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400 },
+          { "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2 },
+          { "offset": 3, "slot": "HEATER", "type": "F4", "unit": "kW" },
+          { "offset": 4, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10 },
+          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+        ],
+        "reports": [
+          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] }
+        ],
+        "ceids": [
+          { "offset": 1, "slot": "PROCESS_START", "reports": ["STATUS"] },
+          { "offset": 2, "slot": "TEMP_OVERHEAT", "reports": ["STATUS"] },
+          { "offset": 3, "slot": "PROCESS_END", "reports": ["STATUS"] }
+        ]
+      }
+    ]
+  },
+  "events": {
+    "maxPerSec": 20,
+    "s6f11Wbit": false,
+    "s6f1Wbit": false,
+    "plans": [
+      { "id": "start", "ceid": 2001,
+        "trigger": { "type": "periodic", "periodMs": 5000, "jitterMs": 200 } },
+      { "id": "hot", "ceid": 2002,
+        "trigger": { "type": "onCondition", "expression": "svid.1001 > 190", "debounceMs": 1000 } },
+      { "id": "follow", "ceid": 2003,
+        "trigger": { "type": "afterEvent", "sourcePlan": "hot", "delayMs": 2000 } }
+    ]
+  },
+  "templates": {
+    "curves": [
+      {
+        "id": "temp-wave",
+        "type": "sine",
+        "min": 20,
+        "max": 200,
+        "periodMs": 60000,
+        "phaseMs": 0
+      }
+    ],
+    "composites": [
+      {
+        "id": "temp-derived",
+        "outputs": {
+          "SV": "in.wave.V * 0.9 + 10",
+          "HEATER": "select(in.wave.V > 180, 1, 0)"
+        }
+      }
+    ],
+    "instances": [
+      { "id": "wave", "template": "temp-wave", "svids": { "V": 1001 } },
+      {
+        "id": "derived",
+        "template": "temp-derived",
+        "svids": { "SV": 1002, "HEATER": 1003 },
+        "params": { "target": 180 }
+      }
+    ]
+  }
+}

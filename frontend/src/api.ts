@@ -1,37 +1,33 @@
 /** 与后端 HTTP API 的契约。类型故意手写而不是生成，先保持零依赖。 */
 
-/** 角色与后端 ApiRole 一一对应，顺序即能力递增（改顺序等于给账号降级/升级）。 */
+/** 后端 health 里带回的身份；内部工具不做权限门槛，界面不再按它禁用任何操作。 */
 export type ApiRole = 'viewer' | 'operator' | 'admin';
 
-const ROLE_ORDER: ReadonlyArray<ApiRole> = ['viewer', 'operator', 'admin'];
-
-/**
- * 当前身份是否至少具备 required 的能力。
- *
- * <p>角色未知（还没连上、或后端版本较老不返回 role）一律按<b>没有权限</b>处理：
- * 宁可少显示一个按钮，也不要让人点了才吃一个 403。
- * 后端仍然是最终裁决者，这里只是不让人做无谓的尝试。
- * </p>
- */
-export function hasRole(actual: ApiRole | undefined, required: ApiRole): boolean {
-  if (actual === undefined) {
-    return false;
-  }
-  return ROLE_ORDER.indexOf(actual) >= ROLE_ORDER.indexOf(required);
+/** 部署期覆盖：多台设备复用一份设备配置时，逐台不同的连接标识。 */
+export interface SessionOverrides {
+  sessionId?: string;
+  bindHost?: string;
+  port?: number;
+  deviceId?: number;
 }
 
-/** 角色的中文标签，给界面用。 */
-export function roleLabel(role: ApiRole | undefined): string {
-  switch (role) {
-    case 'viewer':
-      return '只读';
-    case 'operator':
-      return '操作员';
-    case 'admin':
-      return '管理员';
-    default:
-      return '未知';
-  }
+/** 批量新建请求。 */
+export interface SessionBulkParams extends SessionOverrides {
+  config: string;
+  /** 1..100 */
+  count: number;
+  /** 会话 id 前缀，第 i 台为 `${前缀}i`。 */
+  sessionIdPrefix: string;
+  /** 第 i 台端口 = portBase + i - 1；0 表示都用配置里的端口（会冲突，仅供 demo 会话）。 */
+  portBase: number;
+  /** 第 i 台 device-id = deviceIdBase + i - 1。 */
+  deviceIdBase: number;
+}
+
+/** 批量新建结果。 */
+export interface SessionBulkResult {
+  created: string[];
+  failed: { index: number; error: string }[];
 }
 
 export interface Counters {
@@ -66,7 +62,7 @@ export interface Health {
   mode: string;
   sessions?: number;
   uptimeMs?: number;
-  /** 带凭据时后端才会返回；免鉴权的健康检查里没有。 */
+  /** 后端启用访问控制时返回；开放访问时是匿名身份。 */
   user?: string;
   role?: ApiRole;
 }
@@ -241,7 +237,8 @@ export interface ApiClient {
   health(): Promise<Health>;
   sessions(): Promise<SessionSummary[]>;
   /** 新建会话；config 为 demo 或配置目录下的文件名。 */
-  createSession(config: string): Promise<number>;
+  createSession(config: string, overrides?: SessionOverrides): Promise<number>;
+  bulkSessions(params: SessionBulkParams): Promise<SessionBulkResult>;
   /** 关闭并移除会话。 */
   closeSession(sessionId: string): Promise<number>;
   /** 按配置重载会话。 */
@@ -255,13 +252,13 @@ export interface ApiClient {
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
-  /** 最近审计记录（admin）。 */
+  /** 最近审计记录。 */
   audit(limit: number): Promise<AuditEntryView[]>;
   /** 事件编排列表。 */
   events(sessionId: string): Promise<EventPlanView[]>;
-  /** 运行时启用/禁用一个计划（operator 及以上）。 */
+  /** 运行时启用/禁用一个计划。 */
   setEventEnabled(sessionId: string, planId: string, enabled: boolean): Promise<number>;
-  /** 手动发送一条 SML 报文（operator 及以上）。 */
+  /** 手动发送一条 SML 报文。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
   messages(sessionId: string, direction: string, limit: number): Promise<MessagePage>;
@@ -282,39 +279,37 @@ export interface ApiClient {
   eventsUrl(ticket: string): string;
 }
 
-const TOKEN_KEY = 'secs-sim-token';
+/** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
+const API_BASE_KEY = 'secs-sim-api-base';
+
+/** 当前使用的后端地址；空串表示同源。 */
+export function readApiBase(): string {
+  return window.localStorage.getItem(API_BASE_KEY) ?? '';
+}
 
 /**
- * 读取访问令牌。
+ * 设置后端地址。
  *
- * 优先 hash（打包脚本用 `#token=` 打开浏览器，hash 不会发给服务端，也不进服务端日志），
- * 兼容旧的 `?token=`；读到后立刻从地址栏抹掉，避免留在历史里。
+ * <p>远程运行时后端的场景：完整安装包里的界面可以指向另一台机器上的后端，
+ * 远程改配置、看曲线、发报文。写入后刷新页面生效。</p>
  */
-export function readToken(): string {
-  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
-  const fromUrl =
-    new URLSearchParams(hash).get('token') ?? new URLSearchParams(window.location.search).get('token');
-  const token = (fromUrl ?? '').trim();
-
-  if (token !== '') {
-    window.sessionStorage.setItem(TOKEN_KEY, token);
-    window.history.replaceState({}, '', window.location.pathname);
-    return token;
+export function saveApiBase(base: string): void {
+  const trimmed = base.trim().replace(/\/+$/, '');
+  if (trimmed === '') {
+    window.localStorage.removeItem(API_BASE_KEY);
+  } else {
+    window.localStorage.setItem(API_BASE_KEY, trimmed);
   }
-  return window.sessionStorage.getItem(TOKEN_KEY) ?? '';
 }
 
-export function saveToken(token: string): void {
-  window.sessionStorage.setItem(TOKEN_KEY, token);
+/** 拼出 API 地址：本地模式同源，远程模式带后端地址。 */
+function apiUrl(path: string): string {
+  const base = readApiBase();
+  return base === '' ? path : `${base}${path}`;
 }
 
-export function createClient(token: string): ApiClient {
-  const auth = { Authorization: `Bearer ${token}` };
-
+export function createClient(): ApiClient {
   async function json<T>(response: Response): Promise<T> {
-    if (response.status === 401) {
-      throw new Error('401 未授权：token 无效或缺失');
-    }
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`${response.status} ${text.slice(0, 200)}`);
@@ -322,77 +317,71 @@ export function createClient(token: string): ApiClient {
     return (await response.json()) as T;
   }
 
-  /**
-   * 命令类端点的状态码处理。
-   *
-   * <p>401 与 403 要分开报：前者是"你的口令不对"，后者是"你的角色不够"，
-   * 混成一句"HTTP 4xx"的话，现场根本没法判断该换口令还是该找管理员。
-   * </p>
-   */
+  /** 命令类端点：界面只关心状态码，失败原因在响应体或服务端日志里。 */
   async function command(response: Response): Promise<number> {
-    if (response.status === 401) {
-      throw new Error('401 未授权：token 无效或缺失');
-    }
-    if (response.status === 403) {
-      throw new Error('403 权限不足：当前账号的角色不能执行此操作');
-    }
     return response.status;
   }
 
   return {
     async health() {
-      /* 带 token 才返回版本/形态；不带也能拿到 ok 与 uptimeMs */
-      return json<Health>(await fetch('/api/v1/health', { headers: auth }));
+      return json<Health>(await fetch(apiUrl('/api/v1/health')));
     },
     async sessions() {
       const body = await json<{ sessions: SessionSummary[] }>(
-        await fetch('/api/v1/sessions', { headers: auth }),
+        await fetch(apiUrl('/api/v1/sessions')),
       );
       return body.sessions ?? [];
     },
-    async createSession(config) {
+    async createSession(config, overrides) {
       /* 失败原因全在服务端日志里，界面只报状态码与文案，不自己猜 */
       return command(
-        await fetch('/api/v1/sessions', {
+        await fetch(apiUrl('/api/v1/sessions'), {
           method: 'POST',
-          headers: auth,
-          body: JSON.stringify({ config }),
+          body: JSON.stringify({ config, ...overrides }),
         }),
       );
     },
+    async bulkSessions(params) {
+      const response = await fetch(apiUrl('/api/v1/sessions/bulk'), {
+        method: 'POST',
+        body: JSON.stringify(params),
+      });
+      const text = await response.text();
+      if (!response.ok && response.status !== 207) {
+        throw new Error(`${response.status} ${text.slice(0, 200)}`);
+      }
+      return JSON.parse(text) as SessionBulkResult;
+    },
     async closeSession(sessionId) {
       return command(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}`), {
           method: 'DELETE',
-          headers: auth,
         }),
       );
     },
     async reloadSession(sessionId) {
       return command(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reload`, {
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reload`), {
           method: 'POST',
-          headers: auth,
         }),
       );
     },
     async trigger(sessionId, ceid) {
       return command(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`, {
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`), {
           method: 'POST',
-          headers: auth,
         }),
       );
     },
     async audit(limit) {
       const body = await json<{ audit?: AuditEntryView[] }>(
-        await fetch(`/api/v1/audit?limit=${limit}`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/audit?limit=${limit}`)),
       );
       return body.audit ?? [];
     },
     async events(sessionId) {
       const body = await json<{ events?: EventPlanView[] }>(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`)),
       );
       return body.events ?? [];
     },
@@ -400,23 +389,17 @@ export function createClient(token: string): ApiClient {
       const query = new URLSearchParams({ enabled: String(enabled) });
       return command(
         await fetch(
-          `/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`,
-          { method: 'POST', headers: auth },
+          apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`),
+          { method: 'POST' },
         ),
       );
     },
     async sendSml(sessionId, sml) {
-      const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`, {
+      const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`), {
         method: 'POST',
-        headers: { ...auth, 'Content-Type': 'text/plain; charset=utf-8' },
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: sml,
       });
-      if (response.status === 401) {
-        throw new Error('401 未授权：token 无效或缺失');
-      }
-      if (response.status === 403) {
-        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
-      }
       const text = await response.text();
       if (!response.ok) {
         throw new Error(`${response.status} ${text.slice(0, 300)}`);
@@ -434,25 +417,24 @@ export function createClient(token: string): ApiClient {
         category: String(category),
       });
       return command(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`, {
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`), {
           method: 'POST',
-          headers: auth,
         }),
       );
     },
     async alarms(sessionId) {
       return json<AlarmState[]>(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`)),
       );
     },
     async terminalMessages(sessionId) {
       return json<TerminalMessage[]>(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`)),
       );
     },
     async catalog(sessionId) {
       const body = await json<Partial<Catalog>>(
-        await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`)),
       );
       /* 每个字段都要兜底：老后端没有 catalog 端点时缺字段，缺了就当默认值，
          总比整个面板崩掉强 */
@@ -468,22 +450,14 @@ export function createClient(token: string): ApiClient {
     async preview(sessionId, fromMs, toMs, buckets) {
       return json<PreviewData>(
         await fetch(
-          `/api/v1/preview?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`,
-          { headers: auth },
+          apiUrl(`/api/v1/preview?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`),
         ),
       );
     },
     async previewBinary(sessionId, fromMs, toMs, buckets) {
       const response = await fetch(
-        `/api/v1/preview.bin?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`,
-        { headers: auth },
+        apiUrl(`/api/v1/preview.bin?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`),
       );
-      if (response.status === 401) {
-        throw new Error('401 未授权：token 无效或缺失');
-      }
-      if (response.status === 403) {
-        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
-      }
       if (!response.ok) {
         throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
       }
@@ -491,7 +465,7 @@ export function createClient(token: string): ApiClient {
     },
     async ticket() {
       const body = await json<{ ticket: string }>(
-        await fetch('/api/v1/ticket', { method: 'POST', headers: auth }),
+        await fetch(apiUrl('/api/v1/ticket'), { method: 'POST' }),
       );
       return body.ticket;
     },
@@ -504,7 +478,7 @@ export function createClient(token: string): ApiClient {
         query.set('direction', direction);
       }
       const body = await json<Partial<MessagePage>>(
-        await fetch(`/api/v1/messages?${query}`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/messages?${query}`)),
       );
       return {
         messages: body.messages ?? [],
@@ -521,13 +495,7 @@ export function createClient(token: string): ApiClient {
       if (direction !== '') {
         query.set('direction', direction);
       }
-      const response = await fetch(`/api/v1/messages?${query}`, { headers: auth });
-      if (response.status === 401) {
-        throw new Error('401 未授权：token 无效或缺失');
-      }
-      if (response.status === 403) {
-        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
-      }
+      const response = await fetch(apiUrl(`/api/v1/messages?${query}`));
       if (!response.ok) {
         throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
       }
@@ -535,47 +503,40 @@ export function createClient(token: string): ApiClient {
     },
     async configs() {
       const body = await json<{ configs?: ConfigEntry[] }>(
-        await fetch('/api/v1/configs', { headers: auth }),
+        await fetch(apiUrl('/api/v1/configs')),
       );
       return body.configs ?? [];
     },
     async createConfig(name) {
-      const response = await fetch('/api/v1/configs', {
+      const response = await fetch(apiUrl('/api/v1/configs'), {
         method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify({ name }),
       });
       return command(response);
     },
     async configText(name) {
       const body = await json<{ name?: string; text?: string }>(
-        await fetch(`/api/v1/configs/${encodeURIComponent(name)}`, { headers: auth }),
+        await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`)),
       );
       return body.text ?? '';
     },
     async validateConfig(name, text) {
       const body = await json<ConfigProblems>(
-        await fetch(`/api/v1/configs/${encodeURIComponent(name)}/validate`, {
+        await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}/validate`), {
           method: 'POST',
-          headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
           body: text,
         }),
       );
       return { valid: body.valid ?? false, problems: body.problems ?? [] };
     },
     async saveConfig(name, text) {
-      const response = await fetch(`/api/v1/configs/${encodeURIComponent(name)}`, {
+      const response = await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {
         method: 'PUT',
-        headers: { ...auth, 'Content-Type': 'application/json; charset=utf-8' },
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: text,
       });
-
-      if (response.status === 401) {
-        throw new Error('401 未授权：token 无效或缺失');
-      }
-      if (response.status === 403) {
-        throw new Error('403 权限不足：当前账号的角色不能执行此操作');
-      }
 
       /* 失败响应也带 problems，尽量把它带回来；解析不了就当没有 */
       let problems: string[] = [];
@@ -588,7 +549,7 @@ export function createClient(token: string): ApiClient {
       return { status: response.status, problems };
     },
     eventsUrl(ticket) {
-      return `/api/v1/events?ticket=${encodeURIComponent(ticket)}`;
+      return apiUrl(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`);
     },
   };
 }

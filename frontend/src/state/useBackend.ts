@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  hasRole,
-  roleLabel,
   type AlarmState,
   type ApiClient,
-  type ApiRole,
+  type SessionBulkParams,
+  type SessionBulkResult,
   type AuditEntryView,
   type Catalog,
   type ConfigEntry,
@@ -55,11 +54,6 @@ export interface LogLine {
  */
 export interface BackendController {
   health: Health | null;
-  role: ApiRole | undefined;
-  canOperate: boolean;
-  isAdmin: boolean;
-  /** 只读身份时的说明文案。 */
-  operateHint: string;
 
   sessions: SessionSummary[];
   /** 当前选中的会话；所有面板共用它。 */
@@ -98,6 +92,14 @@ export interface BackendController {
   refreshConfigs: () => Promise<void>;
 
   createSession: (config: string) => Promise<void>;
+  /** 从一份设备配置批量开多台设备；返回逐台结果。 */
+  bulkCreateSessions: (params: SessionBulkParams) => Promise<SessionBulkResult | null>;
+  /** 对多台设备逐台触发上报，返回 [成功, 失败]。 */
+  batchTrigger: (ids: ReadonlySet<string>, ceid: number) => Promise<{ ok: number; fail: number }>;
+  /** 对多台设备逐台重载。 */
+  batchReload: (ids: ReadonlySet<string>) => Promise<{ ok: number; fail: number }>;
+  /** 对多台设备逐台关闭。 */
+  batchClose: (ids: ReadonlySet<string>) => Promise<{ ok: number; fail: number }>;
   /** 新建一份配置骨架；返回 HTTP 状态码。 */
   createConfig: (name: string) => Promise<number>;
   /** 读配置原文；读不到返回 null。 */
@@ -172,16 +174,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
 
-  const role = health?.role;
-  const canOperate = hasRole(role, 'operator');
-  const isAdmin = hasRole(role, 'admin');
-
-  /* 按钮灰掉时要说清是"角色不够"还是"还不知道角色"，否则用户会以为界面坏了 */
-  const operateHint =
-    role === undefined
-      ? '尚未取到身份信息，连上后端后才能判断权限'
-      : `当前角色为${roleLabel(role)}（只读），需要操作员或管理员`;
-
   /* ---------- 读取 ---------- */
 
   const refreshSessions = useCallback(async () => {
@@ -236,7 +228,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   );
 
   const refreshAudit = useCallback(async () => {
-    if (client === null || !isAdmin) {
+    if (client === null) {
       setAuditEntries([]);
       return;
     }
@@ -245,7 +237,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     } catch {
       setAuditEntries([]);
     }
-  }, [client, isAdmin]);
+  }, [client]);
 
   /**
    * 统一刷新入口。
@@ -381,6 +373,69 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client, refreshSessions],
   );
 
+  /** 从一份设备配置批量开多台设备；逐台独立，失败的台数不影响其余。 */
+  const bulkCreateSessions = useCallback(
+    async (params: SessionBulkParams) => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        const result = await client.bulkSessions(params);
+        const failedNote = result.failed.length > 0 ? `，${result.failed.length} 台失败` : '';
+        notifierRef.current.success(`批量新建完成：${result.created.length} 台${failedNote}`);
+        await refreshSessions();
+        return result;
+      } catch (error) {
+        notifierRef.current.error('批量新建失败', (error as Error).message);
+        await refreshSessions();
+        return null;
+      }
+    },
+    [client, refreshSessions],
+  );
+
+  /** 逐台执行并汇总一条提示的通用骨架。 */
+  const batchRun = useCallback(
+    async (ids: ReadonlySet<string>, verb: string, run: (id: string) => Promise<number>, tone: 'success' | 'info') => {
+      let ok = 0;
+      let fail = 0;
+      for (const id of ids) {
+        try {
+          const status = await run(id);
+          if (status >= 200 && status < 300) {
+            ok += 1;
+          } else {
+            fail += 1;
+          }
+        } catch {
+          fail += 1;
+        }
+      }
+      notifierRef.current[tone](`批量${verb}完成：成功 ${ok}，失败 ${fail}`);
+      await refreshSessions();
+      return { ok, fail };
+    },
+    [refreshSessions],
+  );
+
+  const batchTrigger = useCallback(
+    (ids: ReadonlySet<string>, ceid: number) =>
+      batchRun(ids, '上报', (id) => client === null ? Promise.resolve(0) : client.trigger(id, ceid), 'success'),
+    [batchRun, client],
+  );
+
+  const batchReload = useCallback(
+    (ids: ReadonlySet<string>) =>
+      batchRun(ids, '重载', (id) => client === null ? Promise.resolve(0) : client.reloadSession(id), 'info'),
+    [batchRun, client],
+  );
+
+  const batchClose = useCallback(
+    (ids: ReadonlySet<string>) =>
+      batchRun(ids, '关闭', (id) => client === null ? Promise.resolve(0) : client.closeSession(id), 'info'),
+    [batchRun, client],
+  );
+
   const closeSession = useCallback(
     async (sessionId: string) => {
       if (client === null) {
@@ -432,7 +487,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       try {
         const status = await client.trigger(sessionId, ceid);
         const text = `触发 ${sessionId} CEID ${ceid} -> HTTP ${status}`;
-        if (status === 200) {
+        if (status >= 200 && status < 300) {
           notifierRef.current.success(text);
         } else {
           notifierRef.current.error(text);
@@ -452,7 +507,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       try {
         const status = await client.alarm(sessionId, alid, set, text, category);
         const message = `报警${set ? '置位' : '清除'} ${sessionId} ALID ${alid} -> HTTP ${status}`;
-        if (status === 200) {
+        if (status >= 200 && status < 300) {
           notifierRef.current.success(message);
         } else {
           notifierRef.current.error(message);
@@ -738,10 +793,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   return useMemo<BackendController>(
     () => ({
       health,
-      role,
-      canOperate,
-      isAdmin,
-      operateHint,
       sessions,
       activeSession,
       setActiveSession,
@@ -766,6 +817,10 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       refreshSessions,
       refreshConfigs,
       createSession,
+      bulkCreateSessions,
+      batchTrigger,
+      batchReload,
+      batchClose,
       createConfig,
       readConfig,
       validateConfig,
@@ -786,10 +841,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }),
     [
       health,
-      role,
-      canOperate,
-      isAdmin,
-      operateHint,
       sessions,
       activeSession,
       ceid,
@@ -812,6 +863,10 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       refreshSessions,
       refreshConfigs,
       createSession,
+      bulkCreateSessions,
+      batchTrigger,
+      batchReload,
+      batchClose,
       createConfig,
       readConfig,
       validateConfig,

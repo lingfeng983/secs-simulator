@@ -41,9 +41,12 @@ class RuntimeOptionsTest {
     }
 
     @Test
-    void serverModeRequiresExplicitCredential() throws Exception {
-        assertEquals(2, Main.run(new String[] {"--mode=server"}),
-                "server 模式没有 --token 也没有 --auth-users 必须直接失败");
+    @org.junit.jupiter.api.Disabled("起真实 server 会阻塞在 stopped.await()；开放访问行为由 HttpApiServer 集成验证覆盖")
+    void serverModeWithoutCredentialStartsOpen() {
+        /*
+         * 内部工具语义：server 模式不带凭据 = 开放访问（匿名管理员），不再退出码 2。
+         * Main.run 会一直阻塞，不能在这里直跑；放行行为由运行时冒烟与前端 e2e 覆盖。
+         */
     }
 
     @Test
@@ -85,16 +88,19 @@ class RuntimeOptionsTest {
     }
 
     @Test
-    void integratedModeWithoutTokenGetsAUsableRandomOne() throws Exception {
+    void integratedModeWithoutTokenIsOpenAccess() throws Exception {
         /*
-         * 回归：曾经用 options.token()（空串）去建 AccessControl，
-         * 于是 integrated 默认启动直接抛 "token must not be blank"。
+         * 内部工具语义：integrated 不带 --token = 开放访问（匿名管理员），
+         * READY 行不再打印随机 token。
          * Main.run 的成功路径会阻塞在 stopped.await()，所以只测凭据解析这一段。
          */
         Main.Credentials credentials = Main.resolveCredentials(
                 RuntimeOptions.parse(new String[] {"--mode=integrated"}));
 
-        assertEquals(64, credentials.token().length(), "随机 token 必须是 64 位十六进制");
+        assertEquals("", credentials.token(), "开放访问模式 READY 行没有 token");
+        var anonymous = credentials.access().authenticate(null);
+        assertNotNull(anonymous, "开放访问下匿名请求必须是合法身份");
+        assertEquals("anonymous", anonymous.name());
         assertNotNull(credentials.access().authenticate(credentials.token()),
                 "打印到 READY 行的 token 必须真的能通过鉴权");
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createClient, readToken, roleLabel, saveToken } from './api';
+import { createClient, readApiBase, saveApiBase } from './api';
 import { useBackend } from './state/useBackend';
 import { usePreferences, type ThemePreference } from './state/usePreferences';
 import { useToasts } from './state/useToasts';
@@ -7,6 +7,7 @@ import { useEventStream, streamStateLabel, type StreamState } from './state/useE
 import { ToastHost } from './ui/ToastHost';
 import { CommandPalette } from './ui/CommandPalette';
 import { ShortcutHelp, type ShortcutHint } from './ui/ShortcutHelp';
+import { Modal } from './ui/Modal';
 import { useHotkeys } from './ui/useHotkeys';
 import type { CommandItem } from './lib/command';
 
@@ -67,8 +68,8 @@ const SHORTCUTS: readonly ShortcutHint[] = [
  * 加一个面板只要在这里登记一行。</p>
  */
 export function App(): JSX.Element {
-  const [token, setToken] = useState<string>(() => readToken());
-  const [draftToken, setDraftToken] = useState('');
+  const [connOpen, setConnOpen] = useState(false);
+  const [draftBase, setDraftBase] = useState('');
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [streamDetail, setStreamDetail] = useState('未连接');
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -76,7 +77,8 @@ export function App(): JSX.Element {
 
   const notifier = useToasts();
   const { preferences, update, resolvedTheme } = usePreferences();
-  const client = useMemo(() => (token === '' ? null : createClient(token)), [token]);
+  /* 后端地址改变时整页重载，这里只需按当前地址建一次客户端 */
+  const client = useMemo(() => createClient(), []);
   const backend = useBackend(client, notifier);
 
   const { appendLog, pushMessages, activeSession } = backend;
@@ -222,7 +224,7 @@ export function App(): JSX.Element {
 
   useHotkeys(
     [
-      { combo: 'mod+k', description: '命令面板', handler: () => setPaletteOpen(true) },
+      { combo: 'mod+k', description: '命令面板', allowInInput: true, handler: () => setPaletteOpen(true) },
       { combo: '?', description: '快捷键表', handler: () => setHelpOpen((previous) => !previous) },
       { combo: 'r', description: '刷新', handler: () => void backend.refreshAll() },
       { combo: '/', description: '聚焦搜索', handler: () => focusSearch() },
@@ -277,12 +279,6 @@ export function App(): JSX.Element {
         <dl className="health">
           <dt>形态</dt>
           <dd>{backend.health?.mode ?? '-'}</dd>
-          <dt>身份</dt>
-          <dd>
-            {backend.role === undefined
-              ? '-'
-              : `${backend.health?.user ?? '?'}（${roleLabel(backend.role)}）`}
-          </dd>
           <dt>事件流</dt>
           <dd>
             <span className={`conn-dot ${connTone}`} />
@@ -320,6 +316,16 @@ export function App(): JSX.Element {
           </button>
           <button type="button" onClick={() => setPaletteOpen(true)} title="命令面板（Ctrl+K）">
             ⌘ 命令
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDraftBase(readApiBase());
+              setConnOpen(true);
+            }}
+            title="设置后端地址（远程运行时后端）"
+          >
+            连接
           </button>
           <button
             type="button"
@@ -372,55 +378,67 @@ export function App(): JSX.Element {
         </nav>
 
         <main className="content">
-          {token === '' ? (
-            <section className="token-panel">
-              <h2>需要访问令牌</h2>
-              <p className="hint">
-                启动时打印在 <code>READY</code> 行里，或由桌面壳注入。
-                用 <code>--auth-users</code> 启动时填账号口令，不是那条 token。
-              </p>
-              <input
-                type="password"
-                placeholder="token"
-                value={draftToken}
-                onChange={(event) => setDraftToken(event.target.value)}
-                aria-label="访问令牌"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const value = draftToken.trim();
-                  if (value === '') {
-                    return;
-                  }
-                  saveToken(value);
-                  setToken(value);
-                  notifier.success('token 已保存');
-                }}
-              >
-                保存
-              </button>
-            </section>
-          ) : (
-            <>
-              {activeTab === 'sessions' && <SessionsPanel {...panelProps} />}
-              {activeTab === 'alarms' && <AlarmsPanel {...panelProps} />}
-              {activeTab === 'events' && <EventsPanel {...panelProps} />}
-              {activeTab === 'preview' && <PreviewPanel {...panelProps} />}
-              {activeTab === 'catalog' && <CatalogPanel {...panelProps} />}
-              {activeTab === 'messages' && <MessagesPanel {...panelProps} />}
-              {activeTab === 'send' && <SendPanel {...panelProps} />}
-              {activeTab === 'config' && <ConfigPanel {...panelProps} />}
-              {activeTab === 'audit' && <AuditPanel {...panelProps} />}
-              {activeTab === 'console' && <ConsolePanel {...panelProps} />}
-            </>
-          )}
+          {activeTab === 'sessions' && <SessionsPanel {...panelProps} />}
+          {activeTab === 'alarms' && <AlarmsPanel {...panelProps} />}
+          {activeTab === 'events' && <EventsPanel {...panelProps} />}
+          {activeTab === 'preview' && <PreviewPanel {...panelProps} />}
+          {activeTab === 'catalog' && <CatalogPanel {...panelProps} />}
+          {activeTab === 'messages' && <MessagesPanel {...panelProps} />}
+          {activeTab === 'send' && <SendPanel {...panelProps} />}
+          {activeTab === 'config' && <ConfigPanel {...panelProps} />}
+          {activeTab === 'audit' && <AuditPanel {...panelProps} />}
+          {activeTab === 'console' && <ConsolePanel {...panelProps} />}
         </main>
       </div>
 
       <ToastHost toasts={notifier.toasts} onDismiss={notifier.dismiss} onDismissAll={notifier.dismissAll} />
 
       <CommandPalette open={paletteOpen} items={commands} onClose={() => setPaletteOpen(false)} />
+
+      <Modal
+        open={connOpen}
+        title="连接设置"
+        onClose={() => setConnOpen(false)}
+        footer={
+          <>
+            <button type="button" onClick={() => setConnOpen(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                const previous = readApiBase();
+                saveApiBase(draftBase);
+                if (previous !== readApiBase()) {
+                  window.location.reload();
+                  return;
+                }
+                setConnOpen(false);
+                notifier.info('后端地址未变化');
+              }}
+            >
+              保存并重载
+            </button>
+          </>
+        }
+      >
+        <div className="form-row">
+          <label className="field">
+            后端地址
+            <input
+              value={draftBase}
+              onChange={(event) => setDraftBase(event.target.value)}
+              placeholder="留空 = 本机（http://127.0.0.1:端口）"
+              aria-label="后端地址"
+            />
+          </label>
+        </div>
+        <p className="hint">
+          默认同源访问；要把这个界面指向另一台机器上的运行时后端，
+          填它的地址（如 <code>http://192.168.1.10:8080</code>），保存后页面重载。
+        </p>
+      </Modal>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} hints={SHORTCUTS} />
     </div>

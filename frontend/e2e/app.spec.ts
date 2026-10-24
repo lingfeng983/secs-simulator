@@ -268,8 +268,15 @@ test('opens a config and adds a curve through the structured editor', async ({ p
   await configSection.locator('select').first().selectOption('line1.json');
   await expect(page.getByText('模板（结构化编辑）')).toBeVisible();
 
+  /* 表单视图里能看到 session / equipment / events 的结构化编辑 */
+  await expect(page.getByText('会话（session）')).toBeVisible();
+  await expect(page.getByText('事件编排（events）')).toBeVisible();
+
   await page.getByRole('button', { name: '+ 曲线' }).click();
+  /* 表单改动写回的是同一份草稿：切到原文视图核对 */
+  await configSection.getByRole('button', { name: 'JSON 原文' }).click();
   await expect(page.locator('textarea.config-editor')).toHaveValue(/"curve"/);
+  await configSection.getByRole('button', { name: '表单', exact: true }).click();
 
   await configSection.getByRole('button', { name: '校验' }).click();
   await expect(page.getByText('校验通过')).toBeVisible();

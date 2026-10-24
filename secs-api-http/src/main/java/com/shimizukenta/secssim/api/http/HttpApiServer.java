@@ -79,6 +79,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 会话命令前缀（{@code /api/v1/sessions/{id}/ceid/{ceid}}）。 */
     public static final String PATH_SESSION_PREFIX = "/api/v1/sessions/";
 
+    /** 批量新建会话路径（POST /api/v1/sessions/bulk）。 */
+    public static final String PATH_SESSIONS_BULK = "/api/v1/sessions/bulk";
+
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
 
@@ -361,22 +364,25 @@ public final class HttpApiServer implements AutoCloseable {
             api.eventSubscription = bus.subscribe(api::broadcast);
         }
 
-        http.createContext(PATH_HEALTH, api::handleHealth);
-        http.createContext(PATH_EVENTS, api::handleEvents);
-        http.createContext(PATH_TICKET, api::handleTicket);
-        http.createContext(PATH_SHUTDOWN, api::handleShutdown);
-        http.createContext(PATH_SESSIONS, api::handleSessions);
-        http.createContext(PATH_SESSION_PREFIX, api::handleSessionPath);
-        http.createContext(PATH_CONFIGS, api::handleConfigs);
-        http.createContext(PATH_CONFIG_PREFIX, api::handleConfigPath);
-        http.createContext(PATH_PREVIEW, api::handlePreview);
-        http.createContext(PATH_PREVIEW_BINARY, api::handlePreviewBinary);
-        http.createContext(PATH_MESSAGES, api::handleMessages);
-        http.createContext(PATH_AUDIT, api::handleAudit);
+        /* 远程运行时后端：界面从另一台机器来（完整安装包指向远程地址），
+           跨域请求必须放行；开放访问形态下来源不作限制 */
+        http.createContext(PATH_HEALTH, withCors(api::handleHealth));
+        http.createContext(PATH_EVENTS, withCors(api::handleEvents));
+        http.createContext(PATH_TICKET, withCors(api::handleTicket));
+        http.createContext(PATH_SHUTDOWN, withCors(api::handleShutdown));
+        http.createContext(PATH_SESSIONS, withCors(api::handleSessions));
+        http.createContext(PATH_SESSIONS_BULK, withCors(api::handleBulkSessions));
+        http.createContext(PATH_SESSION_PREFIX, withCors(api::handleSessionPath));
+        http.createContext(PATH_CONFIGS, withCors(api::handleConfigs));
+        http.createContext(PATH_CONFIG_PREFIX, withCors(api::handleConfigPath));
+        http.createContext(PATH_PREVIEW, withCors(api::handlePreview));
+        http.createContext(PATH_PREVIEW_BINARY, withCors(api::handlePreviewBinary));
+        http.createContext(PATH_MESSAGES, withCors(api::handleMessages));
+        http.createContext(PATH_AUDIT, withCors(api::handleAudit));
 
         if (api.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
-            http.createContext("/", api::handleStatic);
+            http.createContext("/", withCors(api::handleStatic));
         }
 
         watchdog.scheduleWithFixedDelay(api::sweepStalledStreams,
@@ -737,14 +743,14 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        String config = configNameFrom(body);
-        if (config == null) {
+        SessionCreateRequest request = sessionCreateRequestFrom(body);
+        if (request == null) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"missing-config\"}");
             return;
         }
 
-        SessionOutcome outcome = this.context.createSession(config);
-        audit(ex, "session-create", config, "outcome=" + outcome);
+        SessionOutcome outcome = this.context.createSession(request);
+        audit(ex, "session-create", request.config(), "outcome=" + outcome);
         switch (outcome) {
             case OK -> respond(ex, 201, "{\"ok\":true}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-exists\"}");
@@ -752,18 +758,139 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    /** 从请求体里取 config 字段；体不是对象或没有该字段时返回 {@code null}。 */
-    private static String configNameFrom(String body) {
+    /**
+     * 从请求体解析"新建会话"请求：config 必填，其余是可选的部署期覆盖。
+     *
+     * <p>覆盖字段（sessionId / bindHost / port / deviceId）缺省就用配置原文里的——
+     * 多台设备复用一份设备配置时只有这几项逐台不同。</p>
+     *
+     * @return 请求；体不是对象或缺 config 时返回 {@code null}
+     */
+    private static SessionCreateRequest sessionCreateRequestFrom(String body) {
         try {
             com.shimizukenta.jsonhub.JsonHub root =
                     com.shimizukenta.jsonhub.JsonHub.fromJson(body);
             if (!root.isObject()) {
                 return null;
             }
-            return root.get("config").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+            String config = optionalString(root, "config");
+            if (config == null) {
+                return null;
+            }
+            Integer port = optionalInt(root, "port", n -> n > 0 && n <= 65535);
+            Integer deviceId = optionalInt(root, "deviceId", n -> n >= 0);
+            return new SessionCreateRequest(config, optionalString(root, "sessionId"),
+                    optionalString(root, "bindHost"), port, deviceId);
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * POST /api/v1/sessions/bulk：从一份设备配置批量开多台设备。
+     *
+     * <p>体形如 {@code {"config":"tpl.json","count":5,"sessionIdPrefix":"dev-",
+     * "portBase":5100,"deviceIdBase":100,"bindHost":"127.0.0.1"}}。
+     * 第 i 台（从 1 起）的会话 id 是 {@code prefix+i}、端口 {@code portBase+i-1}、
+     * device-id {@code deviceIdBase+i-1}。逐台独立创建：一台起不来不影响其余，
+     * 全部成功回 201，部分失败回 207 并逐台给原因。</p>
+     */
+    private void handleBulkSessions(HttpExchange ex) throws IOException {
+        if (!PATH_SESSIONS_BULK.equals(ex.getRequestURI().getPath())) {
+            /* /api/v1/sessions/bulk-3 这种会话 id 按前缀撞进了本上下文，交回会话处理器 */
+            this.handleSessionPath(ex);
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        com.shimizukenta.jsonhub.JsonHub root;
+        try {
+            root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
+            return;
+        }
+        if (!root.isObject()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
+            return;
+        }
+        String config = optionalString(root, "config");
+        int count = root.containsKey("count")
+                ? root.get("count").optionalInt().orElse(0)
+                : 0;
+        String prefix = optionalString(root, "sessionIdPrefix");
+        int portBase = root.containsKey("portBase")
+                ? root.get("portBase").optionalInt().orElse(0)
+                : 0;
+        int deviceIdBase = root.containsKey("deviceIdBase")
+                ? root.get("deviceIdBase").optionalInt().orElse(0)
+                : 0;
+        String bindHost = optionalString(root, "bindHost");
+
+        if (config == null || count < 1 || count > 100) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"count 必须在 1..100，且 config 必填\"}");
+            return;
+        }
+
+        StringBuilder created = new StringBuilder();
+        StringBuilder failed = new StringBuilder();
+        int okCount = 0;
+        for (int i = 1; i <= count; i++) {
+            Integer port = portBase > 0 ? portBase + i - 1 : null;
+            Integer deviceId = deviceIdBase >= 0 ? deviceIdBase + i - 1 : null;
+            SessionCreateRequest request = new SessionCreateRequest(config, prefix + i, bindHost, port, deviceId);
+            SessionOutcome outcome = this.context.createSession(request);
+            audit(ex, "session-create", config + "#" + i, "outcome=" + outcome);
+            if (outcome == SessionOutcome.OK) {
+                if (okCount > 0) {
+                    created.append(',');
+                }
+                created.append("\"").append(prefix + i).append('"');
+                okCount++;
+            } else {
+                if (failed.length() > 0) {
+                    failed.append(',');
+                }
+                failed.append("{\"index\":").append(i)
+                        .append(",\"error\":\"").append(outcome.name().toLowerCase()).append("\"}");
+            }
+        }
+
+        int status = okCount == count ? 201 : okCount > 0 ? 207 : 502;
+        String json = "{\"created\":[" + created + "],\"failed\":[" + failed + "]}";
+        respond(ex, status, json);
+    }
+
+    /** 缺键返回 {@code null} 的字符串字段；{@code JsonHub.get} 对缺失键会抛，不能直接用。 */
+    private static String optionalString(com.shimizukenta.jsonhub.JsonHub root, String key) {
+        if (!root.containsKey(key)) {
+            return null;
+        }
+        return root.get(key).optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+    }
+
+    /** 缺键或非法返回 {@code null} 的整数字段。 */
+    private static Integer optionalInt(com.shimizukenta.jsonhub.JsonHub root, String key,
+            java.util.function.IntPredicate valid) {
+        if (!root.containsKey(key)) {
+            return null;
+        }
+        return root.get(key).optionalInt().stream().filter(valid).boxed().findFirst().orElse(null);
     }
 
     /**
@@ -1657,13 +1784,35 @@ public final class HttpApiServer implements AutoCloseable {
                 action, target, detail);
     }
 
+    /**
+     * 给处理器包一层跨域放行。
+     *
+     * <p>预检（OPTIONS）直接回 204；实际响应统一带
+     * {@code Access-Control-Allow-Origin: *}。服务端形态若配置了凭据，
+     * 鉴权仍在业务处理器里照常执行——CORS 只解决"浏览器让不让发"。</p>
+     */
+    private static com.sun.net.httpserver.HttpHandler withCors(com.sun.net.httpserver.HttpHandler handler) {
+        return ex -> {
+            ex.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+            ex.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            ex.getResponseHeaders().add("Access-Control-Allow-Headers", "Authorization, Content-Type");
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                ex.sendResponseHeaders(204, -1);
+                ex.close();
+                return;
+            }
+            handler.handle(ex);
+        };
+    }
+
     /** 只做认证、不判角色（health 需要区分"没带凭据"和"带了凭据"）。 */
     private AccessControl.Principal authenticate(HttpExchange ex) {
         String header = ex.getRequestHeaders().getFirst("Authorization");
-        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            return null;
-        }
-        return this.access.authenticate(header.substring(7).trim());
+        String secret = header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)
+                ? header.substring(7).trim()
+                : null;
+        /* 没带凭据也要问一次 AccessControl：开放访问形态下匿名请求就是合法管理员 */
+        return this.access.authenticate(secret);
     }
 
     private static void respond(HttpExchange ex, int status, String body) throws IOException {

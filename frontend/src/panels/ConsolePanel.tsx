@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote } from '../ui/Panel';
 import { downloadText } from '../lib/table';
 import type { PanelBaseProps } from './types';
 
@@ -37,12 +37,6 @@ export function ConsolePanel({ backend }: PanelBaseProps): JSX.Element {
       id="panel-console"
       title="事件流"
       description="连接状态与操作记录。这里是事后查账用的；即时反馈会直接弹提示条。"
-      stats={
-        <>
-          <StatCard label="日志条数" value={log.length} />
-          <StatCard label="当前过滤" value={visible.length} />
-        </>
-      }
       actions={
         <>
           <input
@@ -79,6 +73,12 @@ export function ConsolePanel({ backend }: PanelBaseProps): JSX.Element {
           {visible.map((line, index) => `[${line.at}] ${line.text}`).join('\n')}
         </pre>
       )}
+          <PanelFootnote
+        items={[
+          { label: '日志条数', value: log.length },
+          { label: '当前过滤', value: visible.length },
+        ]}
+      />
     </Panel>
   );
 }

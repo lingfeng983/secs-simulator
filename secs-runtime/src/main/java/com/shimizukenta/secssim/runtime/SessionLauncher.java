@@ -57,7 +57,11 @@ public final class SessionLauncher {
     private final int defaultHsmsPort;
 
     /** 会话标识 -> 它的配置来源；演示会话没有来源，故不出现在这里。 */
-    private final ConcurrentMap<String, Path> sources = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, SessionSource> sources = new ConcurrentHashMap<>();
+
+    /** 配置来源文件 + 部署期覆盖；重载时两者都要原样带上。 */
+    private record SessionSource(Path file, SessionOverrides overrides) {
+    }
 
     /**
      * 创建启动器。
@@ -83,17 +87,35 @@ public final class SessionLauncher {
      * @throws IOException     端口绑定失败
      */
     public String create(String name) throws ConfigException, IOException {
+        return this.create(name, SessionOverrides.NONE);
+    }
+
+    /**
+     * 按请求创建一个会话，允许用部署期覆盖替换配置里的连接标识。
+     *
+     * <p>多台设备复用同一份设备配置时，只有 id / 端口 / device-id 需要逐台给；
+     * 覆盖不写回配置文件，重载时会原样再套一遍。</p>
+     *
+     * @param name      {@code demo} 或 {@code work-dir} 下的配置文件名
+     * @param overrides 部署期覆盖；{@code null} 视为不覆盖
+     * @return 新建的会话标识
+     * @throws ConfigException 名称非法、配置读不了或编译不过
+     * @throws IOException     端口绑定失败
+     */
+    public String create(String name, SessionOverrides overrides) throws ConfigException, IOException {
         String trimmed = name == null ? "" : name.trim();
         if (trimmed.isEmpty()) {
             throw new ConfigException("$.config", "不能为空（填 demo 或 work-dir 下的配置文件名）");
         }
+        SessionOverrides safe = overrides == null ? SessionOverrides.NONE : overrides;
 
         if (DEMO.equalsIgnoreCase(trimmed)) {
+            /* 演示会话是内置样品，不参与部署覆盖 */
             return startDemo(DEMO_ID, this.defaultHsmsPort, 10);
         }
 
         Path file = this.workDir.resolve(resolveConfigName(trimmed));
-        return startFromFile(file, this.defaultHsmsPort).id();
+        return startFromFile(file, this.defaultHsmsPort, safe).id();
     }
 
     /**
@@ -123,23 +145,24 @@ public final class SessionLauncher {
      * @throws IOException     端口绑定失败
      */
     public boolean reload(String id) throws ConfigException, IOException {
-        Path file = this.sources.get(id);
-        if (file == null) {
+        SessionSource source = this.sources.get(id);
+        if (source == null) {
             return false;
         }
 
-        /* 先构造新的：编译不过时旧会话还好端端地跑着 */
-        Prepared prepared = prepare(file, this.defaultHsmsPort);
+        /* 先构造新的：编译不过时旧会话还好端端地跑着。
+           部署覆盖与来源文件一起带上——否则重载第 2 台会抢第 1 台的端口。 */
+        Prepared prepared = prepare(source.file(), this.defaultHsmsPort, source.overrides());
 
         this.close(id);
 
         try {
-            HsmsSessionRuntime opened = prepared.open(this.bus, file);
+            HsmsSessionRuntime opened = prepared.open(this.bus, source.file());
             this.sessions.register(opened);
-            this.sources.put(id, file);
+            this.sources.put(id, source);
             return true;
         } catch (IOException | RuntimeException e) {
-            Log.error("重载会话 " + id + " 失败（配置已编译通过，但端口绑定失败）: " + file, e);
+            Log.error("重载会话 " + id + " 失败（配置已编译通过，但端口绑定失败）: " + source.file(), e);
             /* 旧会话已经关掉且没能换上来：如实报错，不要假装还在跑 */
             throw e;
         }
@@ -181,16 +204,31 @@ public final class SessionLauncher {
      * @throws IOException     端口绑定失败
      */
     public HsmsSessionRuntime startFromFile(Path file, int defaultPort) throws ConfigException, IOException {
-        HsmsSessionRuntime runtime = prepare(file, defaultPort).open(this.bus, file);
+        return this.startFromFile(file, defaultPort, SessionOverrides.NONE);
+    }
+
+    /**
+     * 从配置文件启动一个会话，并记下来源与部署覆盖。
+     *
+     * @param file        配置文件
+     * @param defaultPort 配置未指定端口时使用的 SECS 端口
+     * @param overrides   部署期覆盖
+     * @return 会话
+     * @throws ConfigException 配置读不了或编译不过
+     * @throws IOException     端口绑定失败
+     */
+    public HsmsSessionRuntime startFromFile(Path file, int defaultPort, SessionOverrides overrides)
+            throws ConfigException, IOException {
+        HsmsSessionRuntime runtime = prepare(file, defaultPort, overrides).open(this.bus, file);
         this.sessions.register(runtime);
         /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
            而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
-        this.sources.put(runtime.id(), file);
+        this.sources.put(runtime.id(), new SessionSource(file, overrides));
         return runtime;
     }
 
     /** 读配置、编译、组装好但还没 open。 */
-    private Prepared prepare(Path file, int defaultPort) throws ConfigException, IOException {
+    private Prepared prepare(Path file, int defaultPort, SessionOverrides overrides) throws ConfigException, IOException {
         SessionConfig config;
         try {
             config = SessionConfigJson.read(file);
@@ -210,9 +248,13 @@ public final class SessionLauncher {
         }
 
         SessionSpec configured = config.spec();
-        SessionSpec spec = new SessionSpec(configured.id(), configured.passive(), configured.bindHost(),
-                configured.port() == 0 ? defaultPort : configured.port(),
-                configured.deviceId(), configured.seed(), configured.equipment());
+        String id = overrides.sessionId() != null ? overrides.sessionId() : configured.id();
+        String bindHost = overrides.bindHost() != null ? overrides.bindHost() : configured.bindHost();
+        int port = overrides.port() != null ? overrides.port()
+                : configured.port() == 0 ? defaultPort : configured.port();
+        int deviceId = overrides.deviceId() != null ? overrides.deviceId() : configured.deviceId();
+        SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
+                configured.seed(), configured.equipment());
 
         ValueSource values = null;
         if (!config.templates().isEmpty()) {
@@ -295,8 +337,8 @@ public final class SessionLauncher {
         }
     }
 
-    /** 取某会话的配置来源（诊断用）。 */
+    /** 取某会话的配置来源文件（诊断用）。 */
     public Optional<Path> sourceOf(String id) {
-        return Optional.ofNullable(this.sources.get(id));
+        return Optional.ofNullable(this.sources.get(id)).map(SessionSource::file);
     }
 }

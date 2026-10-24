@@ -37,8 +37,29 @@ public final class AccessControl {
 
     private final List<ApiAccount> accounts;
 
+    /** 开放访问：内部工具默认形态，任何请求都视为管理员。 */
+    private final boolean openAccess;
+
     private AccessControl(List<ApiAccount> accounts) {
         this.accounts = List.copyOf(accounts);
+        this.openAccess = false;
+    }
+
+    private AccessControl() {
+        this.accounts = List.of();
+        this.openAccess = true;
+    }
+
+    /**
+     * 开放访问：不做任何鉴权，所有请求都是匿名管理员。
+     *
+     * <p>内部工具的默认形态；显式给 {@code --token} / {@code --auth-users}
+     * 仍然可以切回受限模式。</p>
+     *
+     * @return 开放访问控制
+     */
+    public static AccessControl open() {
+        return new AccessControl();
     }
 
     /**
@@ -168,6 +189,9 @@ public final class AccessControl {
      * @return 命中的账号；无任何账号匹配时返回 {@code null}
      */
     public Principal authenticate(String secret) {
+        if (this.openAccess) {
+            return new Principal("anonymous", ApiRole.ADMIN);
+        }
         if (secret == null || secret.isEmpty()) {
             return null;
         }

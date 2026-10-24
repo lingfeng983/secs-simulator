@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MessageEntry } from '../messageHistory';
-import { Panel, StatCard } from '../ui/Panel';
+import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { formatClock, formatDateTime } from '../lib/format';
@@ -114,18 +114,6 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
       id="panel-messages"
       title="报文"
       description="实时报文流（SSE）。过滤、暂停与导出都在这里。"
-      stats={
-        <>
-          <StatCard label="面板内" value={messages.length} />
-          <StatCard label="当前筛选" value={visible.length} />
-          <StatCard label="服务端记录" value={messageTotal} hint="载入历史后才有总数" />
-          <StatCard
-            label="接收"
-            value={preferences.pauseStream ? '已暂停' : '进行中'}
-            tone={preferences.pauseStream ? 'warn' : 'ok'}
-          />
-        </>
-      }
       actions={
         <>
           <button
@@ -253,6 +241,16 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
           </>
         )}
       </Modal>
+          <PanelFootnote
+        items={[
+          { label: '面板内', value: messages.length },
+          { label: '当前筛选', value: visible.length },
+          { label: '服务端记录', value: messageTotal },
+          preferences.pauseStream
+            ? { label: '接收', value: '已暂停', tone: 'warn' as const }
+            : { label: '接收', value: '进行中', tone: 'ok' as const },
+        ]}
+      />
     </Panel>
   );
 }

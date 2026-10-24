@@ -64,3 +64,4 @@ gui/src-tauri/target/
 
 # ---- 第三方工具本地状态 ----
 .freebuff/
+test-run/

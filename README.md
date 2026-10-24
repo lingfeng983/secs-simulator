@@ -95,7 +95,7 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | viewer | 会话列表（状态 / 设备 / 单元数 / 计数器） |
 | `POST /api/v1/sessions` | operator | 新建会话，体为 `{"config":"demo"}` 或 `{"config":"设备.json"}`（201 / 400 / 409） |
-| `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
+| `POST /api/v1/sessions/bulk` | operator | 批量新建：一份配置模板 + 数量/前缀/起始端口/device-id，逐台独立创建（201 全成、207 部分失败并逐台给原因） || `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
 | `POST /api/v1/sessions/{id}/reload` | operator | 按配置热重载（200 / 404 / 409 / 400） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | operator | 手动触发一次 S6F11（202 / 404 / 409） |
 | `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | operator | 置位/清除 S5F1；`set` 默认 true，`category` 0..7（202 / 400 / 404 / 409） |
@@ -370,11 +370,14 @@ CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这�
 面板清单：会话表（状态/控制状态/计数）、活动报警与终端消息、**事件编排控制**、
 曲线预览（Canvas / uPlot / 多轴切换、悬停读数、拖动放大、截断提示、二进制下载、窗口统计）、
 设备目录（CEID/RPTID/SVID）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出 + 过滤 + 暂停）、
-**手动发送 SML**、**配置编辑器**（读原文 / 模板结构化表单 / 校验 / 保存 / 新建）、
+**手动发送 SML**、**配置编辑器**（全段结构化表单 / JSON 原文 / 校验 / 保存 / 新建）、
 **审计（admin）**、事件流日志。
 
 前端源码按职责分层：`src/state/`（轮询、SSE、偏好、通知）、`src/panels/`（面板）、
 `src/ui/`（通用控件）、`src/charts/`（图表）、`src/lib/`（纯函数，可单测）。
+
+界面的完整使用说明（启动登录、每个面板的操作、常见问题）见
+**[用户手册](docs/user-guide.md)**。
 
 ## 打包
 

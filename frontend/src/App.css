@@ -370,6 +370,11 @@ code {
   gap: 0.4rem;
 }
 
+/* 刷新/密度这类带动态文案的按钮固定最小宽,避免文案切换时顶栏跳动 */
+.topbar-actions button {
+  min-width: 4.6rem;
+}
+
 .session-picker {
   display: flex;
   align-items: center;
@@ -468,7 +473,7 @@ code {
 }
 
 .nav-badge {
-  margin-left: auto;
+  margin-left: 0.3rem;
   min-width: 1.35rem;
   padding: 0 0.3rem;
   border-radius: 999px;
@@ -491,13 +496,21 @@ code {
 
 .content {
   min-width: 0;
-  padding: 1rem 1.25rem 3rem;
+  max-width: 110rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 3rem;
 }
 
 /* ---------- 面板 ---------- */
 
 .panel {
   margin-bottom: 1.25rem;
+  padding: 0.9rem 1.1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
 }
 
 .panel-head {
@@ -506,9 +519,17 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 0.85rem;
+  /* 长表单滚到下面时,标题和操作按钮仍然可见;top 让它贴在顶栏下方 */
+  position: sticky;
+  top: 3.05rem;
+  z-index: 10;
+  background: var(--bg-raised);
+  margin-top: -0.9rem;
+  padding-top: 0.9rem;
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .panel-title {
@@ -532,8 +553,8 @@ code {
 }
 
 .panel-stats {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
@@ -689,6 +710,22 @@ code {
   flex: 1 1 auto;
 }
 
+/* 面板脚注：右下角一行轻量统计 */
+.panel-footnote {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 1.2rem;
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panel-footnote .tone-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
 /* ---------- 空状态 ---------- */
 
 .empty-state {
@@ -791,12 +828,15 @@ code {
   color: var(--muted);
 }
 
+/* 标签在左、控件在右，作为一个整体占一行 */
 .field {
   display: inline-flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .field > input,
@@ -1277,17 +1317,17 @@ kbd {
 
 .template-card-head label,
 .template-fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .template-card-head input,
 .template-card-head select,
-.template-fields input,
-.template-fields select,
 .template-binding-row input,
 .template-binding-row select,
 .template-output-row input,
@@ -1302,10 +1342,16 @@ kbd {
 }
 
 .template-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  align-items: end;
+  gap: 0.5rem 0.6rem;
   margin-top: 0.55rem;
+}
+
+.template-fields input,
+.template-fields select {
+  width: 100%;
 }
 
 .template-checkbox {
@@ -1385,7 +1431,68 @@ kbd {
   min-width: 8rem;
 }
 
+/* ---------- 配置结构化表单（session / equipment / events） ---------- */
+
+.cfg-editor {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.cfg-editor h3 {
+  margin: 0;
+}
+
+.cfg-editor h4 {
+  margin: 1rem 0 0.35rem;
+}
+
+.cfg-section {
+  margin-top: 1.1rem;
+}
+
+/* 一行字段 + 行尾删除按钮；auto-fill 网格让所有行的列彼此对齐 */
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  align-items: end;
+  gap: 0.45rem 0.6rem;
+  margin: 0.3rem 0;
+}
+
+.form-row .field > input,
+.form-row .field > select,
+.form-row .field > .template-input-wide {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.form-row > button {
+  justify-self: start;
+}
+
+.form-row > .check-inline {
+  align-self: end;
+  padding-bottom: 0.35rem;
+}
+
 /* ---------- 响应式 ---------- */
+
+/* 中屏:压缩留白,曲线读数列下移 */
+@media (max-width: 1200px) {
+  .spark {
+    grid-template-columns: 6rem minmax(0, 1fr);
+  }
+
+  .spark-readout {
+    grid-column: 2;
+  }
+
+  .form-row {
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  }
+}
 
 @media (max-width: 900px) {
   .shell {
@@ -1411,22 +1518,59 @@ kbd {
     white-space: nowrap;
   }
 
+  /* 窄屏下顶栏不再占位,面板头部直接贴顶 */
+  .panel-head {
+    top: 0;
+  }
+
+  .panel {
+    padding: 0.75rem 0.85rem 0.9rem;
+  }
+
   .content {
     padding: 0.75rem;
   }
 
-  .spark {
-    grid-template-columns: 5rem minmax(0, 1fr);
+  .config-editor,
+  .sml-editor,
+  .log {
+    min-height: 12rem;
+    height: auto;
   }
 
-  .spark-readout {
-    grid-column: 2;
+  .modal {
+    width: min(34rem, 100%);
   }
 }
 
 @media (max-width: 620px) {
   .health dd {
     margin-right: 0.5rem;
+  }
+
+  .topbar {
+    gap: 0.4rem 0.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .session-picker select {
+    min-width: 7rem;
+  }
+
+  .panel {
+    padding: 0.7rem 0.7rem 0.8rem;
+  }
+
+  .form-row {
+    grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  }
+
+  .preview-controls > * {
+    max-width: 100%;
   }
 
   .toast-host {
