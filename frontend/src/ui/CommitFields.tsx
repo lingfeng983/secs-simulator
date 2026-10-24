@@ -4,11 +4,13 @@ interface TextFieldProps {
   value: string;
   allowBlank?: boolean;
   wide?: boolean;
+  /** 占位提示；透传给 input。 */
+  placeholder?: string;
   onCommit: (next: string) => void;
 }
 
 /** 失焦/回车才提交的文本框：避免每敲一个字就重写整份配置。 */
-export function TextField({ value, allowBlank = false, wide = false, onCommit }: TextFieldProps): JSX.Element {
+export function TextField({ value, allowBlank = false, wide = false, placeholder, onCommit }: TextFieldProps): JSX.Element {
   const [draft, setDraft] = useState(value);
 
   useEffect(() => {
@@ -28,6 +30,7 @@ export function TextField({ value, allowBlank = false, wide = false, onCommit }:
   return (
     <input
       className={wide ? 'template-input-wide' : undefined}
+      placeholder={placeholder}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}

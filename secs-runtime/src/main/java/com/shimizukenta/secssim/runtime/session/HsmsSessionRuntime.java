@@ -104,10 +104,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /** S6F11 等 ACK 的队列上限：主机不答 S6F12 时不能无限堆积。 */
     private static final int S6F11_ACK_QUEUE = 256;
 
-    /** 二进制预览格式版本与固定头长度。 */
-    private static final short PREVIEW_BINARY_VERSION = 1;
-    private static final int PREVIEW_BINARY_HEADER_BYTES = 48;
-
     private final SessionSpec spec;
     private final ResolvedEquipment model;
     private final ValueStore store;
@@ -313,12 +309,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.values;
     }
 
+
+
     /**
-     * 预览某一时间段的曲线（分桶 min/max/avg）。
-     *
-     * <p>分桶而不是逐点返回：400 个 SVID × 几十万点会把浏览器打爆，
-     * 而 min/max 双值能保留尖峰（故障注入要看得见），avg 用于看趋势。
-     * </p>
+     * 曲线预览：分桶 min/max 包络 + avg 线。计算与序列化在 {@link PreviewSupport}。
      *
      * @param fromMs  起始时刻
      * @param toMs    结束时刻
@@ -327,144 +321,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     @Override
     public String previewJson(long fromMs, long toMs, int buckets) {
-        PreviewData data = this.previewData(fromMs, toMs, buckets);
-        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
-        java.util.List<com.shimizukenta.jsonhub.JsonHub> series = new java.util.ArrayList<>();
-
-        for (PreviewSeries value : data.series()) {
-            series.add(b.object(
-                    b.pair("svid", value.svid()),
-                    b.pair("owner", value.owner()),
-                    b.pair("unit", value.unit()),
-                    b.pair("min", b.array(numbers(value.min(), b))),
-                    b.pair("max", b.array(numbers(value.max(), b))),
-                    b.pair("avg", b.array(numbers(value.avg(), b)))));
-        }
-
-        return b.object(
-                b.pair("from", data.fromMs()),
-                b.pair("to", data.toMs()),
-                b.pair("buckets", data.buckets()),
-                b.pair("bucketMs", data.bucketMs()),
-                b.pair("svidTotal", data.svidTotal()),
-                b.pair("truncated", data.svidTotal() > data.series().size()),
-                b.pair("series", b.array(series))).toJson();
+        PreviewSupport.PreviewData data = PreviewSupport.compute(
+                this.values, this.model, fromMs, toMs, buckets);
+        return PreviewSupport.toJson(data);
     }
 
-    /**
-     * 预览的二进制格式（小端）。
-     *
-     * <pre>
-     * magic 4 字节 "SCSP"
-     * version u16 = 1
-     * flags   u16 = 0
-     * from    i64
-     * to      i64
-     * buckets u32
-     * bucketMs u64
-     * svidTotal u32
-     * seriesCount u32
-     * reserved u32
-     * 每条序列：svid i32, min f64[buckets], max f64[buckets], avg f64[buckets]
-     * </pre>
-     *
-     * @param fromMs  起始
-     * @param toMs    结束
-     * @param buckets 桶数（1..500）
-     * @return 二进制正文
-     */
+    /** 预览的二进制格式（SCSP v1，小端）。 */
     @Override
     public byte[] previewBinary(long fromMs, long toMs, int buckets) {
-        PreviewData data = this.previewData(fromMs, toMs, buckets);
-        int count = data.buckets();
-        int seriesCount = data.series().size();
-        int size = PREVIEW_BINARY_HEADER_BYTES
-                + seriesCount * (Integer.BYTES + 3 * count * Double.BYTES);
-        ByteBuffer buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
-
-        buffer.put((byte) 'S').put((byte) 'C').put((byte) 'S').put((byte) 'P');
-        buffer.putShort(PREVIEW_BINARY_VERSION);
-        buffer.putShort((short) 0);
-        buffer.putLong(data.fromMs());
-        buffer.putLong(data.toMs());
-        buffer.putInt(count);
-        buffer.putLong(data.bucketMs());
-        buffer.putInt(data.svidTotal());
-        buffer.putInt(seriesCount);
-        buffer.putInt(0);
-
-        for (PreviewSeries value : data.series()) {
-            buffer.putInt(value.svid());
-            for (double v : value.min()) {
-                buffer.putDouble(v);
-            }
-            for (double v : value.max()) {
-                buffer.putDouble(v);
-            }
-            for (double v : value.avg()) {
-                buffer.putDouble(v);
-            }
-        }
-        return buffer.array();
-    }
-
-    private PreviewData previewData(long fromMs, long toMs, int buckets) {
-        int count = Math.max(1, Math.min(500, buckets));
-        long span = Math.max(1L, toMs - fromMs);
-        long bucketMs = Math.max(1L, span / count);
-        long sampleMs = Math.max(1L, bucketMs / 4L);
-
-        java.util.List<Integer> allSvids = this.values.svids().stream().sorted().toList();
-        java.util.List<Integer> svids = allSvids.stream().limit(32).toList();
-        java.util.List<PreviewSeries> series = new java.util.ArrayList<>();
-
-        for (int svid : svids) {
-            double[] min = new double[count];
-            double[] max = new double[count];
-            double[] avg = new double[count];
-            java.util.Arrays.fill(min, Double.POSITIVE_INFINITY);
-            java.util.Arrays.fill(max, Double.NEGATIVE_INFINITY);
-
-            for (int i = 0; i < count; i++) {
-                long bucketFrom = fromMs + i * bucketMs;
-                long bucketTo = Math.min(toMs, bucketFrom + bucketMs);
-                double sum = 0.0;
-                int n = 0;
-
-                for (long t = bucketFrom; t <= bucketTo; t += sampleMs) {
-                    java.util.OptionalDouble value = this.values.valueAt(svid, t);
-                    if (value.isPresent()) {
-                        double v = value.getAsDouble();
-                        min[i] = Math.min(min[i], v);
-                        max[i] = Math.max(max[i], v);
-                        sum += v;
-                        n++;
-                    }
-                }
-
-                if (n == 0) {
-                    min[i] = 0.0;
-                    max[i] = 0.0;
-                }
-                avg[i] = n == 0 ? 0.0 : sum / n;
-            }
-
-            ResolvedSvid resolved = this.model.svids().get(svid);
-            series.add(new PreviewSeries(svid,
-                    resolved == null ? "" : resolved.owner(),
-                    resolved == null ? "" : resolved.unitSymbol(),
-                    min, max, avg));
-        }
-
-        return new PreviewData(fromMs, toMs, count, bucketMs, allSvids.size(), series);
-    }
-
-    private record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
-                               int svidTotal, java.util.List<PreviewSeries> series) {
-    }
-
-    private record PreviewSeries(int svid, String owner, String unit,
-                                 double[] min, double[] max, double[] avg) {
+        PreviewSupport.PreviewData data = PreviewSupport.compute(
+                this.values, this.model, fromMs, toMs, buckets);
+        return PreviewSupport.toBinary(data);
     }
 
     /**
@@ -528,14 +395,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 .toJson();
     }
 
-    private static java.util.List<com.shimizukenta.jsonhub.JsonHub> numbers(double[] values,
-                                                                            com.shimizukenta.jsonhub.JsonHubBuilder b) {
-        java.util.List<com.shimizukenta.jsonhub.JsonHub> list = new java.util.ArrayList<>(values.length);
-        for (double value : values) {
-            list.add(b.number(Math.round(value * 1000.0) / 1000.0));
-        }
-        return list;
-    }
 
     /**
      * 挂上事件总线：会话收发的每条数据报文都会以事件形式发布。
@@ -624,19 +483,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return JSON 文本
      */
     public String eventsJson() {
-        JsonHubBuilder b = JsonHub.getBuilder();
-        java.util.List<JsonHub> events = new java.util.ArrayList<>();
-
-        for (EventPlan plan : this.schedule.plans()) {
-            java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new java.util.ArrayList<>();
-            pairs.add(b.pair("id", plan.id()));
-            pairs.add(b.pair("ceid", plan.ceid()));
-            pairs.add(b.pair("enabled", !this.disabledPlans.contains(plan.id())));
-            triggerJson(plan.trigger(), pairs, b);
-            events.add(b.object(pairs));
-        }
-
-        return b.object(b.pair("events", b.array(events))).toJson();
+        return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans);
     }
 
     /**
@@ -677,26 +524,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return true;
     }
 
-    private static void triggerJson(Trigger trigger,
-                                    java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> pairs,
-                                    JsonHubBuilder b) {
-        if (trigger instanceof Trigger.At at) {
-            pairs.add(b.pair("triggerType", "at"));
-            pairs.add(b.pair("atMs", at.atMs()));
-        } else if (trigger instanceof Trigger.Periodic periodic) {
-            pairs.add(b.pair("triggerType", "periodic"));
-            pairs.add(b.pair("periodMs", periodic.periodMs()));
-            pairs.add(b.pair("jitterMs", periodic.jitterMs()));
-        } else if (trigger instanceof Trigger.OnCondition condition) {
-            pairs.add(b.pair("triggerType", "onCondition"));
-            pairs.add(b.pair("expression", condition.expression().source()));
-            pairs.add(b.pair("debounceMs", condition.debounceMs()));
-        } else if (trigger instanceof Trigger.AfterEvent after) {
-            pairs.add(b.pair("triggerType", "afterEvent"));
-            pairs.add(b.pair("sourcePlan", after.sourcePlan()));
-            pairs.add(b.pair("delayMs", after.delayMs()));
-        }
-    }
 
     /**
      * 已上报的 S6F11 条数。
@@ -895,19 +722,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public String alarmsJson() {
-        JsonHubBuilder b = JsonHub.getBuilder();
-        List<AlarmState> sorted = new ArrayList<>(this.activeAlarms.values());
-        sorted.sort(Comparator.comparingInt(AlarmState::alid));
-
-        List<JsonHub> items = new ArrayList<>(sorted.size());
-        for (AlarmState alarm : sorted) {
-            items.add(b.object(
-                    b.pair("alid", alarm.alid()),
-                    b.pair("text", alarm.text()),
-                    b.pair("category", alarm.category()),
-                    b.pair("atMillis", alarm.atMillis())));
-        }
-        return b.array(items).toJson();
+        return SessionJsonViews.alarmsJson(this.alarms());
     }
 
     /**
