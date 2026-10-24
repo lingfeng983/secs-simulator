@@ -12,6 +12,8 @@ export interface EventStreamHandlers {
   onState: (state: StreamState, detail: string) => void;
   /** 需要写进事件流日志的提示（重连、票据失败等）。 */
   onNotice: (text: string) => void;
+  /** 重连成功后触发：上层用它在补拉断线期间的增量报文。 */
+  onReconnected?: () => void;
 }
 
 /** 重连间隔（毫秒）。 */
@@ -100,8 +102,9 @@ export function useEventStream(
         source.addEventListener('open', () => {
           handlersRef.current.onState('connected', '已连接');
           if (openedOnce) {
-            /* 断线期间的报文后端不补发，界面必须明说 */
-            handlersRef.current.onNotice('事件流已重连：断线期间的报文不会补发');
+            /* 断线期间 SSE 不补发，但上层会按时间戳补拉一次增量 */
+            handlersRef.current.onNotice('事件流已重连：正在补拉断线期间的报文');
+            handlersRef.current.onReconnected?.();
           }
           openedOnce = true;
         });

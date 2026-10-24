@@ -675,6 +675,22 @@ code {
   user-select: none;
 }
 
+/* 列宽拖拽手柄：贴在表头右缘 */
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 3;
+}
+
+.col-resize:hover {
+  background: var(--accent-soft);
+}
+
 .data-table th.sortable {
   cursor: pointer;
 }

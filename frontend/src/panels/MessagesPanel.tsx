@@ -207,6 +207,7 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
 
       <div ref={scrollRef}>
         <DataTable
+        tableKey="messages"
           columns={columns}
           rows={visible}
           rowKey={(row) => String(row.key)}

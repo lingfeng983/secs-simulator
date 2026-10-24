@@ -64,6 +64,7 @@ export function EventsPanel({ backend }: PanelBaseProps): JSX.Element {
       description="周期、条件或延迟触发的事件计划。启停只影响当前运行实例。"
     >
       <DataTable
+        tableKey="events"
         columns={columns}
         rows={eventPlans}
         rowKey={(row) => row.id}

@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { downloadText, filterRows, sortRows, toCsv, type CsvColumn, type SortState } from '../lib/table';
+import { usePersistentState } from '../state/usePersistentState';
 import { EmptyState } from './EmptyState';
 
 /** 一列。 */
@@ -40,6 +41,8 @@ export interface DataTableProps<T> {
   pageSize?: number;
   /** 表头右侧显示的合计行数。 */
   caption?: string;
+  /** 表格标识；给了就启用列宽拖拽，并把列宽记进 localStorage。 */
+  tableKey?: string;
 }
 
 /**
@@ -63,10 +66,53 @@ export function DataTable<T>({
   defaultSort,
   pageSize,
   caption,
+  tableKey,
 }: DataTableProps<T>): JSX.Element {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
   const [page, setPage] = useState(0);
+  /* 列宽（px）：拖拽手柄更新；键为列 key。持久化键按表隔离。 */
+  const widthsKey = tableKey === undefined ? '' : `secs-sim-colw-${tableKey}`;
+  const [columnWidths, setColumnWidths] = usePersistentState<Record<string, number>>(
+    widthsKey === '' ? 'secs-sim-colw-none' : widthsKey,
+    {},
+  );
+  const resizing = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    if (tableKey === undefined) {
+      return;
+    }
+    const onMove = (event: MouseEvent) => {
+      const state = resizing.current;
+      if (state === null) {
+        return;
+      }
+      const next = Math.max(48, Math.round(state.startWidth + event.clientX - state.startX));
+      setColumnWidths((previous) => ({ ...previous, [state.key]: next }));
+    };
+    const onUp = () => {
+      resizing.current = null;
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [tableKey, setColumnWidths]);
+
+  const startResize = useCallback((key: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const th = (event.target as HTMLElement).closest('th');
+    if (th === null) {
+      return;
+    }
+    resizing.current = { key, startX: event.clientX, startWidth: th.getBoundingClientRect().width };
+    document.body.style.cursor = 'col-resize';
+  }, []);
 
   const textOf = useMemo(() => {
     if (searchText !== undefined) {
@@ -164,7 +210,11 @@ export function DataTable<T>({
                   return (
                     <th
                       key={column.key}
-                      style={column.width === undefined ? undefined : { width: column.width }}
+                      style={{
+                        ...(column.width === undefined ? {} : { width: column.width }),
+                        ...(columnWidths[column.key] === undefined ? {} : { width: columnWidths[column.key] }),
+                        ...(tableKey === undefined ? {} : { position: 'relative' }),
+                      }}
                       className={[
                         column.align === undefined ? '' : `align-${column.align}`,
                         column.className ?? '',
@@ -181,6 +231,23 @@ export function DataTable<T>({
                         <span className="sort-mark" aria-hidden="true">
                           {active ? (sort?.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
                         </span>
+                      )}
+                      {tableKey !== undefined && (
+                        <span
+                          className="col-resize"
+                          role="separator"
+                          aria-orientation="vertical"
+                          onMouseDown={(event) => startResize(column.key, event)}
+                          onDoubleClick={() => {
+                            /* 双击手柄恢复该列默认宽 */
+                            setColumnWidths((previous) => {
+                              const next = { ...previous };
+                              delete next[column.key];
+                              return next;
+                            });
+                          }}
+                          title="拖动调整列宽，双击恢复默认"
+                        />
                       )}
                     </th>
                   );

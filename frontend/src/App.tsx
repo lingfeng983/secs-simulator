@@ -104,6 +104,9 @@ export function App(): JSX.Element {
         },
         [appendLog],
       ),
+      onReconnected: useCallback(() => {
+        void backend.backfillAfterReconnect();
+      }, [backend]),
     },
   );
 

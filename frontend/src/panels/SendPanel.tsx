@@ -6,6 +6,19 @@ import { highlightSml } from '../lib/smlHighlight';
 import type { PanelBaseProps } from './types';
 
 /** 常用的示例报文；点一下就能改，不用手打。 */
+/**
+ * 常用的远程命令（S2F41 RCMID 预设，E30 常用集）。
+ *
+ * <p>点一下填进编辑框再发，参数（如批次号）可直接改。</p>
+ */
+const REMOTE_COMMANDS: ReadonlyArray<{ label: string; rcmdid: number; note: string }> = [
+  { label: 'START', rcmdid: 1, note: '开始处理' },
+  { label: 'STOP', rcmdid: 2, note: '停止处理' },
+  { label: 'PAUSE', rcmdid: 3, note: '暂停' },
+  { label: 'RESUME', rcmdid: 4, note: '恢复' },
+  { label: 'CANCEL', rcmdid: 5, note: '取消' },
+];
+
 const EXAMPLES: ReadonlyArray<{ label: string; sml: string }> = [
   { label: '示例 S1F1', sml: 'S1F1 W.' },
   {
@@ -185,6 +198,20 @@ export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
           <button type="button" onClick={() => setDraft(EXAMPLES[2].sml)} disabled={disabled}>
             {EXAMPLES[2].label}
           </button>
+          {REMOTE_COMMANDS.map((command) => (
+            <button
+              key={command.rcmdid}
+              type="button"
+              disabled={disabled}
+              title={`S2F41 远程命令 ${command.rcmdid}（${command.note}），点击填入`}
+              onClick={() => {
+                setDraft('S2F41 W' + String.fromCharCode(10) + '<L' + String.fromCharCode(10) + '  <U4 ' + command.rcmdid + '>'
+                  + String.fromCharCode(10) + '  <A "SIM">' + String.fromCharCode(10) + '>.');
+              }}
+            >
+              {command.label}
+            </button>
+          ))}
           <button
             type="button"
             className="primary"

@@ -131,6 +131,8 @@ export interface BackendController {
   toggleEvent: (plan: EventPlanView) => Promise<void>;
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
   loadHistory: () => Promise<void>;
+  /** SSE 重连后补拉断线期间的增量报文。 */
+  backfillAfterReconnect: () => Promise<void>;
   exportMessages: () => Promise<void>;
   downloadPreview: (windowMs: number) => Promise<void>;
   fetchPreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
@@ -646,6 +648,45 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
+  /**
+   * 重连后补拉断线期间的增量：取最近 1000 条历史，
+   * 只收时间戳比面板里最新一条新的。
+   *
+   * <p>SSE 断线期间后端不补发，这条补拉把缺口接上；
+   * 历史被轮转掉时拿不全，提示里说明。</p>
+   */
+  const backfillAfterReconnect = useCallback(async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const page = await client.messages('', '', 1000);
+      setMessages((previous) => {
+        if (previous.length === 0) {
+          /* 面板本来就是空的：整页并入 */
+          const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
+          nextMessageKey.current = merged.nextKey;
+          return merged.entries;
+        }
+        const newestAt = previous.reduce((max, item) => Math.max(max, item.msg.at), 0);
+        const fresh = page.messages.filter((msg) => msg.at > newestAt);
+        if (fresh.length === 0) {
+          return previous;
+        }
+        const merged = mergeMessages(previous, fresh, nextMessageKey.current, MAX_MESSAGES);
+        nextMessageKey.current = merged.nextKey;
+        return merged.entries;
+      });
+      setMessageTotal(page.total);
+      if (page.truncated) {
+        notifierRef.current.info('重连补拉被截断：断线过久时中间可能有缺口，可手动「载入历史」');
+      }
+    } catch {
+      /* 补拉失败不影响实时流；手动「载入历史」仍是兜底 */
+      notifierRef.current.warn('重连后补拉增量失败，可手动「载入历史」补齐');
+    }
+  }, [client]);
+
   const loadHistory = useCallback(async () => {
     if (client === null) {
       return;
@@ -916,6 +957,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       toggleEvent,
       sendSml,
       loadHistory,
+      backfillAfterReconnect,
       exportMessages,
       downloadPreview,
       fetchPreview,
@@ -965,6 +1007,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       toggleEvent,
       sendSml,
       loadHistory,
+      backfillAfterReconnect,
       exportMessages,
       downloadPreview,
       fetchPreview,

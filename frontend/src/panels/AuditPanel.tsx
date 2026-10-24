@@ -46,6 +46,7 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
       description="谁在什么时候动了什么。完整历史在服务端日志文件里。"
     >
       <DataTable
+        tableKey="audit"
         columns={columns}
         rows={auditEntries}
         rowKey={(row) => `${row.at}-${row.actor}-${row.action}`}

@@ -221,6 +221,7 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
 
               <h3 className="sub-title">窗口统计</h3>
               <DataTable
+        tableKey="preview-stats"
                 columns={statColumns}
                 rows={stats}
                 rowKey={(row) => String(row.svid)}

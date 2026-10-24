@@ -225,6 +225,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
       </div>
 
       <DataTable
+        tableKey="sessions"
         columns={columns}
         rows={sessions}
         rowKey={(row) => row.id}

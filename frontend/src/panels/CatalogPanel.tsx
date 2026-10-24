@@ -142,6 +142,7 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
 
       {tab === 'ceids' && (
         <DataTable
+        tableKey="catalog"
           columns={ceidColumns}
           rows={ceids}
           rowKey={(row) => String(row.ceid)}
@@ -160,6 +161,7 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
 
       {tab === 'reports' && (
         <DataTable
+        tableKey="catalog-2"
           columns={reportColumns}
           rows={reports}
           rowKey={(row) => String(row.rptid)}
@@ -178,6 +180,7 @@ export function CatalogPanel({ backend }: PanelBaseProps): JSX.Element {
 
       {tab === 'svids' && (
         <DataTable
+        tableKey="catalog-3"
           columns={svidColumns}
           rows={svids}
           rowKey={(row) => String(row.svid)}

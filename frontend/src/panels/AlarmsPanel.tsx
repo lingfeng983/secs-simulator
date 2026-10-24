@@ -106,6 +106,7 @@ export function AlarmsPanel({ backend }: PanelBaseProps): JSX.Element {
 
       <h3 className="sub-title">活动报警</h3>
       <DataTable
+        tableKey="alarms"
         columns={alarmColumns}
         rows={alarms}
         rowKey={(row) => String(row.alid)}
@@ -122,6 +123,7 @@ export function AlarmsPanel({ backend }: PanelBaseProps): JSX.Element {
 
       <h3 className="sub-title">终端消息</h3>
       <DataTable
+        tableKey="alarms-2"
         columns={terminalColumns}
         rows={terminalMessages}
         rowKey={(row) => `${row.atMillis}-${row.tid}`}
