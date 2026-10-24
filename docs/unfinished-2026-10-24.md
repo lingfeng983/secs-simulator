@@ -43,8 +43,7 @@
 
 - `Main.java` 的 Context 实现类接近千行，会话/配置/审计的转发逻辑可以按
   `ApiContext` 的能力分面拆掉。
-- `HsmsSessionRuntime` 1800+ 行，协议回调、值引擎接线、HTTP 序列化辅助混在一起；
-  拆分前先补齐针对它的单元测试。
+- `HsmsSessionRuntime` 2100+ 行：**拆分前置的单元测试已补**（2026-10-24 晚：HsmsSessionRuntimeTest 3 例，手动时钟驱动——热生效原地替换、counters 契约、值来源回落），可以开始拆了；
 - 前端 `useBackend` 是单一大控制器（800+ 行），轮询与写操作集中；面板继续增加时
   按域拆成多个 hook（会话域 / 配置域 / 报文域）。
 - 前端 e2e 的 mock API 与真实后端行为存在漂移风险（202 状态码那次就是 mock 测不出来的）；
