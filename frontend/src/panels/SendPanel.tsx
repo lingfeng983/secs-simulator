@@ -26,6 +26,7 @@ const EXAMPLES: ReadonlyArray<{ label: string; sml: string }> = [
     sml: 'S5F1 W\n<L\n  <B 0x81>\n  <U2 1001>\n  <A "ON FIRE">\n>.',
   },
   { label: '示例 S2F41', sml: 'S2F41 W\n<L\n  <U4 1>\n  <A "SIM">\n>.' },
+  { label: '时钟同步 S2F17', sml: 'S2F17 W.' },
 ];
 
 /** 一轮压测的汇总。 */
@@ -197,6 +198,14 @@ export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
           </button>
           <button type="button" onClick={() => setDraft(EXAMPLES[2].sml)} disabled={disabled}>
             {EXAMPLES[2].label}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDraft('S2F17 W.')}
+            disabled={disabled}
+            title="让设备用主机时间对钟（S2F18 回当前时间）"
+          >
+            时钟同步 S2F17
           </button>
           {REMOTE_COMMANDS.map((command) => (
             <button

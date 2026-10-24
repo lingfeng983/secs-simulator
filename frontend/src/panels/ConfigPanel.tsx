@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ConfigFormEditor } from '../ConfigFormEditor';
+import { diffLines, foldUnchanged } from '../lib/textDiff';
 import { TemplateEditor } from '../TemplateEditor';
 import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
 import type { PanelBaseProps } from './types';
 
-/** 编辑视图：表单优先，原文兜底。 */
-type ConfigView = 'form' | 'json';
+/** 编辑视图：表单优先，原文兜底，改动看差异。 */
+type ConfigView = 'form' | 'json' | 'diff';
 
 /**
  * 配置编辑器面板。
@@ -29,6 +30,12 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
 
   /** 编辑区里的内容相对磁盘有没有变。 */
   const dirty = draft !== baseline;
+
+  /* 差异视图的行集：折叠长段未改动，现场几百行的配置只看改动附近 */
+  const diffBlocks = useMemo(
+    () => (dirty ? foldUnchanged(diffLines(baseline, draft)) : []),
+    [baseline, draft, dirty],
+  );
 
   /* 配置列表变了以后，如果当前打开的配置已经被删掉，就关掉它 */
   useEffect(() => {
@@ -243,13 +250,38 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
             </button>
             <button
               type="button"
+              className={`segment${view === 'diff' ? ' active' : ''}`}
+              onClick={() => setView('diff')}
+            >
+              差异
+            </button>
+            <button
+              type="button"
               className={`segment${view === 'json' ? ' active' : ''}`}
               onClick={() => setView('json')}
             >
               JSON 原文
             </button>
           </div>
-          {view === 'json' ? (
+          {view === 'diff' ? (
+            <div className="config-diff" aria-label="与磁盘版本的差异">
+              {diffBlocks.map((block, index) =>
+                block.op === 'skip' ? (
+                  <div className="diff-line diff-skip" key={index}>
+                    ··· {block.count} 行未改动
+                  </div>
+                ) : (
+                  <div className={`diff-line diff-${block.op}`} key={index}>
+                    <span className="diff-gutter">{block.lineNumber}</span>
+                    <span className="diff-mark">
+                      {block.op === 'added' ? '+' : block.op === 'removed' ? '−' : ' '}
+                    </span>
+                    <span className="diff-text">{block.text === '' ? ' ' : block.text}</span>
+                  </div>
+                ),
+              )}
+            </div>
+          ) : view === 'json' ? (
             <textarea
               className="config-editor"
               spellCheck={false}

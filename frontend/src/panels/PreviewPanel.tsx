@@ -25,7 +25,7 @@ const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
  * 值班时先扫一眼统计表，再决定细看哪条线。</p>
  */
 export function PreviewPanel({ backend, preferences, updatePreferences }: PanelBaseProps): JSX.Element {
-  const { preview, previewSession, activeSession } = backend;
+  const { preview, previewSession, activeSession, sessions, comparePreview, compareSession, setComparePreview } = backend;
   const [zoom, setZoom] = useState<ZoomRange | null>(null);
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
@@ -48,10 +48,18 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
 
   const stats = useMemo(() => computeAllStats(visible), [visible]);
 
+  /* 对比 B 里同号 SVID 的序列；没有就不渲染第二条 */
+  const compareSeries = (svid: number) =>
+    comparePreview?.series.find((item) => item.svid === svid);
+
   const onRefresh = async () => {
     setBusy(true);
     try {
       await backend.refreshPreview(windowMs);
+      if (compareSession !== '') {
+        const now = Date.now();
+        await setComparePreview(compareSession, now - windowMs, now);
+      }
       setZoom(null);
     } finally {
       setBusy(false);
@@ -148,6 +156,37 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
         <p className="hint">选好会话与时间窗后点「刷新曲线」，按当前配置算出 min/max 包络 + avg 线。</p>
       ) : (
         <>
+          <div className="preview-controls">
+            <label className="field" title="另选一台设备同屏对比（同 SVID 并排）">
+              对比
+              <select
+                value={compareSession}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '') {
+                    void setComparePreview('', 0, 0);
+                    return;
+                  }
+                  const now = Date.now();
+                  void setComparePreview(value, now - windowMs, now);
+                }}
+              >
+                <option value="">（关闭）</option>
+                {sessions
+                  .filter((item) => item.id !== activeSession)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.id}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {comparePreview !== null && (
+              <span className="hint">
+                A：{previewSession ?? activeSession}　B：{compareSession}
+              </span>
+            )}
+          </div>
           <div className="preview-meta">
             <input
               type="search"
@@ -207,14 +246,24 @@ export function PreviewPanel({ backend, preferences, updatePreferences }: PanelB
               ) : (
                 <div className="sparks">
                   {visible.map((item) => (
-                    <Sparkline
-                      key={item.svid}
-                      series={item}
-                      fromMs={preview.from}
-                      bucketMs={preview.bucketMs}
-                      zoom={zoom}
-                      onZoom={setZoom}
-                    />
+                    <div className="spark-pair" key={item.svid}>
+                      <Sparkline
+                        series={item}
+                        fromMs={preview.from}
+                        bucketMs={preview.bucketMs}
+                        zoom={zoom}
+                        onZoom={setZoom}
+                      />
+                      {compareSeries(item.svid) !== undefined && (
+                        <Sparkline
+                          series={compareSeries(item.svid)!}
+                          fromMs={comparePreview?.from ?? preview.from}
+                          bucketMs={comparePreview?.bucketMs ?? preview.bucketMs}
+                          zoom={zoom}
+                          onZoom={setZoom}
+                        />
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

@@ -136,6 +136,12 @@ export interface BackendController {
   exportMessages: () => Promise<void>;
   downloadPreview: (windowMs: number) => Promise<void>;
   fetchPreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
+  /** 对比会话 B 的预览数据；null 表示未开启对比。 */
+  comparePreview: PreviewData | null;
+  /** 对比会话 B 的 id。 */
+  compareSession: string;
+  /** 拉取/清除对比预览；空 sessionId 关闭对比。 */
+  setComparePreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
   /** 按时间窗刷新曲线（先取一次 uptime，时间窗才是"最近 N 分钟"而不是"开局 N 秒"）。 */
   refreshPreview: (windowMs: number) => Promise<void>;
   pushMessages: (messages: import('../api').WireMessage[]) => void;
@@ -186,6 +192,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [messageTotal, setMessageTotal] = useState(0);
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [comparePreview, setComparePreviewData] = useState<PreviewData | null>(null);
+  const [compareSession, setCompareSessionId] = useState('');
   const [previewSession, setPreviewSession] = useState('');
   const [lastRefresh, setLastRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -750,6 +758,27 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
+  const setComparePreview = useCallback(
+    async (sessionId: string, fromMs: number, toMs: number) => {
+      if (client === null) {
+        return;
+      }
+      if (sessionId === '') {
+        setComparePreviewData(null);
+        setCompareSessionId('');
+        return;
+      }
+      try {
+        const data = await client.preview(sessionId, fromMs, toMs, PREVIEW_BUCKETS);
+        setComparePreviewData(data);
+        setCompareSessionId(sessionId);
+      } catch (error) {
+        notifierRef.current.error('拉取对比曲线失败', (error as Error).message);
+      }
+    },
+    [client],
+  );
+
   const downloadPreview = useCallback(
     async (windowMs: number) => {
       if (client === null || activeSession === '') {
@@ -961,6 +990,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       exportMessages,
       downloadPreview,
       fetchPreview,
+      comparePreview,
+      compareSession,
+      setComparePreview,
       refreshPreview,
       pushMessages,
       clearMessages,
@@ -1011,6 +1043,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       exportMessages,
       downloadPreview,
       fetchPreview,
+      comparePreview,
+      compareSession,
+      setComparePreview,
       refreshPreview,
       pushMessages,
       clearMessages,

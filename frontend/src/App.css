@@ -885,6 +885,14 @@ code {
 
 /* ---------- 图表 ---------- */
 
+/* 对比模式：A/B 同 SVID 左右并排 */
+.spark-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+}
+
 .sparks {
   display: flex;
   flex-direction: column;
@@ -1015,6 +1023,59 @@ code {
   background: var(--bg-sunken);
   font: 12px/1.5 var(--mono);
   white-space: pre-wrap;
+}
+
+/* ---------- SML 语法高亮 ---------- */
+
+.sml-k-head { color: var(--accent); font-weight: 600; }
+.sml-k-format { color: var(--warn); }
+.sml-k-number { color: var(--ok); }
+.sml-k-string { color: var(--muted); }
+.sml-k-punct { color: var(--fg-strong); }
+
+/* ---------- 配置差异视图 ---------- */
+
+.config-diff {
+  max-height: 34rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font: 12px/1.7 var(--mono);
+  padding: 0.4rem 0;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.2rem 1rem minmax(0, 1fr);
+  gap: 0.4rem;
+  padding-right: 0.6rem;
+  white-space: pre;
+}
+
+.diff-gutter {
+  text-align: right;
+  color: var(--muted);
+  opacity: 0.7;
+  user-select: none;
+}
+
+.diff-mark {
+  user-select: none;
+  text-align: center;
+}
+
+.diff-added { background: var(--ok-soft); }
+.diff-added .diff-mark { color: var(--ok); font-weight: 700; }
+.diff-removed { background: var(--danger-soft); }
+.diff-removed .diff-mark { color: var(--danger); font-weight: 700; }
+
+.diff-skip {
+  color: var(--muted);
+  padding: 0.15rem 0.6rem;
+  border-top: 1px dashed var(--line-soft);
+  border-bottom: 1px dashed var(--line-soft);
+  user-select: none;
 }
 
 /* ---------- 提示条 ---------- */
