@@ -277,6 +277,10 @@ export interface ApiClient {
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
   eventsUrl(ticket: string): string;
+  /** 当前日志级别（error/info/debug）。 */
+  logLevel(): Promise<string>;
+  /** 切换日志级别。 */
+  setLogLevel(level: string): Promise<boolean>;
 }
 
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
@@ -550,6 +554,18 @@ export function createClient(): ApiClient {
     },
     eventsUrl(ticket) {
       return apiUrl(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`);
+    },
+    async logLevel() {
+      const body = await json<{ level?: string }>(await fetch(apiUrl('/api/v1/log-level')));
+      return body.level ?? 'info';
+    },
+    async setLogLevel(level) {
+      const response = await fetch(apiUrl('/api/v1/log-level'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: level,
+      });
+      return response.ok;
     },
   };
 }

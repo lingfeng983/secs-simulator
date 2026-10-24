@@ -44,6 +44,41 @@ public final class Log {
     /** 日志文件；{@code null} 表示只写 stderr。 */
     private static volatile Path file;
 
+    /** 当前级别；低于它的日志直接丢弃。ERROR=0 … DEBUG=3。 */
+    private static volatile Level level = Level.INFO;
+
+    /** 日志级别。顺序即严重性递减，序号用于比较。 */
+    public enum Level {
+        /** 只记错误。 */
+        ERROR(0),
+        /** 错误 + 警告 + 信息（默认）。 */
+        INFO(1),
+        /** 再加调试细节（每个报文的去向、计划求值等）。 */
+        DEBUG(2);
+
+        /** 严重性序号，越大越啰嗦。 */
+        final int rank;
+
+        Level(int rank) {
+            this.rank = rank;
+        }
+
+        /**
+         * 按名字解析（不区分大小写），用于命令行与接口。
+         *
+         * @param name 级别名
+         * @return 解析结果；不认识时抛 {@link IllegalArgumentException}
+         */
+        public static Level parse(String name) {
+            for (Level value : values()) {
+                if (value.name().equalsIgnoreCase(name)) {
+                    return value;
+                }
+            }
+            throw new IllegalArgumentException("未知日志级别: " + name + "（可选 error/info/debug）");
+        }
+    }
+
     private Log() {
     }
 
@@ -73,10 +108,40 @@ public final class Log {
     }
 
     /**
+     * 设置日志级别（运行时随时可调）。
+     *
+     * @param next 新级别
+     */
+    public static void setLevel(Level next) {
+        level = next == null ? Level.INFO : next;
+    }
+
+    /**
+     * 当前日志级别。
+     *
+     * @return 级别
+     */
+    public static Level level() {
+        return level;
+    }
+
+    /**
+     * 记录一条调试信息：只在 DEBUG 级别才输出。
+     *
+     * @param message 说明
+     */
+    public static void debug(String message) {
+        if (level.rank >= Level.DEBUG.rank) {
+            write("DEBUG", message, null);
+        }
+    }
+
+    /**
      * 关闭文件日志（测试用；正常进程退出时无需调用）。
      */
     public static synchronized void reset() {
         file = null;
+        level = Level.INFO;
     }
 
     /**
@@ -126,6 +191,9 @@ public final class Log {
     }
 
     private static void write(String level, String message, Throwable cause) {
+        if (severity(level) > level().rank) {
+            return;
+        }
         String text = line(level, message, cause);
         System.err.println(text);
 
@@ -166,6 +234,15 @@ public final class Log {
 
         Files.move(target, target.resolveSibling(target.getFileName() + ".1"),
                 StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** 级别名 → 严重性序号：ERROR=0、WARN/INFO=1、DEBUG=2。 */
+    private static int severity(String level) {
+        return switch (level) {
+            case "ERROR" -> Level.ERROR.rank;
+            case "DEBUG" -> Level.DEBUG.rank;
+            default -> Level.INFO.rank;
+        };
     }
 
     private static String line(String level, String message, Throwable cause) {

@@ -327,6 +327,17 @@ export function App(): JSX.Element {
           >
             连接
           </button>
+          <label className="session-picker" title="后端日志级别（排查时切到 debug）">
+            <span>日志</span>
+            <select
+              value={backend.logLevel}
+              onChange={(event) => void backend.setLogLevel(event.target.value)}
+            >
+              <option value="error">error</option>
+              <option value="info">info</option>
+              <option value="debug">debug</option>
+            </select>
+          </label>
           <button
             type="button"
             onClick={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
@@ -347,6 +358,28 @@ export function App(): JSX.Element {
           </button>
         </div>
       </header>
+
+      {backend.backendError !== '' && (
+        <div className="global-error-banner" role="alert">
+          后端不可达：{backend.backendError}
+          <button
+            type="button"
+            onClick={() => void backend.refreshAll()}
+            title="立即重试"
+          >
+            重试
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDraftBase(readApiBase());
+              setConnOpen(true);
+            }}
+          >
+            修改地址
+          </button>
+        </div>
+      )}
 
       <div className="shell">
         <nav className="sidenav" aria-label="面板导航">

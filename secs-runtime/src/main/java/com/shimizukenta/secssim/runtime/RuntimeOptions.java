@@ -27,11 +27,24 @@ import java.util.Set;
  * @param tlsPassword keystore 密码
  * @param authUsers   多账号文件（带角色），{@code null} 表示只用单 {@code --token}
  * @param help        是否只打印帮助
+ * @param logLevel    日志级别（error/info/debug）
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
                              int hsmsPort, int deviceId, boolean demoSession,
                              Path configFile, Path webRoot, Path workDir,
-                             Path tlsKeystore, String tlsPassword, Path authUsers, boolean help) {
+                             Path tlsKeystore, String tlsPassword, Path authUsers, boolean help,
+                             com.shimizukenta.secssim.app.log.Log.Level logLevel) {
+
+    /** 便捷构造：日志级别用默认 INFO（测试与既有调用点）。 */
+    public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
+                          int hsmsPort, int deviceId, boolean demoSession,
+                          Path configFile, Path webRoot, Path workDir,
+                          Path tlsKeystore, String tlsPassword, Path authUsers, boolean help) {
+        this(mode, bindHost, httpPort, token, hsmsPort, deviceId, demoSession,
+                configFile, webRoot, workDir, tlsKeystore, tlsPassword, authUsers, help,
+                com.shimizukenta.secssim.app.log.Log.Level.INFO);
+    }
+
 
     /**
      * 校验并创建。
@@ -101,7 +114,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
 
         Set<String> known = Set.of("mode", "bind", "port", "token", "hsms-port",
                 "device-id", "demo-session", "config", "web-root", "work-dir",
-                "tls-keystore", "tls-password", "auth-users", "help");
+                "tls-keystore", "tls-password", "auth-users", "help", "log-level");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -124,7 +137,9 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                 values.containsKey("tls-keystore") ? Path.of(values.get("tls-keystore")) : null,
                 values.getOrDefault("tls-password", ""),
                 values.containsKey("auth-users") ? Path.of(values.get("auth-users")) : null,
-                Boolean.parseBoolean(values.getOrDefault("help", "false")));
+                Boolean.parseBoolean(values.getOrDefault("help", "false")),
+                com.shimizukenta.secssim.app.log.Log.Level.parse(
+                        values.getOrDefault("log-level", "INFO")));
     }
 
     /**
@@ -136,6 +151,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
         return """
                 用法: secs-sim [选项]
 
+                  --log-level <error|info|debug>     日志级别，默认 info（debug 输出报文级细节）
                   --mode <integrated|server|probe>  运行形态，默认 integrated
                   --bind <host>                     绑定地址，默认 127.0.0.1（server 为 0.0.0.0）
                   --port <n>                        HTTP 端口，默认 0（系统分配）

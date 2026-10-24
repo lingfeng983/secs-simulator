@@ -94,6 +94,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 审计历史路径。 */
     public static final String PATH_AUDIT = "/api/v1/audit";
 
+    /** 日志级别路径（GET 读取 / PUT 切换）。 */
+    public static final String PATH_LOG_LEVEL = "/api/v1/log-level";
+
     /** 配置目录列表路径。 */
     public static final String PATH_CONFIGS = "/api/v1/configs";
 
@@ -379,6 +382,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_PREVIEW_BINARY, withCors(api::handlePreviewBinary));
         http.createContext(PATH_MESSAGES, withCors(api::handleMessages));
         http.createContext(PATH_AUDIT, withCors(api::handleAudit));
+        http.createContext(PATH_LOG_LEVEL, withCors(api::handleLogLevel));
 
         if (api.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
@@ -1569,6 +1573,56 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
         respond(ex, 200, body);
+    }
+
+    /**
+     * GET /api/v1/log-level：当前级别；PUT 切换（body 是 error/info/debug，裸文本或 JSON 均可）。
+     *
+     * <p>排查现场问题的标准动作是"先开 debug 再复现"；能远程切就不用上机器改启动参数。
+     * 切换记进审计。</p>
+     */
+    private void handleLogLevel(HttpExchange ex) throws IOException {
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, "{\"level\":\"" + json(this.context.logLevel()) + "\"}");
+            return;
+        }
+        if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            String body = readBody(ex);
+            if (body == null) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            String level = null;
+            try {
+                com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+                if (root.isObject() && root.containsKey("level")) {
+                    level = root.get("level").optionalString().orElse(null);
+                } else if (root.isString()) {
+                    level = root.optionalString().orElse(null);
+                }
+            } catch (RuntimeException ignore) {
+                /* 不是 JSON 就当裸文本处理 */
+            }
+            if (level == null) {
+                level = body.trim().replace("\"", "");
+            }
+            boolean changed = this.context.setLogLevel(level);
+            audit(ex, "log-level", level, changed ? "outcome=OK" : "outcome=REJECTED");
+            respond(ex, changed ? 200 : 400,
+                    changed ? "{\"ok\":true,\"level\":\"" + json(this.context.logLevel()) + "\"}"
+                            : "{\"ok\":false,\"error\":\"unknown-level\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
     }
 
     /**

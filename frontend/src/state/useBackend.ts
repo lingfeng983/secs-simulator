@@ -94,12 +94,28 @@ export interface BackendController {
   createSession: (config: string) => Promise<void>;
   /** 从一份设备配置批量开多台设备；返回逐台结果。 */
   bulkCreateSessions: (params: SessionBulkParams) => Promise<SessionBulkResult | null>;
-  /** 对多台设备逐台触发上报，返回 [成功, 失败]。 */
-  batchTrigger: (ids: ReadonlySet<string>, ceid: number) => Promise<{ ok: number; fail: number }>;
-  /** 对多台设备逐台重载。 */
-  batchReload: (ids: ReadonlySet<string>) => Promise<{ ok: number; fail: number }>;
-  /** 对多台设备逐台关闭。 */
-  batchClose: (ids: ReadonlySet<string>) => Promise<{ ok: number; fail: number }>;
+  /** 对多台设备并发触发上报；onProgress 报告进度。 */
+  batchTrigger: (
+    ids: ReadonlySet<string>,
+    ceid: number,
+    onProgress?: (done: number, total: number) => void,
+  ) => Promise<{ ok: number; fail: number }>;
+  /** 对多台设备并发重载。 */
+  batchReload: (
+    ids: ReadonlySet<string>,
+    onProgress?: (done: number, total: number) => void,
+  ) => Promise<{ ok: number; fail: number }>;
+  /** 对多台设备并发关闭。 */
+  batchClose: (
+    ids: ReadonlySet<string>,
+    onProgress?: (done: number, total: number) => void,
+  ) => Promise<{ ok: number; fail: number }>;
+  /** 当前后端日志级别。 */
+  logLevel: string;
+  /** 后端不可达的错误文案；空串 = 正常。 */
+  backendError: string;
+  /** 切换后端日志级别；返回是否成功。 */
+  setLogLevel: (level: string) => Promise<boolean>;
   /** 新建一份配置骨架；返回 HTTP 状态码。 */
   createConfig: (name: string) => Promise<number>;
   /** 读配置原文；读不到返回 null。 */
@@ -153,6 +169,8 @@ export function lifecycleMessage(status: number, what: string): string {
  */
 export function useBackend(client: ApiClient | null, notifier: Notifier): BackendController {
   const [health, setHealth] = useState<Health | null>(null);
+  /** 后端不可达时的最后错误；空串 = 正常。全局横幅靠它。 */
+  const [backendError, setBackendError] = useState('');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState('');
   const [ceid, setCeid] = useState(2001);
@@ -162,6 +180,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntryView[]>([]);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
+  const [logLevel, setLogLevelState] = useState('info');
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [messageTotal, setMessageTotal] = useState(0);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -183,6 +202,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     const [healthResult, sessionsResult] = await Promise.allSettled([client.health(), client.sessions()]);
     if (healthResult.status === 'fulfilled') {
       setHealth(healthResult.value);
+      setBackendError('');
+    } else {
+      setBackendError((healthResult.reason as Error)?.message ?? '后端不可达');
     }
     if (sessionsResult.status === 'fulfilled') {
       setSessions(sessionsResult.value);
@@ -244,6 +266,37 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
    *
    * <p>切面板、回到前台、点"全部刷新"都走这里。</p>
    */
+  const refreshLogLevel = useCallback(async () => {
+    if (client === null) {
+      return;
+    }
+    try {
+      setLogLevelState(await client.logLevel());
+    } catch {
+      /* 老后端没有这个端点：保持 info */
+    }
+  }, [client]);
+
+  const setLogLevel = useCallback(
+    async (level: string) => {
+      if (client === null) {
+        return false;
+      }
+      try {
+        const changed = await client.setLogLevel(level);
+        if (changed) {
+          setLogLevelState(level);
+          notifierRef.current.info(`日志级别已切换为 ${level}`);
+        }
+        return changed;
+      } catch (error) {
+        notifierRef.current.error('切换日志级别失败', (error as Error).message);
+        return false;
+      }
+    },
+    [client],
+  );
+
   const refreshAll = useCallback(async () => {
     if (client === null) {
       return;
@@ -255,12 +308,13 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         refreshSessionDetail(activeSession),
         refreshAudit(),
         refreshConfigs(),
+        refreshLogLevel(),
       ]);
       setLastRefresh(Date.now());
     } finally {
       setRefreshing(false);
     }
-  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs]);
+  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs, refreshLogLevel]);
 
   /* 单一调度器：按各自节奏到点刷新 */
   useEffect(() => {
@@ -394,23 +448,50 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client, refreshSessions],
   );
 
-  /** 逐台执行并汇总一条提示的通用骨架。 */
+  /**
+   * 逐台执行的通用骨架：5 路并发 + 进度回调。
+   *
+   * <p>串行要 100 台 × 500ms = 50 秒；并发上限收在 5 是因为后端命令
+   * 仍要占会话线程，开太高会把自己的事件心跳挤掉。</p>
+   */
   const batchRun = useCallback(
-    async (ids: ReadonlySet<string>, verb: string, run: (id: string) => Promise<number>, tone: 'success' | 'info') => {
+    async (
+      ids: ReadonlySet<string>,
+      verb: string,
+      run: (id: string) => Promise<number>,
+      tone: 'success' | 'info',
+      onProgress?: (done: number, total: number) => void,
+    ) => {
+      const total = ids.size;
       let ok = 0;
       let fail = 0;
-      for (const id of ids) {
-        try {
-          const status = await run(id);
-          if (status >= 200 && status < 300) {
-            ok += 1;
-          } else {
+      let done = 0;
+      let next = 0;
+      const list = [...ids];
+
+      const worker = async (): Promise<void> => {
+        for (;;) {
+          const index = next;
+          if (index >= total) {
+            return;
+          }
+          next += 1;
+          try {
+            const status = await run(list[index]);
+            if (status >= 200 && status < 300) {
+              ok += 1;
+            } else {
+              fail += 1;
+            }
+          } catch {
             fail += 1;
           }
-        } catch {
-          fail += 1;
+          done += 1;
+          onProgress?.(done, total);
         }
-      }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(5, total) }, () => worker()));
       notifierRef.current[tone](`批量${verb}完成：成功 ${ok}，失败 ${fail}`);
       await refreshSessions();
       return { ok, fail };
@@ -419,20 +500,20 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   );
 
   const batchTrigger = useCallback(
-    (ids: ReadonlySet<string>, ceid: number) =>
-      batchRun(ids, '上报', (id) => client === null ? Promise.resolve(0) : client.trigger(id, ceid), 'success'),
+    (ids: ReadonlySet<string>, ceid: number, onProgress?: (done: number, total: number) => void) =>
+      batchRun(ids, '上报', (id) => client === null ? Promise.resolve(0) : client.trigger(id, ceid), 'success', onProgress),
     [batchRun, client],
   );
 
   const batchReload = useCallback(
-    (ids: ReadonlySet<string>) =>
-      batchRun(ids, '重载', (id) => client === null ? Promise.resolve(0) : client.reloadSession(id), 'info'),
+    (ids: ReadonlySet<string>, onProgress?: (done: number, total: number) => void) =>
+      batchRun(ids, '重载', (id) => client === null ? Promise.resolve(0) : client.reloadSession(id), 'info', onProgress),
     [batchRun, client],
   );
 
   const batchClose = useCallback(
-    (ids: ReadonlySet<string>) =>
-      batchRun(ids, '关闭', (id) => client === null ? Promise.resolve(0) : client.closeSession(id), 'info'),
+    (ids: ReadonlySet<string>, onProgress?: (done: number, total: number) => void) =>
+      batchRun(ids, '关闭', (id) => client === null ? Promise.resolve(0) : client.closeSession(id), 'info', onProgress),
     [batchRun, client],
   );
 
@@ -821,6 +902,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       batchTrigger,
       batchReload,
       batchClose,
+      logLevel,
+      backendError,
+      setLogLevel,
       createConfig,
       readConfig,
       validateConfig,
@@ -867,6 +951,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       batchTrigger,
       batchReload,
       batchClose,
+      logLevel,
+      backendError,
+      setLogLevel,
       createConfig,
       readConfig,
       validateConfig,

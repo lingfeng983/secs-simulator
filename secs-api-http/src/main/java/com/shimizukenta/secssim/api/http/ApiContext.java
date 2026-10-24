@@ -39,6 +39,31 @@ public interface ApiContext {
     void requestShutdown();
 
     /**
+     * 当前日志级别。
+     *
+     * @return 级别名（小写）
+     */
+    default String logLevel() {
+        return com.shimizukenta.secssim.app.log.Log.level().name().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * 运行时切换日志级别。
+     *
+     * @param level 级别名（error/info/debug，不分大小写）
+     * @return 切换是否成功
+     */
+    default boolean setLogLevel(String level) {
+        try {
+            com.shimizukenta.secssim.app.log.Log.setLevel(
+                    com.shimizukenta.secssim.app.log.Log.Level.parse(level));
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
      * 会话列表的 JSON 数组（由运行时组装，HTTP 层只做转发）。
      *
      * @return JSON 数组文本

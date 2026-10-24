@@ -52,6 +52,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
   const [bulkDeviceBase, setBulkDeviceBase] = useState(100);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<SessionBulkResult | null>(null);
   const { sessions, ceid, setCeid, configList, bulkCreateSessions, batchTrigger, batchReload, batchClose } = backend;
@@ -237,6 +238,9 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
 
       <div className="preview-controls">
         <span className="table-count">已选 {selected.size} 台</span>
+        {batchBusy && batchProgress !== '' && (
+          <span className="table-count">{batchProgress}…</span>
+        )}
         <button
           type="button"
           disabled={selected.size === 0 || batchBusy}
@@ -254,7 +258,8 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           title={`对选中的 ${selected.size} 台逐台触发 CEID ${ceid}（S6F11）`}
           onClick={() => {
             setBatchBusy(true);
-            void batchTrigger(selected, ceid).finally(() => setBatchBusy(false));
+            void batchTrigger(selected, ceid, (done, total) => setBatchProgress(`上报 ${done}/${total}`))
+              .finally(() => { setBatchBusy(false); setBatchProgress(''); });
           }}
         >
           批量上报
@@ -265,7 +270,8 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           title='对选中的设备逐台重载（配置有问题时旧会话不受影响；主机会断连）'
           onClick={() => {
             setBatchBusy(true);
-            void batchReload(selected).finally(() => setBatchBusy(false));
+            void batchReload(selected, (done, total) => setBatchProgress(`重载 ${done}/${total}`))
+              .finally(() => { setBatchBusy(false); setBatchProgress(''); });
           }}
         >
           批量重载
@@ -280,10 +286,12 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
               return;
             }
             setBatchBusy(true);
-            void batchClose(selected).finally(() => {
-              setSelected(new Set());
-              setBatchBusy(false);
-            });
+            void batchClose(selected, (done, total) => setBatchProgress(`关闭 ${done}/${total}`))
+              .finally(() => {
+                setSelected(new Set());
+                setBatchBusy(false);
+                setBatchProgress('');
+              });
           }}
         >
           批量关闭

@@ -392,6 +392,23 @@ code {
   font-size: 12px;
 }
 
+/* 后端不可达的全局横幅：置顶、红底，重试/改地址就地可点 */
+.global-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 1rem;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-bottom: 1px solid var(--danger);
+  font-size: 13px;
+}
+
+.global-error-banner button {
+  padding: 0.05rem 0.5rem;
+  font-size: 12px;
+}
+
 /* 状态点：一眼看出连没连上 */
 .conn-dot {
   display: inline-block;

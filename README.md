@@ -95,6 +95,7 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | viewer | 会话列表（状态 / 设备 / 单元数 / 计数器） |
 | `POST /api/v1/sessions` | operator | 新建会话，体为 `{"config":"demo"}` 或 `{"config":"设备.json"}`（201 / 400 / 409） |
+| `GET/PUT /api/v1/log-level` | viewer/operator | 读取 / 运行时切换日志级别（error/info/debug，切换记审计） |
 | `POST /api/v1/sessions/bulk` | operator | 批量新建：一份配置模板 + 数量/前缀/起始端口/device-id，逐台独立创建（201 全成、207 部分失败并逐台给原因） || `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
 | `POST /api/v1/sessions/{id}/reload` | operator | 按配置热重载（200 / 404 / 409 / 400） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | operator | 手动触发一次 S6F11（202 / 404 / 409） |
