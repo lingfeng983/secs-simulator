@@ -3,7 +3,9 @@
 # 与 package.ps1（完整安装包）的区别：这个包部署在"设备所在"的机器上，
 # 不带 web/；界面来自完整安装包那台机器，用「连接设置」指向本机。
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    # 附加产出 JVM 版 Linux 包（目标机需 JDK 25+；不含原生镜像）
+    [switch]$IncludeLinux
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,3 +56,29 @@ Write-Host ("package : {0}" -f $stage)
 Write-Host ("zip     : {0} ({1:N1} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
 Get-ChildItem $stage -Recurse -File |
     ForEach-Object { Write-Host ("  {0,-42} {1,8:N0} B" -f $_.FullName.Substring($stage.Length + 1), $_.Length) }
+
+# ----- Linux JVM 包（可选）：模块 jar + start-server.sh，目标机需 JDK 25+ -----
+if ($IncludeLinux) {
+    $linStage = Join-Path $root "package/secs-sim-runtime-$version-linux"
+    if (Test-Path $linStage) { Remove-Item $linStage -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $linStage | Out-Null
+
+    foreach ($module in 'secs-runtime','secs-api-http','secs-app','secs-core','secs-protocol','secs-json') {
+        Copy-Item (Join-Path $root "$module/target/$module-$version.jar") `
+            (Join-Path $linStage ($module + '.jar'))
+    }
+    Copy-Item (Join-Path $root 'packaging/start-server.sh') $linStage
+    Copy-Item (Join-Path $root 'packaging/README-runtime.txt') (Join-Path $linStage 'README.txt')
+    Copy-Item (Join-Path $root 'docs/schema-v5.md') (Join-Path $linStage 'docs-schema-v5.md')
+    Set-Content -Path (Join-Path $linStage 'VERSION') -Value $version -Encoding ASCII
+
+    # bash 语法自检（本机有 git-bash 即可）
+    $shCheck = & bash -n (Join-Path $linStage 'start-server.sh') 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
+    Write-Host 'start-server.sh syntax check OK'
+
+    $linZip = Join-Path $root "package/secs-sim-runtime-$version-linux-x64.zip"
+    if (Test-Path $linZip) { Remove-Item $linZip -Force }
+    Compress-Archive -Path $linStage -DestinationPath $linZip
+    Write-Host ("linux zip: {0} ({1:N1} MB)" -f $linZip, ((Get-Item $linZip).Length / 1MB))
+}

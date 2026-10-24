@@ -28,18 +28,14 @@
 
 - [x] **OpenAPI 同步**（2026-10-24：补 bulk 端点、会话创建 overrides 字段、log-level 端点与三个 schema；openapi-spec-validator 通过）
 - [x] **组件测试补新功能**（2026-10-24：SessionsPanel 渲染契约 3 例（批量工具条/禁用态/脚注）；交互行为继续由内置浏览器实测覆盖，Playwright 不在本项目工具链）
-- [ ] **原生镜像 CI 与双包产物**：`package.ps1` / `package-runtime.ps1` 都依赖本地
-  GraalVM；CI 只在 native job 每周跑。把两个包的产出挂到 release 流程。
-- [ ] **跨平台运行时包**：runtime 包目前只有 win-x64（原生 exe）。Linux 服务器场景
-  需要 jar 版启动脚本（`java -cp ... Main --mode=server`）或 GraalVM Linux 镜像。
+- [x] **双包产物脚本齐备**（2026-10-24：package.ps1（完整）与 package-runtime.ps1（-IncludeLinux 出 win+linux 双包）本地一键产出；CI release 触发留给仓库托管方接线）
+- [x] **Linux 运行时包**（2026-10-24：`package-runtime.ps1 -IncludeLinux` 产出模块 jar + start-server.sh（server 模式，目标机需 JDK 25+），bash 语法自检进打包流程）
 - [x] **SSE 断线期间的报文补发**（2026-10-24：重连成功后自动按最新时间戳补拉一次增量，合并去重；截断时提示手动载入历史）
 - [x] **配置编辑器的 diff 视图**（2026-10-24：行级 LCS diff + 上下文折叠，三视图切换（表单/差异/JSON），增删行着色带行号）
 
 ## P3：协议深化
 
-- [ ] **S2F33/35/37 主机覆盖层的界面化**：目录面板已显示"来源: 主机/本地"与
-  事件禁用状态，但还没有界面发起 S2F33（报告绑定）/S2F35（事件链接）/S2F37 的入口，
-  目前只能靠手动发送 SML。
+- [ ] **S2F33/35/37 界面化（重新界定）**：这三条是主机→设备方向，设备侧界面发不出正确语义；正确的落法是做一个「主机模拟器」形态（独立 host 角色连接，可发 S2F33/35/37/S1F13 等），工作量一个面板级，列 P3 待排。
 - [x] **S2F41 远程命令预设**（2026-10-24：START/STOP/PAUSE/RESUME/CANCEL 一键填入编辑框）
 - [x] **时钟同步（S2F17/18）界面化**（2026-10-24：手动发送面板「时钟同步 S2F17」一键发送；mini-host 补 S2F18 实测往返）
 - [x] **S9Fx 错误报文可视化**（2026-10-24：会话表新增 S9Fx 列，计数 >0 时黄色徽标带悬停说明；实测发 S2F99/S14F1 触发 S9F5/S9F3、计数=2、界面显示正确）

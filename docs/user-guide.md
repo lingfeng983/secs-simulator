@@ -176,6 +176,7 @@ S5F1(带 W 位等 S5F2);「活动报警」表立即出现一行。点「清除�
 |---|---|---|
 | **完整安装包** `secs-sim-<版本>-win-x64.zip` | 原生 exe + 界面 + 启动脚本 | 本地解压,双击 `start.cmd` 即起;`scripts/package.ps1` 产出 |
 | **运行时后端** `secs-sim-runtime-<版本>-win-x64.zip` | 原生 exe + server 启动脚本(无界面) | 部署在设备所在的机器,`start-server.cmd` 以 server 模式对外;`scripts/package-runtime.ps1` 产出 |
+| **运行时后端(Linux)** `secs-sim-runtime-<版本>-linux-x64.zip` | 模块 jar + `start-server.sh`(无界面,目标机需 JDK 25+) | 部署在 Linux 设备机,`./start-server.sh` 对外;`scripts/package-runtime.ps1 -IncludeLinux` 产出 |
 
 远程场景:设备在 A 机跑运行时后端,操作者在 B 机用完整安装包的界面,
 顶栏「连接」填 A 机地址(`http://A 机 IP:8080`),配置、批量、曲线、报文全部直连 A 机。
