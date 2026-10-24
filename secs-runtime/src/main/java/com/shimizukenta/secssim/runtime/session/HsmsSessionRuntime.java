@@ -266,6 +266,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * S6F11 是否带 W 位。
+     *
+     * @return 启用返回 {@code true}
+     */
+    public boolean collectionEventWbitEnabled() {
+        return this.s6f11Wbit;
+    }
+
+    /**
      * 设置 S6F1 是否带 W 位并等待 S6F2。
      *
      * <p>与 S6F11 相同的取舍：默认 {@code false}，开启后发送放到独立单线程队列，
