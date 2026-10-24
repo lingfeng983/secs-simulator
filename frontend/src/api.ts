@@ -300,6 +300,8 @@ export interface ApiClient {
   closeHostSim(sessionId: string): Promise<number>;
   /** 以主机角色发送 SML。 */
   sendHostSml(sessionId: string, sml: string): Promise<SentMessageResult>;
+  /** 按配置草稿文本算曲线预览（不落盘、不需要会话）。 */
+  configPreview(text: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
 }
 
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
@@ -607,6 +609,18 @@ export function createClient(): ApiClient {
     },
     async closeHostSim(sessionId) {
       return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
+    },
+    async configPreview(text, fromMs, toMs, buckets) {
+      const query = new URLSearchParams({ from: String(fromMs), to: String(toMs), buckets: String(buckets) });
+      const response = await fetch(apiUrl(`/api/v1/config-preview?${query}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: text,
+      });
+      if (!response.ok) {
+        throw new Error(response.status === 422 ? '422 配置编译不过，先看校验问题' : `${response.status}`);
+      }
+      return (await response.json()) as PreviewData;
     },
     async sendHostSml(sessionId, sml) {
       const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {

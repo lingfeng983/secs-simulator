@@ -109,6 +109,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 只校验不落盘的子路径。 */
     private static final String PATH_VALIDATE_SUFFIX = "validate";
 
+    /** 配置草稿曲线预览路径（POST，body 为配置文本）。 */
+    public static final String PATH_CONFIG_PREVIEW = "/api/v1/config-preview";
+
     /** 一次性 SSE 票据路径（POST，需 Bearer）。 */
     public static final String PATH_TICKET = "/api/v1/ticket";
 
@@ -379,6 +382,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_SESSIONS, withCors(api::handleSessions));
         http.createContext(PATH_SESSIONS_BULK, withCors(api::handleBulkSessions));
         http.createContext(PATH_SESSION_PREFIX, withCors(api::handleSessionPath));
+        http.createContext(PATH_CONFIG_PREVIEW, withCors(api::handleConfigPreview));
         http.createContext(PATH_CONFIGS, withCors(api::handleConfigs));
         http.createContext(PATH_CONFIG_PREFIX, withCors(api::handleConfigPath));
         http.createContext(PATH_CONFIG_TEMPLATES, withCors(api::handleConfigTemplates));
@@ -930,6 +934,56 @@ public final class HttpApiServer implements AutoCloseable {
             }
             return new String(bytes, StandardCharsets.UTF_8);
         }
+    }
+
+    /**
+     * POST /api/v1/config-preview：按草稿文本算曲线预览。
+     *
+     * <p>编辑器里改模板/SVID 时不用先保存再开会话——直接看"这份配置会画出什么曲线"。
+     * 时间窗相对模拟时钟的 0..N 毫秒（草稿没有运行时态，从种子确定性重放）。</p>
+     */
+    private void handleConfigPreview(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        long fromMs = 0L;
+        long toMs = 60_000L;
+        int buckets = 120;
+        String query = ex.getRequestURI().getRawQuery();
+        if (query != null && !query.isEmpty()) {
+            try {
+                for (String pair : query.split("&")) {
+                    int eq2 = pair.indexOf('=');
+                    if (eq2 <= 0) {
+                        continue;
+                    }
+                    String key = pair.substring(0, eq2);
+                    String value = pair.substring(eq2 + 1);
+                    switch (key) {
+                        case "from" -> fromMs = Long.parseLong(value);
+                        case "to" -> toMs = Long.parseLong(value);
+                        case "buckets" -> buckets = Integer.parseInt(value);
+                        default -> { }
+                    }
+                }
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-query\"}");
+                return;
+            }
+        }
+
+        String text = readBody(ex, MAX_CONFIG_BYTES);
+        if (text == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        String json = this.context.configPreviewJson(text, fromMs, toMs, buckets);
+        if (json == null) {
+            respond(ex, 422, "{\"ok\":false,\"error\":\"config-invalid\"}");
+            return;
+        }
+        respond(ex, 200, json);
     }
 
     /**

@@ -142,6 +142,9 @@ export interface BackendController {
   exportMessages: () => Promise<void>;
   downloadPreview: (windowMs: number) => Promise<void>;
   fetchPreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
+  /** 配置草稿的曲线预览（编辑器里改模板直接看效果）。 */
+  draftPreview: PreviewData | null;
+  previewDraft: (text: string, windowMs: number) => Promise<void>;
   /** 对比会话 B 的预览数据；null 表示未开启对比。 */
   comparePreview: PreviewData | null;
   /** 对比会话 B 的 id。 */
@@ -207,6 +210,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [messageTotal, setMessageTotal] = useState(0);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [comparePreview, setComparePreviewData] = useState<PreviewData | null>(null);
+  const [draftPreview, setDraftPreview] = useState<PreviewData | null>(null);
   const [compareSession, setCompareSessionId] = useState('');
   const [previewSession, setPreviewSession] = useState('');
   const [lastRefresh, setLastRefresh] = useState(0);
@@ -300,6 +304,22 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
    *
    * <p>切面板、回到前台、点"全部刷新"都走这里。</p>
    */
+  /** 配置草稿预览：模拟时钟 0..windowMs，从种子确定性重放。 */
+  const previewDraft = useCallback(
+    async (text: string, windowMs: number) => {
+      if (client === null) {
+        return;
+      }
+      try {
+        setDraftPreview(await client.configPreview(text, 0, windowMs, 120));
+      } catch (error) {
+        notifierRef.current.error('草稿预览失败', (error as Error).message);
+        setDraftPreview(null);
+      }
+    },
+    [client],
+  );
+
   const refreshLogLevel = useCallback(async () => {
     if (client === null) {
       return;
@@ -440,7 +460,40 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
 
   /* ---------- 写操作（会话域拆分至 useSessionCommands） ---------- */
   const sessionCommands = useSessionCommands({ client, notifier, refreshSessions, refreshSessionDetail });
-  const configCommands = useConfigCommands({ client, notifier, refreshConfigs });
+  /**
+   * 保存配置后让相关会话生效：对每个运行中会话调一次重载。
+   *
+   * <p>sessions JSON 不带配置来源，界面无法精确匹配"哪些会话用这份文件"；
+   * 重载对每个会话都按<b>它自己的来源</b>重读——用的是同一份磁盘目录，
+   * 保存过的改动自然被带上；演示会话回 not-reloadable，被安静跳过。
+   * 连接标识没变的会话走热生效不断连，变化了才重建。</p>
+   */
+  const reloadSessionsUsing = useCallback(
+    async (_configName: string) => {
+      if (client === null) {
+        return;
+      }
+      let hot = 0;
+      let rebuilt = 0;
+      for (const session of sessions) {
+        try {
+          const status = await client.reloadSession(session.id);
+          if (status === 200) {
+            hot += 1;
+          }
+        } catch {
+          /* 单个会话重载失败不阻断其余 */
+        }
+      }
+      if (hot + rebuilt > 0) {
+        notifierRef.current.info(`配置已生效：${hot} 个会话已重载（连接标识未变的走热生效，主机不断连）`);
+      }
+      await refreshSessions();
+    },
+    [client, sessions, refreshSessions],
+  );
+
+  const configCommands = useConfigCommands({ client, notifier, refreshConfigs, reloadSessionsUsing });
   const dataCommands = useDataCommands({
     client,
     notifier,
@@ -688,6 +741,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       toggleEvent,
       sendSml,
       comparePreview,
+      draftPreview,
+      previewDraft,
       compareSession,
       refreshPreview,
       pushMessages,
@@ -728,6 +783,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       toggleEvent,
       sendSml,
       comparePreview,
+      draftPreview,
+      previewDraft,
       compareSession,
       refreshPreview,
       pushMessages,

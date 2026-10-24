@@ -166,14 +166,15 @@ public final class SessionLauncher {
         String fingerprint = structureFingerprint(source.file());
         SessionRuntime current = this.sessions.find(id).orElse(null);
 
-        /* 热生效路径：会话结构与连接标识都没变（只动了事件/模板/W 位/限流），
-           原地替换编排与值来源，主机连接保持不断。 */
+        /* 热生效路径：连接标识（session 段）没变——设备模型、编排、模板、
+           限流、W 位的任何变化都原地替换，主机连接保持不断。 */
         if (current instanceof HsmsSessionRuntime running
                 && fingerprint != null && fingerprint.equals(source.fingerprint())) {
             running.applyHot(prepared.schedule, prepared.maxPerSec,
-                    prepared.s6f11Wbit, prepared.s6f1Wbit, prepared.values);
+                    prepared.s6f11Wbit, prepared.s6f1Wbit,
+                    prepared.model, prepared.values);
             this.sources.put(id, source.withFingerprint(fingerprint));
-            Log.info("会话 " + id + " 已热生效（编排/模板原地替换，主机连接未断）");
+            Log.info("会话 " + id + " 已热生效（设备模型/编排/模板原地替换，主机连接未断）");
             return true;
         }
 
@@ -367,10 +368,11 @@ public final class SessionLauncher {
     }
 
     /**
-     * 结构指纹：session + equipment 两段的规范 JSON 文本。
+     * 结构指纹：session 段的规范 JSON 文本。
      *
-     * <p>这两段决定"会话怎么连、设备长什么样"，变了必须关旧开新；
-     * 其余（events/templates 常量初值之外的部分）都可以热生效。
+     * <p>session 段决定"会话怎么连"（id/端口/绑定地址/deviceId/超时），
+     * 变了必须关旧开新；equipment / events / templates 的变化全部热生效
+     * （设备模型、组装器、Trace、值来源整体替换，连接不断）。
      * 解析失败返回 {@code null}，重载一律走重建。</p>
      */
     private static String structureFingerprint(Path file) {
@@ -380,13 +382,13 @@ public final class SessionLauncher {
                 text = text.substring(1);
             }
             com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(text);
-            if (!root.isObject() || !root.containsKey("session") || !root.containsKey("equipment")) {
+            if (!root.isObject() || !root.containsKey("session")) {
                 return null;
             }
+            /* 只有 session 段（连接标识/超时）变化才需要重建连接；
+               equipment / events / templates 的变化全部走热生效。 */
             StringBuilder sb = new StringBuilder();
             appendCanonical(sb, root.get("session"));
-            sb.append('|');
-            appendCanonical(sb, root.get("equipment"));
             return sb.toString();
         } catch (Exception e) {
             return null;

@@ -146,22 +146,40 @@ class SessionLauncherTest {
         assertTrue(events.contains("9000"), "新编排要可见: " + events);
     }
 
-    /** 设备结构变了必须重建：会话实例要换新。 */
+    /** 设备结构变化也热生效：实例不变、连接不断，新模型立即可见。 */
     @Test
-    void reloadWithStructureChangeReplacesSession() throws Exception {
+    void reloadWithEquipmentChangeKeepsSameSessionInstance() throws Exception {
         write("line1.json", config("line1", "BEFORE"));
         this.launcher.create("line1.json");
 
         com.shimizukenta.secssim.app.session.SessionRuntime before =
                 this.sessions.find("line1").orElseThrow();
+        assertTrue(before.deviceName().contains("BEFORE"));
 
         write("line1.json", config("line1", "AFTER"));
         assertTrue(this.launcher.reload("line1"));
 
         com.shimizukenta.secssim.app.session.SessionRuntime after =
                 this.sessions.find("line1").orElseThrow();
-        assertNotSame(before, after, "设备结构变了：必须关旧开新");
-        assertTrue(after.deviceName().contains("AFTER"));
+        assertSame(before, after, "只有连接标识变化才重建；设备结构变化热生效");
+        assertTrue(after.deviceName().contains("AFTER"), "新设备模型要立即可见");
+    }
+
+    /** 连接标识（session 段）变化必须重建：实例换新。 */
+    @Test
+    void reloadWithSessionChangeReplacesSession() throws Exception {
+        write("line1.json", configWithPort("line1", "V1", 4701));
+        this.launcher.create("line1.json");
+
+        com.shimizukenta.secssim.app.session.SessionRuntime before =
+                this.sessions.find("line1").orElseThrow();
+
+        write("line1.json", configWithPort("line1", "V1", 4702));
+        assertTrue(this.launcher.reload("line1"));
+
+        com.shimizukenta.secssim.app.session.SessionRuntime after =
+                this.sessions.find("line1").orElseThrow();
+        assertNotSame(before, after, "连接标识变了：必须关旧开新");
     }
 
     /** 配置坏了要保住旧会话：一个手滑的逗号不该让设备凭空消失。 */
@@ -191,6 +209,11 @@ class SessionLauncherTest {
                 "\"plans\": []",
                 "\"plans\": [{ \"id\": \"" + planId + "\", \"ceid\": 2001, "
                         + "\"trigger\": { \"type\": \"periodic\", \"periodMs\": " + periodMs + ", \"jitterMs\": 0 } }]");
+    }
+
+    /** 同 config，但显式指定端口（连接标识变化测试用）。 */
+    private static String configWithPort(String id, String marker, int port) {
+        return config(id, marker).replace("\"port\": 0", "\"port\": " + port);
     }
 
     /**

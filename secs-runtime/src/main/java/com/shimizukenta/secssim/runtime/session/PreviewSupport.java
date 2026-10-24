@@ -20,7 +20,7 @@ import com.shimizukenta.jsonhub.JsonHub;
  * 不碰协议状态——这让它可以单独测试，也让运行时类少掉 200 行。
  * 而 min/max 双值能保留尖峰（故障注入要看得见），avg 用于看趋势。</p>
  */
-final class PreviewSupport {
+public final class PreviewSupport {
 
     /** 二进制预览格式版本。 */
     private static final short PREVIEW_BINARY_VERSION = 1;
@@ -32,12 +32,12 @@ final class PreviewSupport {
     }
 
     /** 一条序列的分桶统计。 */
-    record PreviewSeries(int svid, String owner, String unit,
+    public record PreviewSeries(int svid, String owner, String unit,
                          double[] min, double[] max, double[] avg) {
     }
 
     /** 一次预览的完整结果。 */
-    record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
+    public record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
                        int svidTotal, List<PreviewSeries> series) {
     }
 
@@ -51,7 +51,7 @@ final class PreviewSupport {
      * @param buckets 桶数（自动收敛到 1..500）
      * @return 预览结果
      */
-    static PreviewData compute(ValueSource values, ResolvedEquipment model,
+    public static PreviewData compute(ValueSource values, ResolvedEquipment model,
                                long fromMs, long toMs, int buckets) {
         int count = Math.max(1, Math.min(500, buckets));
         long span = Math.max(1L, toMs - fromMs);
@@ -109,7 +109,7 @@ final class PreviewSupport {
      * @param data 预览结果
      * @return JSON 文本
      */
-    static String toJson(PreviewData data) {
+    public static String toJson(PreviewData data) {
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> series = new ArrayList<>();
 

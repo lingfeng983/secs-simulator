@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { NumberField, TextField } from './ui/CommitFields';
+import { Collapsible } from './ui/Collapsible';
 import {
   booleanField,
   collectCeids,
@@ -190,7 +191,7 @@ function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Elem
 
   return (
     <div className="cfg-section">
-      <SectionHead title="会话（session）" />
+      <Collapsible title="会话（session · 连接标识，改动需重建连接）" defaultOpen>
       <div className="form-row">
         <label className="field">
           会话 id
@@ -231,6 +232,7 @@ function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Elem
         会话 id 唯一，端口不能和正在运行的会话冲突。超时单位是秒，留空用协议层默认
         （T3=45、T5=10、T6=5、T7=10、T8=6）；改超时会让会话重建、主机断连。
       </p>
+      </Collapsible>
     </div>
   );
 }
@@ -312,8 +314,8 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
 
   return (
     <div className="cfg-section">
-      <SectionHead title="设备（equipment）">
-        {svidsOk && (
+      <Collapsible title={`设备（equipment · ${typeof units === 'string' ? '结构错误' : units.length + ' 个单元'}）`} badge="热生效">
+        {typeof units !== 'string' && (
           <button
             type="button"
             onClick={() => edit((draft) => {
@@ -334,7 +336,6 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
             + 单元
           </button>
         )}
-      </SectionHead>
 
       <div className="form-row">
         <label className="field">
@@ -348,10 +349,18 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
         </label>
       </div>
 
-      <IdSpaceForm equipment={equipment} edit={edit} />
-      <GlobalSvidsForm equipment={equipment} edit={edit} />
-      <GlobalCeidsForm equipment={equipment} edit={edit} />
-      <ConstantsForm equipment={equipment} edit={edit} />
+      <Collapsible title="号段规划（idSpace）">
+        <IdSpaceForm equipment={equipment} edit={edit} />
+      </Collapsible>
+      <Collapsible title="全局 SVID">
+        <GlobalSvidsForm equipment={equipment} edit={edit} />
+      </Collapsible>
+      <Collapsible title="全局 CEID">
+        <GlobalCeidsForm equipment={equipment} edit={edit} />
+      </Collapsible>
+      <Collapsible title="设备常量（ECV · S2F13/15）">
+        <ConstantsForm equipment={equipment} edit={edit} />
+      </Collapsible>
 
       {typeof units === 'string' ? (
         <p className="problems">equipment.units {units}</p>
@@ -360,6 +369,7 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
           <UnitCard key={index} unit={unit} index={index} edit={edit} />
         ))
       )}
+      </Collapsible>
     </div>
   );
 }
@@ -1108,7 +1118,7 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
 
   return (
     <div className="cfg-section">
-      <SectionHead title="事件编排（events）" />
+      <Collapsible title={`事件编排（events · ${typeof plans === 'string' ? '结构错误' : plans.length + ' 个计划'}）`} badge="热生效">
       <div className="form-row">
         <label className="field">
           每秒事件上限
@@ -1351,6 +1361,7 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
       <p className="hint">
         切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。表达式规则见 docs/schema-v4.md。
       </p>
+      </Collapsible>
     </div>
   );
 }

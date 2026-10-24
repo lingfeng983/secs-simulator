@@ -12,10 +12,13 @@ export function useConfigCommands({
   client,
   notifier,
   refreshConfigs,
+  reloadSessionsUsing,
 }: {
   client: ApiClient | null;
   notifier: Notifier;
   refreshConfigs: () => Promise<void>;
+  /** 保存成功后自动重载使用该配置的会话（热生效或重建由后端判定）。 */
+  reloadSessionsUsing: (configName: string) => Promise<void>;
 }) {
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
@@ -83,7 +86,8 @@ export function useConfigCommands({
       try {
         const result = await client.saveConfig(name, text);
         if (result.status === 200) {
-          notifierRef.current.success(`已保存 ${name}（已在运行的会话需要重载才生效）`);
+          notifierRef.current.success(`已保存 ${name}，正在让相关会话生效…`);
+          await reloadSessionsUsing(name);
         } else if (result.status === 422) {
           notifierRef.current.error('保存被拒：配置有问题，未落盘');
         } else {
@@ -95,7 +99,7 @@ export function useConfigCommands({
         return null;
       }
     },
-    [client],
+    [client, reloadSessionsUsing],
   );
 
   /** 内置设备模板目录；取不到就回空列表，选型下拉里只剩骨架。 */

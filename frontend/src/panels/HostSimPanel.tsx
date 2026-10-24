@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SentMessageResult } from '../api';
 import { Panel } from '../ui/Panel';
+import { NumberField } from '../ui/CommitFields';
 import { highlightSml } from '../lib/smlHighlight';
 import type { PanelBaseProps } from './types';
 
@@ -40,6 +41,8 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F13 W');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
+  /** FDC Trace 参数：DSPER 周期 / TOTSMP 总数 / REPGSZ 每条样本数。 */
+  const [fdc, setFdc] = useState({ trid: 1, dsper: 1000, totsmp: 100, repgsz: 10, svids: [] as number[] });
 
   const { sessions, activeSession, hostSimOpen, hostSimTarget, openHostSim, closeHostSim, sendHostSml } = backend;
   const disabled = activeSession === '';
@@ -134,6 +137,78 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
               {busy ? '发送中…' : '发送（主机）'}
             </button>
           </div>
+          {/* FDC Trace 编排：S2F23 周期采样(数据生成→S6F1 分条上报) */}
+          <div className="template-card">
+            <div className="template-head">
+              <h4 style={{ margin: 0 }}>FDC Trace 编排（S2F23 → S6F1）</h4>
+            </div>
+            <div className="form-row">
+              <label className="field">
+                TRID
+                <NumberField value={fdc.trid} integer onCommit={(v) => setFdc({ ...fdc, trid: v })} />
+              </label>
+              <label className="field">
+                采样周期 ms（DSPER）
+                <NumberField value={fdc.dsper} integer onCommit={(v) => setFdc({ ...fdc, dsper: v })} />
+              </label>
+              <label className="field">
+                总样本数（TOTSMP·0=终止）
+                <NumberField value={fdc.totsmp} integer onCommit={(v) => setFdc({ ...fdc, totsmp: v })} />
+              </label>
+              <label className="field">
+                每条 S6F1 样本数（REPGSZ）
+                <NumberField value={fdc.repgsz} integer onCommit={(v) => setFdc({ ...fdc, repgsz: v })} />
+              </label>
+            </div>
+            <div className="form-row">
+              <span className="template-label">采集变量（最多 10 个）</span>
+              {(backend.catalog?.svids ?? []).slice(0, 32).map((item) => (
+                <label key={item.svid} className="check-inline">
+                  <input
+                    type="checkbox"
+                    checked={fdc.svids.includes(item.svid)}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                        ? [...fdc.svids, item.svid]
+                        : fdc.svids.filter((id) => id !== item.svid);
+                      setFdc({ ...fdc, svids: next.slice(0, 10) });
+                    }}
+                  />
+                  {item.svid}·{item.slot || item.owner}
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="primary"
+              disabled={!hostSimOpen || fdc.svids.length === 0}
+              title="生成 S2F23 并以主机角色发送；设备按 DSPER 采样、REPGSZ 分条回 S6F1"
+              onClick={() => {
+                const NL = String.fromCharCode(10);
+                const list = fdc.svids.map((id) => '      <U4 ' + id + '>').join(NL);
+                setDraft(
+                  'S2F23 W' + NL +
+                  '<L' + NL +
+                  '  <U4 ' + fdc.trid + '>' + NL +
+                  '  <A "' + dsperText(fdc.dsper) + '">' + NL +
+                  '  <U4 ' + fdc.totsmp + '>' + NL +
+                  '  <U4 ' + fdc.repgsz + '>' + NL +
+                  '  <L' + NL +
+                  list + NL +
+                  '  >' + NL +
+                  '>.',
+                );
+              }}
+            >
+              生成 S2F23（再点发送）
+            </button>
+            <p className="hint">
+              DSPER 是 hhmmss 六位数字（整秒）：周期 ms 会收敛到最近的整秒、最小 1 秒。
+              采样数据流到「报文」面板的 S6F1；会话表的 S6F1 列显示已发帧数。
+              TOTSMP=0 用于提前终止该 TRID。
+            </p>
+          </div>
+
           <textarea
             className="sml-editor"
             spellCheck={false}
@@ -158,4 +233,16 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
       )}
     </Panel>
   );
+}
+
+/**
+ * DSPER 文本：hhmmss 六位数字（设备侧按整秒解析）。
+ * 周期 ms 收敛到最近的整秒、至少 1 秒。
+ */
+function dsperText(dsperMs: number): string {
+  const seconds = Math.max(1, Math.round(dsperMs / 1000));
+  const hh = String(Math.floor(seconds / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+  const ss = String(seconds % 60).padStart(2, '0');
+  return `${hh}${mm}${ss}`;
 }

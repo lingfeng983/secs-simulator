@@ -625,6 +625,45 @@ public final class Main {
         }
 
         @Override
+        public String configPreviewJson(String text, long fromMs, long toMs, int buckets) {
+            /* 与 validate 同一条编译路径:失败返回 null,界面显示校验问题而不是半张图 */
+            try {
+                java.nio.file.Path temp = java.nio.file.Files.createTempFile("secs-preview-", ".json");
+                try {
+                    java.nio.file.Files.writeString(temp, text, java.nio.charset.StandardCharsets.UTF_8);
+                    com.shimizukenta.secssim.app.config.SessionConfig config =
+                            com.shimizukenta.secssim.app.config.SessionConfigJson.read(temp);
+                    com.shimizukenta.secssim.core.compile.CompilationResult compiled = config.compile();
+                    if (!compiled.ok()) {
+                        return null;
+                    }
+                    com.shimizukenta.secssim.core.value.ValueSource values;
+                    if (!config.templates().isEmpty()) {
+                        com.shimizukenta.secssim.core.template.TemplateGraph graph =
+                                config.templates().build(compiled.equipment());
+                        values = new com.shimizukenta.secssim.core.value.GraphValueSource(
+                                graph, new com.shimizukenta.secssim.core.curve.Rng(config.spec().seed()).derive("graph"));
+                    } else {
+                        com.shimizukenta.secssim.core.value.ValueStore store =
+                                new com.shimizukenta.secssim.core.value.ValueStore(config.spec().seed());
+                        com.shimizukenta.secssim.app.session.DefaultCurves.bind(
+                                store, config.spec().equipment(), compiled.equipment());
+                        values = new com.shimizukenta.secssim.core.value.CurveValueSource(store);
+                    }
+                    com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
+                            com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(
+                                    values, compiled.equipment(), fromMs, toMs, buckets);
+                    return com.shimizukenta.secssim.runtime.session.PreviewSupport.toJson(data);
+                } finally {
+                    java.nio.file.Files.deleteIfExists(temp);
+                }
+            } catch (Exception e) {
+                Log.error("配置草稿预览失败: " + e.getMessage(), e);
+                return null;
+            }
+        }
+
+        @Override
         public String configsJson() {
             return this.configs.listJson();
         }

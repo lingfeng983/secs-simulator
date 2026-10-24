@@ -392,4 +392,9 @@ public interface ApiContext {
     default ConfigResult saveConfig(String name, String text) {
         return ConfigResult.notFound("当前形态不支持保存配置");
     }
+
+    /** 按配置<b>草稿文本</b>算曲线预览（不落盘、不需要运行中的会话）。返回 null 表示编译失败。 */
+    default String configPreviewJson(String text, long fromMs, long toMs, int buckets) {
+        return null;
+    }
 }

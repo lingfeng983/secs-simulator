@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ConfigFormEditor } from '../ConfigFormEditor';
+import { Sparkline } from '../charts/Sparkline';
 import { diffLines, foldUnchanged } from '../lib/textDiff';
 import { TemplateEditor } from '../TemplateEditor';
 import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
 import type { ConfigTemplateEntry } from '../api';
 import type { PanelBaseProps } from './types';
 
-/** 编辑视图：表单优先，原文兜底，改动看差异。 */
-type ConfigView = 'form' | 'json' | 'diff';
+/** 编辑视图：表单优先，原文兜底，改动看差异，曲线看预览。 */
+type ConfigView = 'form' | 'json' | 'diff' | 'preview';
 
 /**
  * 配置编辑器面板。
@@ -290,13 +291,51 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
             </button>
             <button
               type="button"
+              className={`segment${view === 'preview' ? ' active' : ''}`}
+              onClick={() => {
+                setView('preview');
+                void backend.previewDraft(draft, 60_000);
+              }}
+              title="按当前草稿算曲线（不落盘、不需要会话）"
+            >
+              曲线预览
+            </button>
+            <button
+              type="button"
               className={`segment${view === 'json' ? ' active' : ''}`}
               onClick={() => setView('json')}
             >
               JSON 原文
             </button>
           </div>
-          {view === 'diff' ? (
+          {view === 'preview' ? (
+            <>
+              <div className="preview-controls">
+                {[30_000, 60_000, 300_000, 600_000].map((windowMs) => (
+                  <button
+                    key={windowMs}
+                    type="button"
+                    onClick={() => void backend.previewDraft(draft, windowMs)}
+                  >
+                    {windowMs / 1000 >= 60 ? `${windowMs / 60_000} 分钟` : `${windowMs / 1000} 秒`}
+                  </button>
+                ))}
+              </div>
+              {backend.draftPreview === null ? (
+                <p className="hint">草稿编译不过或还没算：先修校验问题，再点上面的时间窗。</p>
+              ) : (
+                <div className="sparks">
+                  {backend.draftPreview.series.map((item) => (
+                    <Sparkline key={item.svid} series={item} fromMs={0} bucketMs={backend.draftPreview!.bucketMs} zoom={null} onZoom={() => undefined} />
+                  ))}
+                </div>
+              )}
+              <p className="hint">
+                草稿预览从随机种子确定性重放（模拟时钟 0 起），不是实时值；
+                改模板参数后点时间窗即可看到新曲线。SVID 超过 32 条时只显示前 32 条。
+              </p>
+            </>
+          ) : view === 'diff' ? (
             <div className="config-diff" aria-label="与磁盘版本的差异">
               {diffBlocks.map((block, index) =>
                 block.op === 'skip' ? (

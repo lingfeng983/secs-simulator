@@ -105,13 +105,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private static final int S6F11_ACK_QUEUE = 256;
 
     private final SessionSpec spec;
-    private final ResolvedEquipment model;
+    /** 设备模型：热生效时可整体替换（改单元/变量不再需要重建连接）。 */
+    private volatile ResolvedEquipment model;
     private final ValueStore store;
     /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
     private final ValueSourceHandle values;
     private final EngineClock clock;
     private final HostReportTable hostReports = new HostReportTable();
-    private final S6F11Assembler assembler;
+    /** S6F11 组装器：随设备模型热替换。 */
+    private volatile S6F11Assembler assembler;
 
     /** 保护一次 pump 的完整状态推进，见 {@link #pumpNow()}。 */
     private final Object pumpLock = new Object();
@@ -133,7 +135,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * 此时写入只留在内存里。</p>
      */
     private volatile ConstantSaver constantSaver;
-    private final TraceManager traces;
+    /** Trace 采集：随设备模型热替换（换模型时终止旧采样是合理的语义）。 */
+    private volatile TraceManager traces;
     private final Rng eventRng;
 
     private final AtomicReference<SessionState> state = new AtomicReference<>(SessionState.CREATED);
@@ -465,14 +468,38 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public void applyHot(EventSchedule schedule, int maxEventsPerSec,
                          boolean s6f11Wbit, boolean s6f1Wbit, ValueSource values) {
+        applyHot(schedule, maxEventsPerSec, s6f11Wbit, s6f1Wbit, this.model, values);
+    }
+
+    /**
+     * 不断连热生效（全量）：连设备模型一起替换。
+     *
+     * <p>连接标识（id/端口/绑定地址/deviceId/超时）在 spec 里，不在替换范围——
+     * 那些变了仍然要关旧开新。设备模型变了要同步换组装器与 Trace：
+     * Trace 绑定旧模型的 SVID 集合，留着会采到已删除的变量。</p>
+     *
+     * @param schedule        新编排表
+     * @param maxEventsPerSec 新限流
+     * @param s6f11Wbit       S6F11 W 位
+     * @param s6f1Wbit        S6F1 W 位
+     * @param model           新设备模型（单元/变量/报告/事件定义）
+     * @param values          新值来源；{@code null} 表示回落设备默认曲线
+     */
+    public void applyHot(EventSchedule schedule, int maxEventsPerSec,
+                         boolean s6f11Wbit, boolean s6f1Wbit,
+                         ResolvedEquipment model, ValueSource values) {
         this.collectionEventWbit(s6f11Wbit);
         this.traceWbit(s6f1Wbit);
+        this.model = model;
+        this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
+        this.traces.stopAll();
+        this.traces = new TraceManager(model, this.values, Instant.now());
         this.enableSchedule(schedule, maxEventsPerSec);
         if (values != null) {
             this.values.set(values);
         } else {
             /* 从模板图切回默认曲线：默认曲线要先重新绑进值存储 */
-            DefaultCurves.bind(this.store, this.spec.equipment(), this.model);
+            DefaultCurves.bind(this.store, this.spec.equipment(), model);
             this.values.set(new CurveValueSource(this.store));
         }
     }
