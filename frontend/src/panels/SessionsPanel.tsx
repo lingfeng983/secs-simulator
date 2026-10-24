@@ -59,6 +59,15 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
 
   const online = sessions.filter((item) => item.controlState === 'ONLINE').length;
 
+  /* 批量新建预检:后端摘要不带端口,端口冲突只能靠创建后的逐台错误;
+     会话 id 冲突可以提前算——这是最常见的重复创建问题 */
+  const bulkIds = new Set(sessions.map((item) => item.id));
+  const plannedIds = Array.from(
+    { length: Math.max(0, Math.min(100, Math.round(bulkCount))) },
+    (_, i) => `${bulkPrefix.trim() === '' ? 'dev-' : bulkPrefix.trim()}${i + 1}`,
+  );
+  const idConflicts = plannedIds.filter((id) => bulkIds.has(id));
+
   const columns: Column<SessionSummary>[] = [
     {
       key: 'id',
@@ -201,7 +210,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
         >
           新建会话
         </button>
-        <button type="button" onClick={() => setBulkOpen(true)} title='从一份设备配置批量开多台，端口与设备号逐台递增'>
+        <button type="button" onClick={() => { setBulkResult(null); setBulkOpen(true); }} title='从一份设备配置批量开多台，端口与设备号逐台递增'>
           批量新建
         </button>
         <label className="field">
@@ -321,7 +330,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
             <button
               type="button"
               className="primary"
-              disabled={bulkBusy || bulkConfig === '' || bulkCount < 1}
+              disabled={bulkBusy || bulkConfig === '' || bulkCount < 1 || idConflicts.length > 0}
               onClick={() => {
                 setBulkBusy(true);
                 setBulkResult(null);
@@ -378,6 +387,12 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           设备本体（单元、变量、事件、模板）全部来自所选配置模板；这些连接标识只在运行期覆盖，
           不写回模板文件。端口从 0 或留空表示全部沿用模板端口（多台会因端口冲突而失败）。
         </p>
+        {idConflicts.length > 0 && bulkResult === null && (
+          <p className="problems">
+            会话 id 已存在：{idConflicts.slice(0, 5).join('、')}
+            {idConflicts.length > 5 ? ` 等 ${idConflicts.length} 个` : ''}（先关闭或换前缀）
+          </p>
+        )}
         {bulkResult !== null && (
           <div className="template-card">
             <strong>已创建 {bulkResult.created.length} 台</strong>
