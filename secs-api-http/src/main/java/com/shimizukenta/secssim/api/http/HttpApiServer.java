@@ -103,6 +103,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 单份配置路径前缀（{@code /api/v1/configs/{name}}）。 */
     public static final String PATH_CONFIG_PREFIX = "/api/v1/configs/";
 
+    /** 内置设备模板目录路径。 */
+    public static final String PATH_CONFIG_TEMPLATES = "/api/v1/config-templates";
+
     /** 只校验不落盘的子路径。 */
     private static final String PATH_VALIDATE_SUFFIX = "validate";
 
@@ -378,6 +381,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_SESSION_PREFIX, withCors(api::handleSessionPath));
         http.createContext(PATH_CONFIGS, withCors(api::handleConfigs));
         http.createContext(PATH_CONFIG_PREFIX, withCors(api::handleConfigPath));
+        http.createContext(PATH_CONFIG_TEMPLATES, withCors(api::handleConfigTemplates));
         http.createContext(PATH_PREVIEW, withCors(api::handlePreview));
         http.createContext(PATH_PREVIEW_BINARY, withCors(api::handlePreviewBinary));
         http.createContext(PATH_MESSAGES, withCors(api::handleMessages));
@@ -962,7 +966,8 @@ public final class HttpApiServer implements AutoCloseable {
     /**
      * POST /api/v1/configs：新建一份配置。
      *
-     * <p>体是 {@code {"name":"新配置.json"}}。
+     * <p>体是 {@code {"name":"新配置.json"}}；可选 {@code "template"} 选内置
+     * 设备模板（目录见 GET /api/v1/config-templates），缺省是空骨架。
      * </p>
      */
     private void createConfig(HttpExchange ex) throws IOException {
@@ -972,16 +977,17 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        String name = newConfigNameFrom(body);
-        if (name == null) {
+        NewConfigRequest request = newConfigRequestFrom(body);
+        if (request == null) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"missing-name\"}");
             return;
         }
 
-        ConfigResult result = this.context.createConfig(name);
-        audit(ex, "config-create", name, "outcome=" + result.outcome());
+        ConfigResult result = this.context.createConfig(request.name(), request.templateId());
+        audit(ex, "config-create", request.name(),
+                "template=" + request.templateId() + " outcome=" + result.outcome());
         switch (result.outcome()) {
-            case OK -> respond(ex, 201, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
+            case OK -> respond(ex, 201, "{\"ok\":true,\"name\":\"" + json(request.name()) + "\"}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"config-exists\"}");
             /* 名字非法要说清是哪个名字、为什么不行，不能笼统回一句"创建失败" */
             case NOT_FOUND, INVALID -> respond(ex, 400, problemsJson(false, result.problems()));
@@ -989,18 +995,48 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    /** 从请求体里取 name 字段；体不是对象或没有该字段时返回 {@code null}。 */
-    private static String newConfigNameFrom(String body) {
+    /** 新建配置请求：文件名 + 可选模板。 */
+    private record NewConfigRequest(String name, String templateId) {
+    }
+
+    /** 从请求体里取 name 与可选 template 字段；体不是对象或缺 name 时返回 {@code null}。 */
+    private static NewConfigRequest newConfigRequestFrom(String body) {
         try {
             com.shimizukenta.jsonhub.JsonHub root =
                     com.shimizukenta.jsonhub.JsonHub.fromJson(body);
             if (!root.isObject()) {
                 return null;
             }
-            return root.get("name").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+            String name = root.get("name").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
+            if (name == null) {
+                return null;
+            }
+            /* 模板缺省给空骨架（DeviceTemplates 在 runtime 层，这里只认同一字符串约定）：
+               模板字段写错值走"未知模板"问题清单，不在这里拦。JsonHub.get 缺键会抛，先 containsKey */
+            String templateId = root.containsKey("template")
+                    ? root.get("template").optionalString().map(String::trim).filter(s -> !s.isEmpty()).orElse("bare")
+                    : "bare";
+            return new NewConfigRequest(name, templateId);
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * GET /api/v1/config-templates：内置设备模板目录。
+     *
+     * <p>新建配置的选型列表：id 是 POST /api/v1/configs 里 {@code template}
+     * 字段的取值，label/description 给界面显示。</p>
+     */
+    private void handleConfigTemplates(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 200, "{\"templates\":" + this.context.configTemplatesJson() + "}");
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
     }
 
     /**

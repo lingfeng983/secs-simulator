@@ -517,7 +517,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
     post:
       tags: [configs]
-      summary: 新建配置骨架
+      summary: 新建配置
+      description: |
+        按内置设备模板生成一份能直接编译的起点。template 取
+        GET /api/v1/config-templates 里的 id，缺省/空骨架为 bare。
+        未知模板按 400 拒绝（problems 里带可用模板清单），不静默退回骨架。
       x-required-role: operator
       requestBody:
         required: true
@@ -528,6 +532,7 @@ paths:
               required: [name]
               properties:
                 name: { type: string, example: line1.json }
+                template: { type: string, default: bare, example: etch }
       responses:
         '201':
           description: 已创建
@@ -539,6 +544,24 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/config-templates:
+    get:
+      tags: [configs]
+      summary: 内置设备模板目录
+      responses:
+        '200':
+          description: 模板数组（id 可用于 POST /api/v1/configs 的 template 字段）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [templates]
+                properties:
+                  templates:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigTemplateEntry' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/configs/{name}:
     get:
       tags: [configs]
@@ -913,6 +936,14 @@ components:
         problems:
           type: array
           items: { type: string }
+    ConfigTemplateEntry:
+      type: object
+      description: 内置设备模板目录里的一项
+      required: [id, label, description]
+      properties:
+        id: { type: string, example: etch }
+        label: { type: string, example: 刻蚀腔 }
+        description: { type: string, example: 温场/射频/腔压曲线 + 过热与腔压异常事件 }
     AuditEntry:
       type: object
       required: [at, actor, role, action, target, detail]

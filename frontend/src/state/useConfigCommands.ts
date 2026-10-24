@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import type { ApiClient, ConfigProblems, ConfigSaveResult } from '../api';
+import type { ApiClient, ConfigProblems, ConfigSaveResult, ConfigTemplateEntry } from '../api';
 import type { Notifier } from './useToasts';
 
 /**
@@ -21,14 +21,15 @@ export function useConfigCommands({
   notifierRef.current = notifier;
 
   const createConfig = useCallback(
-    async (name: string): Promise<number> => {
+    async (name: string, templateId?: string): Promise<number> => {
       if (client === null) {
         return 0;
       }
       try {
-        const status = await client.createConfig(name);
+        const status = await client.createConfig(name, templateId);
         if (status === 201) {
-          notifierRef.current.success(`已新建 ${name}，改完点「保存」才会落盘`);
+          const kind = templateId && templateId !== 'bare' ? `（模板: ${templateId}）` : '';
+          notifierRef.current.success(`已新建 ${name}${kind}，改完点「保存」才会落盘`);
         } else if (status === 409) {
           notifierRef.current.warn('已经有同名的配置了，直接从上面选它来改');
         } else {
@@ -97,5 +98,18 @@ export function useConfigCommands({
     [client],
   );
 
-  return { createConfig, readConfig, validateConfig, saveConfig };
+  /** 内置设备模板目录；取不到就回空列表，选型下拉里只剩骨架。 */
+  const configTemplates = useCallback(async (): Promise<ConfigTemplateEntry[]> => {
+    if (client === null) {
+      return [];
+    }
+    try {
+      return await client.configTemplates();
+    } catch (error) {
+      notifierRef.current.error('取设备模板目录失败', (error as Error).message);
+      return [];
+    }
+  }, [client]);
+
+  return { createConfig, readConfig, validateConfig, saveConfig, configTemplates };
 }

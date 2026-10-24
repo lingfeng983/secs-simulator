@@ -643,6 +643,20 @@ public final class Main {
             return result;
         }
 
+        @Override
+        public String configTemplatesJson() {
+            return DeviceTemplates.listJson();
+        }
+
+        @Override
+        public ConfigResult createConfig(String name, String templateId) {
+            ConfigResult result = this.configs.create(name, templateId);
+            if (result.outcome() == ConfigOutcome.OK) {
+                Log.info("新建配置 " + name + "（模板: " + templateId + "）");
+            }
+            return result;
+        }
+
         /**
          * 提示"存了但没生效"。
          *

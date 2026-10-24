@@ -12,8 +12,7 @@
   加逐项更新入口 + ConfigPanel 保存后按 diff 决定"原地应用还是提示重载"。
 - [x] **HSMS 超时参数可配**（2026-10-24：`session.timeouts` 段 + 会话表单 T3/T5/T6/T7/T8 可选秒数；改超时走重建路径）
 - [x] **日志级别可调**（2026-10-24：`--log-level error|info|debug` 启动参数 + `GET/PUT /api/v1/log-level` 运行时切换 + 顶栏级别下拉，切换记审计）
-- [ ] **设备模板市场 / 内置模板库**：现在新建配置只有一份骨架。常见设备
-  （刻蚀腔、CVD、测试机）做成内置模板，批量新建时可直接选型再改参数。
+- [x] **设备模板市场 / 内置模板库**（2026-10-24：后端 DeviceTemplates 内置刻蚀腔/CVD 沉积腔/双 SITE 测试机三份可编译模板 + `GET /api/v1/config-templates` 目录端点；POST /api/v1/configs 支持 `template` 字段；配置编辑器与批量新建对话框都有选型入口）
 
 ## P1：界面与体验
 

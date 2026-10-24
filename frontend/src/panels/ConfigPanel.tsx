@@ -3,6 +3,7 @@ import { ConfigFormEditor } from '../ConfigFormEditor';
 import { diffLines, foldUnchanged } from '../lib/textDiff';
 import { TemplateEditor } from '../TemplateEditor';
 import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
+import type { ConfigTemplateEntry } from '../api';
 import type { PanelBaseProps } from './types';
 
 /** 编辑视图：表单优先，原文兜底，改动看差异。 */
@@ -25,8 +26,21 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
   const [problems, setProblems] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [newName, setNewName] = useState('');
+  const [newTemplate, setNewTemplate] = useState('bare');
+  const [templates, setTemplates] = useState<ConfigTemplateEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<ConfigView>('form');
+
+  /** 新建选中的模板说明；目录取不到时为空串。 */
+  const templateHint = useMemo(
+    () => templates.find((entry) => entry.id === newTemplate)?.description ?? '',
+    [templates, newTemplate],
+  );
+
+  /* 模板目录取一次就够：它来自后端代码里的常量 */
+  useEffect(() => {
+    void backend.configTemplates().then(setTemplates);
+  }, [backend]);
 
   /** 编辑区里的内容相对磁盘有没有变。 */
   const dirty = draft !== baseline;
@@ -147,7 +161,7 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
 
     setBusy(true);
     try {
-      const status = await backend.createConfig(name);
+      const status = await backend.createConfig(name, newTemplate);
       if (status !== 201) {
         return;
       }
@@ -159,7 +173,11 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
       setDraft(text);
       setBaseline(text);
       setProblems([]);
-      setNotice(`已新建 ${name}，改完点「保存」才会落盘`);
+      setNotice(
+        newTemplate === 'bare'
+          ? `已新建 ${name}，改完点「保存」才会落盘`
+          : `已新建 ${name}（内置模板: ${newTemplate}），照着改参数后点「保存」`,
+      );
     } finally {
       setBusy(false);
     }
@@ -186,6 +204,20 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
               onChange={(event) => setNewName(event.target.value)}
               placeholder="新文件名.json"
             />
+          </label>
+          <label className="field">
+            设备模板
+            <select
+              value={newTemplate}
+              onChange={(event) => setNewTemplate(event.target.value)}
+              title={templateHint}
+            >
+              {templates.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
           </label>
           <button type="button" onClick={() => void onNewConfig()} disabled={newName.trim() === '' || busy}>
             新建
@@ -231,7 +263,8 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
 
       {configName === '' ? (
         <p className="hint">
-          从上面挑一份配置，或输入新文件名点「新建」。配置只认 <code>--work-dir</code> 下的文件名。
+          从上面挑一份配置，或输入新文件名选一台「设备模板」点「新建」（刻蚀腔 / CVD / 测试机都是能直接编译的起点）。
+          配置只认 <code>--work-dir</code> 下的文件名。
         </p>
       ) : (
         <>

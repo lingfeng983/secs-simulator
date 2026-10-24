@@ -358,6 +358,28 @@ public interface ApiContext {
     }
 
     /**
+     * 内置设备模板目录的 JSON 数组。
+     *
+     * @return JSON 文本（{@code [{id,label,description},…]}）
+     */
+    default String configTemplatesJson() {
+        return "[]";
+    }
+
+    /**
+     * 按内置设备模板新建一份配置。
+     *
+     * <p>默认实现忽略模板退回骨架：旧实现只认骨架，语义仍成立。</p>
+     *
+     * @param name       文件名
+     * @param templateId 模板标识；未知模板按非法请求返回问题清单
+     * @return 结果
+     */
+    default ConfigResult createConfig(String name, String templateId) {
+        return this.createConfig(name);
+    }
+
+    /**
      * 保存一份配置。
      *
      * <p>实现必须<b>先校验再落盘</b>：存一份编译不过的配置等于给下一次启动埋雷。

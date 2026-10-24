@@ -223,6 +223,13 @@ export interface ConfigEntry {
   modifiedMs: number;
 }
 
+/** 内置设备模板目录里的一项。 */
+export interface ConfigTemplateEntry {
+  id: string;
+  label: string;
+  description: string;
+}
+
 /** 校验结果：valid 为假时 problems 里是具体哪里错了。 */
 export interface ConfigProblems {
   valid: boolean;
@@ -268,8 +275,10 @@ export interface ApiClient {
   messagesJsonl(sessionId: string, direction: string, limit: number): Promise<string>;
   /** 配置目录列表。 */
   configs(): Promise<ConfigEntry[]>;
-  /** 新建一份配置（后端生成能直接编译的骨架）。 */
-  createConfig(name: string): Promise<number>;
+  /** 新建一份配置；templateId 缺省是空骨架，其余取内置设备模板目录里的 id。 */
+  createConfig(name: string, templateId?: string): Promise<number>;
+  /** 内置设备模板目录（新建配置的选型列表）。 */
+  configTemplates(): Promise<ConfigTemplateEntry[]>;
   /** 读一份配置的原始文本。 */
   configText(name: string): Promise<string>;
   /** 只校验不落盘。 */
@@ -521,13 +530,19 @@ export function createClient(): ApiClient {
       );
       return body.configs ?? [];
     },
-    async createConfig(name) {
+    async createConfig(name, templateId) {
       const response = await fetch(apiUrl('/api/v1/configs'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(templateId ? { name, template: templateId } : { name }),
       });
       return command(response);
+    },
+    async configTemplates() {
+      const body = await json<{ templates?: ConfigTemplateEntry[] }>(
+        await fetch(apiUrl('/api/v1/config-templates')),
+      );
+      return body.templates ?? [];
     },
     async configText(name) {
       const body = await json<{ name?: string; text?: string }>(

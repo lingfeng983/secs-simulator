@@ -9,6 +9,7 @@ import {
   type ConfigEntry,
   type ConfigProblems,
   type ConfigSaveResult,
+  type ConfigTemplateEntry,
   type EventPlanView,
   type Health,
   type PreviewData,
@@ -119,8 +120,10 @@ export interface BackendController {
   backendError: string;
   /** 切换后端日志级别；返回是否成功。 */
   setLogLevel: (level: string) => Promise<boolean>;
-  /** 新建一份配置骨架；返回 HTTP 状态码。 */
-  createConfig: (name: string) => Promise<number>;
+  /** 新建一份配置；templateId 缺省是空骨架。返回 HTTP 状态码。 */
+  createConfig: (name: string, templateId?: string) => Promise<number>;
+  /** 内置设备模板目录（新建配置的选型列表）。 */
+  configTemplates: () => Promise<ConfigTemplateEntry[]>;
   /** 读配置原文；读不到返回 null。 */
   readConfig: (name: string) => Promise<string | null>;
   /** 只校验不落盘。 */

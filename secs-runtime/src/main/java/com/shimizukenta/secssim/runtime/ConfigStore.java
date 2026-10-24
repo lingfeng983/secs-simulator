@@ -192,6 +192,21 @@ public final class ConfigStore {
      * @return 结果
      */
     public ConfigResult create(String name) {
+        return this.create(name, DeviceTemplates.BARE_ID);
+    }
+
+    /**
+     * 按内置设备模板新建一份配置。
+     *
+     * <p>模板目录见 {@link DeviceTemplates#catalog()}。模板生成后仍要过一遍
+     * {@link #validate}：模板是代码里的字符串，改了模板忘了跟着改设备模型，
+     * 用户就会拿到一份起不来的起点——校验是同一道门，不会漏。</p>
+     *
+     * @param name       文件名
+     * @param templateId 模板标识；未知模板按非法请求拒绝，不静默退回骨架
+     * @return 结果
+     */
+    public ConfigResult create(String name, String templateId) {
         Path file;
         try {
             file = this.workDir.resolve(requireFileName(name, "$.name"));
@@ -204,7 +219,11 @@ public final class ConfigStore {
             return ConfigResult.conflict("已经有同名的配置了: " + file.getFileName());
         }
 
-        String text = ConfigTemplate.skeleton(file.getFileName().toString());
+        String text = DeviceTemplates.json(templateId, file.getFileName().toString()).orElse(null);
+        if (text == null) {
+            return ConfigResult.invalid(List.of(
+                    "未知模板: " + templateId + "（可用: " + DeviceTemplates.ids() + "）"));
+        }
         List<String> problems = validate(text);
         if (!problems.isEmpty()) {
             /* 骨架自己都过不了校验，说明代码有问题，宁可报错也不写坏文件 */

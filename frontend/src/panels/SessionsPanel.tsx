@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { SessionBulkResult, SessionSummary } from '../api';
+import { useEffect, useState } from 'react';
+import type { ConfigTemplateEntry, SessionBulkResult, SessionSummary } from '../api';
 import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
@@ -55,7 +55,16 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
   const [batchProgress, setBatchProgress] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<SessionBulkResult | null>(null);
+  const [configTemplates, setConfigTemplates] = useState<ConfigTemplateEntry[]>([]);
+  const [bulkTplId, setBulkTplId] = useState('etch');
+  const [bulkTplName, setBulkTplName] = useState('');
+  const [bulkTplBusy, setBulkTplBusy] = useState(false);
   const { sessions, ceid, setCeid, configList, bulkCreateSessions, batchTrigger, batchReload, batchClose } = backend;
+
+  /* 内置设备模板目录：来自后端常量，取一次即可 */
+  useEffect(() => {
+    void backend.configTemplates().then(setConfigTemplates);
+  }, [backend]);
 
   const online = sessions.filter((item) => item.controlState === 'ONLINE').length;
 
@@ -397,6 +406,41 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
             device-id 起始
             <NumberField value={bulkDeviceBase} integer onCommit={setBulkDeviceBase} />
           </label>
+        </div>
+        <div className="form-row">
+          <label className="field">
+            从内置设备模板建一份
+            <select value={bulkTplId} onChange={(event) => setBulkTplId(event.target.value)}>
+              {configTemplates.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            新配置名
+            <TextField value={bulkTplName} onCommit={setBulkTplName} placeholder="如 etch-line.json" />
+          </label>
+          <button
+            type="button"
+            disabled={bulkTplBusy || bulkTplName.trim() === '' || !bulkTplName.trim().toLowerCase().endsWith('.json')}
+            title="新建一份配置文件并选为下面的设备配置模板"
+            onClick={() => {
+              setBulkTplBusy(true);
+              void backend
+                .createConfig(bulkTplName.trim(), bulkTplId)
+                .then((status) => {
+                  if (status === 201) {
+                    setBulkConfig(bulkTplName.trim());
+                    setBulkTplName('');
+                  }
+                })
+                .finally(() => setBulkTplBusy(false));
+            }}
+          >
+            {bulkTplBusy ? '创建中…' : '建并选用'}
+          </button>
         </div>
         <p className="hint">
           第 i 台：会话 id = 前缀 + i，端口 = 起始端口 + i − 1，device-id = 起始 + i − 1。
