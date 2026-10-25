@@ -450,8 +450,15 @@ textarea::placeholder {
 .form-row .field > select,
 .form-row .field > .template-input-wide {
   flex: 1 1 auto;
-  min-width: 0;
+  /* 长标签(如"采样周期 ms（DSPER）")会把输入框挤到不可用——
+     保住最小可用宽度,放不下时标签换行 */
+  min-width: 4.5rem;
   width: auto;
+}
+
+.form-row .field {
+  flex-wrap: wrap;
+  white-space: normal;
 }
 
 .form-row > button {

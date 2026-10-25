@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SentMessageResult } from '../api';
 import { Panel } from '../ui/Panel';
 import { NumberField } from '../ui/CommitFields';
+import { PresetSelect } from '../ui/PresetSelect';
 import { SmlResult } from '../ui/SmlResult';
 import type { PanelBaseProps } from './types';
 
@@ -9,7 +10,7 @@ import type { PanelBaseProps } from './types';
  * 主机角色常用的 SML 预设：填进编辑框后可再改参数。
  *
  * <p>S2F33/35/37 是主机→设备方向的报文，只有主机角色能发；
- * 这里给了可直接用的骨架（报告 3002 绑 TEMP/PRESS、事件 2001 链 3002、启停 2001）。</p>
+ * 常用三个(S1F13/S2F33/S2F35)留在按钮上,启停事件收进「更多预设」下拉。</p>
  */
 const HOST_PRESETS: ReadonlyArray<{ label: string; sml: string; hint: string }> = [
   { label: 'S1F13 建立通信', sml: 'S1F13 W', hint: 'Establish Communications Request' },
@@ -23,12 +24,12 @@ const HOST_PRESETS: ReadonlyArray<{ label: string; sml: string; hint: string }> 
     sml: 'S2F35 W\n<L\n  <U4 0>\n  <U4 2001>\n  <L\n    <L\n      <U4 2001>\n      <U4 3002>\n    >\n  >\n>.',
     hint: '事件 2001 触发时带报告 3002',
   },
-  {
-    label: 'S2F37 停用事件',
-    sml: 'S2F37 W\n<L\n  <BOOLEAN 0>\n  <L <U4 2001>>\n>.',
-    hint: 'CEED=0 停用 2001（改 1 为启用）',
-  },
 ];
+
+/** S2F37 启停事件:CEED 0 停用 / 1 启用,CEID 列表可再改。 */
+function s2f37Sml(ceed: number): string {
+  return `S2F37 W\n<L\n  <BOOLEAN ${ceed}>\n  <L <U4 2001>>\n>.`;
+}
 
 /**
  * 主机模拟面板。
@@ -191,6 +192,20 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
                 {preset.label}
               </button>
             ))}
+            <PresetSelect
+              disabled={!hostSimOpen}
+              ariaLabel="更多主机预设"
+              groups={[
+                {
+                  label: 'S2F37 启停事件（CEID 列表可再改）',
+                  items: [
+                    { label: 'S2F37 停用事件', value: s2f37Sml(0) },
+                    { label: 'S2F37 启用事件', value: s2f37Sml(1) },
+                  ],
+                },
+              ]}
+              onPick={setDraft}
+            />
             <button
               type="button"
               className="primary"

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SentMessageResult } from '../api';
 import { Panel } from '../ui/Panel';
+import { PresetSelect } from '../ui/PresetSelect';
 import { SmlResult } from '../ui/SmlResult';
 import type { PanelBaseProps } from './types';
 
@@ -27,11 +28,18 @@ const EXAMPLES: ReadonlyArray<{ label: string; sml: string }> = [
   { label: '时钟同步 S2F17', sml: 'S2F17 W.' },
 ];
 
+/** 远程命令的 SML 骨架:填 RCMID 即可发送。 */
+function remoteCommandSml(rcmdid: number): string {
+  const NL = String.fromCharCode(10);
+  return 'S2F41 W' + NL + '<L' + NL + '  <U4 ' + rcmdid + '>' + NL + '  <A "SIM">' + NL + '>.';
+}
+
 /**
  * 手动发送面板。
  *
  * <p>发出去之后，"发出去了但主机没回"和"根本没发出去"是两回事，
  * 必须分开说：结果区把回复内容、超时与否、耗时都列出来。
+ * 常用预设留在按钮上,示例 S2F41 与五个远程命令收进下拉;
  * 批量重复发送走「压测」子页(服务端循环,消除 HTTP 往返失真),这里只做单发。</p>
  */
 export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
@@ -69,31 +77,38 @@ export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
       description="直接往选中的会话发一条 SML。报文头写 SxFy，可带 W 位。"
       actions={
         <>
-          {EXAMPLES.map((example, index) => (
-            <button
-              key={example.label}
-              type="button"
-              onClick={() => setDraft(example.sml)}
-              disabled={disabled}
-              title={index === 3 ? '让设备用主机时间对钟（S2F18 回当前时间）' : undefined}
-            >
-              {example.label}
-            </button>
-          ))}
-          {REMOTE_COMMANDS.map((command) => (
-            <button
-              key={command.rcmdid}
-              type="button"
-              disabled={disabled}
-              title={`S2F41 远程命令 ${command.rcmdid}（${command.note}），点击填入`}
-              onClick={() => {
-                setDraft('S2F41 W' + String.fromCharCode(10) + '<L' + String.fromCharCode(10) + '  <U4 ' + command.rcmdid + '>'
-                  + String.fromCharCode(10) + '  <A "SIM">' + String.fromCharCode(10) + '>.');
-              }}
-            >
-              {command.label}
-            </button>
-          ))}
+          <button type="button" onClick={() => setDraft(EXAMPLES[0].sml)} disabled={disabled}>
+            {EXAMPLES[0].label}
+          </button>
+          <button type="button" onClick={() => setDraft(EXAMPLES[1].sml)} disabled={disabled}>
+            {EXAMPLES[1].label}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDraft(EXAMPLES[3].sml)}
+            disabled={disabled}
+            title="让设备用主机时间对钟（S2F18 回当前时间）"
+          >
+            {EXAMPLES[3].label}
+          </button>
+          <PresetSelect
+            disabled={disabled}
+            ariaLabel="更多发送预设"
+            groups={[
+              {
+                label: '示例',
+                items: [{ label: EXAMPLES[2].label, value: EXAMPLES[2].sml }],
+              },
+              {
+                label: '远程命令（S2F41，参数可再改）',
+                items: REMOTE_COMMANDS.map((command) => ({
+                  label: `${command.label}（RCMID ${command.rcmdid} · ${command.note}）`,
+                  value: remoteCommandSml(command.rcmdid),
+                })),
+              },
+            ]}
+            onPick={setDraft}
+          />
           <button
             type="button"
             className="primary"
