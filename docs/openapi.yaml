@@ -27,6 +27,7 @@ tags:
   - name: configs
   - name: audit
   - name: admin
+  - name: system
 paths:
   /api/v1/health:
     get:
@@ -534,14 +535,93 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/host-sim:
+    get:
+      tags: [control]
+      summary: 主机模拟连接状态
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 未连接时 open=false；已连接时带 target 描述与模式
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  open: { type: boolean }
+                  target: { type: string }
+                  mode: { type: string, enum: [local, remote] }
+                  remote: { type: boolean }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [control]
+      summary: 以主机角色打开到该会话（或远程 SECS）的连接
+      x-required-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                host: { type: string }
+                port: { type: integer }
+                deviceId: { type: integer }
+      responses:
+        '200': { description: 已连接 }
+        '409': { description: 设备已有主机（设备只接受一个主机），或已处于连接状态 }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [control]
+      summary: 断开主机模拟连接
+      x-required-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 已断开 }
+  /api/v1/sessions/{id}/host-sim/send:
+    post:
+      tags: [control]
+      summary: 以主机角色发送一条 SML（等 T3 应答）
+      x-required-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '200':
+          description: 发送结果（含应答报文与耗时）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SentMessageResult' }
+        '409': { description: 主机模拟未连接 }
   /api/v1/sessions/{id}/host-sim/collector:
-    put:
+    post:
       tags: [control]
       summary: 下发主机模拟 S1F3 采集器配置（v6）
       description: |
         收到 startCeid 的 S6F11 开始按 intervalMs 轮询 S1F3，收到 stopCeid 停止。
         本机模式校验 SVID 存在；远程模式（host-sim 以 target 打开时）不做存在性校验。
-        与 PUT 等价的 POST 也接受。
       parameters:
         - name: id
           in: path
@@ -598,8 +678,11 @@ paths:
   /api/v1/messages:
     get:
       tags: [messages]
-      summary: 最近报文历史
-      description: 内存保留最近 5000 条；`format=jsonl` 返回可下载的 JSON Lines。
+      summary: 最近报文历史（支持 before 游标与报文类型过滤）
+      description: |
+        内存保留最近 5000 条;`format=jsonl` 返回可下载的 JSON Lines。
+        `before` 是翻旧账的游标:只返回时间早于该 epoch 毫秒的报文,
+        配合 `stream`/`function` 可以只翻某一类报文的历史。
       parameters:
         - name: session
           in: query
@@ -613,6 +696,16 @@ paths:
         - name: format
           in: query
           schema: { type: string, enum: [json, jsonl], default: json }
+        - name: before
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+          description: 只取时间早于该值的消息;缺省不限制
+        - name: stream
+          in: query
+          schema: { type: integer }
+        - name: function
+          in: query
+          schema: { type: integer }
       responses:
         '200':
           description: JSON 历史或 JSONL 附件
@@ -695,12 +788,12 @@ paths:
   /api/v1/configs/{name}:
     get:
       tags: [configs]
-      summary: 读配置原文
+      summary: 读配置原文（带 modifiedMs 快照）
       parameters:
         - $ref: '#/components/parameters/ConfigName'
       responses:
         '200':
-          description: 配置原文
+          description: 配置原文与其修改时间快照（存盘时经 If-Match 带回做并发保护）
           content:
             application/json:
               schema:
@@ -709,16 +802,26 @@ paths:
                 properties:
                   name: { type: string }
                   text: { type: string }
+                  modifiedMs: { type: integer, format: int64, description: 最后修改时间（epoch 毫秒） }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
       tags: [configs]
-      summary: 校验通过后原子保存配置
+      summary: 校验通过后原子保存配置（支持 If-Match 并发保护）
       x-required-role: operator
+      description: |
+        请求头可带 `If-Match: <modifiedMs>`（取自 GET 响应的 modifiedMs）。
+        文件在这期间被其他窗口/进程修改过时回 409，不落盘；
+        不带 If-Match 的旧客户端行为不变。校验不过回 422（问题清单随响应带回）。
       parameters:
         - $ref: '#/components/parameters/ConfigName'
+        - name: If-Match
+          in: header
+          required: false
+          schema: { type: string }
+          description: GET 响应里的 modifiedMs；与当前不一致时回 409
       requestBody:
         required: true
         content:
@@ -733,8 +836,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: 配置在编辑期间被其他操作修改过（If-Match 不一致），未落盘
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
         '422':
           description: 配置校验失败，未落盘
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
   /api/v1/configs/{name}/validate:
     post:
       tags: [configs]
@@ -754,18 +865,70 @@ paths:
               schema: { $ref: '#/components/schemas/ConfigProblems' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/config-preview:
+    post:
+      tags: [preview]
+      summary: 按配置草稿文本算曲线预览（不落盘、不需要运行中的会话）
+      x-required-role: viewer
+      description: |
+        给编辑器的草稿预览用：编译草稿并按模拟时间轴分桶，编译失败回 422。
+        withEvents=false 时只画默认曲线，不模拟事件时间线。
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: buckets
+          in: query
+          schema: { type: integer, default: 120 }
+        - name: svids
+          in: query
+          required: false
+          schema: { type: string }
+          description: 逗号分隔的 SVID 列表;缺省画全部
+        - name: withEvents
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: 分桶曲线数据
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewData' }
+        '422': { description: 配置编译不过 }
   /api/v1/audit:
     get:
       tags: [audit]
-      summary: 最近审计记录
+      summary: 最近审计记录（支持 action/actor 服务端过滤）
       x-required-role: admin
       parameters:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+        - name: action
+          in: query
+          schema: { type: string }
+          description: 精确匹配动作名（如 config-save）；缺省不过滤
+        - name: actor
+          in: query
+          schema: { type: string }
+          description: 精确匹配操作者；缺省不过滤
+        - name: before
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+          description: 只取时间早于该值（epoch 毫秒）的记录,翻旧账的游标;缺省不限制
       responses:
         '200':
-          description: 审计数组
+          description: 审计数组（total 是过滤后的总数,truncated 表示被 limit 截断）
           content:
             application/json:
               schema:
@@ -776,6 +939,8 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/AuditEntry' }
                   limit: { type: integer }
+                  total: { type: integer }
+                  truncated: { type: boolean }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1083,6 +1248,14 @@ components:
         samples: { type: integer }
         decodeErrors: { type: integer }
         lastRttMs: { type: integer }
+        svids:
+          type: array
+          description: 已配置的采集 SVID(id 与名称)
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
         staleSvids:
           type: array
           items: { type: integer }
