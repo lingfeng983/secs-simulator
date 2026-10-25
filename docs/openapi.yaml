@@ -1398,6 +1398,7 @@ components:
               slot: { type: string }
               type: { type: string }
               unit: { type: string }
+              pinned: { type: boolean, description: 是否被「设定」钉住(值设定接口的真值回显) }
         hostReports: { type: integer }
         hostLinks: { type: integer }
         hostAllDisabled: { type: boolean }

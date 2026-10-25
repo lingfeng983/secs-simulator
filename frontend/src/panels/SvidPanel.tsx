@@ -48,9 +48,7 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [preview, setPreview] = useState<{ svid: number; data: PreviewData } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
 
-  /* 已设定的变量集合:从逐变量预览拉不到全局钉住状态,先按预览/操作记录粗略维护 */
-  const [pinnedIds, setPinnedIds] = useState<ReadonlySet<number>>(new Set());
-
+  /* 已设定的变量:目录视图直接带 pinned 标志(后端钉住状态的真值),刷新不丢 */
   const rows: SvidRow[] = useMemo(
     () => svidChoices.map((choice) => ({
       svid: choice.svid,
@@ -58,9 +56,9 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
       slot: choice.slot,
       type: choice.type,
       unit: choice.unit,
-      pinned: pinnedIds.has(choice.svid),
+      pinned: choice.pinned === true,
     })),
-    [svidChoices, pinnedIds],
+    [svidChoices],
   );
 
   const columns: Column<SvidRow>[] = [
@@ -173,7 +171,6 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     try {
       const ok = await backend.setSvidValue(pinTarget, value);
       if (ok) {
-        setPinnedIds((previous) => new Set(previous).add(pinTarget));
         setPinTarget(null);
       }
     } finally {
@@ -182,14 +179,7 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   };
 
   const unpin = async (svid: number) => {
-    const ok = await backend.clearSvidValue(svid);
-    if (ok) {
-      setPinnedIds((previous) => {
-        const next = new Set(previous);
-        next.delete(svid);
-        return next;
-      });
-    }
+    await backend.clearSvidValue(svid);
   };
 
   const previewSeries = preview?.data.series[0];

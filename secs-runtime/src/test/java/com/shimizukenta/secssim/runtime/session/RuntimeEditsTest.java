@@ -53,6 +53,53 @@ class RuntimeEditsTest {
     }
 
     @Test
+    void editsRejectDanglingReferences() throws Exception {
+        HsmsSessionRuntime session = runtime("dangling");
+        session.open();
+
+        /* 计划挂不存在的 CEID:当场拒绝,给出处理指引 */
+        assertThrows(IllegalArgumentException.class, () -> session.addEventPlan(
+                new EventPlan("p1", 424242, new Trigger.Periodic(1000L, 0L))),
+                "CEID 未定义");
+
+        /* 报告绑不存在的 SVID / 事件绑不存在的 RPTID */
+        assertThrows(IllegalArgumentException.class, () -> session.addReport(
+                new ResolvedReport(9001, "GLOBAL", "R", List.of(424242))),
+                "SVID 未定义");
+        assertThrows(IllegalArgumentException.class, () -> session.addCeid(
+                new ResolvedCeid(7001, "GLOBAL", "E", List.of(94242))),
+                "RPTID 未定义");
+
+        /* 合法链路:SVID → 报告 → 事件 → 计划,逐级建起来都能过 */
+        int svid = firstSvidOf(session);
+        assertTrue(session.addSvid(new ResolvedSvid(4242, "GLOBAL", "V", ValueType.F4, "")));
+        assertTrue(session.addReport(new ResolvedReport(9001, "GLOBAL", "R", List.of(svid, 4242))));
+        assertTrue(session.addCeid(new ResolvedCeid(7001, "GLOBAL", "E", List.of(9001))));
+        assertTrue(session.addEventPlan(new EventPlan("p1", 7001, new Trigger.Periodic(1000L, 0L))));
+    }
+
+    @Test
+    void catalogCarriesPinnedFlag() throws Exception {
+        HsmsSessionRuntime session = runtime("pinned-flag");
+        session.open();
+        int svid = firstSvidOf(session);
+
+        assertFalse(session.catalogJson().contains("\"pinned\":true"), "默认没有设定");
+        assertTrue(session.pinSvidValue(svid, 1.0));
+        String json = session.catalogJson();
+        int at = json.indexOf("\"svid\":" + svid);
+        String entry = json.substring(at, json.indexOf('}', at));
+        assertTrue(entry.contains("\"pinned\":true"), "钉住后目录要带回 pinned: " + entry);
+        session.unpinSvidValue(svid);
+    }
+
+    private static int firstSvidOf(HsmsSessionRuntime session) {
+        String json = session.catalogJson();
+        int at = json.indexOf("\"svid\":");
+        return Integer.parseInt(json.substring(at + 7).split("[^0-9]")[0]);
+    }
+
+    @Test
     void updateRejectsMismatchedId() throws Exception {
         HsmsSessionRuntime session = runtime("crud-mismatch");
         session.open();

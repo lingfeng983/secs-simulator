@@ -340,6 +340,8 @@ export interface CatalogSvid {
   slot: string;
   type: string;
   unit: string;
+  /** 是否被「设定」钉住(设备页·状态变量);后端目录视图带回,刷新不丢。 */
+  pinned?: boolean;
 }
 
 /**

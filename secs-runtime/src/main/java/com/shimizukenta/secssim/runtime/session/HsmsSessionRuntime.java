@@ -635,6 +635,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return 是否成功
      */
     public synchronized boolean addEventPlan(EventPlan plan) {
+        requireKnownCeid(plan.ceid());
         List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
         if (plans.stream().anyMatch(p -> p.id().equals(plan.id()))) {
             return false;
@@ -655,6 +656,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         if (!planId.equals(next.id())) {
             throw new IllegalArgumentException("planId 与新计划的 id 不一致: " + planId + " vs " + next.id());
         }
+        requireKnownCeid(next.ceid());
         List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
         int index = -1;
         for (int i = 0; i < plans.size(); i++) {
@@ -712,6 +714,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return 是否成功
      */
     public synchronized boolean addReport(ResolvedReport report) {
+        requireKnownSvids(report.svidIds());
         if (this.model.reports().containsKey(report.id())) {
             return false;
         }
@@ -728,6 +731,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return 是否成功
      */
     public synchronized boolean updateReport(ResolvedReport report) {
+        requireKnownSvids(report.svidIds());
         if (!this.model.reports().containsKey(report.id())) {
             return false;
         }
@@ -760,6 +764,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return 是否成功
      */
     public synchronized boolean addCeid(ResolvedCeid def) {
+        requireKnownRptids(def.reportIds());
         if (this.model.ceids().containsKey(def.id())) {
             return false;
         }
@@ -778,6 +783,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @return 是否成功
      */
     public synchronized boolean updateCeid(ResolvedCeid def) {
+        requireKnownRptids(def.reportIds());
         if (!this.model.ceids().containsKey(def.id())) {
             return false;
         }
@@ -890,6 +896,30 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public boolean isSvidPinned(int svid) {
         return this.effectValues.isPinned(svid);
+    }
+
+    /* 引用校验:和配置编译的 UNKNOWN_CEID 同语义——编辑入口当场说清,不留悬空引用。 */
+
+    private void requireKnownCeid(int ceid) {
+        if (!this.model.ceids().containsKey(ceid) && !this.hostReports.definedCeids().contains(ceid)) {
+            throw new IllegalArgumentException("CEID 未定义: " + ceid + "（先在「事件设置」里定义它）");
+        }
+    }
+
+    private void requireKnownSvids(List<Integer> svids) {
+        for (int svid : svids) {
+            if (!this.model.svids().containsKey(svid)) {
+                throw new IllegalArgumentException("SVID 未定义: " + svid + "（先在「状态变量」里定义它）");
+            }
+        }
+    }
+
+    private void requireKnownRptids(List<Integer> rptids) {
+        for (int rptid : rptids) {
+            if (!this.model.reports().containsKey(rptid) && !this.hostReports.definedRptids().contains(rptid)) {
+                throw new IllegalArgumentException("RPTID 未定义: " + rptid + "（先定义报告再绑定事件）");
+            }
+        }
     }
 
     /** 换设备模型后重建引用它的视图（S6F11 组装器与 Trace）。 */
@@ -1917,7 +1947,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                         b.pair("owner", svid.owner()),
                         b.pair("slot", svid.slot()),
                         b.pair("type", svid.type().name()),
-                        b.pair("unit", svid.unitSymbol()))));
+                        b.pair("unit", svid.unitSymbol()),
+                        b.pair("pinned", this.effectValues.isPinned(svid.id())))));
 
         return b.object(
                 b.pair("ceids", b.array(ceidItems)),
