@@ -18,10 +18,7 @@ import {
   type SessionSummary,
   type TerminalMessage,
 } from '../api';
-import { mergeMessages, type MessageEntry } from '../messageHistory';
 import type { CeidInput, EventPlanInput, ReportInput, SvidInput } from '../api';
-import { ceidFromS6f11Body } from '../lib/format';
-import type { NoticeWire } from './useEventStream';
 import type { Notifier } from './useToasts';
 import { useSessionCommands } from './useSessionCommands';
 import { useConfigCommands } from './useConfigCommands';
@@ -47,10 +44,6 @@ const INTERVAL = {
 const MAX_LOG = 400;
 
 /** 事件流日志的一行。 */
-export interface LogLine {
-  at: string;
-  text: string;
-}
 
 /**
  * 控制器返回的东西。
@@ -82,21 +75,11 @@ export interface BackendController {
   setAuditFilter: (filter: { action?: string; actor?: string }) => Promise<void>;
   /** 审计「载入更早」:以当前视图最早一条为游标向更早翻一页。 */
   loadAuditOlder: () => Promise<void>;
-  /**
-   * 事件流「载入历史」:从报文历史取最近的 S6F11 并反解 CEID。
-   * 历史报文没有类型化事件,CEID 从 body 的第二个数值项反解,仅供参考展示。
-   */
-  loadEventHistory: () => Promise<NoticeWire[]>;
   configList: ConfigEntry[];
 
-  messages: MessageEntry[];
   /** 服务端记录的报文总数（可能大于面板里保留的条数）。 */
-  messageTotal: number;
 
   /** 事件流日志。 */
-  log: LogLine[];
-  appendLog: (text: string) => void;
-  clearLog: () => void;
 
   preview: PreviewData | null;
   previewSession: string;
@@ -167,11 +150,6 @@ export interface BackendController {
   /** 单个状态变量的曲线预览(窗口相对仿真起点)。 */
   previewSvid: (sessionId: string, svid: number, windowMs: number) => Promise<PreviewData | null>;
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
-  /** 载入报文历史;可按会话与方向过滤,before>0 时向更早翻页(服务端最多保留最近 5000 条)。 */
-  loadHistory: (session?: string, direction?: string, before?: number) => Promise<void>;
-  /** SSE 重连后补拉断线期间的增量报文。 */
-  backfillAfterReconnect: () => Promise<void>;
-  exportMessages: () => Promise<void>;
   downloadPreview: (windowMs: number) => Promise<void>;
   /** 配置草稿的曲线预览（编辑器里改模板直接看效果）。 */
   draftPreview: PreviewData | null;
@@ -186,8 +164,6 @@ export interface BackendController {
   setComparePreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
   /** 按时间窗刷新曲线（先取一次 uptime，时间窗才是"最近 N 分钟"而不是"开局 N 秒"）。 */
   refreshPreview: (windowMs: number) => Promise<void>;
-  pushMessages: (messages: import('../api').WireMessage[]) => void;
-  clearMessages: () => void;
 
   /** 主机模拟器连接状态（随会话明细轮询）。 */
   hostSimOpen: boolean;
@@ -251,20 +227,16 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [auditEntries, setAuditEntries] = useState<AuditEntryView[]>([]);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
   const [logLevel, setLogLevelState] = useState('info');
-  const [messages, setMessages] = useState<MessageEntry[]>([]);
-  const [messageTotal, setMessageTotal] = useState(0);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [comparePreview, setComparePreviewData] = useState<PreviewData | null>(null);
   const [draftPreview, setDraftPreview] = useState<PreviewData | null>(null);
   const [compareSession, setCompareSessionId] = useState('');
   const [previewSession, setPreviewSession] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [log, setLog] = useState<LogLine[]>([]);
   const [hostSimOpen, setHostSimOpen] = useState(false);
   const [overview, setOverview] = useState<OverviewRow[]>([]);
   const [hostSimTarget, setHostSimTarget] = useState('');
 
-  const nextMessageKey = useRef(0);
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
 
@@ -389,24 +361,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }
   }, [client, auditEntries, auditOlder]);
 
-  /** 事件流「载入历史」:取最近 500 条 S6F11 报文,反解 CEID 后转成类型化事件视图。 */
-  const loadEventHistory = useCallback(async (): Promise<NoticeWire[]> => {
-    if (client === null) {
-      return [];
-    }
-    try {
-      const page = await client.messages('', '', 500, { stream: 6, function: 11 });
-      return page.messages.map((msg) => ({
-        type: 's6f11' as const,
-        sessionId: msg.sessionId,
-        at: msg.at,
-        data: { ceid: ceidFromS6f11Body(msg.body) },
-      }));
-    } catch (error) {
-      notifierRef.current.error('载入事件历史失败', (error as Error).message);
-      return [];
-    }
-  }, [client]);
 
   /**
    * 统一刷新入口。
@@ -783,9 +737,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const dataCommands = useDataCommands({
     client,
     notifier,
-    setMessages,
-    setMessageTotal,
-    nextMessageKey,
     setComparePreviewData,
     setCompareSessionId,
     setPreview,
@@ -959,37 +910,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
 
 
 
-  /* ---------- 报文 ---------- */
-
-  const pushMessages = useCallback((incoming: import('../api').WireMessage[]) => {
-    /* key 在 setState 之外分配：setState 的更新函数在开发模式下会被调用两次，
-       在里面自增会让 key 跳号，React 的 key 就不再唯一了。 */
-    const entries = incoming.map((message) => {
-      const key = nextMessageKey.current;
-      nextMessageKey.current += 1;
-      return { key, msg: message };
-    });
-    setMessages((previous) => {
-      const next = [...previous, ...entries];
-      return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
-    });
-  }, []);
-
-  const clearMessages = useCallback(() => {
-    setMessages([]);
-  }, []);
-
-  /** 往事件流日志追加一行。 */
-  const appendLog = useCallback((text: string) => {
-    setLog((previous) => {
-      const next = [...previous, { at: new Date().toLocaleTimeString(), text }];
-      return next.length > MAX_LOG ? next.slice(next.length - MAX_LOG) : next;
-    });
-  }, []);
-
-  const clearLog = useCallback(() => {
-    setLog([]);
-  }, []);
 
   return useMemo<BackendController>(
     () => ({
@@ -1011,7 +931,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       auditFilter,
       setAuditFilter,
       loadAuditOlder,
-      loadEventHistory,
       addEventPlan,
       updateEventPlan,
       deleteEventPlan,
@@ -1028,11 +947,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       clearSvidValue,
       previewSvid,
       configList,
-      messages,
-      messageTotal,
-      log,
-      appendLog,
-      clearLog,
       preview,
       previewSession,
       refreshing,
@@ -1051,8 +965,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       previewDraftSvid,
       compareSession,
       refreshPreview,
-      pushMessages,
-      clearMessages,
       hostSimOpen,
       hostSimTarget,
       openHostSim,
@@ -1079,7 +991,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       auditFilter,
       setAuditFilter,
       loadAuditOlder,
-      loadEventHistory,
       addEventPlan,
       updateEventPlan,
       deleteEventPlan,
@@ -1096,11 +1007,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       clearSvidValue,
       previewSvid,
       configList,
-      messages,
-      messageTotal,
-      log,
-      appendLog,
-      clearLog,
       preview,
       previewSession,
       refreshing,
@@ -1119,8 +1025,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       previewDraftSvid,
       compareSession,
       refreshPreview,
-      pushMessages,
-      clearMessages,
       overview,
       refreshOverview,
       burst,

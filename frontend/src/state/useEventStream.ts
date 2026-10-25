@@ -20,8 +20,8 @@ export interface EventStreamHandlers {
   onFlush: (messages: WireMessage[]) => void;
   /** 状态变化(需要展示连接状态的调用方才用;精简后界面不展示了)。 */
   onState?: (state: StreamState, detail: string) => void;
-  /** 需要写进事件流日志的提示（重连、票据失败等）。 */
-  onNotice: (text: string) => void;
+  /** 需要写进事件流日志的提示（重连、票据失败等）;界面不再展示日志,可选。 */
+  onNotice?: (text: string) => void;
   /** 重连成功后触发：上层用它在补拉断线期间的增量报文。 */
   onReconnected?: () => void;
   /** 类型化通知（v6:事件/报警/状态迁移）;工作台与设备页的事件流订阅它。 */
@@ -115,7 +115,7 @@ export function useEventStream(
           handlersRef.current.onState?.('connected', '已连接');
           if (openedOnce) {
             /* 断线期间 SSE 不补发，但上层会按时间戳补拉一次增量 */
-            handlersRef.current.onNotice('事件流已重连：正在补拉断线期间的报文');
+            handlersRef.current.onNotice?.('事件流已重连：正在补拉断线期间的报文');
             handlersRef.current.onReconnected?.();
           }
           openedOnce = true;
@@ -134,7 +134,7 @@ export function useEventStream(
           try {
             parsed = JSON.parse(event.data) as WireMessage;
           } catch {
-            handlersRef.current.onNotice('收到无法解析的报文事件');
+            handlersRef.current.onNotice?.('收到无法解析的报文事件');
             return;
           }
           if (pausedRef.current) {
@@ -170,7 +170,7 @@ export function useEventStream(
           const now = Date.now();
           if (now - lastErrorAt > 5000) {
             lastErrorAt = now;
-            handlersRef.current.onNotice(`事件流断开（${state}），2 秒后用新票据重连`);
+            handlersRef.current.onNotice?.(`事件流断开（${state}），2 秒后用新票据重连`);
           }
 
           /* 票据只能用一次，自动重连会带着旧票据被 401，必须自己换票重连 */
@@ -184,7 +184,7 @@ export function useEventStream(
         const now = Date.now();
         if (now - lastTicketErrorAt > 10_000) {
           lastTicketErrorAt = now;
-          handlersRef.current.onNotice(`获取事件流票据失败: ${(error as Error).message}`);
+          handlersRef.current.onNotice?.(`获取事件流票据失败: ${(error as Error).message}`);
         }
         handlersRef.current.onState?.('reconnecting', '等待重连');
         scheduleReconnect();

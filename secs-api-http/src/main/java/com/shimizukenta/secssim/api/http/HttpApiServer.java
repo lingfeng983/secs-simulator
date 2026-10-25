@@ -1350,11 +1350,25 @@ public final class HttpApiServer implements AutoCloseable {
             this.handleSessionCommand(ex);
             return;
         }
+        if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
+            /* 运行时编辑(计划/报告/事件/变量)的更新走 PUT 子路径 */
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.handleSessionCommand(ex);
+            return;
+        }
         if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;
             }
-            this.closeSession(ex);
+            /* DELETE /sessions/{id} 是关会话;/host-sim 是断开;其余子路径是运行时编辑的删除 */
+            String rest = ex.getRequestURI().getPath().substring(PATH_SESSION_PREFIX.length());
+            if (rest.indexOf('/') < 0 || rest.endsWith("/host-sim")) {
+                this.closeSession(ex);
+            } else {
+                this.handleSessionCommand(ex);
+            }
             return;
         }
 

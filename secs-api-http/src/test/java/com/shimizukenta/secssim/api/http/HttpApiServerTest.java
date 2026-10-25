@@ -693,6 +693,28 @@ class HttpApiServerTest {
         return values;
     }
 
+    /**
+     * 运行时编辑的 PUT/DELETE 子路径必须到达命令分发(默认 context 回 404),
+     * 不能被方法门(405)或关会话分支(bad-path/400)吃掉——真后端冒烟抓到过一次回归。
+     */
+    @Test
+    void runtimeEditPutAndDeleteSubpathsReachTheCommandDispatcher() throws Exception {
+        String body = "{\"id\":\"p\",\"ceid\":1,\"trigger\":{\"type\":\"periodic\",\"periodMs\":1000}}";
+        /* PUT 更新计划/变量值:到达 context(桩回 404)而不是 405 */
+        assertEquals(404, putJson("/api/v1/sessions/s1/events/p", TOKEN, body).statusCode());
+        assertEquals(404, putJson("/api/v1/sessions/s1/svids/1001/value", TOKEN, "{\"value\":1}").statusCode());
+        /* DELETE 删除计划:到达 context 而不是被当关会话 */
+        assertEquals(404, delete("/api/v1/sessions/s1/events/p", TOKEN).statusCode());
+        /* DELETE 根路径仍是关会话(已有用例覆盖 404 未知会话) */
+        assertEquals(404, delete("/api/v1/sessions/missing", TOKEN).statusCode());
+    }
+
+    private HttpResponse<String> putJson(String path, String token, String body) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(this.base + path))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .PUT(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)), token);
+    }
+
     private HttpResponse<String> postSml(String path, String token, String sml) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(this.base + path))
                 .header("Content-Type", "text/plain; charset=utf-8")

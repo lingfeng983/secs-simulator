@@ -56,43 +56,27 @@ export function App(): JSX.Element {
   const backend = useBackend(client, notifier);
 
   const [route, navigate] = useRoute(preferences.activeTab);
-  const { appendLog, pushMessages } = backend;
 
-  /* 事件流：提示与报文都转发给控制器;类型化通知进 liveEvents 缓冲(设备事件子页用) */
-  useEventStream(
-    client,
-    preferences.pauseStream,
-    {
-      onFlush: useCallback(
-        (messages: import('./api').WireMessage[]) => {
-          pushMessages(messages);
-        },
-        [pushMessages],
-      ),
-      onNotice: useCallback(
-        (text: string) => {
-          appendLog(text);
-        },
-        [appendLog],
-      ),
-      onReconnected: useCallback(() => {
-        void backend.backfillAfterReconnect();
-      }, [backend]),
-      onNoticeEvent: useCallback(
-        (notice: NoticeWire) => {
-          setLiveEvents((previous) => {
-            const next = [...previous, notice];
-            return next.length > MAX_LIVE_EVENTS ? next.slice(next.length - MAX_LIVE_EVENTS) : next;
-          });
-          if (notice.type === 'session') {
-            /* 设备状态迁移:工作台卡片与侧栏状态点要跟上 */
-            void backend.refreshSessions();
-          }
-        },
-        [backend],
-      ),
+  /* 事件流:界面不再展示全局报文/日志,onFlush 置空即可;
+     类型化通知进 liveEvents 缓冲(设备事件子页的实时事件用)。 */
+  useEventStream(client, preferences.pauseStream, {
+    onFlush: () => {
+      /* 报文落盘在服务端 logs/messages.jsonl,界面不缓存 */
     },
-  );
+    onNoticeEvent: useCallback(
+      (notice: NoticeWire) => {
+        setLiveEvents((previous) => {
+          const next = [...previous, notice];
+          return next.length > MAX_LIVE_EVENTS ? next.slice(next.length - MAX_LIVE_EVENTS) : next;
+        });
+        if (notice.type === 'session') {
+          /* 设备状态迁移:工作台表格与侧栏状态点要跟上 */
+          void backend.refreshSessions();
+        }
+      },
+      [backend],
+    ),
+  });
 
   /** 兼容旧面板 id 的导航:面板与命令面板都只会说"去 config / 去 sessions"这类话。 */
   const goTo = useCallback(
