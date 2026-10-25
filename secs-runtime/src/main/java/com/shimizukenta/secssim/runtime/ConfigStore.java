@@ -175,11 +175,12 @@ public final class ConfigStore {
         }
 
         try {
-            if (!config.templates().isEmpty()) {
-                config.templates().build(compiled.equipment());
+            if (config.hasCustomValues()) {
+                /* 模板 + SVID 直配(v6)统一在模板图里过单写者/环/未知引用 */
+                config.buildValues(compiled.equipment());
             }
         } catch (RuntimeException e) {
-            return List.of("模板配置错误：" + e);
+            return List.of("值来源配置错误：" + e);
         }
 
         return List.of();

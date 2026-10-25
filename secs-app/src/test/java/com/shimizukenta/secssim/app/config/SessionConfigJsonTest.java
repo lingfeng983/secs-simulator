@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.app.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +31,7 @@ import com.shimizukenta.secssim.core.domain.SvidDef;
 import com.shimizukenta.secssim.core.domain.UnitId;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.domain.ValueType;
+import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
@@ -101,7 +103,7 @@ class SessionConfigJsonTest {
 
     @Test
     void unsupportedSchemaVersionIsRejected() {
-        String json = SessionConfigJson.toJson(demoConfig()).replace("\"schemaVersion\": 5", "\"schemaVersion\": 3");
+        String json = SessionConfigJson.toJson(demoConfig()).replaceAll("\"schemaVersion\": \\d+", "\"schemaVersion\": 3");
 
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
         assertEquals("$.schemaVersion", e.path());
@@ -425,4 +427,162 @@ class SessionConfigJsonTest {
                 () -> "应提示重名: " + result.warnings());
     }
 
+    /* ===== schema v6:事件效果 + SVID 直配值来源 ===== */
+
+    private static final String V6_SAMPLE = """
+            {
+              "schemaVersion": 6,
+              "session": { "id": "v6-01", "passive": true, "port": 5000, "deviceId": 7, "seed": 42 },
+              "equipment": {
+                "name": "V6",
+                "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000 },
+                "globalSvids": [
+                  { "id": 9001, "name": "FAC", "type": "F4", "curve": { "type": "sine", "min": 1, "max": 2, "periodMs": 1000 } }
+                ],
+                "units": [
+                  {
+                    "unitId": 1, "name": "CH1", "injectUnitId": true,
+                    "svids": [
+                      { "offset": 90, "slot": "UNIT_ID", "type": "U4" },
+                      { "offset": 1, "slot": "TEMP_PV", "type": "F4", "min": 0, "max": 400,
+                        "curve": { "type": "constant", "value": 180 } },
+                      { "offset": 2, "slot": "PRESS", "type": "F4", "template": "press", "params": { "base": 1.0 } },
+                      { "offset": 3, "slot": "HEATER", "type": "BOOLEAN", "min": 0, "max": 1 }
+                    ],
+                    "reports": [ { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV"] } ],
+                    "ceids": [ { "offset": 1, "slot": "E1", "reports": ["STATUS"] } ]
+                  }
+                ]
+              },
+              "events": {
+                "maxPerSec": 50,
+                "plans": [
+                  { "id": "p1", "ceid": 2001,
+                    "trigger": { "type": "periodic", "periodMs": 1000 },
+                    "effects": [
+                      { "svid": 1001, "op": "pulse", "value": 250, "holdMs": 5000 },
+                      { "svid": 1001, "op": "set", "value": 300, "decayMs": 10000 },
+                      { "svid": 1001, "op": "shift", "delta": 10 },
+                      { "svid": 1003, "op": "set", "value": 1 }
+                    ] }
+                ]
+              },
+              "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ] }
+            }
+            """;
+
+    @Test
+    void parsesV6DirectSourcesAndEffects() {
+        SessionConfig config = SessionConfigJson.parse(V6_SAMPLE);
+        CompilationResult result = config.compile();
+        assertTrue(result.ok(), "v6 样例应能编译: " + result.errors());
+
+        SvidDef temp = config.spec().equipment().units().get(0).svids().get(1);
+        assertNotNull(temp.source(), "TEMP_PV 应带直配曲线");
+        assertNull(temp.source().template());
+
+        SvidDef press = config.spec().equipment().units().get(0).svids().get(2);
+        assertEquals("press", press.source().template());
+        assertEquals(Map.of("base", 1.0), press.source().params());
+
+        assertTrue(config.hasCustomValues());
+        EventPlan plan = config.schedule().plans().get(0);
+        assertEquals(4, plan.effects().size());
+        assertEquals(EventEffect.Op.PULSE, plan.effects().get(0).op());
+    }
+
+    @Test
+    void v6SampleBuildsValueSource() {
+        SessionConfig config = SessionConfigJson.parse(V6_SAMPLE);
+        CompilationResult result = config.compile();
+        assertTrue(result.ok());
+
+        var values = ValueSources.of(config, result.equipment());
+        assertTrue(values instanceof GraphValueSource);
+        /* 直配 constant 曲线:任意时刻都是 180 */
+        assertEquals(180.0, values.valueAt(1001, 12345L).orElse(-1), 1e-9);
+        /* 模板图里未绑定值来源的 SVID 取不到(上层按 0 处理) */
+        assertTrue(values.valueAt(1003, 12345L).isEmpty());
+        /* 全局 SVID 走内联 sine */
+        assertTrue(values.valueAt(9001, 0L).isPresent());
+    }
+
+    @Test
+    void v6ConfigRoundTrips() {
+        SessionConfig parsed = SessionConfigJson.parse(V6_SAMPLE);
+        String first = SessionConfigJson.toJson(parsed);
+        SessionConfig reparsed = SessionConfigJson.parse(first);
+        assertEquals(first, SessionConfigJson.toJson(reparsed), "v6 字段必须往返稳定");
+        assertTrue(first.contains("\"curve\""));
+        assertTrue(first.contains("\"effects\""));
+    }
+
+    @Test
+    void rejectsCurveAndTemplateTogether() {
+        String bad = V6_SAMPLE.replace(
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }, \"template\": \"press\"");
+        ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(bad));
+        assertTrue(e.getMessage().contains("二选一"));
+    }
+
+    @Test
+    void rejectsParamsWithoutTemplate() {
+        String bad = V6_SAMPLE.replace(
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }, \"params\": { \"a\": 1 }");
+        ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(bad));
+        assertTrue(e.getMessage().contains("template"));
+    }
+
+    @Test
+    void rejectsUnknownEffectSvid() {
+        String bad = V6_SAMPLE.replace("{ \"svid\": 1003, \"op\": \"set\", \"value\": 1 }",
+                "{ \"svid\": 4242, \"op\": \"set\", \"value\": 1 }");
+        CompilationResult result = SessionConfigJson.parse(bad).compile();
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("UNKNOWN_EFFECT_SVID")));
+    }
+
+    @Test
+    void rejectsEffectOnNonNumericSvid() {
+        String bad = V6_SAMPLE.replace("{ \"svid\": 1003, \"op\": \"set\", \"value\": 1 }",
+                "{ \"svid\": 1003, \"op\": \"pulse\", \"value\": 1, \"holdMs\": 100 }");
+        CompilationResult result = SessionConfigJson.parse(bad).compile();
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("EFFECT_TYPE_MISMATCH")));
+    }
+
+    @Test
+    void allowsBooleanSetForEffects() {
+        CompilationResult result = SessionConfigJson.parse(V6_SAMPLE).compile();
+        assertTrue(result.ok(), "BOOLEAN set 0/1 应放行: " + result.errors());
+    }
+
+    @Test
+    void rejectsDirectSourceOnStringSvid() {
+        String bad = V6_SAMPLE.replace(
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
+                "\"curve\": { \"type\": \"constant\", \"value\": 180 }")
+                .replace("{ \"offset\": 2, \"slot\": \"PRESS\", \"type\": \"F4\", \"template\": \"press\", \"params\": { \"base\": 1.0 } }",
+                        "{ \"offset\": 2, \"slot\": \"NAME\", \"type\": \"ASCII\", \"curve\": { \"type\": \"constant\", \"value\": 1 } }");
+        CompilationResult result = SessionConfigJson.parse(bad).compile();
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("SOURCE_TYPE_MISMATCH")));
+    }
+
+    @Test
+    void rejectsSingleWriterBetweenDirectAndInstance() {
+        String bad = V6_SAMPLE.replace(
+                """
+                      "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ] }""",
+                """
+                      "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ],
+                                     "instances": [ { "id": "dup", "template": "press", "svids": { "V": 1001 } } ] }""");
+        SessionConfig config = SessionConfigJson.parse(bad);
+        CompilationResult result = config.compile();
+        assertTrue(result.ok());
+        ConfigException e = assertThrows(ConfigException.class, () -> config.buildValues(result.equipment()));
+        assertTrue(e.getMessage().contains("1001"), "单写者冲突应指向重复的 SVID: " + e.getMessage());
+    }
 }

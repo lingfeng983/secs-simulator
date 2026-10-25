@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 6,
+  "session": {
+    "id": "etch-01",
+    "passive": true,
+    "bindHost": "127.0.0.1",
+    "port": 5000,
+    "deviceId": 10,
+    "seed": 20260225
+  },
+  "equipment": {
+    "name": "ETCH-DEMO",
+    "idSpace": {
+      "svidBase": 1000,
+      "ceidBase": 2000,
+      "reportBase": 3000,
+      "svidStride": 100,
+      "ceidStride": 100,
+      "reportStride": 100,
+      "reserve": [[1, 999]]
+    },
+    "globalSvids": [
+      {
+        "id": 9001,
+        "name": "FACILITY_TEMP",
+        "type": "F4",
+        "min": 15,
+        "max": 30,
+        "curve": { "type": "sine", "min": 20, "max": 25, "periodMs": 600000 }
+      }
+    ],
+    "units": [
+      {
+        "unitId": 1,
+        "name": "CH1",
+        "injectUnitId": true,
+        "svids": [
+          { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
+          {
+            "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400,
+            "curve": { "type": "randomWalk", "start": 180, "sigma": 2.5, "min": 0, "max": 400 }
+          },
+          {
+            "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2,
+            "curve": { "type": "constant", "value": 200 }
+          },
+          {
+            "offset": 3, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
+            "template": "chamber-press"
+          },
+          { "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1 },
+          {
+            "offset": 5, "slot": "GAS_FLOW", "type": "F4", "unit": "sccm", "decimals": 1, "min": 0, "max": 500,
+            "curve": { "type": "sine", "min": 180, "max": 220, "periodMs": 45000 }
+          }
+        ],
+        "reports": [
+          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] },
+          { "offset": 2, "slot": "MEASURE", "svids": ["TEMP_PV", "GAS_FLOW"] }
+        ],
+        "ceids": [
+          { "offset": 1, "slot": "PROCESS_START", "reports": ["STATUS"] },
+          { "offset": 2, "slot": "PROCESS_END", "reports": [] },
+          { "offset": 3, "slot": "MEASURE_EVENT", "reports": ["MEASURE"] },
+          { "offset": 4, "slot": "TEMP_ALARM", "reports": ["STATUS"] }
+        ]
+      },
+      {
+        "unitId": 2,
+        "name": "CH2",
+        "injectUnitId": true,
+        "svids": [
+          { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
+          {
+            "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400,
+            "curve": { "type": "randomWalk", "start": 150, "sigma": 2.0, "min": 0, "max": 400 }
+          },
+          {
+            "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2,
+            "curve": { "type": "constant", "value": 170 }
+          },
+          {
+            "offset": 3, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
+            "template": "chamber-press"
+          },
+          { "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1 }
+        ],
+        "reports": [
+          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] },
+          { "offset": 2, "slot": "MEASURE", "svids": ["TEMP_PV"] }
+        ],
+        "ceids": [
+          { "offset": 1, "slot": "PROCESS_START", "reports": ["STATUS"] },
+          { "offset": 2, "slot": "PROCESS_END", "reports": [] },
+          { "offset": 3, "slot": "MEASURE_EVENT", "reports": ["MEASURE"] }
+        ]
+      }
+    ]
+  },
+  "events": {
+    "maxPerSec": 50,
+    "plans": [
+      {
+        "id": "pl-process-start",
+        "ceid": 2001,
+        "trigger": { "type": "periodic", "periodMs": 60000, "jitterMs": 500 },
+        "effects": [
+          { "svid": 1001, "op": "pulse", "value": 250, "holdMs": 8000 },
+          { "svid": 1003, "op": "set", "value": 6.5, "decayMs": 20000 },
+          { "svid": 1101, "op": "shift", "delta": 20 }
+        ]
+      },
+      {
+        "id": "pl-process-end",
+        "ceid": 2002,
+        "trigger": { "type": "afterEvent", "sourcePlan": "pl-process-start", "delayMs": 30000 },
+        "effects": [
+          { "svid": 1101, "op": "resume" },
+          { "svid": 1004, "op": "set", "value": 0 }
+        ]
+      },
+      {
+        "id": "pl-measure",
+        "ceid": 2003,
+        "trigger": { "type": "periodic", "periodMs": 10000 }
+      },
+      {
+        "id": "pl-overheat",
+        "ceid": 2004,
+        "trigger": { "type": "onCondition", "expression": "svid.1001 > 240", "debounceMs": 5000 },
+        "effects": [
+          { "svid": 1001, "op": "resume" },
+          { "svid": 1004, "op": "set", "value": 0 }
+        ]
+      }
+    ]
+  },
+  "templates": {
+    "curves": [
+      { "id": "chamber-press", "type": "sine", "min": 0.2, "max": 2.0, "periodMs": 30000 }
+    ]
+  }
+}

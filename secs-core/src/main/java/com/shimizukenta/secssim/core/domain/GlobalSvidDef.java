@@ -12,13 +12,27 @@ package com.shimizukenta.secssim.core.domain;
  * 设备级变量没有“槽位定义”这一步，值域只能在这里给。
  * </p>
  *
- * @param id   绝对 SVID
- * @param name 名称
- * @param type 类型
- * @param min  值域下界（默认负无穷）
- * @param max  值域上界（默认正无穷）
+ * @param id     绝对 SVID
+ * @param name   名称
+ * @param type   类型
+ * @param min    值域下界（默认负无穷）
+ * @param max    值域上界（默认正无穷）
+ * @param source 直配值来源（schema v6，可选；{@code null} 用默认曲线）
  */
-public record GlobalSvidDef(int id, String name, ValueType type, double min, double max) {
+public record GlobalSvidDef(int id, String name, ValueType type, double min, double max, DirectSource source) {
+
+    /**
+     * 兼容旧调用的构造：不配值来源。
+     *
+     * @param id   绝对 SVID
+     * @param name 名称
+     * @param type 类型
+     * @param min  值域下界
+     * @param max  值域上界
+     */
+    public GlobalSvidDef(int id, String name, ValueType type, double min, double max) {
+        this(id, name, type, min, max, null);
+    }
 
     /**
      * 简化构造：不带值域。

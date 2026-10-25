@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentMap;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
+import com.shimizukenta.secssim.app.config.ValueSources;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
@@ -19,13 +20,10 @@ import com.shimizukenta.secssim.core.EngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
-import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
-import com.shimizukenta.secssim.core.template.TemplateGraph;
-import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
@@ -281,11 +279,8 @@ public final class SessionLauncher {
         SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
                 configured.seed(), configured.equipment(), configured.timeouts());
 
-        ValueSource values = null;
-        if (!config.templates().isEmpty()) {
-            TemplateGraph graph = config.templates().build(compiled.equipment());
-            values = new GraphValueSource(graph, new Rng(config.spec().seed()).derive("graph"));
-        }
+        /* 值来源统一从这里出：默认曲线 / 模板图 / SVID 直配（v6）的分支只在 ValueSources 里有一份 */
+        ValueSource values = ValueSources.of(config, compiled.equipment());
 
         return new Prepared(spec, compiled.equipment(), values, config.schedule(),
                 config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit());

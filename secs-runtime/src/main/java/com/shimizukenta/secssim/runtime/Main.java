@@ -637,19 +637,9 @@ public final class Main {
                     if (!compiled.ok()) {
                         return null;
                     }
-                    com.shimizukenta.secssim.core.value.ValueSource values;
-                    if (!config.templates().isEmpty()) {
-                        com.shimizukenta.secssim.core.template.TemplateGraph graph =
-                                config.templates().build(compiled.equipment());
-                        values = new com.shimizukenta.secssim.core.value.GraphValueSource(
-                                graph, new com.shimizukenta.secssim.core.curve.Rng(config.spec().seed()).derive("graph"));
-                    } else {
-                        com.shimizukenta.secssim.core.value.ValueStore store =
-                                new com.shimizukenta.secssim.core.value.ValueStore(config.spec().seed());
-                        com.shimizukenta.secssim.app.session.DefaultCurves.bind(
-                                store, config.spec().equipment(), compiled.equipment());
-                        values = new com.shimizukenta.secssim.core.value.CurveValueSource(store);
-                    }
+                    /* 值来源统一走 ValueSources:草稿预览与真实启动必须是同一套语义 */
+                    com.shimizukenta.secssim.core.value.ValueSource values =
+                            com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
                     com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
                             com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(
                                     values, compiled.equipment(), fromMs, toMs, buckets);

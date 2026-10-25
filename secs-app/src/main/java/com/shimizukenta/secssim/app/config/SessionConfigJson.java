@@ -16,9 +16,11 @@ import java.util.OptionalInt;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.jsonhub.JsonObjectPair;
+import com.shimizukenta.jsonhub.JsonString;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.core.domain.CeidDef;
+import com.shimizukenta.secssim.core.domain.DirectSource;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalCeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
@@ -30,6 +32,7 @@ import com.shimizukenta.secssim.core.domain.SvidDef;
 import com.shimizukenta.secssim.core.domain.UnitId;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.domain.ValueType;
+import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
@@ -256,6 +259,7 @@ public final class SessionConfigJson {
             if (Double.isFinite(def.max())) {
                 pairs.add(b.pair("max", def.max()));
             }
+            addDirectSource(pairs, def.source(), b);
             globals.add(b.object(pairs));
         }
 
@@ -370,6 +374,7 @@ public final class SessionConfigJson {
         if (Double.isFinite(def.max())) {
             pairs.add(b.pair("max", def.max()));
         }
+        addDirectSource(pairs, def.source(), b);
 
         return b.object(pairs);
     }
@@ -386,10 +391,14 @@ public final class SessionConfigJson {
         List<JsonHub> plans = new ArrayList<>();
 
         for (EventPlan plan : config.schedule().plans()) {
-            plans.add(b.object(
-                    b.pair("id", plan.id()),
-                    b.pair("ceid", plan.ceid()),
-                    b.pair("trigger", triggerJson(plan.trigger(), b))));
+            List<com.shimizukenta.jsonhub.JsonObjectPair> planPairs = new ArrayList<>();
+            planPairs.add(b.pair("id", plan.id()));
+            planPairs.add(b.pair("ceid", plan.ceid()));
+            planPairs.add(b.pair("trigger", triggerJson(plan.trigger(), b)));
+            if (!plan.effects().isEmpty()) {
+                planPairs.add(b.pair("effects", effectsJson(plan.effects(), b)));
+            }
+            plans.add(b.object(planPairs));
         }
 
         List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
@@ -404,6 +413,29 @@ public final class SessionConfigJson {
         }
 
         return b.object(pairs);
+    }
+
+    private static JsonHub effectsJson(List<EventEffect> effects, JsonHubBuilder b) {
+        List<JsonHub> items = new ArrayList<>(effects.size());
+        for (EventEffect effect : effects) {
+            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
+            pairs.add(b.pair("svid", effect.svid()));
+            pairs.add(b.pair("op", effect.op().name().toLowerCase(java.util.Locale.ROOT)));
+            if (effect.value() != null) {
+                pairs.add(b.pair("value", effect.value()));
+            }
+            if (effect.delta() != null) {
+                pairs.add(b.pair("delta", effect.delta()));
+            }
+            if (effect.holdMs() != null) {
+                pairs.add(b.pair("holdMs", effect.holdMs()));
+            }
+            if (effect.decayMs() != null) {
+                pairs.add(b.pair("decayMs", effect.decayMs()));
+            }
+            items.add(b.object(pairs));
+        }
+        return b.array(items);
     }
 
     private static JsonHub triggerJson(Trigger trigger, JsonHubBuilder b) {
@@ -452,7 +484,8 @@ public final class SessionConfigJson {
                         JsonAccess.string(item, "name", itemPath),
                         parseType(JsonAccess.string(item, "type", itemPath), itemPath + ".type"),
                         JsonAccess.optionalDouble(item, "min", itemPath).orElse(Double.NEGATIVE_INFINITY),
-                        JsonAccess.optionalDouble(item, "max", itemPath).orElse(Double.POSITIVE_INFINITY)));
+                        JsonAccess.optionalDouble(item, "max", itemPath).orElse(Double.POSITIVE_INFINITY),
+                        parseDirectSource(item, itemPath)));
             }
         }
 
@@ -588,7 +621,69 @@ public final class SessionConfigJson {
             throw new ConfigException(path + ".min", "min " + lower + " 大于 max " + upper);
         }
 
-        return new SvidDef(offset, slot, type, unitSymbol, decimals, lower, upper);
+        return new SvidDef(offset, slot, type, unitSymbol, decimals, lower, upper, parseDirectSource(jh, path));
+    }
+
+    /**
+     * 解析 SVID 上的直配值来源（schema v6，可选）。
+     *
+     * <p>{@code curve}（内联曲线）与 {@code template}（引用模板，可带
+     * {@code output} 与 {@code params}）二选一；都不写就是默认曲线。</p>
+     */
+    private static DirectSource parseDirectSource(JsonHub jh, String path) {
+        boolean hasCurve = jh.containsKey("curve");
+        boolean hasTemplate = jh.containsKey("template");
+
+        if (hasCurve && hasTemplate) {
+            throw new ConfigException(path, "curve 与 template 只能二选一");
+        }
+        if (hasTemplate) {
+            String template = JsonAccess.string(jh, "template", path);
+            String output = jh.containsKey("output")
+                    ? JsonAccess.string(jh, "output", path + ".output") : null;
+            Map<String, Double> params = new LinkedHashMap<>();
+            if (jh.containsKey("params")) {
+                JsonHub paramsJson = JsonAccess.object(jh, "params", path + ".params");
+                for (JsonString key : paramsJson.keySet()) {
+                    String name = key.unescaped();
+                    OptionalDouble value = paramsJson.get(name).optionalDouble();
+                    if (value.isEmpty()) {
+                        throw new ConfigException(path + ".params." + name, "应为数字");
+                    }
+                    params.put(name, value.getAsDouble());
+                }
+            }
+            return DirectSource.ofTemplate(template, output, params);
+        }
+        if (hasCurve) {
+            if (jh.containsKey("params") || jh.containsKey("output")) {
+                throw new ConfigException(path, "output/params 必须与 template 搭配使用");
+            }
+            return DirectSource.ofCurve(CurveJson.parse(JsonAccess.object(jh, "curve", path), path + ".curve"));
+        }
+        return null;
+    }
+
+    /** 把直配值来源写回 SVID 的 JSON（没配就不写，保持旧配置往返稳定）。 */
+    private static void addDirectSource(List<JsonObjectPair> pairs, DirectSource source, JsonHubBuilder b) {
+        if (source == null) {
+            return;
+        }
+        if (source.curve() != null) {
+            pairs.add(b.pair("curve", b.object(CurveJson.pairs(source.curve(), b))));
+            return;
+        }
+        pairs.add(b.pair("template", source.template()));
+        if (source.output() != null) {
+            pairs.add(b.pair("output", source.output()));
+        }
+        if (!source.params().isEmpty()) {
+            List<JsonObjectPair> params = new ArrayList<>();
+            for (Map.Entry<String, Double> entry : source.params().entrySet()) {
+                params.add(b.pair(entry.getKey(), entry.getValue()));
+            }
+            pairs.add(b.pair("params", b.object(params)));
+        }
     }
 
     private static ValueType parseType(String name, String path) {
@@ -638,11 +733,63 @@ public final class SessionConfigJson {
             plans.add(new EventPlan(
                     JsonAccess.string(item, "id", itemPath),
                     JsonAccess.integer(item, "ceid", itemPath),
-                    parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger")));
+                    parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger"),
+                    parseEffects(item, itemPath)));
         }
 
         validateChains(plans, path);
         return new EventSchedule(plans);
+    }
+
+    /**
+     * 解析计划的效果数组（schema v6，可选）。
+     *
+     * <p>字段完整性（哪个 op 要哪些字段）由 {@link EventEffect} 的构造器把关，
+     * 这里只做 JSON → 模型的映射与 op 名的容错。</p>
+     */
+    private static List<EventEffect> parseEffects(JsonHub item, String itemPath) {
+        if (!item.containsKey("effects")) {
+            return List.of();
+        }
+
+        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(item, "effects", itemPath), itemPath + ".effects");
+        List<EventEffect> effects = new ArrayList<>(items.size());
+
+        for (int i = 0; i < items.size(); i++) {
+            String path = itemPath + ".effects[" + i + "]";
+            JsonHub effect = items.get(i);
+            String opName = JsonAccess.string(effect, "op", path).trim().toUpperCase(java.util.Locale.ROOT);
+
+            EventEffect.Op op;
+            try {
+                op = EventEffect.Op.valueOf(opName);
+            } catch (IllegalArgumentException e) {
+                throw new ConfigException(path + ".op",
+                        "未知效果类型: " + opName + "（可选 set / add / pulse / shift / resume）");
+            }
+
+            try {
+                effects.add(new EventEffect(
+                        JsonAccess.integer(effect, "svid", path),
+                        op,
+                        boxedOptionalDouble(effect, "value"),
+                        boxedOptionalDouble(effect, "delta"),
+                        effect.containsKey("holdMs") ? JsonAccess.longValue(effect, "holdMs", path) : null,
+                        effect.containsKey("decayMs") ? JsonAccess.longValue(effect, "decayMs", path) : null));
+            } catch (IllegalArgumentException e) {
+                throw new ConfigException(path, e.getMessage());
+            }
+        }
+        return effects;
+    }
+
+    /** OptionalDouble → 装箱可空（JSON 字段缺失时为 {@code null}）。 */
+    private static Double boxedOptionalDouble(JsonHub jh, String key) {
+        return JsonAccess.optionalDouble(jh, key, ROOT + "." + key)
+                .stream()
+                .mapToObj(value -> value)
+                .findFirst()
+                .orElse(null);
     }
 
     /** 校验 AfterEvent 引用存在且无环；区间/条件触发不参与图。 */

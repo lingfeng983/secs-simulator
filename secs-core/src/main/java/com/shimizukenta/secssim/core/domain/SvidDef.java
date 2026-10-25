@@ -14,8 +14,25 @@ package com.shimizukenta.secssim.core.domain;
  * @param decimals   显示小数位，≥ 0
  * @param min        值域下界
  * @param max        值域上界
+ * @param source     直配值来源（schema v6，可选；{@code null} 用默认曲线）
  */
-public record SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min, double max) {
+public record SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min, double max,
+                      DirectSource source) {
+
+    /**
+     * 兼容旧调用的构造：不配值来源。
+     *
+     * @param offset     段内偏移
+     * @param slot       符号名
+     * @param type       类型
+     * @param unitSymbol 单位
+     * @param decimals   小数位
+     * @param min        下界
+     * @param max        上界
+     */
+    public SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min, double max) {
+        this(offset, slot, type, unitSymbol, decimals, min, max, null);
+    }
 
     /**
      * 校验并创建。

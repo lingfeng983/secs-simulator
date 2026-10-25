@@ -11,6 +11,9 @@ import {
   templateOutputs,
   uniqueId,
   isExpressionName,
+  effectFieldSpecs,
+  defaultEffect,
+  svidSourceKind,
   type JsonObject,
 } from './templateConfig';
 
@@ -265,3 +268,58 @@ function objectField(value: JsonObject, key: string): JsonObject {
   const child = value[key];
   return typeof child === 'object' && child !== null && !Array.isArray(child) ? (child as JsonObject) : {};
 }
+
+/* ===== schema v6:效果 op 与 SVID 直配形态 ===== */
+
+describe('v6 effect helpers', () => {
+  it('effectFieldSpecs 覆盖五种 op', () => {
+    expect(effectFieldSpecs('set').map((f) => f.key)).toEqual(['value', 'decayMs']);
+    expect(effectFieldSpecs('add').map((f) => f.key)).toEqual(['delta']);
+    expect(effectFieldSpecs('pulse').map((f) => f.key)).toEqual(['value', 'holdMs']);
+    expect(effectFieldSpecs('resume')).toEqual([]);
+  });
+
+  it('defaultEffect 只带该 op 需要的字段', () => {
+    expect(defaultEffect('pulse', 1001)).toEqual({ svid: 1001, op: 'pulse', value: 0, holdMs: 5000 });
+    expect(defaultEffect('resume', 1001)).toEqual({ svid: 1001, op: 'resume' });
+  });
+});
+
+describe('v6 svidSourceKind', () => {
+  const doc = (svid: JsonObject): JsonObject => ({
+    equipment: { units: [{ name: 'CH1', svids: [svid] }] },
+  });
+
+  it('识别三种形态', () => {
+    expect(svidSourceKind({ offset: 1, slot: 'A', type: 'F4' })).toBe('default');
+    expect(svidSourceKind({ offset: 1, slot: 'A', type: 'F4', curve: { type: 'constant', value: 1 } })).toBe('curve');
+    expect(svidSourceKind({ offset: 1, slot: 'A', type: 'F4', template: 't1' })).toBe('template');
+  });
+
+  it('文档透传:editDocument 保留 svid 上的 v6 字段', () => {
+    const text = JSON.stringify({
+      schemaVersion: 6,
+      equipment: {
+        units: [{
+          name: 'CH1',
+          svids: [{ offset: 1, slot: 'A', type: 'F4', curve: { type: 'constant', value: 7 } }],
+        }],
+      },
+      events: { plans: [{ id: 'p1', ceid: 2001, trigger: { type: 'periodic', periodMs: 1000 }, effects: [{ svid: 1001, op: 'pulse', value: 9, holdMs: 1000 }] }] },
+    });
+    const result = editDocument(text, (root) => {
+      const unit = (root.equipment as JsonObject) as JsonObject;
+      const units = unit.units as JsonObject[];
+      const svid = units[0].svids as JsonObject[];
+      svid[0].slot = 'B';
+      const plans = ((root.events as JsonObject).plans) as JsonObject[];
+      plans[0].ceid = 2002;
+    });
+    expect(result.ok).toBe(true);
+    const reparsed = JSON.parse((result as { ok: true; text: string }).text);
+    const svid = reparsed.equipment.units[0].svids[0];
+    expect(svid.slot).toBe('B');
+    expect(svid.curve).toEqual({ type: 'constant', value: 7 });
+    expect(reparsed.events.plans[0].effects).toEqual([{ svid: 1001, op: 'pulse', value: 9, holdMs: 1000 }]);
+  });
+});

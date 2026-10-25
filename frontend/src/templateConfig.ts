@@ -136,6 +136,57 @@ export const SECS_TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4',
 export const TRIGGER_TYPES = ['at', 'periodic', 'onCondition', 'afterEvent'] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
+/** 事件效果的 op（schema v6，docs/redesign-device-workbench.md §1.1）。 */
+export const EFFECT_OPS = ['set', 'add', 'pulse', 'shift', 'resume'] as const;
+export type EffectOp = (typeof EFFECT_OPS)[number];
+
+export function isEffectOp(value: unknown): value is EffectOp {
+  return typeof value === 'string' && (EFFECT_OPS as readonly string[]).includes(value);
+}
+
+/** 某个 op 的参数字段；set 的 decayMs 可省略。 */
+export function effectFieldSpecs(op: EffectOp): { key: string; label: string; optional?: boolean }[] {
+  switch (op) {
+    case 'set':
+      return [{ key: 'value', label: '值' }, { key: 'decayMs', label: '衰减 ms', optional: true }];
+    case 'add':
+    case 'shift':
+      return [{ key: 'delta', label: '增量' }];
+    case 'pulse':
+      return [{ key: 'value', label: '值' }, { key: 'holdMs', label: '保持 ms' }];
+    case 'resume':
+      return [];
+  }
+}
+
+/** 一种 op 的默认效果对象。 */
+export function defaultEffect(op: EffectOp, svid: number): JsonObject {
+  switch (op) {
+    case 'set':
+      return { svid, op, value: 0 };
+    case 'add':
+    case 'shift':
+      return { svid, op, delta: 0 };
+    case 'pulse':
+      return { svid, op, value: 0, holdMs: 5_000 };
+    case 'resume':
+      return { svid, op };
+  }
+}
+
+/** SVID 直配值来源形态（schema v6；default = 默认随机游走）。 */
+export type SourceKind = 'default' | 'curve' | 'template';
+
+export function svidSourceKind(def: JsonObject): SourceKind {
+  if (isJsonObject(def.curve)) {
+    return 'curve';
+  }
+  if (typeof def.template === 'string') {
+    return 'template';
+  }
+  return 'default';
+}
+
 export function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

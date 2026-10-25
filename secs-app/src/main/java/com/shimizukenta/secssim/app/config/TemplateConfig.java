@@ -6,6 +6,7 @@ import java.util.Map;
 
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.curve.Curve;
+import com.shimizukenta.secssim.core.domain.DirectSource;
 import com.shimizukenta.secssim.core.template.CompositeTemplate;
 import com.shimizukenta.secssim.core.template.Expression;
 import com.shimizukenta.secssim.core.template.GraphException;
@@ -66,6 +67,23 @@ public record TemplateConfig(List<CurveDef> curves, List<CompositeDef> composite
      * @throws ConfigException 未知模板/SVID、输出名不匹配、环或单写者冲突
      */
     public TemplateGraph build(ResolvedEquipment equipment) {
+        return this.buildWithDirect(equipment, Map.of());
+    }
+
+    /**
+     * 构建模板图（schema v6）：用户实例 + SVID 直配合成的实例。
+     *
+     * <p>直配（{@code svids[].curve} / {@code svids[].template}）在编译期
+     * 合成单输出的匿名实例——单写者、环、未知引用因此全部走模板图同一道门，
+     * 不会出现两套各查各的规则。匿名实例/曲线用 {@code @} 前缀命名，
+     * 与用户起的 id 冲突时报"模板 id 重复"。</p>
+     *
+     * @param equipment 已编译的设备模型
+     * @param direct    绝对 SVID → 直配来源
+     * @return 模板图
+     * @throws ConfigException 未知模板/SVID、输出名不匹配、环或单写者冲突
+     */
+    public TemplateGraph buildWithDirect(ResolvedEquipment equipment, Map<Integer, DirectSource> direct) {
         Map<String, Template> templates = new LinkedHashMap<>();
 
         for (CurveDef def : this.curves) {
@@ -105,6 +123,45 @@ public record TemplateConfig(List<CurveDef> curves, List<CompositeDef> composite
                     : ParameterLayers.empty().with(ParameterLayers.Layer.UNIT, def.params());
 
             graph.add(new TemplateGraph.Instance(def.id(), template, def.svids(), params));
+        }
+
+        for (Map.Entry<Integer, DirectSource> entry : direct.entrySet()) {
+            int svid = entry.getKey();
+            DirectSource source = entry.getValue();
+            Template template;
+            String output;
+
+            if (source.curve() != null) {
+                String curveId = "@curve:" + svid;
+                putTemplate(templates, curveId, new SingleCurveTemplate(curveId, source.curve()));
+                template = templates.get(curveId);
+                output = SingleCurveTemplate.OUTPUT;
+            } else {
+                template = templates.get(source.template());
+                if (template == null) {
+                    throw new ConfigException("$.equipment",
+                            "SVID " + svid + " 直配引用了未知模板: " + source.template());
+                }
+                if (source.output() != null) {
+                    output = source.output();
+                    if (!template.outputs().contains(output)) {
+                        throw new ConfigException("$.equipment",
+                                "SVID " + svid + " 直配的 output 在模板里不存在: " + output
+                                        + "（可用: " + template.outputs() + "）");
+                    }
+                } else if (template.outputs().size() == 1) {
+                    output = template.outputs().getFirst();
+                } else {
+                    throw new ConfigException("$.equipment",
+                            "SVID " + svid + " 直配的组合模板有多个输出，需要 output 字段指定: " + template.outputs());
+                }
+            }
+
+            ParameterLayers params = source.params().isEmpty()
+                    ? ParameterLayers.empty()
+                    : ParameterLayers.empty().with(ParameterLayers.Layer.UNIT, source.params());
+
+            graph.add(new TemplateGraph.Instance("@svid:" + svid, template, Map.of(output, svid), params));
         }
 
         try {
