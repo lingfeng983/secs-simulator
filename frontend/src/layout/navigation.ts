@@ -4,46 +4,91 @@ import type { Route } from '../router';
 /**
  * 导航结构（单一事实来源）。
  *
- * <p>v6 两层信息架构:静态入口只有「工作台」与「系统」两组;
- * 「设备」组是动态的（来自会话列表）,由 Sidebar 直接渲染。
- * 设备页内部的 监控/配置/工具 Tab 也不进这份表——它们是设备页的状态。</p>
+ * <p>拆分后的信息架构:静态入口每个只代表一个页面、一个核心能力;
+ * 「设备」组是动态的（来自会话列表）,由 Sidebar 渲染在上下两组之间。
+ * 设备内部的子页也不进这份表——它们是设备页的状态。</p>
  */
 
 export interface NavItemDef {
-  /** 面板 id。 */
+  /** 面板 id（命令面板/快捷键引用）。 */
   id: string;
   /** 菜单上的短名称。 */
   label: string;
   /** 顶栏标题下的一句话说明。 */
   description: string;
   icon: IconName;
+  /** 该入口对应的路由。 */
+  route: Route;
 }
 
 export interface NavGroupDef {
   id: string;
   label: string;
+  /** true = 渲染在「设备」动态组下方（管理类入口）。 */
+  belowDevices?: boolean;
   items: readonly NavItemDef[];
 }
 
 export const NAV_GROUPS: readonly NavGroupDef[] = [
   {
     id: 'workbench',
-    label: '工作台',
+    label: '总览',
     items: [
       {
         id: 'workbench',
         label: '工作台',
-        description: '所有设备的总监控:卡片墙、实时事件流、报文与会话管理。',
+        description: '所有设备的总览:KPI 与设备卡墙,点卡片进设备页。',
         icon: 'overview',
+        route: { name: 'workbench' },
       },
     ],
   },
   {
-    id: 'system',
-    label: '系统',
+    id: 'live',
+    label: '实时',
     items: [
-      { id: 'audit', label: '审计', description: '谁在什么时候动了什么：操作留痕。', icon: 'audit' },
-      { id: 'console', label: '事件流日志', description: 'SSE 事件通道的运行日志与连接状态。', icon: 'console' },
+      {
+        id: 'events',
+        label: '事件流',
+        description: '全部设备的实时事件(S6F11),按设备/CEID 过滤。',
+        icon: 'events',
+        route: { name: 'view', page: 'events' },
+      },
+      {
+        id: 'messages',
+        label: '报文',
+        description: 'HSMS 报文流:搜索、查看 SML、导出 JSONL。',
+        icon: 'messages',
+        route: { name: 'view', page: 'messages' },
+      },
+    ],
+  },
+  {
+    id: 'manage',
+    label: '管理',
+    belowDevices: true,
+    items: [
+      {
+        id: 'sessions',
+        label: '会话管理',
+        description: '开设备/关设备、批量操作、手动上报 CEID。',
+        icon: 'sessions',
+        route: { name: 'view', page: 'sessions' },
+      },
+      {
+        id: 'audit',
+        label: '审计',
+        description: '谁在什么时候动了什么：操作留痕。',
+        icon: 'audit',
+        route: { name: 'system', page: 'audit' },
+      },
+      {
+        id: 'console',
+        label: '事件流日志',
+        description: 'SSE 事件通道的运行日志与连接状态。',
+        icon: 'console',
+        route: { name: 'system', page: 'console' },
+      },
     ],
   },
 ];
@@ -53,22 +98,16 @@ export const NAV_ITEMS: readonly NavItemDef[] = NAV_GROUPS.flatMap((group) => gr
 
 /** 路由 → 顶栏标题（设备页在 Sidebar 里动态列出,标题在 App 单独拼）。 */
 export function routeTitle(route: Route): { group: string; label: string; description: string } {
-  if (route.name === 'workbench') {
-    const item = NAV_ITEMS.find((entry) => entry.id === 'workbench');
-    return { group: '工作台', label: item?.label ?? '工作台', description: item?.description ?? '' };
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (
+        (route.name === 'workbench' && item.id === 'workbench')
+        || (route.name === 'view' && item.id === route.page)
+        || (route.name === 'system' && item.id === route.page)
+      ) {
+        return { group: group.label, label: item.label, description: item.description };
+      }
+    }
   }
-  if (route.name === 'system') {
-    const id = route.page === 'audit' ? 'audit' : 'console';
-    const item = NAV_ITEMS.find((entry) => entry.id === id);
-    return { group: '系统', label: item?.label ?? id, description: item?.description ?? '' };
-  }
-  return {
-    group: '设备',
-    label: route.sessionId,
-    description: route.tab === 'monitor'
-      ? '该设备的曲线、事件、报警与目录。'
-      : route.tab === 'config'
-        ? '该设备的配置:分段编辑、每 SVID 值来源与曲线预览。'
-        : '该设备的工具:发送、压测、主机模拟与 S1F3 采集。',
-  };
+  return { group: '', label: '', description: '' };
 }

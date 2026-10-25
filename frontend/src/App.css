@@ -38,6 +38,12 @@
   --line: #dbe1ea;
   --line-soft: #eaeef4;
 
+  /* 历史别名(v6 追加段在用,统一指向既有令牌;新代码请用右侧原名) */
+  --border: var(--line);
+  --surface: var(--bg-raised);
+  --surface-2: var(--bg-soft);
+  --text-muted: var(--muted);
+
   /* 主色与状态 */
   --accent: #3b5bdb;
   --accent-strong: #2f49ae;
@@ -194,6 +200,7 @@ kbd {
 
 .mono {
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .nowrap {
@@ -484,7 +491,8 @@ textarea::placeholder {
   background: var(--bg-soft);
 }
 
-.segment {
+.segment,
+.segmented > button {
   border: none;
   background: transparent;
   color: var(--muted);
@@ -494,13 +502,15 @@ textarea::placeholder {
   font-weight: 500;
 }
 
-.segment:hover:not(:disabled) {
+.segment:hover:not(:disabled),
+.segmented > button:hover:not(:disabled) {
   background: transparent;
   border: none;
   color: var(--fg);
 }
 
-.segment.active {
+.segment.active,
+.segmented > button.active {
   background: var(--bg-raised);
   color: var(--accent);
   font-weight: 600;
@@ -1209,10 +1219,6 @@ textarea::placeholder {
   text-align: right;
 }
 
-.align-center {
-  text-align: center;
-}
-
 .table-pager {
   display: flex;
   flex-wrap: wrap;
@@ -1605,152 +1611,6 @@ textarea::placeholder {
 }
 
 /* ==========================================================================
-   12. 总览工作台
-   ========================================================================== */
-
-.ov-page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.ov-kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
-  gap: 0.75rem;
-}
-
-.ov-kpis .stat-card {
-  padding: 0.75rem 0.9rem;
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-sm);
-}
-
-.ov-kpis .stat-value {
-  font-size: 1.3rem;
-}
-
-.ov-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  align-items: start;
-}
-
-.ov-card {
-  margin-bottom: 0;
-}
-
-.panel-head-lite {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.8rem;
-}
-
-.ov-card-title {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-
-.ov-card-meta {
-  font-size: 11px;
-  color: var(--muted);
-  text-align: right;
-}
-
-.quick-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.mini-feed {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.mini-feed-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.1rem;
-  border-bottom: 1px dashed var(--line-soft);
-  font-size: 12px;
-  min-width: 0;
-}
-
-.mini-feed-row:last-child {
-  border-bottom: none;
-}
-
-.feed-dir {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 21px;
-  height: 21px;
-  border-radius: var(--radius-xs);
-  flex: 0 0 auto;
-}
-
-.feed-dir.in {
-  color: var(--warn);
-  background: var(--warn-soft);
-}
-
-.feed-dir.out {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.feed-sxfy {
-  color: var(--fg-strong);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.feed-session {
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.feed-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-
-.feed-time {
-  margin-left: auto;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
-.feed-log-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
-}
-
-/* ==========================================================================
    13. 浮层与提示
    ========================================================================== */
 
@@ -1920,6 +1780,7 @@ textarea::placeholder {
 
 .palette-input:focus-visible {
   outline: none;
+  border-bottom-color: var(--accent);
 }
 
 .palette-list {
@@ -2462,9 +2323,6 @@ textarea::placeholder {
     width: auto;
   }
 
-  .ov-kpis {
-    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-  }
 }
 
 /* 尊重系统的减少动效偏好 */
@@ -2552,18 +2410,17 @@ textarea::placeholder {
   font-size: 13px;
 }
 .live-event-list li { display: flex; gap: 10px; align-items: baseline; padding: 2px 6px; border-radius: 6px; }
-.live-event-list li:nth-child(odd) { background: var(--surface-2, rgba(128,128,128,0.08)); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
-.link { color: var(--accent, #4493f8); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font: inherit; }
+.live-event-list li:nth-child(odd) { background: var(--surface-2); }
+.link { color: var(--accent); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font: inherit; }
 .hint-inline { color: var(--text-muted); font-size: 12px; }
+
+/* 过滤/操作行:输入框 + 分段控件/按钮的通用排布 */
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .device-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .device-name { margin: 0; font-size: 20px; }
 .device-header-sub { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; }
 .device-tabs { margin: 4px 0; }
-
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 1100px) { .two-col { grid-template-columns: 1fr; } }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
@@ -2595,10 +2452,11 @@ textarea::placeholder {
 
 .nav-empty { font-size: 12px; color: var(--text-muted); padding: 2px 10px; margin: 0; }
 
-.badge.tone-ok { color: #1a7f37; }
-.badge.tone-warn { color: #b0700f; }
-.badge.tone-info { color: var(--accent, #4493f8); }
-.badge.tone-muted { color: var(--text-muted); }
+.badge.tone-ok { background: var(--ok-soft); color: var(--ok); }
+.badge.tone-warn { background: var(--warn-soft); color: var(--warn); }
+.badge.tone-danger { background: var(--danger-soft); color: var(--danger); }
+.badge.tone-info { background: var(--accent-soft); color: var(--accent); }
+.badge.tone-muted { background: var(--bg-sunken); color: var(--muted); }
 
 /* 采集卡里的 spark:卡宽有限,三列 grid 会把画布挤扁,改纵向堆叠 */
 .collector-chart .spark {

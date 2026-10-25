@@ -10,6 +10,7 @@ import {
   type ConfigProblems,
   type ConfigSaveResult,
   type ConfigTemplateEntry,
+  type ConfigTextSnapshot,
   type EventPlanView,
   type Health,
   type PreviewData,
@@ -18,6 +19,8 @@ import {
   type TerminalMessage,
 } from '../api';
 import { mergeMessages, type MessageEntry } from '../messageHistory';
+import { ceidFromS6f11Body } from '../lib/format';
+import type { NoticeWire } from './useEventStream';
 import type { Notifier } from './useToasts';
 import { useSessionCommands } from './useSessionCommands';
 import { useConfigCommands } from './useConfigCommands';
@@ -38,9 +41,6 @@ const INTERVAL = {
   /** 配置目录：低频。 */
   config: 5000,
 } as const;
-
-/** 预览曲线默认桶数。 */
-const PREVIEW_BUCKETS = 120;
 
 /** 事件流日志保留的条数。 */
 const MAX_LOG = 400;
@@ -73,6 +73,19 @@ export interface BackendController {
   catalog: Catalog | null;
   eventPlans: EventPlanView[];
   auditEntries: AuditEntryView[];
+  /** 「载入更早」翻出来的更旧审计页(轮询不刷新它,随过滤变化清空)。 */
+  auditOlder: AuditEntryView[];
+  /** 审计服务端过滤(action/actor 精确匹配,空串=全部);轮询也带着它取数。 */
+  auditFilter: { action: string; actor: string };
+  /** 设置审计过滤并立刻按新过滤取一次。 */
+  setAuditFilter: (filter: { action?: string; actor?: string }) => Promise<void>;
+  /** 审计「载入更早」:以当前视图最早一条为游标向更早翻一页。 */
+  loadAuditOlder: () => Promise<void>;
+  /**
+   * 事件流「载入历史」:从报文历史取最近的 S6F11 并反解 CEID。
+   * 历史报文没有类型化事件,CEID 从 body 的第二个数值项反解,仅供参考展示。
+   */
+  loadEventHistory: () => Promise<NoticeWire[]>;
   configList: ConfigEntry[];
 
   messages: MessageEntry[];
@@ -87,8 +100,6 @@ export interface BackendController {
   preview: PreviewData | null;
   previewSession: string;
 
-  /** 上次成功刷新的时间戳。 */
-  lastRefresh: number;
   /** 正在刷新（用于按钮上的等待态）。 */
   refreshing: boolean;
 
@@ -125,24 +136,24 @@ export interface BackendController {
   createConfig: (name: string, templateId?: string) => Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
   configTemplates: () => Promise<ConfigTemplateEntry[]>;
-  /** 读配置原文；读不到返回 null。 */
-  readConfig: (name: string) => Promise<string | null>;
+  /** 读配置原文(带 modifiedMs 快照);读不到返回 null。 */
+  readConfig: (name: string) => Promise<ConfigTextSnapshot | null>;
   /** 只校验不落盘。 */
   validateConfig: (name: string, text: string) => Promise<ConfigProblems | null>;
-  /** 校验通过后落盘。 */
-  saveConfig: (name: string, text: string) => Promise<ConfigSaveResult | null>;
+  /** 校验通过后落盘;expectedModifiedMs 非空时 If-Match 并发保护,被改过回 409。 */
+  saveConfig: (name: string, text: string, expectedModifiedMs?: number | null) => Promise<ConfigSaveResult | null>;
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession: (sessionId: string) => Promise<void>;
   trigger: (sessionId: string, ceid: number) => Promise<void>;
   setAlarm: (sessionId: string, alid: number, set: boolean, text: string, category: number) => Promise<void>;
   toggleEvent: (plan: EventPlanView) => Promise<void>;
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
-  loadHistory: () => Promise<void>;
+  /** 载入报文历史;可按会话与方向过滤,before>0 时向更早翻页(服务端最多保留最近 5000 条)。 */
+  loadHistory: (session?: string, direction?: string, before?: number) => Promise<void>;
   /** SSE 重连后补拉断线期间的增量报文。 */
   backfillAfterReconnect: () => Promise<void>;
   exportMessages: () => Promise<void>;
   downloadPreview: (windowMs: number) => Promise<void>;
-  fetchPreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
   /** 配置草稿的曲线预览（编辑器里改模板直接看效果）。 */
   draftPreview: PreviewData | null;
   previewDraft: (text: string, windowMs: number) => Promise<void>;
@@ -228,7 +239,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [draftPreview, setDraftPreview] = useState<PreviewData | null>(null);
   const [compareSession, setCompareSessionId] = useState('');
   const [previewSession, setPreviewSession] = useState('');
-  const [lastRefresh, setLastRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
   const [hostSimOpen, setHostSimOpen] = useState(false);
@@ -303,15 +313,79 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
+  /** 审计的服务端过滤(action/actor 精确匹配);每次轮询都带着它取数。 */
+  const [auditFilter, setAuditFilterState] = useState<{ action: string; actor: string }>({ action: '', actor: '' });
+  const auditFilterRef = useRef(auditFilter);
+  auditFilterRef.current = auditFilter;
+  /** 「载入更早」翻出来的更旧审计页;轮询只刷新最近窗口,不碰这里。 */
+  const [auditOlder, setAuditOlder] = useState<AuditEntryView[]>([]);
+
   const refreshAudit = useCallback(async () => {
     if (client === null) {
       setAuditEntries([]);
       return;
     }
     try {
-      setAuditEntries(await client.audit(200));
+      setAuditEntries(await client.audit(200, auditFilterRef.current));
     } catch {
       setAuditEntries([]);
+    }
+  }, [client]);
+
+  /** 设置审计过滤并立刻按新过滤取一次(轮询此后也一直带着它);翻页缓存随之清空。 */
+  const setAuditFilter = useCallback(async (filter: { action?: string; actor?: string }) => {
+    setAuditFilterState((previous) => ({ ...previous, ...filter }));
+    setAuditOlder([]);
+    /* 用最新过滤直接取,不等下一次轮询 */
+    if (client !== null) {
+      try {
+        setAuditEntries(await client.audit(200, { ...auditFilterRef.current, ...filter }));
+      } catch {
+        /* 取失败就留给下一轮轮询 */
+      }
+    }
+  }, [client]);
+
+  /** 审计「载入更早」:以当前视图最早一条为游标向更早翻一页,合并进 auditOlder。 */
+  const loadAuditOlder = useCallback(async () => {
+    if (client === null) {
+      return;
+    }
+    const oldest = Math.min(
+      ...[...auditEntries, ...auditOlder].map((entry) => entry.at),
+      Number.POSITIVE_INFINITY,
+    );
+    if (!Number.isFinite(oldest)) {
+      return;
+    }
+    try {
+      const page = await client.audit(200, { ...auditFilterRef.current, before: oldest });
+      setAuditOlder((previous) => {
+        const seen = new Set(previous.map(auditEntryKey));
+        const fresh = page.filter((entry) => !seen.has(auditEntryKey(entry)));
+        return [...previous, ...fresh].sort((left, right) => right.at - left.at);
+      });
+    } catch (error) {
+      notifierRef.current.error('载入更早的审计失败', (error as Error).message);
+    }
+  }, [client, auditEntries, auditOlder]);
+
+  /** 事件流「载入历史」:取最近 500 条 S6F11 报文,反解 CEID 后转成类型化事件视图。 */
+  const loadEventHistory = useCallback(async (): Promise<NoticeWire[]> => {
+    if (client === null) {
+      return [];
+    }
+    try {
+      const page = await client.messages('', '', 500, { stream: 6, function: 11 });
+      return page.messages.map((msg) => ({
+        type: 's6f11' as const,
+        sessionId: msg.sessionId,
+        at: msg.at,
+        data: { ceid: ceidFromS6f11Body(msg.body) },
+      }));
+    } catch (error) {
+      notifierRef.current.error('载入事件历史失败', (error as Error).message);
+      return [];
     }
   }, [client]);
 
@@ -449,7 +523,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         refreshLogLevel(),
         refreshOverview(),
       ]);
-      setLastRefresh(Date.now());
     } finally {
       setRefreshing(false);
     }
@@ -564,7 +637,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         return;
       }
       let hot = 0;
-      let rebuilt = 0;
       for (const session of sessions) {
         try {
           const status = await client.reloadSession(session.id);
@@ -575,7 +647,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
           /* 单个会话重载失败不阻断其余 */
         }
       }
-      if (hot + rebuilt > 0) {
+      if (hot > 0) {
         notifierRef.current.info(`配置已生效：${hot} 个会话已重载（连接标识未变的走热生效，主机不断连）`);
       }
       await refreshSessions();
@@ -811,6 +883,11 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       catalog,
       eventPlans,
       auditEntries,
+      auditOlder,
+      auditFilter,
+      setAuditFilter,
+      loadAuditOlder,
+      loadEventHistory,
       configList,
       messages,
       messageTotal,
@@ -819,7 +896,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       clearLog,
       preview,
       previewSession,
-      lastRefresh,
       refreshing,
       refreshAll,
       refreshSessions,
@@ -860,6 +936,11 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       catalog,
       eventPlans,
       auditEntries,
+      auditOlder,
+      auditFilter,
+      setAuditFilter,
+      loadAuditOlder,
+      loadEventHistory,
       configList,
       messages,
       messageTotal,
@@ -868,7 +949,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       clearLog,
       preview,
       previewSession,
-      lastRefresh,
       refreshing,
       refreshAll,
       refreshSessions,
@@ -895,4 +975,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       collectorCommand,
     ],
   );
+}
+
+/** 审计条目的去重键:翻页合并与轮询刷新的联合视图用。 */
+function auditEntryKey(entry: AuditEntryView): string {
+  return `${entry.at}-${entry.actor}-${entry.action}-${entry.target}-${entry.detail}`;
 }

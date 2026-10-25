@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../types';
 import type { CollectorConfigInput, CollectorState, PreviewSeries } from '../../api';
 import { Sparkline } from '../../charts/Sparkline';
+import { downloadText, safeFilename } from '../../lib/table';
+import { CeidDatalist } from '../../ui/CeidPicker';
 
 /** 每 SVID 曲线的重采样桶数(画图用,原始采样不均匀)。 */
 const CHART_BUCKETS = 120;
@@ -43,19 +45,34 @@ export function CollectorCard({ backend, notifier, sessionId }: PanelBaseProps &
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  /* 运行中每 2 秒拉一次数据 */
+  /* 运行中每 2 秒拉一次数据;页面在后台时暂停,回前台立刻补一拍(与全局调度器同语义) */
   useEffect(() => {
     if (!state?.running && !state?.configured) {
       return;
     }
-    const timer = window.setInterval(() => {
+    let stopped = false;
+    const poll = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
       void backend.collectorState(sessionId).then((value) => {
-        if (value !== null) {
+        if (!stopped && value !== null) {
           setState(value);
         }
       });
-    }, 2000);
-    return () => window.clearInterval(timer);
+    };
+    const timer = window.setInterval(poll, 2000);
+    const onVisible = () => {
+      if (!document.hidden) {
+        poll();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [backend, sessionId, state?.running, state?.configured]);
 
   const parseSvids = useCallback((text: string): number[] => {
@@ -118,26 +135,19 @@ export function CollectorCard({ backend, notifier, sessionId }: PanelBaseProps &
       notifier.info('还没有可导出的数据');
       return;
     }
-    const header = 'timestamp,svid,name,value';
-    const lines: string[] = [header];
+    const lines: string[] = ['timestamp,svid,name,value'];
     for (const item of series) {
       for (let i = 0; i < item.t.length; i++) {
         lines.push(`${new Date(item.t[i]).toISOString()},${item.svid},${item.name ?? ''},${item.v[i]}`);
       }
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `collector-${sessionId}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadText(`collector-${safeFilename(sessionId)}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
   };
 
   const seriesList = state?.series ?? [];
 
   return (
-    <section className="panel-section">
+    <section className="panel-section" id="panel-collector">
       <div className="section-head">
         <h2>S1F3 数据采集（主机侧拉取）</h2>
         <span className={`badge ${state?.running ? 'tone-ok' : 'tone-muted'}`}>
@@ -186,13 +196,7 @@ export function CollectorCard({ backend, notifier, sessionId }: PanelBaseProps &
             placeholder="如 1001, 1003"
           />
         </label>
-        <datalist id="collector-ceid-choices">
-          {(backend.catalog?.ceids ?? []).map((choice) => (
-            <option key={choice.ceid} value={choice.ceid}>
-              {choice.slot}
-            </option>
-          ))}
-        </datalist>
+        <CeidDatalist id="collector-ceid-choices" ceids={backend.catalog?.ceids ?? []} />
         {svidChoices.length > 0 && (
           <datalist id="collector-svid-choices">
             {svidChoices.map((choice) => (
@@ -252,12 +256,16 @@ export function CollectorCard({ backend, notifier, sessionId }: PanelBaseProps &
         )}
       </div>
 
-      {seriesList.length > 0 && (
+      {seriesList.length > 0 ? (
         <div className="collector-charts">
           {seriesList.map((item) => (
             <CollectorChart key={item.svid} item={item} />
           ))}
         </div>
+      ) : (
+        <p className="hint">
+          尚未采集到数据。下发配置后「手动开始」调试,或等启动 CEID 的 S6F11 触发;采到数据后这里实时画图。
+        </p>
       )}
     </section>
   );

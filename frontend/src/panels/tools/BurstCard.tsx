@@ -1,6 +1,14 @@
 import { useState } from 'react';
 import type { PanelBaseProps } from '../types';
 import type { BurstRequest } from '../../api';
+import { CeidChips, CeidDatalist } from '../../ui/CeidPicker';
+import { downloadText, safeFilename } from '../../lib/table';
+
+/** 一次压测的完整留档:请求参数 + 服务端统计。 */
+interface BurstRun {
+  request: BurstRequest;
+  stats: { sent: number; failed: number; durationMs: number; latencyP50: number; latencyP95: number; latencyMax: number };
+}
 
 /**
  * 服务端压测卡（schema v6 需求③的"自定义消息压测 / 特定事件压测"）。
@@ -17,7 +25,7 @@ export function BurstCard({ backend, notifier, sessionId, catalogHint }: PanelBa
   const [ceid, setCeid] = useState('');
   const [alid, setAlid] = useState('');
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ sent: number; failed: number; durationMs: number; latencyP50: number; latencyP95: number; latencyMax: number } | null>(null);
+  const [result, setResult] = useState<BurstRun | null>(null);
 
   const ceidChoices = backend.catalog?.ceids ?? [];
 
@@ -58,7 +66,7 @@ export function BurstCard({ backend, notifier, sessionId, catalogHint }: PanelBa
     setResult(null);
     try {
       const stats = await backend.burst(sessionId, request);
-      setResult(stats);
+      setResult({ request, stats });
       notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
     } catch (error) {
       notifier.error(`压测失败: ${(error as Error).message}`);
@@ -67,8 +75,31 @@ export function BurstCard({ backend, notifier, sessionId, catalogHint }: PanelBa
     }
   };
 
+  const exportResult = () => {
+    if (result === null) {
+      return;
+    }
+    const kindLabel = { message: '自定义消息', ceid: '特定事件', alarm: '报警风暴' }[result.request.kind];
+    const rows: (string | number)[][] = [
+      ['压测类型', '次数', '间隔ms', '成功', '失败', '总耗时ms', 'P50ms', 'P95ms', 'Maxms'],
+      [
+        kindLabel,
+        result.request.count,
+        result.request.intervalMs ?? 0,
+        result.stats.sent,
+        result.stats.failed,
+        result.stats.durationMs,
+        result.stats.latencyP50,
+        result.stats.latencyP95,
+        result.stats.latencyMax,
+      ],
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    downloadText(`burst-${safeFilename(sessionId)}-${Date.now()}.csv`, `﻿${csv}`, 'text/csv;charset=utf-8');
+  };
+
   return (
-    <section className="panel-section">
+    <section className="panel-section" id="panel-burst">
       <div className="section-head">
         <h2>压测（服务端循环）</h2>
       </div>
@@ -126,22 +157,8 @@ export function BurstCard({ backend, notifier, sessionId, catalogHint }: PanelBa
               placeholder="如 2001"
             />
           </label>
-          <datalist id="burst-ceid-choices">
-            {ceidChoices.map((choice) => (
-              <option key={choice.ceid} value={choice.ceid}>
-                {choice.slot}
-              </option>
-            ))}
-          </datalist>
-          {ceidChoices.length > 0 && (
-            <div className="chip-row">
-              {ceidChoices.slice(0, 12).map((choice) => (
-                <button key={choice.ceid} type="button" className="chip" onClick={() => setCeid(String(choice.ceid))}>
-                  +{choice.ceid}
-                </button>
-              ))}
-            </div>
-          )}
+          <CeidDatalist id="burst-ceid-choices" ceids={ceidChoices} />
+          <CeidChips ceids={ceidChoices} onPick={(value) => setCeid(String(value))} />
         </div>
       )}
       {kind === 'alarm' && (
@@ -156,12 +173,15 @@ export function BurstCard({ backend, notifier, sessionId, catalogHint }: PanelBa
 
       {result !== null && (
         <div className="burst-result">
-          <span>成功 <b>{result.sent}</b></span>
-          <span className={result.failed > 0 ? 'danger' : ''}>失败 <b>{result.failed}</b></span>
-          <span>耗时 {result.durationMs}ms</span>
-          <span>P50 {result.latencyP50}ms</span>
-          <span>P95 {result.latencyP95}ms</span>
-          <span>Max {result.latencyMax}ms</span>
+          <span>成功 <b>{result.stats.sent}</b></span>
+          <span className={result.stats.failed > 0 ? 'danger' : ''}>失败 <b>{result.stats.failed}</b></span>
+          <span>耗时 {result.stats.durationMs}ms</span>
+          <span>P50 {result.stats.latencyP50}ms</span>
+          <span>P95 {result.stats.latencyP95}ms</span>
+          <span>Max {result.stats.latencyMax}ms</span>
+          <button type="button" onClick={exportResult} title="把本次压测参数与统计导出为 CSV">
+            导出 CSV
+          </button>
         </div>
       )}
     </section>

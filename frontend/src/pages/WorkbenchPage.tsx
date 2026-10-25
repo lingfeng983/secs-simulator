@@ -1,25 +1,16 @@
 import { useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { controlStateLabel } from '../panels/SessionsPanel';
-import { SessionsPanel } from '../panels/SessionsPanel';
-import { MessagesPanel } from '../panels/MessagesPanel';
 
 /**
- * 工作台（schema v6 重设计的需求②）。
+ * 工作台（总览页）。
  *
- * <p>三层内容,从"一眼全局"到"下钻入口"：</p>
- * <ol>
- *   <li><b>设备卡墙</b>——每台设备一张卡:连接/控制态、消息与事件速率、
- *       活动报警、最近事件;可按关键字/状态过滤;点卡片进设备页;</li>
- *   <li><b>实时事件流</b>——SSE 类型化通知(s6f11),可按设备过滤、暂停;</li>
- *   <li><b>会话管理</b>——嵌入 SessionsPanel,批量新建/上报/重载都在。</li>
- * </ol>
+ * <p>只做一件事:一眼看清所有设备——KPI 行 + 设备卡墙(可按关键字/状态过滤),
+ * 点卡片进设备页。事件流、报文、会话管理各自是独立页面。</p>
  */
-export function WorkbenchPanel({ backend, notifier, preferences, updatePreferences, goTo, streamLabel, liveEvents = [] }: PanelBaseProps): JSX.Element {
+export function WorkbenchPage({ backend, goTo, streamLabel }: PanelBaseProps): JSX.Element {
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const [eventFilter, setEventFilter] = useState('');
-  const [showSessions, setShowSessions] = useState(false);
 
   const rows = backend.overview;
 
@@ -59,19 +50,6 @@ export function WorkbenchPanel({ backend, notifier, preferences, updatePreferenc
   }, [rows]);
 
   const maxRate = Math.max(1, ...rows.map((row) => row.s6f11PerMin));
-
-  const visibleEvents = useMemo(() => {
-    const keyword = eventFilter.trim().toLowerCase();
-    return liveEvents
-      .filter((notice) => notice.type === 's6f11')
-      .filter((notice) => keyword === ''
-        || notice.sessionId.toLowerCase().includes(keyword)
-        || String(notice.data.ceid ?? '').includes(keyword));
-  }, [liveEvents, eventFilter]);
-
-  const openDevice = (sessionId: string) => {
-    goTo?.(`device:${sessionId}`);
-  };
 
   return (
     <div className="panel-stack">
@@ -126,13 +104,13 @@ export function WorkbenchPanel({ backend, notifier, preferences, updatePreferenc
       {cards.length === 0 ? (
         <p className="hint">
           {rows.length === 0
-            ? '还没有设备。用「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
+            ? '还没有设备。去「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
             : '没有匹配过滤条件的设备。'}
         </p>
       ) : (
         <div className="device-grid">
           {cards.map((row) => (
-            <button key={row.id} type="button" className="device-card" onClick={() => openDevice(row.id)}>
+            <button key={row.id} type="button" className="device-card" onClick={() => goTo?.(`device:${row.id}`)}>
               <div className="device-card-head">
                 <span className="device-card-title">{row.device}</span>
                 <span className={`badge tone-${row.controlState === 'ONLINE' ? 'ok' : row.controlState === 'COMMUNICATING' ? 'warn' : 'muted'}`}>
@@ -162,73 +140,6 @@ export function WorkbenchPanel({ backend, notifier, preferences, updatePreferenc
           ))}
         </div>
       )}
-
-      {/* 实时事件流 */}
-      <section className="panel-section">
-        <div className="section-head">
-          <h2>实时事件流（S6F11）</h2>
-          <input
-            type="search"
-            placeholder="按设备 / CEID 过滤"
-            value={eventFilter}
-            onChange={(event) => setEventFilter(event.target.value)}
-            aria-label="事件流过滤"
-          />
-        </div>
-        {visibleEvents.length === 0 ? (
-          <p className="hint">
-            暂无实时事件。事件流来自 SSE 的类型化通知——连上后端、设备上报后这里实时滚动;
-            也可以进入设备页看编排与手动触发。
-          </p>
-        ) : (
-          <ul className="live-event-list">
-            {visibleEvents.slice(0, 50).map((notice, index) => (
-              <li key={`${notice.at}-${index}`}>
-                <span className="mono">{new Date(notice.at).toLocaleTimeString()}</span>
-                <button type="button" className="link" onClick={() => openDevice(notice.sessionId)}>
-                  {notice.sessionId}
-                </button>
-                <span>CEID {String(notice.data.ceid ?? '-')}</span>
-                {typeof notice.data.planId === 'string' && notice.data.planId !== '' && (
-                  <span className="hint-inline">{notice.data.planId}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* 全局报文 */}
-      <section className="panel-section">
-        <div className="section-head">
-          <h2>最近报文</h2>
-        </div>
-        <MessagesPanel
-          backend={backend}
-          notifier={notifier}
-          preferences={preferences}
-          updatePreferences={updatePreferences}
-        />
-      </section>
-
-      {/* 会话管理(可折叠):批量操作都在这里 */}
-      <section className="panel-section">
-        <div className="section-head">
-          <h2>会话管理</h2>
-          <button type="button" onClick={() => setShowSessions((previous) => !previous)}>
-            {showSessions ? '收起' : '展开'}
-          </button>
-        </div>
-        {showSessions && (
-          <SessionsPanel
-            backend={backend}
-            notifier={notifier}
-            preferences={preferences}
-            updatePreferences={updatePreferences}
-            goTo={goTo}
-          />
-        )}
-      </section>
     </div>
   );
 }

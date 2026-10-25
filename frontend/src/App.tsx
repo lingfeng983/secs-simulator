@@ -15,10 +15,13 @@ import { NAV_ITEMS, routeTitle } from './layout/navigation';
 import { Sidebar, type SidebarDevice } from './layout/Sidebar';
 import { Topbar } from './layout/Topbar';
 
-import { useRoute, DEVICE_TABS, type Route } from './router';
-import { WorkbenchPanel } from './pages/WorkbenchPage';
-import { DevicePage } from './pages/DevicePage';
+import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage, type Route } from './router';
+import { WorkbenchPage } from './pages/WorkbenchPage';
+import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from './pages/DevicePage';
 import { SystemPage } from './pages/SystemPage';
+import { EventsPage } from './pages/EventsPage';
+import { MessagesPage } from './pages/MessagesPage';
+import { SessionsPage } from './pages/SessionsPage';
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
@@ -35,13 +38,13 @@ const SHORTCUTS: readonly ShortcutHint[] = [
 ];
 
 /**
- * 应用外壳（schema v6 两层信息架构）。
+ * 应用外壳（拆分后的单功能页面信息架构）。
  *
- * <p>hash 路由:<code>#/workbench</code>、<code>#/device/{id}/{tab}</code>、
- * <code>#/system/{page}</code>。旧面板全部收编:overview/sessions→工作台,
- * catalog/alarms/events/preview→设备页·监控,config→设备页·配置,
- * send/hostsim→设备页·工具,audit/console→系统页。
- * 数据接线、页面摆位、快捷键——仍只做这三件事。</p>
+ * <p>hash 路由:<code>#/workbench</code>、<code>#/events</code>、
+ * <code>#/messages</code>、<code>#/sessions</code>、
+ * <code>#/device/{id}/{page}</code>、<code>#/system/{page}</code>。
+ * 每个页面只展示一个核心能力:工作台=总览卡墙,事件流/报文/会话管理独立成页,
+ * 设备页一页一能力(曲线/事件/报警/目录/配置/发送/压测/主机模拟/采集)。</p>
  */
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
@@ -106,8 +109,8 @@ export function App(): JSX.Element {
     (id: string) => {
       if (id.startsWith('device-tab:')) {
         const [, sessionId, tab] = id.split(':');
-        if (sessionId !== undefined && DEVICE_TABS.includes(tab as never)) {
-          navigate({ name: 'device', sessionId, tab: tab as 'monitor' | 'config' | 'tools' });
+        if (sessionId !== undefined && DEVICE_PAGES.includes(tab as never)) {
+          navigate({ name: 'device', sessionId, tab: tab as DevicePage });
         }
         return;
       }
@@ -118,8 +121,16 @@ export function App(): JSX.Element {
       switch (id) {
         case 'workbench':
         case 'overview':
-        case 'sessions':
           navigate({ name: 'workbench' });
+          return;
+        case 'events':
+          navigate({ name: 'view', page: 'events' });
+          return;
+        case 'messages':
+          navigate({ name: 'view', page: 'messages' });
+          return;
+        case 'sessions':
+          navigate({ name: 'view', page: 'sessions' });
           return;
         case 'audit':
           navigate({ name: 'system', page: 'audit' });
@@ -127,30 +138,12 @@ export function App(): JSX.Element {
         case 'console':
           navigate({ name: 'system', page: 'console' });
           return;
-        case 'config': {
-          const sessionId = backend.activeSession;
-          if (sessionId !== '') {
-            navigate({ name: 'device', sessionId, tab: 'config' });
-          } else {
-            navigate({ name: 'workbench' });
-          }
-          return;
-        }
-        case 'send':
-        case 'hostsim': {
-          const sessionId = backend.activeSession;
-          if (sessionId !== '') {
-            navigate({ name: 'device', sessionId, tab: 'tools' });
-          } else {
-            navigate({ name: 'workbench' });
-          }
-          return;
-        }
         default: {
-          /* preview/alarms/events/catalog/messages → 设备页·监控 */
+          /* 设备能力 id(config/send/burst/hostsim/collector/catalog/alarms/preview)→ 当前设备对应子页 */
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
-            navigate({ name: 'device', sessionId, tab: 'monitor' });
+            const tab = (DEVICE_PAGES as readonly string[]).includes(id) ? (id as DevicePage) : 'monitor';
+            navigate({ name: 'device', sessionId, tab });
           } else {
             navigate({ name: 'workbench' });
           }
@@ -165,7 +158,11 @@ export function App(): JSX.Element {
   const refreshRef = useRef(backend.refreshAll);
   refreshRef.current = backend.refreshAll;
 
-  const routeKey = route.name === 'device' ? `device:${route.sessionId}:${route.tab}` : route.name === 'system' ? `system:${route.page}` : 'workbench';
+  const routeKey = route.name === 'device'
+    ? `device:${route.sessionId}:${route.tab}`
+    : route.name === 'view'
+      ? `view:${route.page}`
+      : route.name === 'system' ? `system:${route.page}` : 'workbench';
 
   useEffect(() => {
     void refreshRef.current();
@@ -195,13 +192,13 @@ export function App(): JSX.Element {
         keywords: ['device', session.id, session.device],
         run: () => goTo(`device:${session.id}`),
       });
-      for (const tab of DEVICE_TABS) {
+      for (const tab of DEVICE_PAGES) {
         if (tab === 'monitor') {
           continue;
         }
         items.push({
           id: `device-tab:${session.id}:${tab}`,
-          label: `${session.id} · ${tab === 'config' ? '配置' : '工具'}`,
+          label: `${session.id} · ${DEVICE_PAGE_LABELS[tab]}`,
           group: '设备',
           keywords: [session.id, tab],
           run: () => goTo(`device-tab:${session.id}:${tab}`),
@@ -275,7 +272,7 @@ export function App(): JSX.Element {
         keywords: ['ceid', String(ceid.ceid), ceid.slot ?? ''],
         run: () => {
           backend.setCeid(ceid.ceid);
-          goTo('workbench');
+          goTo('sessions');
           notifier.info(`已把 CEID 填成 ${ceid.ceid}`);
         },
       });
@@ -323,7 +320,9 @@ export function App(): JSX.Element {
 
   /* ---------- 布局 ---------- */
 
-  const title = routeTitle(route);
+  const title = route.name === 'device'
+    ? { group: '设备', label: route.sessionId, description: DEVICE_PAGE_DESCRIPTIONS[route.tab] }
+    : routeTitle(route);
   const streamLabel = streamStateLabel(streamState, streamDetail);
 
   const badgeFor = (id: string): number | null => {
@@ -411,9 +410,12 @@ export function App(): JSX.Element {
         )}
 
         <main className="content">
-          {route.name === 'workbench' && <WorkbenchPanel {...panelProps} />}
+          {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
+          {route.name === 'view' && route.page === 'events' && <EventsPage {...panelProps} />}
+          {route.name === 'view' && route.page === 'messages' && <MessagesPage {...panelProps} />}
+          {route.name === 'view' && route.page === 'sessions' && <SessionsPage {...panelProps} />}
           {route.name === 'device' && (
-            <DevicePage {...panelProps} sessionId={route.sessionId} tab={route.tab} />
+            <DevicePageView {...panelProps} sessionId={route.sessionId} tab={route.tab} />
           )}
           {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
         </main>

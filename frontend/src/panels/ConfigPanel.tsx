@@ -24,6 +24,8 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
   const [configName, setConfigName] = useState('');
   const [draft, setDraft] = useState('');
   const [baseline, setBaseline] = useState('');
+  /** 打开/重载时的文件修改时间快照:保存时经 If-Match 带回,防双窗口互相覆盖。 */
+  const [loadedMs, setLoadedMs] = useState<number | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [newName, setNewName] = useState('');
@@ -60,6 +62,7 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
       setConfigName('');
       setDraft('');
       setBaseline('');
+      setLoadedMs(null);
       setProblems([]);
       setNotice('配置已不存在，编辑器已关闭');
     }
@@ -72,13 +75,14 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     }
     setBusy(true);
     try {
-      const text = await backend.readConfig(name);
-      if (text === null) {
+      const snapshot = await backend.readConfig(name);
+      if (snapshot === null) {
         return;
       }
       setConfigName(name);
-      setDraft(text);
-      setBaseline(text);
+      setDraft(snapshot.text);
+      setBaseline(snapshot.text);
+      setLoadedMs(snapshot.modifiedMs);
       setProblems([]);
       setNotice(`已打开 ${name}`);
     } finally {
@@ -93,12 +97,13 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     }
     setBusy(true);
     try {
-      const text = await backend.readConfig(configName);
-      if (text === null) {
+      const snapshot = await backend.readConfig(configName);
+      if (snapshot === null) {
         return;
       }
-      setDraft(text);
-      setBaseline(text);
+      setDraft(snapshot.text);
+      setBaseline(snapshot.text);
+      setLoadedMs(snapshot.modifiedMs);
       setProblems([]);
       setNotice(`已重新载入 ${configName}`);
     } finally {
@@ -130,18 +135,29 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     }
     setBusy(true);
     try {
-      const result = await backend.saveConfig(configName, draft);
+      const result = await backend.saveConfig(configName, draft, loadedMs);
       if (result === null) {
         return;
       }
       if (result.status === 200) {
         setProblems([]);
         setBaseline(draft);
+        /* 拿一份新的修改时间快照,下一次保存的 If-Match 才对得上 */
+        const fresh = await backend.readConfig(configName);
+        if (fresh !== null) {
+          setLoadedMs(fresh.modifiedMs);
+        }
         setNotice(`已保存 ${configName}（已在运行的会话需要重载才生效）`);
         void refreshConfigs();
       } else {
         setProblems(result.problems);
-        setNotice(result.status === 422 ? '保存被拒：配置有问题，未落盘' : `保存失败（HTTP ${result.status}）`);
+        setNotice(
+          result.status === 422
+            ? '保存被拒：配置有问题，未落盘'
+            : result.status === 409
+              ? '保存被拒：配置在编辑期间被其他窗口修改过，未覆盖——点「重新载入」拿到最新内容再改'
+              : `保存失败（HTTP ${result.status}）`,
+        );
       }
     } finally {
       setBusy(false);
@@ -168,13 +184,14 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
       if (status !== 201) {
         return;
       }
-      const text = await backend.readConfig(name);
-      if (text === null) {
+      const snapshot = await backend.readConfig(name);
+      if (snapshot === null) {
         return;
       }
       setConfigName(name);
-      setDraft(text);
-      setBaseline(text);
+      setDraft(snapshot.text);
+      setBaseline(snapshot.text);
+      setLoadedMs(snapshot.modifiedMs);
       setProblems([]);
       setNotice(
         newTemplate === 'bare'

@@ -130,6 +130,20 @@ export interface MessagePage {
   truncated: boolean;
 }
 
+/** 报文历史的服务端过滤项:before 是翻旧账的游标(只取早于该时间戳的),stream/function 过滤报文类型。 */
+export interface MessageHistoryOptions {
+  before?: number;
+  stream?: number;
+  function?: number;
+}
+
+/** 审计的服务端过滤项:action/actor 精确匹配,空串/undefined 表示全部;before 是翻旧账的游标。 */
+export interface AuditFilters {
+  action?: string;
+  actor?: string;
+  before?: number;
+}
+
 /** 曲线预览：分桶 min/max/avg。 */
 export interface PreviewSeries {
   svid: number;
@@ -308,6 +322,12 @@ export interface ConfigTemplateEntry {
   description: string;
 }
 
+/** 一份配置的原文快照:modifiedMs 用于保存时的 If-Match 并发保护。 */
+export interface ConfigTextSnapshot {
+  text: string;
+  modifiedMs: number | null;
+}
+
 /** 校验结果：valid 为假时 problems 里是具体哪里错了。 */
 export interface ConfigProblems {
   valid: boolean;
@@ -340,7 +360,7 @@ export interface ApiClient {
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
   /** 最近审计记录。 */
-  audit(limit: number): Promise<AuditEntryView[]>;
+  audit(limit: number, filters?: AuditFilters): Promise<AuditEntryView[]>;
   /** 事件编排列表。 */
   events(sessionId: string): Promise<EventPlanView[]>;
   /** 运行时启用/禁用一个计划。 */
@@ -348,7 +368,7 @@ export interface ApiClient {
   /** 手动发送一条 SML 报文。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
-  messages(sessionId: string, direction: string, limit: number): Promise<MessagePage>;
+  messages(sessionId: string, direction: string, limit: number, opts?: MessageHistoryOptions): Promise<MessagePage>;
   /** 报文历史 JSON Lines，用于导出。 */
   messagesJsonl(sessionId: string, direction: string, limit: number): Promise<string>;
   /** 配置目录列表。 */
@@ -357,12 +377,12 @@ export interface ApiClient {
   createConfig(name: string, templateId?: string): Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
   configTemplates(): Promise<ConfigTemplateEntry[]>;
-  /** 读一份配置的原始文本。 */
-  configText(name: string): Promise<string>;
+  /** 读一份配置的原文(带 modifiedMs 快照,保存时经 If-Match 带回做并发保护)。 */
+  configText(name: string): Promise<ConfigTextSnapshot>;
   /** 只校验不落盘。 */
   validateConfig(name: string, text: string): Promise<ConfigProblems>;
-  /** 校验通过后落盘。 */
-  saveConfig(name: string, text: string): Promise<ConfigSaveResult>;
+  /** 校验通过后落盘;expectedModifiedMs 非空时经 If-Match 做并发保护,被改过回 409。 */
+  saveConfig(name: string, text: string, expectedModifiedMs?: number | null): Promise<ConfigSaveResult>;
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
   eventsUrl(ticket: string): string;
@@ -428,11 +448,34 @@ function apiUrl(path: string): string {
   return base === '' ? path : `${base}${path}`;
 }
 
+/** 后端返回 {ok:false,error:"code"} 时的结构化错误;message 保持可读。 */
+export class ApiError extends Error {
+  readonly status: number;
+  /** 后端的错误码字符串(如 forbidden / not-found);非包络响应为 ''。 */
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export function createClient(): ApiClient {
   async function json<T>(response: Response): Promise<T> {
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`${response.status} ${text.slice(0, 200)}`);
+      let code = '';
+      try {
+        const body = JSON.parse(text) as { error?: unknown };
+        if (typeof body.error === 'string') {
+          code = body.error;
+        }
+      } catch {
+        /* 非 JSON 响应(网关错误页等)没有错误码 */
+      }
+      throw new ApiError(response.status, code, `${response.status} ${text.slice(0, 200)}`);
     }
     return (await response.json()) as T;
   }
@@ -493,9 +536,19 @@ export function createClient(): ApiClient {
         }),
       );
     },
-    async audit(limit) {
+    async audit(limit, filters) {
+      const query = new URLSearchParams({ limit: String(limit) });
+      if (filters?.action) {
+        query.set('action', filters.action);
+      }
+      if (filters?.actor) {
+        query.set('actor', filters.actor);
+      }
+      if (filters?.before !== undefined && filters.before > 0) {
+        query.set('before', String(filters.before));
+      }
       const body = await json<{ audit?: AuditEntryView[] }>(
-        await fetch(apiUrl(`/api/v1/audit?limit=${limit}`)),
+        await fetch(apiUrl(`/api/v1/audit?${query}`)),
       );
       return body.audit ?? [];
     },
@@ -599,13 +652,22 @@ export function createClient(): ApiClient {
       );
       return body.ticket;
     },
-    async messages(sessionId, direction, limit) {
+    async messages(sessionId, direction, limit, opts) {
       const query = new URLSearchParams({ limit: String(limit) });
       if (sessionId !== '') {
         query.set('session', sessionId);
       }
       if (direction !== '') {
         query.set('direction', direction);
+      }
+      if (opts?.before !== undefined && opts.before > 0) {
+        query.set('before', String(opts.before));
+      }
+      if (opts?.stream !== undefined) {
+        query.set('stream', String(opts.stream));
+      }
+      if (opts?.function !== undefined) {
+        query.set('function', String(opts.function));
       }
       const body = await json<Partial<MessagePage>>(
         await fetch(apiUrl(`/api/v1/messages?${query}`)),
@@ -652,10 +714,10 @@ export function createClient(): ApiClient {
       return body.templates ?? [];
     },
     async configText(name) {
-      const body = await json<{ name?: string; text?: string }>(
+      const body = await json<{ name?: string; text?: string; modifiedMs?: number }>(
         await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`)),
       );
-      return body.text ?? '';
+      return { text: body.text ?? '', modifiedMs: typeof body.modifiedMs === 'number' ? body.modifiedMs : null };
     },
     async validateConfig(name, text) {
       const body = await json<ConfigProblems>(
@@ -667,10 +729,14 @@ export function createClient(): ApiClient {
       );
       return { valid: body.valid ?? false, problems: body.problems ?? [] };
     },
-    async saveConfig(name, text) {
+    async saveConfig(name, text, expectedModifiedMs) {
+      const headers: Record<string, string> = { 'Content-Type': 'text/plain; charset=utf-8' };
+      if (expectedModifiedMs != null) {
+        headers['If-Match'] = String(expectedModifiedMs);
+      }
       const response = await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {
         method: 'PUT',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        headers,
         body: text,
       });
 

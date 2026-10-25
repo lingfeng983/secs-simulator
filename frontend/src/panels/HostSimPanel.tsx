@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SentMessageResult } from '../api';
 import { Panel } from '../ui/Panel';
 import { NumberField } from '../ui/CommitFields';
-import { highlightSml } from '../lib/smlHighlight';
+import { SmlResult } from '../ui/SmlResult';
 import type { PanelBaseProps } from './types';
 
 /**
@@ -40,6 +40,7 @@ const HOST_PRESETS: ReadonlyArray<{ label: string; sml: string; hint: string }> 
 export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F13 W');
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
   /** FDC Trace 参数：DSPER 周期 / TOTSMP 总数 / REPGSZ 每条样本数。 */
   const [fdc, setFdc] = useState({ trid: 1, dsper: 1000, totsmp: 100, repgsz: 10, svids: [] as number[] });
@@ -68,7 +69,7 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
   };
 
   const onOpen = async () => {
-    if (disabled) {
+    if (disabled || opening) {
       return;
     }
     if (remoteMode) {
@@ -77,29 +78,25 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
       if (remoteTarget.host.trim() === '' || !Number.isFinite(port) || port < 1) {
         return;
       }
-      await openHostSim(activeSession, {
-        host: remoteTarget.host.trim(),
-        port,
-        deviceId: Number.isFinite(deviceId) ? deviceId : 0,
-      });
+      setOpening(true);
+      try {
+        await openHostSim(activeSession, {
+          host: remoteTarget.host.trim(),
+          port,
+          deviceId: Number.isFinite(deviceId) ? deviceId : 0,
+        });
+      } finally {
+        setOpening(false);
+      }
       return;
     }
-    await openHostSim(activeSession);
-  };
-
-  const lines: string[] = [];
-  if (result !== null) {
-    lines.push(`发送 ${activeSession}(主机)  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`);
-    lines.push(result.sentSml === '' ? '（无 body）' : result.sentSml);
-    if (result.replySml != null) {
-      lines.push('', `回复 S${result.replyStream}F${result.replyFunction}${result.replyWbit ? ' W' : ''}`, result.replySml);
-    } else if (result.timedOut) {
-      lines.push('', 'W 位报文已发出，但设备未在 T3 内回复');
-    } else {
-      lines.push('', '未请求回复（W=0）');
+    setOpening(true);
+    try {
+      await openHostSim(activeSession);
+    } finally {
+      setOpening(false);
     }
-    lines.push('', `耗时 ${result.elapsedMs} ms`);
-  }
+  };
 
   return (
     <Panel
@@ -122,10 +119,10 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
             type="button"
             className="primary"
             onClick={() => void onOpen()}
-            disabled={disabled}
+            disabled={disabled || opening}
             title={remoteMode ? '以主机角色连到远程 SECS' : '以主机角色连到该设备（设备只接受一个主机）'}
           >
-            {remoteMode ? '连接远程 SECS' : '连接设备'}
+            {opening ? '连接中…' : remoteMode ? '连接远程 SECS' : '连接设备'}
           </button>
         )
       }
@@ -284,11 +281,7 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
             aria-label="主机角色 SML 报文内容"
           />
           {result !== null && (
-            <pre
-              className="sml-result"
-              /* 高亮输出已整体转义，不可能注入 */
-              dangerouslySetInnerHTML={{ __html: highlightSml(lines.join('\n')) }}
-            />
+            <SmlResult header={`发送 ${activeSession}(主机)  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`} result={result} peerLabel="设备" />
           )}
           <p className="hint">
             S2F33 定义报告（DATAID、RPTID、变量列表）、S2F35 链接事件（CEID→RPTID）、

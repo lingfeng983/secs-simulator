@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import type { ApiClient, ConfigProblems, ConfigSaveResult, ConfigTemplateEntry } from '../api';
+import type { ApiClient, ConfigProblems, ConfigSaveResult, ConfigTemplateEntry, ConfigTextSnapshot } from '../api';
 import type { Notifier } from './useToasts';
 
 /**
@@ -49,7 +49,7 @@ export function useConfigCommands({
   );
 
   const readConfig = useCallback(
-    async (name: string): Promise<string | null> => {
+    async (name: string): Promise<ConfigTextSnapshot | null> => {
       if (client === null) {
         return null;
       }
@@ -79,15 +79,17 @@ export function useConfigCommands({
   );
 
   const saveConfig = useCallback(
-    async (name: string, text: string): Promise<ConfigSaveResult | null> => {
+    async (name: string, text: string, expectedModifiedMs?: number | null): Promise<ConfigSaveResult | null> => {
       if (client === null) {
         return null;
       }
       try {
-        const result = await client.saveConfig(name, text);
+        const result = await client.saveConfig(name, text, expectedModifiedMs);
         if (result.status === 200) {
           notifierRef.current.success(`已保存 ${name}，正在让相关会话生效…`);
           await reloadSessionsUsing(name);
+        } else if (result.status === 409) {
+          notifierRef.current.warn('配置在编辑期间被其他窗口修改过，未覆盖；请点「重新载入」');
         } else if (result.status === 422) {
           notifierRef.current.error('保存被拒：配置有问题，未落盘');
         } else {

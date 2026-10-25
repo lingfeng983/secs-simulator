@@ -3,6 +3,7 @@ import type { ConfigTemplateEntry, SessionBulkResult, SessionSummary } from '../
 import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { ConfirmModal } from '../ui/ConfirmModal';
 import { NumberField, TextField } from '../ui/CommitFields';
 import { formatCount } from '../lib/format';
 import type { PanelBaseProps } from './types';
@@ -58,6 +59,8 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
   const [configTemplates, setConfigTemplates] = useState<ConfigTemplateEntry[]>([]);
   const [bulkTplId, setBulkTplId] = useState('etch');
   const [bulkTplName, setBulkTplName] = useState('');
+  /** 待确认的关闭目标:null = 不弹;label 是确认文案里的人话描述。 */
+  const [closeTarget, setCloseTarget] = useState<{ ids: readonly string[]; label: string } | null>(null);
   const [bulkTplBusy, setBulkTplBusy] = useState(false);
   const { sessions, ceid, setCeid, configList, bulkCreateSessions, batchTrigger, batchReload, batchClose } = backend;
 
@@ -196,7 +199,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           <button
             type="button"
             className="danger"
-            onClick={() => void backend.closeSession(row.id)}
+            onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
             title='关闭并移除该会话（端口立即解绑）'
           >
             关闭
@@ -315,18 +318,7 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
           className="danger"
           disabled={selected.size === 0 || batchBusy}
           title='关闭并移除选中的设备（端口立即解绑，不可恢复）'
-          onClick={() => {
-            if (!window.confirm(`确定关闭选中的 ${selected.size} 台设备？端口会立即解绑。`)) {
-              return;
-            }
-            setBatchBusy(true);
-            void batchClose(selected, (done, total) => setBatchProgress(`关闭 ${done}/${total}`))
-              .finally(() => {
-                setSelected(new Set());
-                setBatchBusy(false);
-                setBatchProgress('');
-              });
-          }}
+          onClick={() => setCloseTarget({ ids: [...selected], label: `选中的 ${selected.size} 台设备` })}
         >
           批量关闭
         </button>
@@ -336,6 +328,33 @@ export function SessionsPanel({ backend, notifier }: PanelBaseProps): JSX.Elemen
         CEID 可在「设备目录」里按名称挑选；配置只认 <code>--work-dir</code> 下的文件名。
         批量操作对勾选的设备逐台执行：上报要设备在线，重载会让主机断连后重连。
       </p>
+
+      <ConfirmModal
+        open={closeTarget !== null}
+        title="关闭会话"
+        danger
+        confirmLabel="关闭"
+        message={closeTarget === null ? '' : `确定关闭${closeTarget.label}？端口会立即解绑，主机连接断开。`}
+        onClose={() => setCloseTarget(null)}
+        onConfirm={() => {
+          if (closeTarget === null) {
+            return;
+          }
+          const ids = closeTarget.ids;
+          setCloseTarget(null);
+          if (ids.length === 1) {
+            void backend.closeSession(ids[0]);
+            return;
+          }
+          setBatchBusy(true);
+          void batchClose(new Set(ids), (done, total) => setBatchProgress(`关闭 ${done}/${total}`))
+            .finally(() => {
+              setSelected(new Set());
+              setBatchBusy(false);
+              setBatchProgress('');
+            });
+        }}
+      />
       <PanelFootnote
         items={[
           { label: '会话数', value: sessions.length },

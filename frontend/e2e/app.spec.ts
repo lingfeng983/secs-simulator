@@ -89,7 +89,7 @@ async function mockApi(page: Page): Promise<void> {
     }
 
     if (path === '/api/v1/overview') {
-      /* v6 工作台聚合:设备卡的数据源 */
+      /* 工作台设备卡的数据源 */
       return route.fulfill({
         json: {
           sessions: [
@@ -230,30 +230,24 @@ async function mockApi(page: Page): Promise<void> {
   });
 }
 
-/** v6 两层信息架构的导航助手:侧栏静态项 + 设备动态项 + 设备页 Tab。 */
+/** 拆分后单功能页面的导航助手:侧栏静态入口 + 设备动态项 + 设备子页。 */
 
-/** 打开侧栏静态入口(工作台 / 审计 / 事件流日志)。 */
+/** 打开侧栏静态入口(工作台/事件流/报文/会话管理/审计/事件流日志)。 */
 async function openStatic(page: Page, label: string, panelId: string): Promise<void> {
   await page.locator('.sidenav .nav-item', { hasText: label }).first().click();
   await expect(page.locator(`#panel-${panelId}`)).toBeVisible();
 }
 
-/** 打开一台设备(默认落监控 Tab)。 */
+/** 打开一台设备(默认落曲线子页)。 */
 async function openDevice(page: Page, device: string): Promise<void> {
   await page.locator('.sidenav .nav-group', { hasText: '设备' }).locator('.nav-item', { hasText: device }).first().click();
   await expect(page.locator('#panel-preview')).toBeVisible();
 }
 
-/** 切设备页 Tab。 */
+/** 切设备子页。 */
 async function openDeviceTab(page: Page, label: string, panelId: string): Promise<void> {
   await page.getByRole('tab', { name: label, exact: true }).click();
   await expect(page.locator(`#panel-${panelId}`)).toBeVisible();
-}
-
-/** 工作台的「会话管理」默认折叠:展开后 SessionsPanel 才挂载。 */
-async function expandSessions(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '展开', exact: true }).click();
-  await expect(page.locator('#panel-sessions')).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -269,9 +263,9 @@ test('lands on the workbench and opens a device monitor', async ({ page }) => {
   await expect(page.locator('.device-card')).toHaveCount(1);
   await expect(page.locator('.device-card', { hasText: 'LINE1' })).toBeVisible();
 
-  /* 设备卡进设备页,事件流 tab 用例需要 preview 就绪 */
+  /* 设备卡进设备页·曲线 */
   await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '监控' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: '曲线' })).toHaveAttribute('aria-selected', 'true');
 
   /* 曲线三模式 */
   await page.getByRole('button', { name: '刷新曲线' }).click();
@@ -311,8 +305,8 @@ test('opens a config and adds a curve through the structured editor', async ({ p
   await expect(configSection.getByText(/已保存 line1\.json/)).toBeVisible();
 });
 
-test('toggles an event plan and shows the admin audit entry', async ({ page }) => {
-  await page.goto('/#/device/line1/monitor');
+test('toggles an event plan on the device events page and shows the admin audit entry', async ({ page }) => {
+  await page.goto('/#/device/line1/events');
 
   const eventSection = page.locator('#panel-events');
   await expect(eventSection.getByRole('cell', { name: 'beat' })).toBeVisible();
@@ -323,10 +317,9 @@ test('toggles an event plan and shows the admin audit entry', async ({ page }) =
   await expect(page.locator('#panel-audit').getByText('trigger-ceid', { exact: true })).toBeVisible();
 });
 
-test('filters sessions from the workbench', async ({ page }) => {
-  await page.goto('/');
+test('filters sessions on the sessions page', async ({ page }) => {
+  await page.goto('/#/sessions');
 
-  await expandSessions(page);
   const sessions = page.locator('#panel-sessions');
   await expect(sessions.getByRole('cell', { name: 'line1', exact: true })).toBeVisible();
 
@@ -348,7 +341,7 @@ test('opens the command palette and jumps to a device', async ({ page }) => {
   await expect(palette.getByText('打开设备 LINE1')).toBeVisible();
   await palette.getByText('打开设备 LINE1').click();
 
-  await expect(page.getByRole('tab', { name: '监控' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '曲线' })).toBeVisible();
 });
 
 test('switches the theme and remembers it', async ({ page }) => {
@@ -366,29 +359,35 @@ test('switches the theme and remembers it', async ({ page }) => {
 });
 
 test('shows a toast after triggering from the sessions table', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/#/sessions');
 
-  await expandSessions(page);
   await page.locator('#panel-sessions').getByRole('button', { name: '上报', exact: true }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect(page.locator('.toast-title').first()).toContainText('触发 line1 CEID');
 });
 
-test('workbench device card opens the device page with tool tabs', async ({ page }) => {
+test('device tool tabs each show their own capability', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '监控' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '曲线' })).toBeVisible();
 
-  await openDeviceTab(page, '工具', 'hostsim');
+  await openDeviceTab(page, '主机模拟', 'hostsim');
   await expect(page.locator('#panel-hostsim')).toBeVisible();
-  /* 压测卡与采集卡同页 */
+  await expect(page.locator('#panel-burst')).toHaveCount(0);
+  await expect(page.locator('#panel-collector')).toHaveCount(0);
+
+  await openDeviceTab(page, '压测', 'burst');
   await expect(page.getByText('压测（服务端循环）')).toBeVisible();
+  await expect(page.locator('#panel-hostsim')).toHaveCount(0);
+
+  await openDeviceTab(page, '采集', 'collector');
   await expect(page.getByText('S1F3 数据采集（主机侧拉取）')).toBeVisible();
+  await expect(page.locator('#panel-burst')).toHaveCount(0);
 });
 
-test('loads message history on the workbench and filters it', async ({ page }) => {
-  await page.goto('/');
+test('loads message history on the messages page and filters it', async ({ page }) => {
+  await page.goto('/#/messages');
 
   await page.getByRole('button', { name: '载入历史' }).click();
   await expect(page.locator('#panel-messages').getByRole('cell', { name: 'S1F1', exact: true })).toBeVisible();
@@ -397,14 +396,11 @@ test('loads message history on the workbench and filters it', async ({ page }) =
   await expect(page.locator('#panel-messages').getByText('当前过滤条件下没有报文')).toBeVisible();
 });
 
-test('fills the CEID from the device catalog into the sessions table', async ({ page }) => {
-  await page.goto('/#/device/line1/monitor');
+test('fills the CEID from the device catalog into the sessions page', async ({ page }) => {
+  await page.goto('/#/device/line1/catalog');
 
-  /* 目录在监控 Tab 的折叠区里 */
-  await page.locator('details:has(#panel-catalog) summary').click();
   await page.locator('#panel-catalog').getByRole('button', { name: '填入' }).first().click();
 
-  await page.locator('.sidenav .nav-item', { hasText: '工作台' }).first().click();
-  await expandSessions(page);
+  await openStatic(page, '会话管理', 'sessions');
   await expect(page.locator('#panel-sessions').locator('input[type="number"]').first()).toHaveValue('2001');
 });

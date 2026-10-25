@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import type { ApiClient, Health, PreviewData } from '../api';
 import { MAX_MESSAGES, mergeMessages, type MessageEntry } from '../messageHistory';
+import { downloadBlob, safeFilename } from '../lib/table';
 import type { Notifier } from './useToasts';
 
 /** 预览曲线默认桶数。 */
@@ -82,12 +83,12 @@ export function useDataCommands({
     }
   }, [client]);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (session = '', direction = '', before = 0) => {
     if (client === null) {
       return;
     }
     try {
-      const page = await client.messages('', '', 1000);
+      const page = await client.messages(session, direction, 1000, before > 0 ? { before } : undefined);
       setMessages((previous) => {
         const merged = mergeMessages(previous, page.messages, nextMessageKey.current, MAX_MESSAGES);
         nextMessageKey.current = merged.nextKey;
@@ -114,15 +115,10 @@ export function useDataCommands({
         notifierRef.current.info('没有可导出的报文');
         return;
       }
-      const blob = new Blob([text], { type: 'application/x-ndjson;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `messages-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      downloadBlob(
+        `messages-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`,
+        new Blob([text], { type: 'application/x-ndjson;charset=utf-8' }),
+      );
       notifierRef.current.success(`已导出报文历史 ${text.trim().split('\n').length} 行`);
     } catch (error) {
       notifierRef.current.error('导出报文失败', (error as Error).message);
@@ -177,14 +173,7 @@ export function useDataCommands({
         const to = Math.max(1, fresh.uptimeMs ?? 0);
         const from = Math.max(0, to - windowMs);
         const blob = await client.previewBinary(activeSession, from, to, PREVIEW_BUCKETS);
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `preview-${activeSession}-${Date.now()}.bin`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        downloadBlob(`preview-${safeFilename(activeSession)}-${Date.now()}.bin`, blob);
         notifierRef.current.success(`已下载 ${activeSession} 的二进制曲线（${blob.size} 字节）`);
       } catch (error) {
         notifierRef.current.error('下载二进制曲线失败', (error as Error).message);

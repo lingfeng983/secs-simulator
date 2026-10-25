@@ -1,6 +1,7 @@
 import { Icon } from '../ui/Icon';
 import type { StreamState } from '../state/useEventStream';
 import type { Route } from '../router';
+import { sameRoute } from '../router';
 import { NAV_GROUPS } from './navigation';
 
 /** 侧栏「设备」动态组里的一台设备。 */
@@ -33,9 +34,9 @@ export interface SidebarProps {
 /**
  * 左侧导航栏。
  *
- * <p>品牌区在顶部，中间是按「总览 / 监控 / 设备 / 数据 / 系统」
- * 分组的菜单，底部是折叠开关与连接状态。折叠后只剩图标，
- * 悬停靠 title 提示，给内容区让出横向空间。</p>
+ * <p>每个入口对应一个单功能页面。分组按「设备」动态组分上下两段:
+ * 上段是总览与实时数据,下段是管理入口(会话/审计/日志)。
+ * 折叠后只剩图标,悬停靠 title 提示。</p>
  */
 export function Sidebar({
   route,
@@ -51,6 +52,40 @@ export function Sidebar({
 }: SidebarProps): JSX.Element {
   const tone =
     streamState === 'connected' ? 'ok' : streamState === 'reconnecting' ? 'warn' : streamState === 'idle' ? 'muted' : 'danger';
+
+  const groupsAbove = NAV_GROUPS.filter((group) => !group.belowDevices);
+  const groupsBelow = NAV_GROUPS.filter((group) => group.belowDevices);
+
+  const renderGroup = (group: (typeof NAV_GROUPS)[number]) => (
+    <div className="nav-group" key={group.id}>
+      {!collapsed && <div className="nav-group-title">{group.label}</div>}
+      {group.items.map((item) => {
+        const badge = badgeFor(item.id);
+        const active = sameRoute(item.route, route);
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={`nav-item${active ? ' active' : ''}`}
+            onClick={() => onNavigate(item.route)}
+            aria-current={active ? 'page' : undefined}
+            title={collapsed ? `${item.label}（${group.label}）` : undefined}
+          >
+            <span className="nav-icon" aria-hidden="true">
+              <Icon name={item.icon} size={17} />
+            </span>
+            {!collapsed && <span className="nav-label">{item.label}</span>}
+            {!collapsed && badge !== null && badge > 0 && (
+              <span className={`nav-badge${item.id === 'alarms' ? ' alert' : ''}`}>{badge}</span>
+            )}
+            {collapsed && badge !== null && badge > 0 && (
+              <span className={`nav-dot${item.id === 'alarms' ? ' alert' : ''}`} aria-hidden="true" />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <aside className={`sidenav${collapsed ? ' collapsed' : ''}`} aria-label="面板导航">
@@ -71,44 +106,9 @@ export function Sidebar({
       </div>
 
       <nav className="sidenav-nav">
-        {NAV_GROUPS.map((group) => (
-          <div className="nav-group" key={group.id}>
-            {!collapsed && <div className="nav-group-title">{group.label}</div>}
-            {group.items.map((item) => {
-              const badge = badgeFor(item.id);
-              const active =
-                (group.id === 'workbench' && route.name === 'workbench')
-                || (group.id === 'system' && route.name === 'system'
-                  && (route.page === item.id || (item.id === 'console' && route.page === 'console')));
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`nav-item${active ? ' active' : ''}`}
-                  onClick={() =>
-                    onNavigate(group.id === 'workbench'
-                      ? { name: 'workbench' }
-                      : { name: 'system', page: item.id === 'console' ? 'console' : 'audit' })}
-                  aria-current={active ? 'page' : undefined}
-                  title={collapsed ? `${item.label}（${group.label}）` : undefined}
-                >
-                  <span className="nav-icon" aria-hidden="true">
-                    <Icon name={item.icon} size={17} />
-                  </span>
-                  {!collapsed && <span className="nav-label">{item.label}</span>}
-                  {!collapsed && badge !== null && badge > 0 && (
-                    <span className={`nav-badge${item.id === 'alarms' ? ' alert' : ''}`}>{badge}</span>
-                  )}
-                  {collapsed && badge !== null && badge > 0 && (
-                    <span className={`nav-dot${item.id === 'alarms' ? ' alert' : ''}`} aria-hidden="true" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+        {groupsAbove.map(renderGroup)}
 
-        {/* 设备组(动态):点击进设备页·监控 */}
+        {/* 设备组(动态):点击进设备子页 */}
         <div className="nav-group">
           {!collapsed && <div className="nav-group-title">设备（{devices.length}）</div>}
           {devices.length === 0 && !collapsed && <p className="nav-empty">暂无设备</p>}
@@ -131,6 +131,8 @@ export function Sidebar({
             );
           })}
         </div>
+
+        {groupsBelow.map(renderGroup)}
       </nav>
 
       <div className="sidenav-foot">

@@ -139,8 +139,25 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
             />
             自动滚动
           </label>
-          <button type="button" onClick={() => void backend.loadHistory()}>
+          <button
+            type="button"
+            onClick={() => void backend.loadHistory(sessionFilter, direction === 'all' ? '' : direction)}
+            title={`按当前会话/方向过滤从服务端载入历史（服务端最多保留最近 5000 条；当前过滤：${sessionFilter === '' ? '全部会话' : sessionFilter} · ${direction === 'all' ? '全部方向' : direction === 'in' ? '收' : '发'}）`}
+          >
             载入历史
+          </button>
+          <button
+            type="button"
+            disabled={messages.length === 0}
+            onClick={() => {
+              const oldest = messages.reduce((min, item) => Math.min(min, item.msg.at), Number.POSITIVE_INFINITY);
+              if (Number.isFinite(oldest)) {
+                void backend.loadHistory(sessionFilter, direction === 'all' ? '' : direction, oldest);
+              }
+            }}
+            title="往更早翻一页(以面板里最早一条报文的时间为游标,继续往服务端要更早的历史)"
+          >
+            载入更早
           </button>
           <button type="button" onClick={() => void backend.exportMessages()}>
             导出 JSONL
@@ -255,6 +272,7 @@ export function MessagesPanel({ backend, preferences, updatePreferences }: Panel
           { label: '面板内', value: messages.length },
           { label: '当前筛选', value: visible.length },
           { label: '服务端记录', value: messageTotal },
+          { label: '保留窗口', value: '最近 5000 条' },
           preferences.pauseStream
             ? { label: '接收', value: '已暂停', tone: 'warn' as const }
             : { label: '接收', value: '进行中', tone: 'ok' as const },

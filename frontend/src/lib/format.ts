@@ -110,3 +110,23 @@ export function formatCount(value: number | undefined): string {
   }
   return value.toLocaleString();
 }
+
+/**
+ * 从 S6F11 的 SML body 反解 CEID。
+ *
+ * <p>历史报文里没有现成的 CEID 字段，只能从 body 取：S6F11 的数据是
+ * <code>&lt;L[3] DATAID CEID 报告列表&gt;</code>,前两个数值项就是
+ * DATAID 和 CEID——取第二个。解不出(非典型 body)返回 undefined,
+ * 界面显示 '-'。仅供事件流「载入历史」展示,不参与逻辑。</p>
+ */
+export function ceidFromS6f11Body(body: string): number | undefined {
+  const matches = body.matchAll(/<U\d+ (\d+)>/g);
+  let index = 0;
+  for (const match of matches) {
+    index += 1;
+    if (index === 2) {
+      return Number.parseInt(match[1], 10);
+    }
+  }
+  return undefined;
+}

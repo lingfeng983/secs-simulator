@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import type { AuditEntryView } from '../api';
 import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
@@ -7,12 +8,25 @@ import type { PanelBaseProps } from './types';
 /**
  * 审计面板。
  *
- * <p>只有管理员能看：记录里有账号和操作目标。
- * 非管理员看到的不是"空列表"，而是一句说明——
- * 否则用户会以为这个功能坏了。</p>
+ * <p>只有管理员能看：记录里有账号和操作目标。非管理员看到的不是
+ * "空列表"，而是一句说明——否则用户会以为这个功能坏了。
+ * 动作/操作者是<b>服务端</b>过滤(精确匹配),轮询也带着它取数;
+ * 表格内建搜索是本地包含式过滤,两者互补。</p>
  */
 export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
-  const { auditEntries } = backend;
+  const { auditEntries, auditOlder, auditFilter, setAuditFilter, loadAuditOlder, health } = backend;
+  const [actionInput, setActionInput] = useState(auditFilter.action);
+  const [actorInput, setActorInput] = useState(auditFilter.actor);
+
+  /** 轮询只刷新最近窗口;翻出来的旧页在这里合并去重,按时间倒序。 */
+  const allEntries = useMemo(() => {
+    const seen = new Set(auditEntries.map((entry) => `${entry.at}-${entry.actor}-${entry.action}-${entry.target}-${entry.detail}`));
+    const fresh = auditOlder.filter((entry) => !seen.has(`${entry.at}-${entry.actor}-${entry.action}-${entry.target}-${entry.detail}`));
+    return [...auditEntries, ...fresh].sort((left, right) => right.at - left.at);
+  }, [auditEntries, auditOlder]);
+
+  /** 非管理员:后端对审计回 403,界面明说而不是给一个空表。 */
+  const notAdmin = health?.role === 'viewer' || health?.role === 'operator';
 
   const columns: Column<AuditEntryView>[] = [
     {
@@ -39,32 +53,97 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
     },
   ];
 
+  const applyFilter = () => {
+    void setAuditFilter({ action: actionInput.trim(), actor: actorInput.trim() });
+  };
+
+  const clearFilter = () => {
+    setActionInput('');
+    setActorInput('');
+    void setAuditFilter({ action: '', actor: '' });
+  };
+
+  const filterActive = auditFilter.action !== '' || auditFilter.actor !== '';
+
   return (
     <Panel
       id="panel-audit"
       title="审计"
       description="谁在什么时候动了什么。完整历史在服务端日志文件里。"
+      actions={
+        <>
+          <input
+            type="search"
+            className="table-search"
+            placeholder="动作精确匹配,如 config-save"
+            value={actionInput}
+            onChange={(event) => setActionInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                applyFilter();
+              }
+            }}
+            aria-label="按动作过滤"
+          />
+          <input
+            type="search"
+            className="table-search"
+            placeholder="操作者精确匹配"
+            value={actorInput}
+            onChange={(event) => setActorInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                applyFilter();
+              }
+            }}
+            aria-label="按操作者过滤"
+          />
+          <button type="button" className="primary" onClick={applyFilter}>
+            过滤
+          </button>
+          <button type="button" onClick={clearFilter} disabled={!filterActive}>
+            清除过滤
+          </button>
+          <button type="button" onClick={() => void loadAuditOlder()} disabled={allEntries.length === 0} title="以当前最早一条为游标,向服务端要更早的一页审计">
+            载入更早
+          </button>
+        </>
+      }
     >
-      <DataTable
-        tableKey="audit"
-        columns={columns}
-        rows={auditEntries}
-        rowKey={(row) => `${row.at}-${row.actor}-${row.action}`}
-        searchPlaceholder="搜索操作者 / 动作 / 目标"
-        exportName="audit"
-        emptyText="暂无审计记录"
-        defaultSort={{ key: 'at', direction: 'desc' }}
-        exportColumns={[
-          { header: '时间', value: (row) => new Date(row.at).toISOString() },
-          { header: '操作者', value: (row) => row.actor },
-          { header: '角色', value: (row) => row.role },
-          { header: '动作', value: (row) => row.action },
-          { header: '目标', value: (row) => row.target },
-          { header: '细节', value: (row) => row.detail },
-        ]}
-      />
-      <p className="hint">最近 200 条操作记录；完整历史在 <code>--work-dir/logs/audit.jsonl</code>。</p>
-          <PanelFootnote items={[{ label: '最近记录', value: auditEntries.length }]} />
+      {notAdmin ? (
+        <p className="hint">审计只对管理员开放;当前账号角色是「{health?.role}」。找管理员查操作留痕。</p>
+      ) : (
+        <>
+          <DataTable
+            tableKey="audit"
+            columns={columns}
+            rows={allEntries}
+            rowKey={(row) => `${row.at}-${row.actor}-${row.action}`}
+            searchPlaceholder="搜索操作者 / 动作 / 目标"
+            exportName="audit"
+            emptyText={filterActive ? '当前过滤条件下没有审计记录' : '暂无审计记录'}
+            defaultSort={{ key: 'at', direction: 'desc' }}
+            exportColumns={[
+              { header: '时间', value: (row) => new Date(row.at).toISOString() },
+              { header: '操作者', value: (row) => row.actor },
+              { header: '角色', value: (row) => row.role },
+              { header: '动作', value: (row) => row.action },
+              { header: '目标', value: (row) => row.target },
+              { header: '细节', value: (row) => row.detail },
+            ]}
+          />
+          <p className="hint">
+            最近 200 条操作记录{filterActive ? '（按动作/操作者过滤后）' : ''}，「载入更早」继续往前翻；
+            完整历史在 <code>--work-dir/logs/audit.jsonl</code>（重启后仍保留最近 1000 条）。
+          </p>
+          <PanelFootnote
+            items={[
+              { label: '当前视图', value: allEntries.length },
+              { label: '过滤', value: filterActive ? `${auditFilter.action || '*'} · ${auditFilter.actor || '*'}` : '无', tone: filterActive ? 'warn' : undefined },
+            ]}
+          />
+        </>
+      )}
     </Panel>
   );
 }

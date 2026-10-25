@@ -10,17 +10,30 @@ import { SendPanel } from '../panels/SendPanel';
 import { HostSimPanel } from '../panels/HostSimPanel';
 import { CollectorCard } from '../panels/tools/CollectorCard';
 import { BurstCard } from '../panels/tools/BurstCard';
-import { DEVICE_TABS, type DeviceTab } from '../router';
+import { LiveEventList } from '../ui/LiveEventList';
+import { DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage } from '../router';
+
+/** 设备子页的一句话说明（顶栏描述用）。 */
+const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
+  monitor: '该设备的 SVID 曲线预览(当前时间轴 + 事件标记)。',
+  events: '该设备的事件编排与实时上报。',
+  alarms: '该设备的报警与终端。',
+  catalog: '该设备的 SVID / RPTID / CEID 清册。',
+  config: '该设备的配置:分段编辑、每 SVID 值来源与曲线预览。',
+  send: '向该设备手动发送 SML。',
+  burst: '对该设备做服务端压测(消息/事件/报警)。',
+  hostsim: '用该设备做主机模拟(本机或远程 SECS)。',
+  collector: '对该设备做 S1F3 数据采集(CEID 触发启停)。',
+};
 
 /**
- * 单设备全景页（schema v6 重设计的需求③④）。
+ * 单设备页——一个子页一个能力,不聚合。
  *
- * <p>进入即把该会话钉为全局 activeSession——现有面板全部按
- * "当前会话"取数,钉住之后零改动复用。三个 Tab:</p>
+ * <p>进入设备页就把该会话钉为全局 activeSession——现有面板全部按
+ * "当前会话"取数,钉住之后零改动复用。子页:</p>
  * <ul>
- *   <li>监控:曲线(SVID 多选,当前时间轴+事件标记)、事件编排、报警、目录;</li>
- *   <li>配置:分段编辑器 + 每 SVID 值来源 + 单变量曲线预览;</li>
- *   <li>工具:SML 发送、压测(消息/事件/报警)、主机模拟、S1F3 采集器。</li>
+ *   <li>曲线:曲线预览;事件:编排 + 本设备实时事件;报警;目录;配置;</li>
+ *   <li>发送:SML 手发;压测;主机模拟;采集:S1F3 拉取。</li>
  * </ul>
  */
 export function DevicePage({
@@ -33,7 +46,7 @@ export function DevicePage({
   goTo,
   liveEvents,
   streamLabel,
-}: PanelBaseProps & { sessionId: string; tab: DeviceTab }): JSX.Element {
+}: PanelBaseProps & { sessionId: string; tab: DevicePage }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
 
   /* 进入设备页就把全局会话钉到这台设备:所有面板按 activeSession 取数 */
@@ -77,7 +90,7 @@ export function DevicePage({
       </div>
 
       <div className="segmented device-tabs" role="tablist">
-        {DEVICE_TABS.map((value) => (
+        {DEVICE_PAGES.map((value) => (
           <button
             key={value}
             type="button"
@@ -86,55 +99,43 @@ export function DevicePage({
             className={tab === value ? 'active' : ''}
             onClick={() => goTo?.(`device-tab:${sessionId}:${value}`)}
           >
-            {value === 'monitor' ? '监控' : value === 'config' ? '配置' : '工具'}
+            {DEVICE_PAGE_LABELS[value]}
           </button>
         ))}
       </div>
 
-      {tab === 'monitor' && (
+      {tab === 'monitor' && <PreviewPanel {...baseProps} />}
+
+      {tab === 'events' && (
         <div className="panel-stack">
-          <PreviewPanel {...baseProps} />
-          <div className="two-col">
-            <EventsPanel {...baseProps} />
-            <AlarmsPanel {...baseProps} />
-          </div>
-          <details className="collapse">
-            <summary>设备目录（SVID / RPTID / CEID 清册）</summary>
-            <CatalogPanel {...baseProps} />
-          </details>
+          <EventsPanel {...baseProps} />
           <section className="panel-section">
             <div className="section-head">
               <h2>本设备实时事件</h2>
             </div>
-            {deviceEvents.length === 0 ? (
-              <p className="hint">暂无实时事件;编排触发或手动上报后这里实时滚动。</p>
-            ) : (
-              <ul className="live-event-list">
-                {deviceEvents.slice(0, 30).map((notice, index) => (
-                  <li key={`${notice.at}-${index}`}>
-                    <span className="mono">{new Date(notice.at).toLocaleTimeString()}</span>
-                    <span>CEID {String(notice.data.ceid ?? '-')}</span>
-                    {typeof notice.data.planId === 'string' && notice.data.planId !== '' && (
-                      <span className="hint-inline">{notice.data.planId}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <LiveEventList
+              events={deviceEvents}
+              emptyText="暂无实时事件;编排触发或手动上报后这里实时滚动。"
+            />
           </section>
         </div>
       )}
 
+      {tab === 'alarms' && <AlarmsPanel {...baseProps} />}
+
+      {tab === 'catalog' && <CatalogPanel {...baseProps} />}
+
       {tab === 'config' && <ConfigPanel {...baseProps} />}
 
-      {tab === 'tools' && (
-        <div className="panel-stack">
-          <SendPanel {...baseProps} />
-          <BurstCard {...baseProps} sessionId={sessionId} />
-          <HostSimPanel {...baseProps} />
-          <CollectorCard {...baseProps} sessionId={sessionId} />
-        </div>
-      )}
+      {tab === 'send' && <SendPanel {...baseProps} />}
+
+      {tab === 'burst' && <BurstCard {...baseProps} sessionId={sessionId} />}
+
+      {tab === 'hostsim' && <HostSimPanel {...baseProps} />}
+
+      {tab === 'collector' && <CollectorCard {...baseProps} sessionId={sessionId} />}
     </div>
   );
 }
+
+export { DEVICE_PAGE_DESCRIPTIONS };

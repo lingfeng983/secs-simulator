@@ -5,8 +5,7 @@ import {
   formatDuration,
   formatRelative,
   formatSeconds,
-  formatValue,
-} from './format';
+  formatValue, ceidFromS6f11Body } from './format';
 
 describe('formatValue', () => {
   it('drops trailing zeros but keeps significant decimals', () => {
@@ -88,5 +87,16 @@ describe('formatCount', () => {
 
   it('keeps zero as zero', () => {
     expect(formatCount(0)).toBe('0');
+  });
+});
+
+describe('ceidFromS6f11Body', () => {
+  it('takes the second integer item as the CEID', () => {
+    const body = '<L[3] <U4 0> <U4 2002> <L[1] <L[2] <U4 3001> <L[3] <U4 0> <F4 198.5>>>';
+    expect(ceidFromS6f11Body(body)).toBe(2002);
+  });
+
+  it('returns undefined for atypical bodies', () => {
+    expect(ceidFromS6f11Body('<L[0]>')).toBeUndefined();
   });
 });
