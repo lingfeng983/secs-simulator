@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Launcher window only; the remote web UI needs no IPC.",
-  "windows": ["launcher"],
+  "description": "Main window loads the bundled frontend; it invokes connection_info / switch_backend to talk to the local or remote backend.",
+  "windows": ["main"],
   "permissions": ["core:default"]
 }

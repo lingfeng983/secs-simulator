@@ -36,14 +36,12 @@ if (-not $SkipNative) {
 }
 if (-not (Test-Path $exe)) { throw "缺少原生镜像: $exe（先构建，或去掉 -SkipNative）" }
 
-# ---- 3. 填充 Tauri resources（bundle.resources 会整体打进安装包）----
+# ---- 3. 填充 Tauri resources（前端经 frontendDist 内嵌进壳，resources 只需本机后端）----
 $resources = Join-Path $root 'gui/src-tauri/resources'
 if (Test-Path $resources) { Remove-Item $resources -Recurse -Force }
-New-Item -ItemType Directory -Force -Path (Join-Path $resources 'web') | Out-Null
+New-Item -ItemType Directory -Force -Path $resources | Out-Null
 
 Copy-Item $exe (Join-Path $resources 'secs-sim.exe')
-Copy-Item "$web/*" (Join-Path $resources 'web') -Recurse
-Copy-Item (Join-Path $root 'docs/schema-v5.md') (Join-Path $resources 'docs-schema-v5.md')
 
 # ---- 4. tauri build（Rust release + NSIS 安装程序）----
 Write-Host '--- tauri build ---'
@@ -71,4 +69,4 @@ Copy-Item $installer.FullName $dest -Force
 
 Write-Host ''
 Write-Host ("installer : {0} ({1:N1} MB)" -f $dest, ((Get-Item $dest).Length / 1MB))
-Write-Host "内含: secs-sim.exe(本机后端) + web(前端) + launcher(本机运行/连接服务器)"
+Write-Host "内含: 桌面壳(前端内嵌) + secs-sim.exe(本机后端)"

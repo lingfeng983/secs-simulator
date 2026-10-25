@@ -4,19 +4,20 @@
   "version": "2.0.0",
   "identifier": "com.shimizukenta.secssim",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../../frontend/dist"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
-        "label": "launcher",
+        "label": "main",
         "title": "SECS Simulator",
-        "width": 560,
-        "height": 620,
-        "resizable": false,
+        "width": 1320,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
         "center": true,
-        "visible": true,
+        "visible": false,
         "url": "index.html"
       }
     ],

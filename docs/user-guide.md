@@ -11,7 +11,7 @@ HTTP/SSE API 见 [docs/openapi.yaml](openapi.yaml),架构与模块见 [README.md
 ## 1. 启动与登录
 
 ```powershell
-# 最简单:一体化模式,只绑本机,token 自动生成
+# 最简单:一体化模式,只绑本机,默认开放访问(免令牌)
 secs-sim --mode=integrated
 
 # 顺便托管界面(推荐):构建一次前端后,浏览器直接打开 READY 行里的地址
@@ -20,18 +20,19 @@ secs-sim --mode=integrated --web-root frontend/dist
 # 从配置文件装载设备
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
-# 服务端模式:对外提供访问,必须带凭据
+# 服务端模式:对外提供访问,默认开放;需要限制时显式给凭据
 secs-sim --mode=server --bind 0.0.0.0 --port 8080 --token $env:SECS_TOKEN
 ```
 
 启动日志里会打印一行 `READY`:
 
 ```
-READY mode=integrated http=60331 token=cf83dd61... accounts=1 sessions=0 work=...
+READY mode=integrated http=60331 token= accounts=0 sessions=0 work=...
 ```
 
 - `http=` 后面是界面地址,浏览器**直接打开就用**——内部工具默认开放访问,没有令牌、没有登录;
-- 需要限制访问时显式给 `--token <口令>` 或 `--auth-users users.json`,此时 READY 行会带 token;
+- 需要限制访问时显式给 `--token <口令>` 或 `--auth-users users.json`,此时 READY 行会带 token
+  (注意:加了凭据后当前界面无法登录,受限访问请走 API/脚本);
 - 要把界面指向另一台机器上的**运行时后端**:顶栏「连接」填后端地址,保存后页面重载。
 
 ## 2. 界面总览（v6.1:单功能页面）
@@ -189,13 +190,14 @@ S2F33(定义报告)/S2F35(链接事件)/S2F37(启停事件)是**主机→设备*
 
 | 形态 | 内容 | 用法 |
 |---|---|---|
-| **Windows 安装程序** `SECS Simulator_<版本>_x64-setup.exe` | Tauri 壳 + 原生 exe 后端 + 前端(一并打进安装包) | 安装后启动:「本机运行」一键起本机模拟器(无需 JVM),或「连接服务器」远程;`scripts/package-windows.ps1` 产出 |
-| **Linux 服务端** `secs-sim-server-<版本>-linux.zip` | 模块 jar + 前端 + `start-server.sh` | 部署在 Linux 设备机,`./start-server.sh` 以 server 模式对外并托管界面(目标机需 JDK 25+);`scripts/package-linux.ps1` 产出 |
+| **Windows 安装程序** `SECS Simulator_<版本>_x64-setup.exe` | Tauri 壳(前端内嵌) + 原生 exe 后端 | 安装后打开直接进界面,默认连本机后端(无需 JVM);`scripts/package-windows.ps1` 产出 |
+| **Linux 服务端** `secs-sim-server-<版本>-linux.zip` | 模块 jar + 前端 + `start-server.sh` | 部署在 Linux 设备机,`./start-server.sh` 以 server 模式对外(目标机需 JDK 25+);`scripts/package-linux.ps1` 产出 |
 
 远程场景:设备在 Linux 机(A)解压服务端包并 `./start-server.sh` 启动;
-操作者在 Windows 机(B)安装程序,启动器选「连接服务器」填 A 机地址(`http://A 机 IP:8080`)。
-界面直接由 A 机提供,配置、批量、曲线、报文全部操作 A 机,不占用 B 机资源。
-本机场景则完全不依赖网络:安装程序内置后端与前端,「本机运行」即起。
+操作者在 Windows 机(B)安装程序,打开后点右上角「连接」,填 A 机地址(`http://A 机 IP:8080`)
+保存——界面仍由 B 机的壳提供,但配置、批量、曲线、报文全部操作 A 机,本机后端自动停止。
+要切回本机,同一对话框里清空地址保存即可。
+本机场景则完全不依赖网络:安装程序内置后端与前端,打开即用。
 
 ## 7. 一分钟上手清单
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, readApiBase, saveApiBase } from './api';
+import { inDesktopShell, tauriInvoke, type ShellConnection } from './lib/tauri';
 import { useBackend } from './state/useBackend';
 import { usePreferences, type ThemePreference } from './state/usePreferences';
 import { useToasts } from './state/useToasts';
@@ -45,6 +46,7 @@ const SHORTCUTS: readonly ShortcutHint[] = [
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
   const [draftBase, setDraftBase] = useState('');
+  const [shellConn, setShellConn] = useState<ShellConnection | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
@@ -56,6 +58,36 @@ export function App(): JSX.Element {
   const backend = useBackend(client, notifier);
 
   const [route, navigate] = useRoute(preferences.activeTab);
+
+  /** 打开「连接设置」：桌面壳内显示当前模式并预填远程地址；浏览器环境维持 localStorage 编辑。 */
+  const openConnection = useCallback(() => {
+    if (inDesktopShell) {
+      setShellConn(null);
+      setDraftBase('');
+      void tauriInvoke<ShellConnection>('connection_info')
+        .then((info) => {
+          setShellConn(info);
+          setDraftBase(info.mode === 'remote' ? info.url : '');
+        })
+        .catch(() => setShellConn(null));
+    } else {
+      setDraftBase(readApiBase());
+    }
+    setConnOpen(true);
+  }, []);
+
+  /** 桌面壳内切换后端：local 或远程地址；成功后整页重载（boot 重新取地址）。 */
+  const applyShellConnection = useCallback(
+    async (target: string) => {
+      try {
+        await tauriInvoke('switch_backend', { target });
+        window.location.reload();
+      } catch (error) {
+        notifier.error('切换后端失败', String(error));
+      }
+    },
+    [notifier],
+  );
 
   /* 事件流:界面不再展示全局报文/日志,onFlush 置空即可;
      类型化通知进 liveEvents 缓冲(设备事件子页的实时事件用)。 */
@@ -310,10 +342,7 @@ export function App(): JSX.Element {
           refreshing={backend.refreshing}
           onRefresh={() => void backend.refreshAll()}
           onOpenPalette={() => setPaletteOpen(true)}
-          onOpenConnection={() => {
-            setDraftBase(readApiBase());
-            setConnOpen(true);
-          }}
+          onOpenConnection={openConnection}
           logLevel={backend.logLevel}
           onLogLevel={(level) => void backend.setLogLevel(level)}
           resolvedTheme={resolvedTheme}
@@ -331,10 +360,7 @@ export function App(): JSX.Element {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setDraftBase(readApiBase());
-                setConnOpen(true);
-              }}
+              onClick={openConnection}
             >
               修改地址
             </button>
@@ -367,6 +393,11 @@ export function App(): JSX.Element {
               type="button"
               className="primary"
               onClick={() => {
+                if (inDesktopShell) {
+                  /* 桌面壳：留空切回本机后端，填地址切远程（壳会停掉本机进程） */
+                  void applyShellConnection(draftBase.trim() === '' ? 'local' : draftBase.trim());
+                  return;
+                }
                 const previous = readApiBase();
                 saveApiBase(draftBase);
                 if (previous !== readApiBase()) {
@@ -382,20 +413,39 @@ export function App(): JSX.Element {
           </>
         }
       >
+        {inDesktopShell && (
+          <p className="hint">
+            当前：
+            {shellConn === null
+              ? '未知'
+              : shellConn.mode === 'local'
+                ? `本机后端（${shellConn.url}）`
+                : `远程服务端（${shellConn.url}）`}
+          </p>
+        )}
         <div className="form-row">
           <label className="field">
             后端地址
             <input
               value={draftBase}
               onChange={(event) => setDraftBase(event.target.value)}
-              placeholder="留空 = 本机（http://127.0.0.1:端口）"
+              placeholder={inDesktopShell ? '留空 = 本机后端' : '留空 = 本机（http://127.0.0.1:端口）'}
               aria-label="后端地址"
             />
           </label>
         </div>
         <p className="hint">
-          默认同源访问；要把这个界面指向另一台机器上的运行时后端，
-          填它的地址（如 <code>http://192.168.1.10:8080</code>），保存后页面重载。
+          {inDesktopShell ? (
+            <>
+              填远程服务端地址（如 <code>http://192.168.1.10:8080</code>）切换到远程，
+              本机后端会停止；留空切回本机。远程端需以开放访问启动（Linux jar 包默认）。
+            </>
+          ) : (
+            <>
+              默认同源访问；要把这个界面指向另一台机器上的运行时后端，
+              填它的地址（如 <code>http://192.168.1.10:8080</code>），保存后页面重载。
+            </>
+          )}
         </p>
       </Modal>
 

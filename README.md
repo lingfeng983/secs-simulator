@@ -393,9 +393,9 @@ scripts\package-windows.ps1
 scripts\package-linux.ps1
 ```
 
-- **Windows 安装程序** `package/SECS Simulator_<版本>_x64-setup.exe`：安装后两种用法——
-  「本机运行」启动内置的 `secs-sim.exe`（原生镜像，无需 JVM）连本机；
-  或「连接服务器」不启本机后端，直接加载 Linux 服务端托管的界面。
+- **Windows 安装程序** `package/SECS Simulator_<版本>_x64-setup.exe`：打开直接进界面
+  （前端内嵌在壳里），默认启动内置的 `secs-sim.exe`（原生镜像，无需 JVM）连本机；
+  右上角「连接」可随时切到远程服务端（本机后端自动停止），留空切回本机，选择会记住。
 - **Linux 服务端** `package/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
   Linux 机器，`./start-server.sh` 以 server 模式对外并托管 web，被 Windows 端远程操作。
 - 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）+ Node；安装程序另需 Rust

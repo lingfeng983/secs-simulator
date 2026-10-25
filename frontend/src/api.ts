@@ -505,8 +505,17 @@ export interface ApiClient {
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
 const API_BASE_KEY = 'secs-sim-api-base';
 
+/** 桌面壳注入的后端地址；null = 未注入（浏览器环境或壳内后端未就绪）。 */
+let runtimeApiBase: string | null = null;
+
+/** 桌面壳启动时注入后端地址；注入后 readApiBase 以它为准，忽略 localStorage。 */
+export function setRuntimeApiBase(base: string): void {
+  runtimeApiBase = base;
+}
+
 /** 当前使用的后端地址；空串表示同源。 */
 export function readApiBase(): string {
+  if (runtimeApiBase !== null) return runtimeApiBase;
   return window.localStorage.getItem(API_BASE_KEY) ?? '';
 }
 

@@ -3,7 +3,7 @@ SECS Simulator — Linux 服务端（<版本>）
 
 这是部署在 Linux 机器上的设备模拟后端，以 JVM（jar 包）方式运行。
 它被 Windows 机器上安装的 SECS Simulator 远程操作：Windows 端在
-「连接服务器」里填本机地址，界面即由本服务端提供。
+右上角「连接」里填本机地址即可，配置、曲线、报文全部操作本机。
 
 快速开始
 --------
@@ -11,8 +11,8 @@ SECS Simulator — Linux 服务端（<版本>）
 2. 运行 ./start-server.sh
    默认：API 端口 8080（绑 0.0.0.0）、HSMS 端口 5000、数据目录 ./work。
 3. 控制台会打印 API 地址（http://<本机名>:8080）。
-4. 在 Windows 机器上安装 SECS Simulator，启动后在「连接服务器」
-   标签页填上面的地址，点「连接服务器」。
+4. 在 Windows 机器上安装 SECS Simulator，打开后点右上角「连接」，
+   填上面的地址保存即可（本机浏览器也可以直接打开这个地址用）。
 
 常用参数（start-server.sh）
 --------
@@ -37,7 +37,8 @@ API/脚本访问。生产建议置于 TLS 反向代理之后。
 目录
 --------
     secs-*.jar        后端模块（runtime / api-http / app / core / protocol / json）
-    web/              前端静态资源（服务端托管，供远程界面加载）
+    web/              前端静态资源（服务端托管，供本机浏览器直接打开；
+                      Windows 桌面端界面内嵌在安装程序里，不依赖它）
     start-server.sh   启动脚本
     docs-schema-v5.md 设备配置格式说明
     VERSION           版本号
