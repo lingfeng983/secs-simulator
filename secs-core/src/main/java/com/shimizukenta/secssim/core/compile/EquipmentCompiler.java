@@ -108,7 +108,12 @@ public final class EquipmentCompiler {
             }
 
             // first-wins：按名索引，重名时保留先注册者（ID 重复才在上面报 DUPLICATE_SVID）。
-            this.globalSvidByName.putIfAbsent(def.name(), resolved);
+            // 重名本身不阻断启动，但必须留一条提示：报告/CEID 按名引用时，
+            // 后定义的同名项会被悄悄忽略，现场只会看到“引用的好像是另一个值”。
+            if (this.globalSvidByName.putIfAbsent(def.name(), resolved) != null) {
+                this.issues.add(Issue.warning("DUPLICATE_GLOBAL_SVID_NAME",
+                        "设备级 SVID 名称重复: " + def.name() + "（按先注册者生效，后定义的同名项被忽略）"));
+            }
         }
     }
 

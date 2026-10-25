@@ -231,7 +231,8 @@ class SessionLauncherTest {
                  "equipment": {"name": "LINE-%s", "idSpace": {},
                    "units": [{ "unitId": 1, "name": "CH1", "injectUnitId": false,
                      "svids": [{ "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C" }],
-                     "reports": [], "ceids": [] }]},
+                     "reports": [],
+                     "ceids": [{ "offset": 1, "slot": "BEAT", "reports": [] }] }]},
                  "events": {"maxPerSec": 5, "plans": []}}
                 """.formatted(id, marker);
     }

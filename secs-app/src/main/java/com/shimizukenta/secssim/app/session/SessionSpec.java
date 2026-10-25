@@ -10,7 +10,8 @@ import com.shimizukenta.secssim.core.domain.EquipmentSpec;
  * @param id        会话标识（进程内唯一）
  * @param passive   {@code true} 为被动（监听），{@code false} 为主动（连接主机）
  * @param bindHost  监听/连接地址
- * @param port      端口，0 表示由系统分配
+ * @param port      端口；配置里写 0 表示“不指定”，由启动器替换为 {@code --hsms-port}，
+ *                  不会向操作系统申请随机端口。API 的部署期覆盖也不接受 0
  * @param deviceId  SECS device-id
  * @param seed      数据种子
  * @param equipment 设备配置

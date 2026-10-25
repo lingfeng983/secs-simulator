@@ -220,7 +220,7 @@ function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Elem
         <label className="check-inline">
           <input
             type="checkbox"
-            checked={booleanField(session, 'passive')}
+            checked={booleanField(session, 'passive', true)}
             onChange={(event) => set('passive', event.target.checked)}
           />
           被动监听
@@ -807,10 +807,10 @@ function UnitCard({ unit, index, edit }: { unit: JsonObject; index: number; edit
             })}
           />
         </label>
-        <label className="check-inline">
+        <label className="check-inline" title="缺省为 true：开启时必须在该单元定义 UNIT_ID 槽位">
           <input
             type="checkbox"
-            checked={booleanField(unit, 'injectUnitId')}
+            checked={booleanField(unit, 'injectUnitId', true)}
             onChange={(event) => mutateUnit((target) => {
               target.injectUnitId = event.target.checked;
             })}

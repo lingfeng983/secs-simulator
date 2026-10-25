@@ -7,20 +7,24 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
+import com.shimizukenta.jsonhub.JsonHub;
+import com.shimizukenta.jsonhub.JsonHubBuilder;
+import com.shimizukenta.jsonhub.JsonObjectPair;
+import com.shimizukenta.jsonhub.JsonString;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.log.Log;
-import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
-import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 
 /**
  * 配置文件的读取、校验与保存。
@@ -280,18 +284,19 @@ public final class ConfigStore {
     /**
      * 把设备常量写回配置文件。
      *
-     * <p>用于 S2F15（主机写 ECV）：主机改的是设备的"调机参数"，现场预期是
+     * <p>用于 S2F15（主机写 ECV）：主机改的是设备的“调机参数”，现场预期是
      * <b>重启/重载后仍然保留</b>，所以必须落盘，而不是只留在内存里。</p>
      *
-     * <p>做法是"读原文 → 只换 equipment.constants → 重新序列化 → 原子替换"：
-     * 这样配置里的其它段（单元、模板、事件编排）一个字节都不会被这次写入改动，
-     * 避免主机写一个温度值把人工调过的模板冲掉。</p>
+     * <p>做法是「解析原文 → 只替换 equipment.constants 节点 → 重新序列化 → 原子替换」：
+     * 其它段（session / 单元 / 模板 / 编排）、未知键、schemaVersion 全部原样保留，
+     * 不会被模型往返悄悄改掉。唯一的变化是缩进/空行会统一成 2 空格——
+     * 这是保住“其余内容一个键都不丢”必须付的小代价。</p>
      *
      * @param file      配置文件
      * @param constants ECID → 常量（调用方传入的是快照）
-     * @throws IOException 读不了或写不了
+     * @throws IOException 读不了、解析不了或写不了
      */
-    public static void writeConstants(Path file, java.util.Map<Integer, EquipmentConstantDef> constants) throws IOException {
+    public static void writeConstants(Path file, Map<Integer, EquipmentConstantDef> constants) throws IOException {
         String text;
         try {
             text = Files.readString(file, StandardCharsets.UTF_8);
@@ -299,30 +304,48 @@ public final class ConfigStore {
             throw new IOException("读不了配置 " + file.getFileName() + ": " + e.getMessage(), e);
         }
 
-        SessionConfig config;
+        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') {
+            text = text.substring(1);
+        }
+
+        JsonHub root;
         try {
-            config = SessionConfigJson.parse(text);
+            root = JsonHub.fromJson(text);
         } catch (RuntimeException e) {
-            /* ConfigException 也是 RuntimeException：解析失败就不覆盖，宁可写失败 */
+            /* 解析失败就不覆盖：宁可写失败，也不要把原文弄丢 */
             throw new IOException("配置无法解析，拒绝覆盖 " + file.getFileName() + ": " + e.getMessage(), e);
         }
 
-        EquipmentSpec equipment = config.spec().equipment();
-        List<EquipmentConstantDef> ordered = new java.util.ArrayList<>(constants.values());
-        ordered.sort(java.util.Comparator.comparingInt(EquipmentConstantDef::id));
+        if (!root.isObject() || !root.containsKey("equipment") || !root.get("equipment").isObject()) {
+            throw new IOException("配置没有 equipment 段，拒绝覆盖 " + file.getFileName());
+        }
 
-        EquipmentSpec updated = new EquipmentSpec(equipment.name(), equipment.deviceId(),
-                equipment.units(), equipment.globalSvids(), equipment.globalCeids(),
-                equipment.idSpace(), ordered);
+        JsonHubBuilder b = JsonHub.getBuilder();
+        JsonHub equipment = root.get("equipment");
+        List<JsonObjectPair> equipmentPairs = new ArrayList<>();
+        boolean replaced = false;
 
-        SessionSpec spec = config.spec();
-        SessionSpec newSpec = new SessionSpec(spec.id(), spec.passive(), spec.bindHost(),
-                spec.port(), spec.deviceId(), spec.seed(), updated);
+        for (JsonString key : equipment.keySet()) {
+            String name = key.unescaped();
+            if ("constants".equals(name)) {
+                equipmentPairs.add(b.pair(name, SessionConfigJson.constantsJson(constants.values(), b)));
+                replaced = true;
+            } else {
+                equipmentPairs.add(b.pair(name, equipment.get(name)));
+            }
+        }
+        if (!replaced) {
+            equipmentPairs.add(b.pair("constants", SessionConfigJson.constantsJson(constants.values(), b)));
+        }
 
-        SessionConfig newConfig = new SessionConfig(newSpec, config.schedule(),
-                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), config.templates());
+        JsonHub newEquipment = b.object(equipmentPairs);
+        List<JsonObjectPair> rootPairs = new ArrayList<>();
+        for (JsonString key : root.keySet()) {
+            String name = key.unescaped();
+            rootPairs.add(b.pair(name, "equipment".equals(name) ? newEquipment : root.get(name)));
+        }
 
-        writeAtomically(file, SessionConfigJson.toJson(newConfig));
+        writeAtomically(file, b.object(rootPairs).prettyPrint());
     }
 
     /**

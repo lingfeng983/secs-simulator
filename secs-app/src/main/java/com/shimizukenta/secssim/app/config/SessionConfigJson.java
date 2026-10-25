@@ -195,13 +195,47 @@ public final class SessionConfigJson {
     }
 
     private static JsonHub sessionJson(SessionSpec spec, JsonHubBuilder b) {
-        return b.object(
-                b.pair("id", spec.id()),
-                b.pair("passive", spec.passive()),
-                b.pair("bindHost", spec.bindHost()),
-                b.pair("port", spec.port()),
-                b.pair("deviceId", spec.deviceId()),
-                b.pair("seed", spec.seed()));
+        List<JsonObjectPair> pairs = new ArrayList<>();
+        pairs.add(b.pair("id", spec.id()));
+        pairs.add(b.pair("passive", spec.passive()));
+        pairs.add(b.pair("bindHost", spec.bindHost()));
+        pairs.add(b.pair("port", spec.port()));
+        pairs.add(b.pair("deviceId", spec.deviceId()));
+        pairs.add(b.pair("seed", spec.seed()));
+        addTimeouts(pairs, spec.timeouts(), b);
+        return b.object(pairs);
+    }
+
+    /**
+     * 把 HSMS 超时写回 session 段。
+     *
+     * <p>只写显式给过的键：没写的键在文件里保持"没有"，语义上等于协议层默认。
+     * 这段必须参与往返——否则 S2F15 写一次设备常量，配置文件里的超时就会消失。</p>
+     */
+    private static void addTimeouts(List<JsonObjectPair> pairs, HsmsTimeouts timeouts, JsonHubBuilder b) {
+        if (timeouts == null) {
+            return;
+        }
+
+        List<JsonObjectPair> values = new ArrayList<>();
+        if (timeouts.t3() != null) {
+            values.add(b.pair("t3", timeouts.t3()));
+        }
+        if (timeouts.t5() != null) {
+            values.add(b.pair("t5", timeouts.t5()));
+        }
+        if (timeouts.t6() != null) {
+            values.add(b.pair("t6", timeouts.t6()));
+        }
+        if (timeouts.t7() != null) {
+            values.add(b.pair("t7", timeouts.t7()));
+        }
+        if (timeouts.t8() != null) {
+            values.add(b.pair("t8", timeouts.t8()));
+        }
+        if (!values.isEmpty()) {
+            pairs.add(b.pair("timeouts", b.object(values)));
+        }
     }
 
     private static JsonHub equipmentJson(EquipmentSpec equipment, JsonHubBuilder b) {
@@ -235,26 +269,44 @@ public final class SessionConfigJson {
 
         /* 设备常量要原样写回：S2F15 落盘后如果这段没保存，
            "重载后保留"就成了假的——文件里根本没有这些值。 */
-        List<JsonHub> constants = new ArrayList<>();
-        for (EquipmentConstantDef def : equipment.constants()) {
-            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
-            pairs.add(b.pair("id", def.id()));
-            pairs.add(b.pair("name", def.name()));
-            pairs.add(b.pair("type", def.type().name()));
-            pairs.add(b.pair("value", def.value()));
-            if (! def.unit().isEmpty()) {
-                pairs.add(b.pair("unit", def.unit()));
-            }
-            constants.add(b.object(pairs));
-        }
+        JsonHub constants = constantsJson(equipment.constants(), b);
 
         return b.object(
                 b.pair("name", equipment.name()),
                 b.pair("idSpace", idSpaceJson(equipment.idSpace(), b)),
                 b.pair("globalSvids", b.array(globals)),
                 b.pair("globalCeids", b.array(globalCeids)),
-                b.pair("constants", b.array(constants)),
+                b.pair("constants", constants),
                 b.pair("units", b.array(units)));
+    }
+
+    /**
+     * 设备常量（ECV）数组。
+     *
+     * <p>公开给 S2F15 的原文回写复用：两条写盘路径必须用同一种元素形状，
+     * 否则"编辑器保存"与"主机写常量"产出的文件会不一致。</p>
+     *
+     * @param constants 常量（按 id 排序后写出）
+     * @param b         JSON builder
+     * @return JSON 数组
+     */
+    public static JsonHub constantsJson(java.util.Collection<EquipmentConstantDef> constants, JsonHubBuilder b) {
+        List<JsonHub> items = new ArrayList<>();
+        List<EquipmentConstantDef> ordered = new ArrayList<>(constants);
+        ordered.sort(java.util.Comparator.comparingInt(EquipmentConstantDef::id));
+
+        for (EquipmentConstantDef def : ordered) {
+            List<JsonObjectPair> pairs = new ArrayList<>();
+            pairs.add(b.pair("id", def.id()));
+            pairs.add(b.pair("name", def.name()));
+            pairs.add(b.pair("type", def.type().name()));
+            pairs.add(b.pair("value", def.value()));
+            if (!def.unit().isEmpty()) {
+                pairs.add(b.pair("unit", def.unit()));
+            }
+            items.add(b.object(pairs));
+        }
+        return b.array(items);
     }
 
     private static JsonHub idSpaceJson(IdSpacePolicy policy, JsonHubBuilder b) {

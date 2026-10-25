@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePersistentState } from './usePersistentState';
+import { DEFAULT_TAB } from '../layout/navigation';
 
 /** 主题偏好：跟随系统 / 强制浅色 / 强制深色。 */
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -15,6 +16,8 @@ export interface Preferences {
   density: Density;
   /** 上次停留的面板。 */
   activeTab: string;
+  /** 左侧导航是否折叠为纯图标栏。 */
+  sidebarCollapsed: boolean;
   /** 报文面板是否自动滚动到底。 */
   autoscroll: boolean;
   /** 报文面板是否暂停接收（只冻结显示，不影响服务端）。 */
@@ -28,7 +31,8 @@ export interface Preferences {
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
   density: 'comfortable',
-  activeTab: 'sessions',
+  activeTab: DEFAULT_TAB,
+  sidebarCollapsed: false,
   autoscroll: true,
   pauseStream: false,
   chartMode: 'canvas',

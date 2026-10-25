@@ -205,14 +205,16 @@ async function mockApi(page: Page): Promise<void> {
   });
 }
 
-/** 切到某个面板。界面改成侧边栏导航以后要先把面板点出来。 */
+/** 切到某个面板。界面用侧边栏导航，先点菜单再断言内容。 */
 async function gotoPanel(page: Page, label: string): Promise<void> {
   await page.locator('.sidenav .nav-item', { hasText: label }).first().click();
-  await expect(page.locator(`.panel[id="panel-${panelId(label)}"]`)).toBeVisible();
+  await expect(page.locator(`#panel-${panelId(label)}`)).toBeVisible();
 }
 
 function panelId(label: string): string {
   switch (label) {
+    case '总览':
+      return 'overview';
     case '会话':
       return 'sessions';
     case '报警':
@@ -243,7 +245,12 @@ test.beforeEach(async ({ page }) => {
 test('loads identity, session, Canvas and uPlot preview', async ({ page }) => {
   await page.goto('/#token=e2e-token');
 
-  await expect(page.getByText('管理员').first()).toBeVisible();
+  /* 默认落在总览工作台：品牌、KPI 与后端信息都应在 */
+  await expect(page.locator('.brand-name')).toContainText('SECS Simulator');
+  await expect(page.locator('#panel-overview')).toBeVisible();
+  await expect(page.getByText('在线会话').first()).toBeVisible();
+
+  await gotoPanel(page, '会话');
   await expect(page.getByRole('cell', { name: 'line1' }).first()).toBeVisible();
 
   await gotoPanel(page, '曲线预览');
@@ -265,12 +272,12 @@ test('opens a config and adds a curve through the structured editor', async ({ p
 
   await gotoPanel(page, '配置编辑器');
   const configSection = page.locator('#panel-config');
-  await configSection.locator('select').first().selectOption('line1.json');
+  await configSection.getByRole('combobox', { name: '选择配置' }).selectOption('line1.json');
   await expect(page.getByText('模板（结构化编辑）')).toBeVisible();
 
   /* 表单视图里能看到 session / equipment / events 的结构化编辑 */
-  await expect(page.getByText('会话（session）')).toBeVisible();
-  await expect(page.getByText('事件编排（events）')).toBeVisible();
+  await expect(page.getByText('会话（session').first()).toBeVisible();
+  await expect(page.getByText('事件编排（events').first()).toBeVisible();
 
   await page.getByRole('button', { name: '+ 曲线' }).click();
   /* 表单改动写回的是同一份草稿：切到原文视图核对 */
@@ -300,6 +307,7 @@ test('toggles an event plan and shows the admin audit entry', async ({ page }) =
 test('filters sessions with the table search box', async ({ page }) => {
   await page.goto('/#token=e2e-token');
 
+  await gotoPanel(page, '会话');
   const sessions = page.locator('#panel-sessions');
   await expect(sessions.getByRole('cell', { name: 'line1', exact: true })).toBeVisible();
 
@@ -341,9 +349,18 @@ test('switches the theme and remembers it', async ({ page }) => {
 test('shows a toast after an action instead of only logging it', async ({ page }) => {
   await page.goto('/#token=e2e-token');
 
-  await page.locator('#panel-sessions').getByRole('button', { name: '上报' }).click();
+  await gotoPanel(page, '会话');
+  await page.locator('#panel-sessions').getByRole('button', { name: '上报', exact: true }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect(page.locator('.toast-title').first()).toContainText('触发 line1 CEID');
+});
+
+test('overview quick actions jump to the related panel', async ({ page }) => {
+  await page.goto('/#token=e2e-token');
+
+  await expect(page.locator('#panel-overview')).toBeVisible();
+  await page.locator('#panel-overview').getByRole('button', { name: /新建会话/ }).click();
+  await expect(page.locator('#panel-sessions')).toBeVisible();
 });
 
 test('loads message history and filters it', async ({ page }) => {

@@ -1,8 +1,13 @@
 package com.shimizukenta.secssim.app.config;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
+import com.shimizukenta.secssim.core.compile.Issue;
+import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 
 /**
@@ -85,11 +90,27 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
     }
 
     /**
-     * 编译设备模型（解析绝对 ID 并校验）。
+     * 编译设备模型（解析绝对 ID 并校验），并校验事件计划引用的 CEID。
      *
-     * @return 编译结果
+     * <p>计划里的 CEID 是本地编排的一部分，必须在设备模型里真实存在：
+     * 否则配置能存、能启动，但运行期每次触发都会在组装 S6F11 时抛
+     * “未知 CEID”，只留下一条日志——表现为“设备在线、计划启用、却永远收不到事件”。
+     * 把它挪到编译期，编辑器的「校验」与启动走同一道门。</p>
+     *
+     * @return 编译结果（含设备模型问题与未知 CEID 问题）
      */
     public CompilationResult compile() {
-        return EquipmentCompiler.compile(this.spec.equipment());
+        CompilationResult compiled = EquipmentCompiler.compile(this.spec.equipment());
+        List<Issue> issues = new ArrayList<>(compiled.issues());
+
+        for (EventPlan plan : this.schedule.plans()) {
+            if (!compiled.equipment().ceids().containsKey(plan.ceid())) {
+                issues.add(Issue.error("UNKNOWN_CEID",
+                        "事件计划 " + plan.id() + " 引用的 CEID " + plan.ceid()
+                                + " 在设备模型里不存在（先在该单元的 ceids 里定义它）"));
+            }
+        }
+
+        return new CompilationResult(compiled.equipment(), issues);
     }
 }

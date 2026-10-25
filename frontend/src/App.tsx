@@ -11,6 +11,11 @@ import { Modal } from './ui/Modal';
 import { useHotkeys } from './ui/useHotkeys';
 import type { CommandItem } from './lib/command';
 
+import { DEFAULT_TAB, NAV_ITEMS, findNavItem, groupOf } from './layout/navigation';
+import { Sidebar } from './layout/Sidebar';
+import { Topbar } from './layout/Topbar';
+
+import { OverviewPanel } from './panels/OverviewPanel';
 import { SessionsPanel } from './panels/SessionsPanel';
 import { AlarmsPanel } from './panels/AlarmsPanel';
 import { PreviewPanel } from './panels/PreviewPanel';
@@ -23,41 +28,13 @@ import { AuditPanel } from './panels/AuditPanel';
 import { ConsolePanel } from './panels/ConsolePanel';
 import { HostSimPanel } from './panels/HostSimPanel';
 
-/** 一个面板的入口。 */
-interface TabDef {
-  id: string;
-  label: string;
-  group: string;
-  /** 侧边栏上的小图标。 */
-  icon: string;
-}
-
-/**
- * 面板清单。
- *
- * <p>分组是给人看的：设备 / 数据 / 工具三块，
- * 面板多起来以后还能靠分组找到位置。</p>
- */
-const TABS: readonly TabDef[] = [
-  { id: 'sessions', label: '会话', group: '设备', icon: '▦' },
-  { id: 'alarms', label: '报警', group: '设备', icon: '⚠' },
-  { id: 'events', label: '事件编排', group: '设备', icon: '↻' },
-  { id: 'preview', label: '曲线预览', group: '数据', icon: '∿' },
-  { id: 'catalog', label: '设备目录', group: '数据', icon: '☰' },
-  { id: 'messages', label: '报文', group: '数据', icon: '⇄' },
-  { id: 'send', label: '手动发送', group: '工具', icon: '➤' },
-  { id: 'config', label: '配置编辑器', group: '工具', icon: '⚙' },
-  { id: 'audit', label: '审计', group: '工具', icon: '☑' },
-  { id: 'console', label: '事件流', group: '工具', icon: '▷' },
-  { id: 'hostsim', label: '主机模拟', group: '设备', icon: '⇋' },
-];
-
 /** 快捷键说明表。 */
 const SHORTCUTS: readonly ShortcutHint[] = [
   { keys: 'Ctrl+K', description: '打开命令面板：跳面板、找 CEID、执行动作' },
-  { keys: '1..9', description: '直接跳到第 N 个面板（0 是第 10 个）' },
+  { keys: '1..9 / 0', description: '跳到导航里的前 10 个面板' },
   { keys: 'R', description: '立即刷新所有数据' },
   { keys: '/', description: '聚焦当前面板的搜索框' },
+  { keys: '[', description: '收起 / 展开导航栏' },
   { keys: '?', description: '打开这张快捷键表' },
   { keys: 'Esc', description: '关闭浮层' },
 ];
@@ -65,9 +42,10 @@ const SHORTCUTS: readonly ShortcutHint[] = [
 /**
  * 应用外壳。
  *
- * <p>这里只做三件事：把数据接起来、把面板摆好、把快捷键接上。
- * 具体逻辑都在 {@link useBackend} 与各个面板里，
- * 加一个面板只要在这里登记一行。</p>
+ * <p>新版布局：左侧是品牌 + 分组导航 + 连接状态，右侧是
+ * 顶栏（当前页标题 / 全局动作）与内容区。这里只做三件事：
+ * 把数据接起来、把面板摆好、把快捷键接上——具体逻辑都在
+ * {@link useBackend} 与各个面板里，加面板只要在 navigation.ts 登记一行。</p>
  */
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
@@ -112,7 +90,10 @@ export function App(): JSX.Element {
     },
   );
 
-  const activeTab = TABS.some((tab) => tab.id === preferences.activeTab) ? preferences.activeTab : TABS[0].id;
+  const activeTab = findNavItem(preferences.activeTab) === undefined ? DEFAULT_TAB : preferences.activeTab;
+  const activeItem = findNavItem(activeTab) ?? NAV_ITEMS[0];
+  const activeGroup = groupOf(activeTab);
+  const streamLabel = streamStateLabel(streamState, streamDetail);
 
   const goTo = useCallback(
     (id: string) => {
@@ -135,12 +116,12 @@ export function App(): JSX.Element {
   const commands = useMemo<CommandItem[]>(() => {
     const items: CommandItem[] = [];
 
-    for (const tab of TABS) {
+    for (const tab of NAV_ITEMS) {
       items.push({
         id: `tab:${tab.id}`,
         label: `前往 ${tab.label}`,
         group: '跳转面板',
-        hint: tab.group,
+        hint: groupOf(tab.id)?.label,
         keywords: [tab.id, tab.label],
         run: () => goTo(tab.id),
       });
@@ -187,6 +168,13 @@ export function App(): JSX.Element {
         },
       },
       {
+        id: 'action:sidebar',
+        label: '收起 / 展开导航栏',
+        group: '操作',
+        hint: '[',
+        run: () => update({ sidebarCollapsed: !preferences.sidebarCollapsed }),
+      },
+      {
         id: 'action:shortcuts',
         label: '查看快捷键',
         group: '操作',
@@ -223,7 +211,7 @@ export function App(): JSX.Element {
     }
 
     return items;
-  }, [backend, goTo, notifier, preferences.density, preferences.theme, resolvedTheme, update]);
+  }, [backend, goTo, notifier, preferences.density, preferences.sidebarCollapsed, preferences.theme, resolvedTheme, update]);
 
   /* ---------- 快捷键 ---------- */
 
@@ -233,6 +221,7 @@ export function App(): JSX.Element {
       { combo: '?', description: '快捷键表', handler: () => setHelpOpen((previous) => !previous) },
       { combo: 'r', description: '刷新', handler: () => void backend.refreshAll() },
       { combo: '/', description: '聚焦搜索', handler: () => focusSearch() },
+      { combo: '[', description: '收起 / 展开导航', handler: () => update({ sidebarCollapsed: !preferences.sidebarCollapsed }) },
       {
         combo: 'escape',
         description: '关闭浮层',
@@ -241,7 +230,7 @@ export function App(): JSX.Element {
           setHelpOpen(false);
         },
       },
-      ...TABS.map((tab, index) => ({
+      ...NAV_ITEMS.slice(0, 10).map((tab, index) => ({
         /* 第十个面板用 0：单字符键位才留得住 */
         combo: index === 9 ? '0' : String(index + 1),
         description: `跳到 ${tab.label}`,
@@ -252,9 +241,6 @@ export function App(): JSX.Element {
   );
 
   /* ---------- 顶栏 ---------- */
-
-  const connTone =
-    streamState === 'connected' ? 'ok' : streamState === 'reconnecting' ? 'warn' : streamState === 'idle' ? 'muted' : 'danger';
 
   const badgeFor = (id: string): number | null => {
     if (id === 'alarms') {
@@ -271,151 +257,70 @@ export function App(): JSX.Element {
     notifier,
     preferences,
     updatePreferences: update,
+    goTo,
+    streamState,
+    streamLabel,
   };
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="topbar-brand">
-          <h1>SECS Simulator</h1>
-          <span className="version">{backend.health?.version ?? '-'}</span>
-        </div>
+    <div className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      <Sidebar
+        activeId={activeTab}
+        collapsed={preferences.sidebarCollapsed}
+        badgeFor={badgeFor}
+        onNavigate={goTo}
+        onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
+        version={backend.health?.version ?? '-'}
+        mode={backend.health?.mode ?? '-'}
+        streamState={streamState}
+        streamLabel={streamLabel}
+      />
 
-        <dl className="health">
-          <dt>形态</dt>
-          <dd>{backend.health?.mode ?? '-'}</dd>
-          <dt>事件流</dt>
-          <dd>
-            <span className={`conn-dot ${connTone}`} />
-            {streamStateLabel(streamState, streamDetail)}
-          </dd>
-        </dl>
+      <div className="main-col">
+        <Topbar
+          item={activeItem}
+          group={activeGroup}
+          streamState={streamState}
+          streamLabel={streamLabel}
+          sessions={backend.sessions}
+          activeSession={activeSession}
+          onSessionChange={backend.setActiveSession}
+          refreshing={backend.refreshing}
+          onRefresh={() => void backend.refreshAll()}
+          onOpenPalette={() => setPaletteOpen(true)}
+          onOpenConnection={() => {
+            setDraftBase(readApiBase());
+            setConnOpen(true);
+          }}
+          logLevel={backend.logLevel}
+          onLogLevel={(level) => void backend.setLogLevel(level)}
+          resolvedTheme={resolvedTheme}
+          onToggleTheme={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
+          density={preferences.density}
+          onToggleDensity={() => update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' })}
+          onShowHelp={() => setHelpOpen(true)}
+        />
 
-        <span className="topbar-spacer" />
-
-        <div className="topbar-actions">
-          <div className="session-picker">
-            <label htmlFor="active-session">会话</label>
-            <select
-              id="active-session"
-              value={activeSession}
-              onChange={(event) => backend.setActiveSession(event.target.value)}
-              disabled={backend.sessions.length === 0}
+        {backend.backendError !== '' && (
+          <div className="global-error-banner" role="alert">
+            <span>后端不可达：{backend.backendError}</span>
+            <button type="button" onClick={() => void backend.refreshAll()} title="立即重试">
+              重试
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDraftBase(readApiBase());
+                setConnOpen(true);
+              }}
             >
-              {backend.sessions.length === 0 && <option value="">（无会话）</option>}
-              {backend.sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.id}
-                </option>
-              ))}
-            </select>
+              修改地址
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => void backend.refreshAll()}
-            disabled={backend.refreshing}
-            title="立即刷新所有数据（R）"
-          >
-            {backend.refreshing ? '刷新中…' : '刷新'}
-          </button>
-          <button type="button" onClick={() => setPaletteOpen(true)} title="命令面板（Ctrl+K）">
-            ⌘ 命令
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraftBase(readApiBase());
-              setConnOpen(true);
-            }}
-            title="设置后端地址（远程运行时后端）"
-          >
-            连接
-          </button>
-          <label className="session-picker" title="后端日志级别（排查时切到 debug）">
-            <span>日志</span>
-            <select
-              value={backend.logLevel}
-              onChange={(event) => void backend.setLogLevel(event.target.value)}
-            >
-              <option value="error">error</option>
-              <option value="info">info</option>
-              <option value="debug">debug</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
-            title="切换浅色 / 深色"
-            aria-label="切换主题"
-          >
-            {resolvedTheme === 'dark' ? '☀' : '☾'}
-          </button>
-          <button
-            type="button"
-            onClick={() => update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' })}
-            title="切换表格密度"
-          >
-            {preferences.density === 'compact' ? '≡ 紧凑' : '≡ 宽松'}
-          </button>
-          <button type="button" onClick={() => setHelpOpen(true)} title="快捷键（?）">
-            ?
-          </button>
-        </div>
-      </header>
-
-      {backend.backendError !== '' && (
-        <div className="global-error-banner" role="alert">
-          后端不可达：{backend.backendError}
-          <button
-            type="button"
-            onClick={() => void backend.refreshAll()}
-            title="立即重试"
-          >
-            重试
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraftBase(readApiBase());
-              setConnOpen(true);
-            }}
-          >
-            修改地址
-          </button>
-        </div>
-      )}
-
-      <div className="shell">
-        <nav className="sidenav" aria-label="面板导航">
-          {(['设备', '数据', '工具'] as const).map((group) => (
-            <div key={group}>
-              <div className="nav-group-title">{group}</div>
-              {TABS.filter((tab) => tab.group === group).map((tab) => {
-                const badge = badgeFor(tab.id);
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={`nav-item${activeTab === tab.id ? ' active' : ''}`}
-                    onClick={() => goTo(tab.id)}
-                    aria-current={activeTab === tab.id ? 'page' : undefined}
-                  >
-                    <span className="nav-icon" aria-hidden="true">
-                      {tab.icon}
-                    </span>
-                    <span>{tab.label}</span>
-                    {badge !== null && badge > 0 && (
-                      <span className={`nav-badge${tab.id === 'alarms' ? ' alert' : ''}`}>{badge}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        )}
 
         <main className="content">
+          {activeTab === 'overview' && <OverviewPanel {...panelProps} />}
           {activeTab === 'sessions' && <SessionsPanel {...panelProps} />}
           {activeTab === 'alarms' && <AlarmsPanel {...panelProps} />}
           {activeTab === 'events' && <EventsPanel {...panelProps} />}

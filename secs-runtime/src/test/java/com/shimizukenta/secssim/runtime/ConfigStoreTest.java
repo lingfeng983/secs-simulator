@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.app.config.ConfigException;
+import com.shimizukenta.secssim.app.config.SessionConfig;
+import com.shimizukenta.secssim.app.config.SessionConfigJson;
+import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
+import com.shimizukenta.secssim.core.domain.ValueType;
 
 /**
  * 配置的读、校验与存。
@@ -245,6 +250,61 @@ class ConfigStoreTest {
             assertEquals(ConfigOutcome.NOT_FOUND,
                     this.store.save(bad, config("x")).outcome(), "应拒绝: '" + bad + "'");
         }
+    }
+
+    /**
+     * S2F15 回写只换 constants：其它段、未知键、schemaVersion 都不能动。
+     *
+     * <p>历史上这里走的是“模型往返”，会悄悄丢掉 session.timeouts 和手写的未知键，
+     * 还会把 v4 配置升级成 v5。主机只是写一个温度限值，不该顺手改掉别的配置。</p>
+     */
+    @Test
+    void writeConstantsPreservesEverythingElse() throws Exception {
+        String original = """
+                {"schemaVersion": 4,
+                 "我自己加的键": {"保留我": true},
+                 "session": {"id": "line1", "passive": true, "bindHost": "127.0.0.1",
+                             "port": 0, "deviceId": 61, "seed": 3,
+                             "timeouts": {"t3": 60}},
+                 "equipment": {"name": "L1", "idSpace": {},
+                   "constants": [{"id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 1.0, "unit": "C"}],
+                   "units": [{ "unitId": 1, "name": "CH1", "injectUnitId": false,
+                     "svids": [{ "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C" }],
+                     "reports": [], "ceids": [] }]},
+                 "events": {"maxPerSec": 5, "plans": []}}
+                """;
+        write("line1.json", original);
+
+        ConfigStore.writeConstants(this.workDir.resolve("line1.json"), Map.of(
+                501, new EquipmentConstantDef(501, "TEMP_LIMIT", ValueType.F4, 5.0, "C"),
+                502, new EquipmentConstantDef(502, "BATCH_SIZE", ValueType.U2, 100.0)));
+
+        String saved = Files.readString(this.workDir.resolve("line1.json"), StandardCharsets.UTF_8);
+
+        assertTrue(saved.contains("\"我自己加的键\""), "未知键必须保留: " + saved);
+        assertTrue(saved.contains("\"schemaVersion\": 4"), "不应被悄悄升级版本: " + saved);
+        assertTrue(saved.contains("\"timeouts\""), "session.timeouts 不能被丢掉: " + saved);
+        assertTrue(saved.contains("\"t3\""), saved);
+
+        SessionConfig parsed = SessionConfigJson.parse(saved);
+        assertEquals(60.0, parsed.spec().timeouts().t3(), "超时值本身也要保留");
+        assertEquals(List.of(501, 502),
+                parsed.spec().equipment().constants().stream().map(EquipmentConstantDef::id).toList(),
+                "常量应替换旧值并按 id 排序");
+        assertEquals(5.0, parsed.spec().equipment().constants().get(0).value(), "501 应被覆盖成新值");
+        assertEquals(100.0, parsed.spec().equipment().constants().get(1).value());
+
+        assertEquals(List.of(), ConfigStore.validate(saved), "回写后的配置仍必须可编译");
+    }
+
+    @Test
+    void writeConstantsRefusesAnUnparsableFile() throws Exception {
+        write("broken.json", "{ 这不是 JSON");
+
+        assertThrows(IOException.class,
+                () -> ConfigStore.writeConstants(this.workDir.resolve("broken.json"), Map.of()));
+        assertEquals("{ 这不是 JSON", Files.readString(this.workDir.resolve("broken.json")),
+                "解析失败时原文必须原封不动");
     }
 
     private void assertRefused(String name) {

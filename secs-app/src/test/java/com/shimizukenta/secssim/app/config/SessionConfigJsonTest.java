@@ -59,7 +59,7 @@ class SessionConfigJsonTest {
         SessionSpec spec = new SessionSpec("pri-01", true, "127.0.0.1", 5000, 100, 20240601L, twoChambers());
         EventSchedule schedule = new EventSchedule(List.of(
                 new EventPlan("start", 2001, new Trigger.Periodic(5_000L, 200L)),
-                new EventPlan("once", 2002, new Trigger.At(1_000L))));
+                new EventPlan("once", 2101, new Trigger.At(1_000L))));
         return new SessionConfig(spec, schedule, 20);
     }
 
@@ -361,6 +361,68 @@ class SessionConfigJsonTest {
                                  "events": {"plans": []}}
                                 """));
         assertTrue(error.getMessage().contains("必须大于 0"), error.getMessage());
+    }
+
+    @Test
+    void hsmsTimeoutsSurviveRoundTrip() {
+        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers(),
+                new HsmsTimeouts(60.0, null, null, 15.0, null));
+        SessionConfig config = new SessionConfig(spec, EventSchedule.empty(), 20);
+
+        String json = SessionConfigJson.toJson(config);
+        assertTrue(json.contains("\"timeouts\""), "显式写过的超时必须能往返: " + json);
+
+        SessionConfig parsed = SessionConfigJson.parse(json);
+        assertEquals(60.0, parsed.spec().timeouts().t3());
+        assertEquals(15.0, parsed.spec().timeouts().t7());
+        assertNull(parsed.spec().timeouts().t5(), "没写的键不应被补成默认值写进文件");
+
+        /* 没有 timeouts 的配置不应凭空多出一个空对象 */
+        SessionConfig noTimeouts = new SessionConfig(
+                new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers()),
+                EventSchedule.empty(), 20);
+        assertFalse(SessionConfigJson.toJson(noTimeouts).contains("\"timeouts\""));
+    }
+
+    @Test
+    void unknownPlanCeidIsACompileError() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
+                 "events":{"plans":[{"id":"p","ceid":9999,
+                   "trigger":{"type":"periodic","periodMs":1000}}]}}
+                """;
+
+        CompilationResult result = SessionConfigJson.parse(json).compile();
+
+        assertFalse(result.ok(), "引用不存在的 CEID 必须在编译期拦下");
+        assertTrue(result.errors().stream().map(Issue::code).collect(Collectors.toSet())
+                        .contains("UNKNOWN_CEID"),
+                () -> "应报 UNKNOWN_CEID: " + result.issues());
+    }
+
+    @Test
+    void duplicateGlobalSvidNameIsAWarning() {
+        String json = """
+                {"schemaVersion":4,
+                 "session":{"id":"s1"},
+                 "equipment":{"name":"E","idSpace":{},
+                   "globalSvids":[
+                     {"id":9001,"name":"FACILITY_TEMP","type":"F4"},
+                     {"id":9002,"name":"FACILITY_TEMP","type":"F4"}],
+                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]}}
+                """;
+
+        CompilationResult result = SessionConfigJson.parse(json).compile();
+
+        assertTrue(result.ok(), "重名只提示，不阻断编译: " + result.errors());
+        assertTrue(result.warnings().stream().map(Issue::code).collect(Collectors.toSet())
+                        .contains("DUPLICATE_GLOBAL_SVID_NAME"),
+                () -> "应提示重名: " + result.warnings());
     }
 
 }

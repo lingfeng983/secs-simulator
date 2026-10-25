@@ -245,6 +245,7 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
         <label className="field">
           配置
           <select
+            aria-label="选择配置"
             value={configList.some((entry) => entry.name === configName) ? configName : ''}
             onChange={(event) => {
               if (event.target.value !== '') {

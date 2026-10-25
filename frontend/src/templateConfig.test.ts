@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  booleanField,
   collectCeids,
   collectSvids,
   editDocument,
@@ -248,6 +249,14 @@ describe('template helpers', () => {
     }
     expect(collectCeids(parsed.config.root).map((choice) => choice.svid)).toEqual([1001, 2001, 2102]);
     expect(collectCeids(parsed.config.root)[2]).toMatchObject({ owner: 'CH2', slot: 'STOP' });
+  });
+
+  it('booleanField honours an explicit default', () => {
+    expect(booleanField({ flag: true }, 'flag')).toBe(true);
+    expect(booleanField({ flag: false }, 'flag', true)).toBe(false);
+    expect(booleanField({}, 'flag')).toBe(false);
+    expect(booleanField({}, 'flag', true)).toBe(true);
+    expect(booleanField({ flag: 'yes' }, 'flag', true)).toBe(true);
   });
 });
 

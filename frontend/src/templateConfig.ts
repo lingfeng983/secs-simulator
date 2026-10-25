@@ -172,8 +172,9 @@ export function numberField(value: JsonObject, key: string): number | undefined 
   return typeof child === 'number' && Number.isFinite(child) ? child : undefined;
 }
 
-export function booleanField(value: JsonObject, key: string): boolean {
-  return value[key] === true;
+export function booleanField(value: JsonObject, key: string, fallback = false): boolean {
+  const child = value[key];
+  return typeof child === 'boolean' ? child : fallback;
 }
 
 /** 解析配置原文；只校验 JSON 与根对象，templates 的形状由 readTemplates 校验。 */
