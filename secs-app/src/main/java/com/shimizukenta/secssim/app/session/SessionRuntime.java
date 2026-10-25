@@ -104,6 +104,15 @@ public interface SessionRuntime {
     }
 
     /**
+     * 工作台聚合用的单会话片段（schema v6）。
+     *
+     * @return JSON 对象文本;不支持时返回 {@code null}（聚合时跳过）
+     */
+    default String overviewJson() {
+        return null;
+    }
+
+    /**
      * 运行时启用/禁用一个编排计划。
      *
      * @param planId  计划标识
@@ -124,6 +133,21 @@ public interface SessionRuntime {
      */
     default String previewJson(long fromMs, long toMs, int buckets) {
         return "{\"series\":[]}";
+    }
+
+    /**
+     * 曲线预览（schema v6:SVID 过滤 + 事件标记）。
+     *
+     * @param fromMs     起始
+     * @param toMs       结束
+     * @param buckets    桶数
+     * @param svids      只画这些 SVID;空集合不过滤
+     * @param withEvents 是否附带窗口内的事件标记(编排的确定性重放)
+     * @return JSON 文本
+     */
+    default String previewJson(long fromMs, long toMs, int buckets,
+                               java.util.Set<Integer> svids, boolean withEvents) {
+        return previewJson(fromMs, toMs, buckets);
     }
 
     /**

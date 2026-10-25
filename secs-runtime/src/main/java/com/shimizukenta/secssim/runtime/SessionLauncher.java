@@ -12,6 +12,7 @@ import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.config.ValueSources;
 import com.shimizukenta.secssim.app.event.EventBus;
+import com.shimizukenta.secssim.app.event.NoticeBus;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
@@ -53,6 +54,8 @@ public final class SessionLauncher {
     private final EventBus bus;
     private final Path workDir;
     private final int defaultHsmsPort;
+    /** 状态通知总线(v6);默认 null,可用 {@link #noticeBus(NoticeBus)} 挂上。 */
+    private volatile NoticeBus noticeBus;
 
     /** 会话标识 -> 它的配置来源；演示会话没有来源，故不出现在这里。 */
     private final ConcurrentMap<String, SessionSource> sources = new ConcurrentHashMap<>();
@@ -179,7 +182,7 @@ public final class SessionLauncher {
         this.close(id);
 
         try {
-            HsmsSessionRuntime opened = prepared.open(this.bus, source.file());
+            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.file());
             this.sessions.register(opened);
             this.sources.put(id, new SessionSource(source.file(), source.overrides(), fingerprint));
             Log.info("会话 " + id + " 已重建（结构或连接标识变化，主机需重连）");
@@ -242,7 +245,7 @@ public final class SessionLauncher {
      */
     public HsmsSessionRuntime startFromFile(Path file, int defaultPort, SessionOverrides overrides)
             throws ConfigException, IOException {
-        HsmsSessionRuntime runtime = prepare(file, defaultPort, overrides).open(this.bus, file);
+        HsmsSessionRuntime runtime = prepare(file, defaultPort, overrides).open(this.bus, this.noticeBus, file);
         this.sessions.register(runtime);
         /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
            而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
@@ -290,6 +293,18 @@ public final class SessionLauncher {
         if (this.bus != null) {
             runtime.eventBus(this.bus);
         }
+        if (this.noticeBus != null) {
+            runtime.noticeBus(this.noticeBus);
+        }
+    }
+
+    /**
+     * 挂上状态通知总线（schema v6）。
+     *
+     * @param bus 通知总线
+     */
+    public void noticeBus(NoticeBus bus) {
+        this.noticeBus = bus;
     }
 
     /**
@@ -328,7 +343,7 @@ public final class SessionLauncher {
         }
 
         HsmsSessionRuntime open(EventBus bus) throws IOException {
-            return this.open(bus, null);
+            return this.open(bus, null, null);
         }
 
         /**
@@ -340,11 +355,14 @@ public final class SessionLauncher {
          * @return 已打开的会话
          * @throws IOException 打开失败
          */
-        HsmsSessionRuntime open(EventBus bus, Path source) throws IOException {
+        HsmsSessionRuntime open(EventBus bus, NoticeBus notices, Path source) throws IOException {
             HsmsSessionRuntime runtime = new HsmsSessionRuntime(this.spec, this.model,
                     EngineClock.system(), this.values);
             if (bus != null) {
                 runtime.eventBus(bus);
+            }
+            if (notices != null) {
+                runtime.noticeBus(notices);
             }
             if (source != null) {
                 runtime.constantSaver(constants -> ConfigStore.writeConstants(source, constants));

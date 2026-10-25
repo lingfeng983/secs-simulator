@@ -166,6 +166,22 @@ public interface ApiContext {
     }
 
     /**
+     * 曲线预览（schema v6:SVID 过滤 + 事件标记）。
+     *
+     * @param sessionId  会话标识
+     * @param fromMs     起始
+     * @param toMs       结束
+     * @param buckets    桶数
+     * @param svids      只画这些 SVID;空/null 不过滤
+     * @param withEvents 是否附带编排重放的事件标记
+     * @return JSON 文本；会话不存在时返回 {@code null}
+     */
+    default String previewJson(String sessionId, long fromMs, long toMs, int buckets,
+                               java.util.Set<Integer> svids, boolean withEvents) {
+        return previewJson(sessionId, fromMs, toMs, buckets);
+    }
+
+    /**
      * 曲线预览的二进制正文。
      *
      * @param sessionId 会话标识
@@ -284,6 +300,69 @@ public interface ApiContext {
     }
 
     /**
+     * 打开主机模拟器连接，可指定远程 SECS 目标（schema v6）。
+     *
+     * @param sessionId  会话标识（工具实例宿主）
+     * @param targetJson {@code null}/空 连本机;否则 {@code {"host":"...","port":5000,"deviceId":0}}
+     * @return 结果
+     */
+    default SessionOutcome openHostSim(String sessionId, String targetJson) {
+        return openHostSim(sessionId);
+    }
+
+    /**
+     * 下发主机模拟 S1F3 采集器配置（schema v6）。
+     *
+     * @param sessionId   会话标识
+     * @param requestJson {@code {"startCeid":..,"stopCeid":..,"intervalMs":..,"svids":[{"id":..}]}}
+     * @return {@code {"ok":true}} 或 {@code {"ok":false,"error":"..."}}
+     */
+    default String setHostSimCollector(String sessionId, String requestJson) {
+        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    }
+
+    /**
+     * 手动启停采集器（正常流程由 CEID 的 S6F11 驱动）。
+     *
+     * @param sessionId 会话标识
+     * @param start     {@code true} 启动 / {@code false} 停止
+     * @return {@code {"ok":true}} 或错误
+     */
+    default String hostSimCollectorCommand(String sessionId, boolean start) {
+        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    }
+
+    /**
+     * 采集器状态与数据。
+     *
+     * @param sessionId 会话标识
+     * @return JSON；会话不存在返回 {@code null}
+     */
+    default String hostSimCollectorJson(String sessionId) {
+        return null;
+    }
+
+    /**
+     * 工作台聚合（schema v6）：全部会话的状态/速率/计数片段。
+     *
+     * @return {@code {"sessions":[...]}}
+     */
+    default String overviewJson() {
+        return null;
+    }
+
+    /**
+     * 服务端压测（schema v6）：同一条报文/事件在服务端循环发送。
+     *
+     * @param sessionId   会话标识
+     * @param requestJson {@code {"kind":"message"|"ceid"|"alarm",...}}
+     * @return 统计 JSON
+     */
+    default String burst(String sessionId, String requestJson) {
+        return null;
+    }
+
+    /**
      * 关闭会话的主机模拟器连接。
      *
      * @param sessionId 会话标识
@@ -396,5 +475,21 @@ public interface ApiContext {
     /** 按配置<b>草稿文本</b>算曲线预览（不落盘、不需要运行中的会话）。返回 null 表示编译失败。 */
     default String configPreviewJson(String text, long fromMs, long toMs, int buckets) {
         return null;
+    }
+
+    /**
+     * 草稿预览（schema v6:SVID 过滤 + 模拟事件时间线,效果叠加进曲线）。
+     *
+     * @param text       配置草稿原文
+     * @param fromMs     起始（模拟时钟）
+     * @param toMs       结束
+     * @param buckets    桶数
+     * @param svids      只画这些 SVID;空/null 不过滤
+     * @param withEvents 是否模拟事件时间线并叠加效果
+     * @return JSON 文本；编译失败返回 {@code null}
+     */
+    default String configPreviewJson(String text, long fromMs, long toMs, int buckets,
+                                     java.util.Set<Integer> svids, boolean withEvents) {
+        return configPreviewJson(text, fromMs, toMs, buckets);
     }
 }

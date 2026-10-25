@@ -85,6 +85,9 @@ public final class HttpApiServer implements AutoCloseable {
     /** 曲线预览路径。 */
     public static final String PATH_PREVIEW = "/api/v1/preview";
 
+    /** 工作台聚合（schema v6）。 */
+    public static final String PATH_OVERVIEW = "/api/v1/overview";
+
     /** 曲线预览的二进制路径。 */
     public static final String PATH_PREVIEW_BINARY = "/api/v1/preview.bin";
 
@@ -387,6 +390,7 @@ public final class HttpApiServer implements AutoCloseable {
         http.createContext(PATH_CONFIG_PREFIX, withCors(api::handleConfigPath));
         http.createContext(PATH_CONFIG_TEMPLATES, withCors(api::handleConfigTemplates));
         http.createContext(PATH_PREVIEW, withCors(api::handlePreview));
+        http.createContext(PATH_OVERVIEW, withCors(api::handleOverview));
         http.createContext(PATH_PREVIEW_BINARY, withCors(api::handlePreviewBinary));
         http.createContext(PATH_MESSAGES, withCors(api::handleMessages));
         http.createContext(PATH_AUDIT, withCors(api::handleAudit));
@@ -423,6 +427,44 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
+     * 订阅状态通知总线（schema v6:SSE 类型化事件）。
+     *
+     * <p>与报文总线并行:通知以 {@code event: <type>} 帧推送,
+     * 报文事件保持 {@code event: message} 不变。</p>
+     *
+     * @param bus 通知总线;{@code null} 忽略
+     */
+    public void subscribeNotices(com.shimizukenta.secssim.app.event.NoticeBus bus) {
+        if (bus != null) {
+            this.noticeSubscription = bus.subscribe(this::broadcastNotice);
+        }
+    }
+
+    private AutoCloseable noticeSubscription;
+
+    /** 把一条状态通知推给所有订阅者;队列满同样丢最旧。 */
+    private void broadcastNotice(com.shimizukenta.secssim.app.event.NoticeEvent event) {
+        if (this.subscribers.isEmpty()) {
+            return;
+        }
+
+        /* payload 是 JSON 对象文本,拆掉外层花括号与 sessionId/at 合并成一帧 */
+        String payload = event.payload() == null ? "" : event.payload().trim();
+        String merged;
+        if (payload.length() <= 2) {
+            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis() + "}";
+        } else {
+            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis()
+                    + "," + payload.substring(1);
+        }
+
+        String frame = "event: " + event.type() + "\ndata: " + merged + "\n\n";
+        for (Subscriber subscriber : this.subscribers) {
+            subscriber.enqueue(frame);
+        }
+    }
+
+    /**
      * 把一条报文事件推给所有 SSE 订阅者。
      *
      * <p>订阅者队列满了就丢最旧的一帧：界面宁可缺几条，也不能把内存拖爆或阻塞会话。
@@ -450,15 +492,17 @@ public final class HttpApiServer implements AutoCloseable {
 
     @Override
     public void close() {
-        AutoCloseable subscription = this.eventSubscription;
-        if (subscription != null) {
-            try {
-                subscription.close();
-            } catch (Exception e) {
-                Log.error("取消事件订阅失败（已忽略）", e);
+        for (AutoCloseable handle : new AutoCloseable[] {this.eventSubscription, this.noticeSubscription}) {
+            if (handle != null) {
+                try {
+                    handle.close();
+                } catch (Exception e) {
+                    Log.error("取消事件订阅失败（已忽略）", e);
+                }
             }
-            this.eventSubscription = null;
         }
+        this.eventSubscription = null;
+        this.noticeSubscription = null;
 
         this.server.stop(0);
         this.watchdog.shutdownNow();
@@ -950,6 +994,8 @@ public final class HttpApiServer implements AutoCloseable {
         long fromMs = 0L;
         long toMs = 60_000L;
         int buckets = 120;
+        boolean withEvents = true;
+        java.util.Set<Integer> svids = new java.util.LinkedHashSet<>();
         String query = ex.getRequestURI().getRawQuery();
         if (query != null && !query.isEmpty()) {
             try {
@@ -964,6 +1010,7 @@ public final class HttpApiServer implements AutoCloseable {
                         case "from" -> fromMs = Long.parseLong(value);
                         case "to" -> toMs = Long.parseLong(value);
                         case "buckets" -> buckets = Integer.parseInt(value);
+                        case "withEvents" -> withEvents = !"false".equalsIgnoreCase(value) && !"0".equals(value);
                         default -> { }
                     }
                 }
@@ -978,7 +1025,25 @@ public final class HttpApiServer implements AutoCloseable {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
             return;
         }
-        String json = this.context.configPreviewJson(text, fromMs, toMs, buckets);
+        String rawSvids = ex.getRequestURI().getRawQuery();
+        if (rawSvids != null) {
+            for (String pair : rawSvids.split("&")) {
+                if (pair.startsWith("svids=")) {
+                    try {
+                        for (String piece : pair.substring("svids=".length()).split(",")) {
+                            if (!piece.isBlank()) {
+                                svids.add(Integer.parseInt(piece.trim()));
+                            }
+                        }
+                    } catch (NumberFormatException e) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-svids\"}");
+                        return;
+                    }
+                }
+            }
+        }
+
+        String json = this.context.configPreviewJson(text, fromMs, toMs, buckets, svids, withEvents);
         if (json == null) {
             respond(ex, 422, "{\"ok\":false,\"error\":\"config-invalid\"}");
             return;
@@ -1331,6 +1396,18 @@ public final class HttpApiServer implements AutoCloseable {
      */
     private void handleSessionQuery(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
+        if (path.endsWith("/host-sim/collector")) {
+            /* v6:采集器状态与数据 */
+            String id = path.substring(PATH_SESSION_PREFIX.length(),
+                    path.length() - "/host-sim/collector".length());
+            String json = this.context.hostSimCollectorJson(id);
+            if (json == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                return;
+            }
+            respond(ex, 200, json);
+            return;
+        }
         if (path.endsWith("/host-sim")) {
             String id = path.substring(PATH_SESSION_PREFIX.length(), path.length() - "/host-sim".length());
             String json = this.context.hostSimJson(id);
@@ -1397,14 +1474,20 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        /* 主机模拟器：打开连接 / 以主机角色发报文 */
+        /* 主机模拟器：打开连接 / 以主机角色发报文 / 采集器配置与启停 */
         if (parts.length >= 2 && "host-sim".equals(parts[1])) {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;
             }
             if (parts.length == 2) {
-                SessionOutcome outcome = this.context.openHostSim(parts[0]);
-                audit(ex, "host-sim-open", parts[0], "outcome=" + outcome);
+                /* v6:请求体可选携带远程目标 {"host":..,"port":..,"deviceId":..};空体连本机 */
+                String targetBody = readBody(ex, MAX_CONFIG_BYTES);
+                if (targetBody != null && targetBody.isBlank()) {
+                    targetBody = null;
+                }
+                SessionOutcome outcome = this.context.openHostSim(parts[0], targetBody);
+                audit(ex, "host-sim-open", parts[0], "outcome=" + outcome
+                        + (targetBody == null ? "" : " remote"));
                 switch (outcome) {
                     case OK -> respond(ex, 201, "{\"ok\":true}");
                     case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"host-busy-or-sim-open\"}");
@@ -1435,6 +1518,41 @@ public final class HttpApiServer implements AutoCloseable {
                 }
                 return;
             }
+            if (parts.length == 3 && "collector".equals(parts[2])) {
+                String body = readBody(ex, MAX_CONFIG_BYTES);
+                if (body == null || body.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                String result = this.context.setHostSimCollector(parts[0], body);
+                audit(ex, "host-sim-collector-config", parts[0], "ok=" + result.contains("\"ok\":true"));
+                respond(ex, result.contains("\"ok\":true") ? 200 : 400, result);
+                return;
+            }
+            if (parts.length == 4 && "collector".equals(parts[2])
+                    && ("start".equals(parts[3]) || "stop".equals(parts[3]))) {
+                String result = this.context.hostSimCollectorCommand(parts[0], "start".equals(parts[3]));
+                audit(ex, "host-sim-collector-" + parts[3], parts[0], "ok=" + result.contains("\"ok\":true"));
+                respond(ex, result.contains("\"ok\":true") ? 200 : 409, result);
+                return;
+            }
+        }
+
+        /* v6:服务端压测 */
+        if (parts.length == 2 && "burst".equals(parts[1])) {
+            String body = readBody(ex);
+            if (body == null || body.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            String result = this.context.burst(parts[0], body);
+            if (result == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
+                return;
+            }
+            audit(ex, "burst", parts[0], "ok=" + !result.contains("error"));
+            respond(ex, 200, result);
+            return;
         }
 
         if (parts.length == 2 && "message".equals(parts[1])) {
@@ -1568,9 +1686,25 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
+     * GET /api/v1/overview：全部会话的工作台聚合（schema v6）。
+     */
+    private void handleOverview(HttpExchange ex) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        String body = this.context.overviewJson();
+        respond(ex, 200, body == null ? "{\"sessions\":[]}" : body);
+    }
+
+    /**
      * 曲线预览：{@code /api/v1/preview?session=demo&from=0&to=60000&buckets=120}。
      *
      * <p>参数非法一律 400：静默回落默认值会让调用方以为自己的参数生效了。
+     * schema v6 增加可选 {@code svids=401,402} 过滤与 {@code withEvents=false} 关闭事件标记。
      * </p>
      */
     private void handlePreview(HttpExchange ex) throws IOException {
@@ -1588,7 +1722,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
 
         String body = this.context.previewJson(request.sessionId(), request.fromMs(),
-                request.toMs(), request.buckets());
+                request.toMs(), request.buckets(), request.svids(), request.withEvents());
         if (body == null) {
             respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
             return;
@@ -1660,10 +1794,32 @@ public final class HttpApiServer implements AutoCloseable {
             return null;
         }
 
-        return new PreviewRequest(sessionId, from, to, (int) count);
+        java.util.Set<Integer> svids = new java.util.LinkedHashSet<>();
+        String rawSvids = query.get("svids");
+        if (rawSvids != null && !rawSvids.isBlank()) {
+            try {
+                for (String piece : rawSvids.split(",")) {
+                    if (!piece.isBlank()) {
+                        svids.add(Integer.parseInt(piece.trim()));
+                    }
+                }
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-svids\"}");
+                return null;
+            }
+        }
+
+        boolean withEvents = true;
+        String rawEvents = query.get("withEvents");
+        if (rawEvents != null) {
+            withEvents = !"false".equalsIgnoreCase(rawEvents) && !"0".equals(rawEvents);
+        }
+
+        return new PreviewRequest(sessionId, from, to, (int) count, svids, withEvents);
     }
 
-    private record PreviewRequest(String sessionId, long fromMs, long toMs, int buckets) {
+    private record PreviewRequest(String sessionId, long fromMs, long toMs, int buckets,
+                                  java.util.Set<Integer> svids, boolean withEvents) {
     }
 
     /**

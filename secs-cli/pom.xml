@@ -77,6 +77,7 @@
                 <buildArg>-H:+ReportExceptionStackTraces</buildArg>
                 <buildArg>-Dfile.encoding=UTF-8</buildArg>
                 <buildArg>-Os</buildArg>
+                <buildArg>-H:IncludeResources=defaults/.*</buildArg>
               </buildArgs>
             </configuration>
             <executions>

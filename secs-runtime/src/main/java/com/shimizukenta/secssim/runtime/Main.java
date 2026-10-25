@@ -24,6 +24,7 @@ import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.audit.AuditLog;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.event.EventBus;
+import com.shimizukenta.secssim.app.event.NoticeBus;
 import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
@@ -117,6 +118,7 @@ public final class Main {
 
         SessionManager sessions = new SessionManager();
         EventBus bus = new EventBus();
+        NoticeBus notices = new NoticeBus();
         SecsProbe probe = null;
 
         /*
@@ -146,6 +148,8 @@ public final class Main {
          * 热重载全靠这份记忆。每次调用现造一个的话，重载接口会永远说"没有配置来源"。
          */
         SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
+        launcher.noticeBus(notices);
+        seedDefaultConfigs(options.workDir(), options.hsmsPort(), options.deviceId());
 
         /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
         ConfigStore configStore = new ConfigStore(options.workDir());
@@ -182,6 +186,7 @@ public final class Main {
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, context,
                 options.webRoot(), bus, tls, auditSink);
+        api.subscribeNotices(notices);
 
         Runtime.getRuntime().addShutdownHook(new Thread(stopped::countDown, "shutdown-hook"));
 
@@ -287,8 +292,61 @@ public final class Main {
 
     private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher)
             throws IOException {
-        launcher.startDemo("demo", options.hsmsPort(), options.deviceId());
+        /* v6:--demo-session 开两台内置演示设备(播种是幂等的,这里再调一次无害),
+           分别演示"事件驱动值变化"(etch)与"主机拉取采集"(cvd) */
+        seedDefaultConfigs(options.workDir(), options.hsmsPort(), options.deviceId());
+        for (String name : DEFAULT_CONFIGS) {
+            try {
+                launcher.startFromFile(options.workDir().resolve(name), options.hsmsPort());
+            } catch (com.shimizukenta.secssim.app.config.ConfigException e) {
+                Log.error("内置演示配置编译失败: " + name, e);
+                return 3;
+            }
+        }
         return 0;
+    }
+
+    /** 内置默认配置文件名（播种与 --demo-session 共用）。 */
+    private static final String[] DEFAULT_CONFIGS = {"demo-etch.json", "demo-cvd.json"};
+
+    /**
+     * 播种内置默认设备配置（schema v6 的需求:开箱即有两台可用设备）。
+     *
+     * <p>幂等不覆盖:workDir 里已有同名文件（含用户改过的）一律不动,
+     * 删除文件重启即恢复默认。端口/deviceId 按启动参数覆写——
+     * 两台 passive 会话必须端口错开,deviceId 错开才能并排出现在工作台。</p>
+     */
+    private static void seedDefaultConfigs(java.nio.file.Path workDir, int hsmsPort, int deviceId) {
+        for (int i = 0; i < DEFAULT_CONFIGS.length; i++) {
+            String name = DEFAULT_CONFIGS[i];
+            java.nio.file.Path target = workDir.resolve(name);
+            if (java.nio.file.Files.exists(target)) {
+                continue;
+            }
+            String text;
+            try (java.io.InputStream in = Main.class.getResourceAsStream("/defaults/" + name)) {
+                if (in == null) {
+                    Log.warn("内置默认配置缺失（不播种）: /defaults/" + name);
+                    continue;
+                }
+                text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                Log.error("读取内置默认配置失败: " + name, e);
+                continue;
+            }
+
+            text = text.replace("\"port\": 5000", "\"port\": " + hsmsPort)
+                    .replace("\"port\": 5001", "\"port\": " + (hsmsPort + 1))
+                    .replace("\"deviceId\": 10", "\"deviceId\": " + deviceId)
+                    .replace("\"deviceId\": 11", "\"deviceId\": " + (deviceId + 1));
+
+            try {
+                java.nio.file.Files.writeString(target, text, java.nio.charset.StandardCharsets.UTF_8);
+                Log.info("已播种默认设备配置: " + name + "（port=" + (hsmsPort + i) + "）");
+            } catch (IOException e) {
+                Log.error("播种默认配置失败: " + name, e);
+            }
+        }
     }
 
     private static String newToken() {
@@ -395,6 +453,14 @@ public final class Main {
         public String previewJson(String sessionId, long fromMs, long toMs, int buckets) {
             return this.sessions.find(sessionId)
                     .map(session -> session.previewJson(fromMs, toMs, buckets))
+                    .orElse(null);
+        }
+
+        @Override
+        public String previewJson(String sessionId, long fromMs, long toMs, int buckets,
+                                  java.util.Set<Integer> svids, boolean withEvents) {
+            return this.sessions.find(sessionId)
+                    .map(session -> session.previewJson(fromMs, toMs, buckets, svids, withEvents))
                     .orElse(null);
         }
 
@@ -528,6 +594,11 @@ public final class Main {
 
         @Override
         public SessionOutcome openHostSim(String sessionId) {
+            return openHostSim(sessionId, null);
+        }
+
+        @Override
+        public SessionOutcome openHostSim(String sessionId, String targetJson) {
             com.shimizukenta.secssim.app.session.SessionRuntime session = this.sessions.find(sessionId).orElse(null);
             if (session == null) {
                 return SessionOutcome.UNKNOWN_SESSION;
@@ -535,9 +606,32 @@ public final class Main {
             if (this.hostSims.containsKey(sessionId) && this.hostSims.get(sessionId).isOpen()) {
                 return SessionOutcome.CONFLICT;
             }
+
+            /* v6:target 为空连本机(保留"设备已有真主机→409"检查);
+               远程目标连别的 SECS,占用情况不可知,冲突由连接行为自然暴露 */
+            com.shimizukenta.secssim.app.session.HsmsConnectionTarget override = null;
+            boolean remote = targetJson != null && !targetJson.isBlank();
+            if (remote) {
+                try {
+                    com.shimizukenta.jsonhub.JsonHub target = com.shimizukenta.jsonhub.JsonHub.fromJson(targetJson);
+                    String host = target.get("host").optionalString().orElse("");
+                    int port = target.get("port").optionalInt().orElse(0);
+                    int deviceId = target.get("deviceId").optionalInt().orElse(0);
+                    if (host.isBlank() || port < 1 || port > 65535) {
+                        Log.error("主机模拟远程目标非法（会话 " + sessionId + "）", null);
+                        return SessionOutcome.FAILED;
+                    }
+                    override = new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId);
+                } catch (RuntimeException e) {
+                    Log.error("主机模拟远程目标解析失败（会话 " + sessionId + "）: " + e.getMessage(), null);
+                    return SessionOutcome.FAILED;
+                }
+            }
+
             try {
-                this.hostSims.put(sessionId, com.shimizukenta.secssim.runtime.session.HostSimulator.open(session));
-                Log.info("主机模拟器已连接会话 " + sessionId);
+                this.hostSims.put(sessionId,
+                        com.shimizukenta.secssim.runtime.session.HostSimulator.open(session, override));
+                Log.info("主机模拟器已连接会话 " + sessionId + (remote ? "（远程）" : ""));
                 return SessionOutcome.OK;
             } catch (IOException e) {
                 Log.error("主机模拟器连接失败（会话 " + sessionId + "）: " + e.getMessage(), null);
@@ -576,30 +670,208 @@ public final class Main {
             if (sim == null || this.sessions.find(sessionId).isEmpty()) {
                 return null;
             }
-            try {
-                return sim.sendSml(sml);
-            } catch (IOException e) {
-                /* 设备重载后端口重绑会让 host 连接死亡：自动重开一次再发，
-                   让"改配置→重载→继续用主机模拟"不需要手动断开重连 */
-                if (!sim.isOpen()) {
-                    Log.info("主机模拟器连接已断（会话 " + sessionId + "），自动重连后重试");
-                    com.shimizukenta.secssim.app.session.SessionRuntime session =
-                            this.sessions.find(sessionId).orElse(null);
-                    if (session == null) {
-                        throw e;
-                    }
-                    com.shimizukenta.secssim.runtime.session.HostSimulator reopened;
-                    try {
-                        reopened = com.shimizukenta.secssim.runtime.session.HostSimulator.open(session);
-                    } catch (IOException reconnectError) {
-                        throw e;
-                    }
-                    this.hostSims.put(sessionId, reopened);
-                    return reopened.sendSml(sml);
+        try {
+            return sim.sendSml(sml);
+        } catch (IOException e) {
+            /* 设备重载后端口重绑会让 host 连接死亡：自动重连一次再发，
+               让"改配置→重载→继续用主机模拟"不需要手动断开重连。
+               v6:用 reconnect() 保留原目标(远程模式同样适用)。 */
+            if (!sim.isOpen()) {
+                Log.info("主机模拟器连接已断（会话 " + sessionId + "），自动重连后重试");
+                try {
+                    sim.reconnect();
+                } catch (IOException reconnectError) {
+                    throw e;
                 }
-                throw e;
+                return sim.sendSml(sml);
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public String setHostSimCollector(String sessionId, String requestJson) {
+        com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(sessionId);
+        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
+            return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+        }
+        try {
+            sim.setCollectorConfig(requestJson);
+            return "{\"ok\":true}";
+        } catch (IllegalArgumentException e) {
+            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        }
+    }
+
+    @Override
+    public String hostSimCollectorCommand(String sessionId, boolean start) {
+        com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(sessionId);
+        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
+            return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+        }
+        try {
+            if (start) {
+                sim.collectorStartManual();
+            } else {
+                sim.collectorStopManual();
+            }
+            return "{\"ok\":true}";
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        }
+    }
+
+    @Override
+    public String hostSimCollectorJson(String sessionId) {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return null;
+        }
+        com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(sessionId);
+        if (sim == null) {
+            return "{\"configured\":false}";
+        }
+        return sim.collectorJson();
+    }
+
+    @Override
+    public String overviewJson() {
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        java.util.List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
+        for (SessionRuntime session : this.sessions.list()) {
+            String fragment = session.overviewJson();
+            if (fragment == null) {
+                continue;
+            }
+            /* 注入 hostSim 占用标记:效果层不知道 hostSims 的存在,在这里拼 */
+            boolean hostSim = this.hostSims.containsKey(session.id())
+                    && this.hostSims.get(session.id()).isOpen();
+            String patched = fragment.substring(0, fragment.length() - 1)
+                    + ",\"hostSim\":" + hostSim + "}";
+            items.add(com.shimizukenta.jsonhub.JsonHub.fromJson(patched));
+        }
+        return b.object(b.pair("sessions", b.array(items))).toJson();
+    }
+
+    @Override
+    public String burst(String sessionId, String requestJson) {
+        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+        if (session == null) {
+            return null;
+        }
+        if (!(session instanceof com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime runtime)) {
+            return "{\"ok\":false,\"error\":\"unsupported-session\"}";
+        }
+
+        com.shimizukenta.jsonhub.JsonHub request;
+        try {
+            request = com.shimizukenta.jsonhub.JsonHub.fromJson(requestJson);
+        } catch (RuntimeException e) {
+            return "{\"ok\":false,\"error\":\"bad-request\"}";
+        }
+
+        String kind = request.get("kind").optionalString().orElse("");
+        int count = request.get("count").optionalInt().orElse(1);
+        long intervalMs = request.get("intervalMs").optionalLong().orElse(0L);
+        if (count < 1 || count > 5000) {
+            return "{\"ok\":false,\"error\":\"count-out-of-range\"}";
+        }
+        if (intervalMs < 0 || intervalMs > 60_000L) {
+            return "{\"ok\":false,\"error\":\"interval-out-of-range\"}";
+        }
+
+        java.util.List<Long> latencies = new java.util.ArrayList<>();
+        long startedAt = System.currentTimeMillis();
+        int failed = 0;
+
+        try {
+            switch (kind) {
+                case "message" -> {
+                    String sml = request.get("sml").optionalString().orElse("");
+                    if (sml.isBlank()) {
+                        return "{\"ok\":false,\"error\":\"missing-sml\"}";
+                    }
+                    for (int i = 0; i < count; i++) {
+                        long t0 = System.currentTimeMillis();
+                        try {
+                            runtime.sendSml(sml);
+                            latencies.add(System.currentTimeMillis() - t0);
+                        } catch (Exception e) {
+                            failed++;
+                        }
+                        pace(intervalMs, startedAt, i);
+                    }
+                }
+                case "ceid" -> {
+                    int ceid = request.get("ceid").optionalInt().orElse(0);
+                    if (ceid < 1) {
+                        return "{\"ok\":false,\"error\":\"missing-ceid\"}";
+                    }
+                    for (int i = 0; i < count; i++) {
+                        long t0 = System.currentTimeMillis();
+                        try {
+                            runtime.emitCeid(ceid);
+                            latencies.add(System.currentTimeMillis() - t0);
+                        } catch (Exception e) {
+                            failed++;
+                        }
+                        pace(intervalMs, startedAt, i);
+                    }
+                }
+                case "alarm" -> {
+                    int alid = request.get("alid").optionalInt().orElse(0);
+                    if (alid < 1) {
+                        return "{\"ok\":false,\"error\":\"missing-alid\"}";
+                    }
+                    String text = request.get("text").optionalString().orElse("");
+                    int category = request.get("category").optionalInt().orElse(4);
+                    for (int i = 0; i < count; i++) {
+                        long t0 = System.currentTimeMillis();
+                        try {
+                            runtime.emitAlarm(alid, i % 2 == 0, text, category);
+                            latencies.add(System.currentTimeMillis() - t0);
+                        } catch (Exception e) {
+                            failed++;
+                        }
+                        pace(intervalMs, startedAt, i);
+                    }
+                }
+                default -> {
+                    return "{\"ok\":false,\"error\":\"unknown-kind\"}";
+                }
+            }
+        } catch (Exception e) {
+            Log.error("压测执行异常（会话 " + sessionId + "）", e);
+        }
+
+        long durationMs = System.currentTimeMillis() - startedAt;
+        latencies.sort(Long::compare);
+        java.util.function.IntFunction<Long> pick = rank -> latencies.isEmpty()
+                ? 0L : latencies.get(Math.min(latencies.size() - 1, rank));
+
+        return "{\"sent\":" + latencies.size()
+                + ",\"failed\":" + failed
+                + ",\"durationMs\":" + durationMs
+                + ",\"latencyP50\":" + pick.apply((int) (latencies.size() * 0.5))
+                + ",\"latencyP95\":" + pick.apply((int) (latencies.size() * 0.95))
+                + ",\"latencyMax\":" + pick.apply(latencies.size() - 1)
+                + "}";
+    }
+
+    /** 压测节奏:按起始时刻对齐间隔,避免循环体耗时累积漂移。 */
+    private static void pace(long intervalMs, long startedAt, int index) {
+        if (intervalMs <= 0L) {
+            return;
+        }
+        long nextAt = startedAt + (index + 1L) * intervalMs;
+        long wait = nextAt - System.currentTimeMillis();
+        if (wait > 0L) {
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
+    }
 
         @Override
         public SessionOutcome reloadSession(String sessionId) {
@@ -626,6 +898,12 @@ public final class Main {
 
         @Override
         public String configPreviewJson(String text, long fromMs, long toMs, int buckets) {
+            return configPreviewJson(text, fromMs, toMs, buckets, java.util.Set.of(), true);
+        }
+
+        @Override
+        public String configPreviewJson(String text, long fromMs, long toMs, int buckets,
+                                        java.util.Set<Integer> svids, boolean withEvents) {
             /* 与 validate 同一条编译路径:失败返回 null,界面显示校验问题而不是半张图 */
             try {
                 java.nio.file.Path temp = java.nio.file.Files.createTempFile("secs-preview-", ".json");
@@ -640,9 +918,20 @@ public final class Main {
                     /* 值来源统一走 ValueSources:草稿预览与真实启动必须是同一套语义 */
                     com.shimizukenta.secssim.core.value.ValueSource values =
                             com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
+                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> events =
+                            java.util.List.of();
+                    if (withEvents && !config.schedule().plans().isEmpty()) {
+                        events = com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
+                                        config.schedule(), values, config.spec().seed(), fromMs, toMs,
+                                        com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS)
+                                .stream()
+                                .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
+                                        fire.atMs(), fire.ceid(), fire.planId()))
+                                .toList();
+                    }
                     com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
                             com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(
-                                    values, compiled.equipment(), fromMs, toMs, buckets);
+                                    values, compiled.equipment(), fromMs, toMs, buckets, svids, events);
                     return com.shimizukenta.secssim.runtime.session.PreviewSupport.toJson(data);
                 } finally {
                     java.nio.file.Files.deleteIfExists(temp);

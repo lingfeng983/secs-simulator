@@ -49,6 +49,8 @@ import com.shimizukenta.secs.secs2.Secs2Exception;
 import com.shimizukenta.secs.secs2.Secs2Item;
 import com.shimizukenta.secs.secs2.Secs2IrregalDataFormatException;
 import com.shimizukenta.secssim.app.event.EventBus;
+import com.shimizukenta.secssim.app.event.NoticeBus;
+import com.shimizukenta.secssim.app.event.NoticeEvent;
 import com.shimizukenta.secssim.app.event.MessageEvent;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.DefaultCurves;
@@ -67,6 +69,7 @@ import com.shimizukenta.secssim.core.compile.ResolvedReport;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.event.ConditionDebouncer;
+import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Fire;
@@ -110,6 +113,13 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final ValueStore store;
     /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
     private final ValueSourceHandle values;
+    /** 事件效果的运行时记录(v6):手动触发的效果无法重放,只能记录。 */
+    private final EventEffectStore effects = new EventEffectStore();
+    /** overview 速率统计(60 秒滑动窗口)。 */
+    private final RateTracker msgRate = new RateTracker();
+    private final RateTracker eventRate = new RateTracker();
+    private volatile long lastEventAtMs = 0L;
+    private final long openedAtMs = System.currentTimeMillis();
     private final EngineClock clock;
     private final HostReportTable hostReports = new HostReportTable();
     /** S6F11 组装器：随设备模型热替换。 */
@@ -233,7 +243,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         } else {
             initial = values;
         }
-        this.values = new ValueSourceHandle(initial);
+        this.values = new ValueSourceHandle(new EffectValueSource(initial, this.effects));
 
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
         this.traces = new TraceManager(model, this.values, Instant.now());
@@ -324,8 +334,27 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     @Override
     public String previewJson(long fromMs, long toMs, int buckets) {
+        return previewJson(fromMs, toMs, buckets, java.util.Set.of(), true);
+    }
+
+    @Override
+    public String previewJson(long fromMs, long toMs, int buckets,
+                              java.util.Set<Integer> svids, boolean withEvents) {
+        /* 事件标记用确定性模拟(独立效果记录),曲线本身走运行时值来源——
+           手动触发产生的效果在曲线上可见,但不在重放的事件列表里(§5.1 的语义边界) */
+        List<PreviewSupport.PreviewEvent> events = List.of();
+        if (withEvents) {
+            ValueSource base = this.values;
+            if (base instanceof EffectValueSource layered) {
+                base = layered.base();
+            }
+            events = EventSimulator.simulate(this.schedule, base, this.spec.seed(),
+                            fromMs, toMs, EventSimulator.DEFAULT_MAX_EVENTS).stream()
+                    .map(fire -> new PreviewSupport.PreviewEvent(fire.atMs(), fire.ceid(), fire.planId()))
+                    .toList();
+        }
         PreviewSupport.PreviewData data = PreviewSupport.compute(
-                this.values, this.model, fromMs, toMs, buckets);
+                this.values, this.model, fromMs, toMs, buckets, svids, events);
         return PreviewSupport.toJson(data);
     }
 
@@ -406,6 +435,40 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public void eventBus(EventBus bus) {
         this.eventBus = bus;
+    }
+
+    /** 状态通知总线（v6:SSE 类型化事件);null 表示不发布。 */
+    private volatile NoticeBus noticeBus;
+
+    /**
+     * 挂上状态通知总线：事件/报警/状态迁移会以 NoticeEvent 发布。
+     *
+     * @param bus 通知总线；{@code null} 表示不发布
+     */
+    public void noticeBus(NoticeBus bus) {
+        this.noticeBus = bus;
+    }
+
+    /**
+     * 迁移控制状态并在变化时发布通知。
+     *
+     * @param next 新状态
+     */
+    private void changeControlState(EquipmentControlState next) {
+        if (this.controlState == next) {
+            return;
+        }
+        this.controlState = next;
+        this.publishNotice(NoticeEvent.SESSION,
+                "{\"controlState\":\"" + next.name() + "\"}");
+    }
+
+    /** 发布一条通知（无总线时no-op）。 */
+    private void publishNotice(String type, String payloadJson) {
+        NoticeBus bus = this.noticeBus;
+        if (bus != null) {
+            bus.publish(new NoticeEvent(this.spec.id(), type, payloadJson, System.currentTimeMillis()));
+        }
     }
 
     /**
@@ -495,12 +558,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.traces.stopAll();
         this.traces = new TraceManager(model, this.values, Instant.now());
         this.enableSchedule(schedule, maxEventsPerSec);
+        /* 旧模型的效果随旧配置失效:效果记录不能跨热重载残留 */
+        this.effects.clear();
         if (values != null) {
-            this.values.set(values);
+            this.values.set(new EffectValueSource(values, this.effects));
         } else {
             /* 从模板图切回默认曲线：默认曲线要先重新绑进值存储 */
             DefaultCurves.bind(this.store, this.spec.equipment(), model);
-            this.values.set(new CurveValueSource(this.store));
+            this.values.set(new EffectValueSource(new CurveValueSource(this.store), this.effects));
         }
     }
 
@@ -637,6 +702,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             return;
         }
 
+        this.applyPlanEffects(ceid);
+        this.publishS6f11Notice(ceid);
+
         Secs2 body;
         try {
             body = this.assembler.build(ceid, this.clock.nowMs());
@@ -669,11 +737,45 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         try {
             comm.send(6, 11, false, body);
             this.emitted.incrementAndGet();
+            this.recordEventFire();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("发送 S6F11 被中断: " + ceid, e);
         } catch (Exception e) {
             throw new IOException("发送 S6F11 失败: " + ceid, e);
+        }
+    }
+
+    /**
+     * 发布 s6f11 通知（载荷含首个匹配且启用的计划 id,手动触发可能为 null）。
+     */
+    private void publishS6f11Notice(int ceid) {
+        String planId = this.schedule.plans().stream()
+                .filter(plan -> plan.ceid() == ceid && !this.disabledPlans.contains(plan.id()))
+                .map(EventPlan::id)
+                .findFirst()
+                .orElse(null);
+        String payload = "{\"ceid\":" + ceid
+                + (planId == null ? "" : ",\"planId\":\"" + planId + "\"")
+                + "}";
+        this.publishNotice(NoticeEvent.S6F11, payload);
+    }
+
+    /**
+     * 施加某 CEID 对应计划的值效果（schema v6）。
+     *
+     * <p>emitCeid 是全部触发路径（定时/条件/链式/手动）的公共入口，
+     * 效果也只在这里施加一次:手动触发同样生效。计划被禁用时效果不施加。</p>
+     */
+    private void applyPlanEffects(int ceid) {
+        long now = this.clock.nowMs();
+        for (EventPlan plan : this.schedule.plans()) {
+            if (plan.ceid() != ceid || this.disabledPlans.contains(plan.id())) {
+                continue;
+            }
+            for (EventEffect effect : plan.effects()) {
+                this.effects.apply(effect.svid(), effect, now);
+            }
         }
     }
 
@@ -724,6 +826,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     } else {
                         this.activeAlarms.remove(alid);
                     }
+                    this.publishNotice(NoticeEvent.ALARM,
+                            "{\"alid\":" + alid + ",\"set\":" + set
+                                    + ",\"category\":" + category
+                                    + ",\"text\":\"" + altx.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     this.lastError = "等待 S5F2 被中断: ALID " + alid;
@@ -799,9 +905,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             comm.addSecsCommunicatableStateChangeListener(value -> {
                 this.communicatable = value;
                 if (!value) {
-                    this.controlState = EquipmentControlState.OFFLINE;
+                    this.changeControlState(EquipmentControlState.OFFLINE);
                 } else if (this.controlState == EquipmentControlState.OFFLINE) {
-                    this.controlState = EquipmentControlState.COMMUNICATING;
+                    this.changeControlState(EquipmentControlState.COMMUNICATING);
                 }
             });
             this.communicator = comm;
@@ -947,6 +1053,44 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 Map.entry("hostReports", (long) this.hostReports.reportCount()),
                 Map.entry("hostLinks", (long) this.hostReports.linkCount()),
                 Map.entry("s9Replies", this.s9Replies.get()));
+    }
+
+    /**
+     * 工作台聚合用的单会话片段（schema v6 的 overview 端点）。
+     *
+     * @return JSON 对象文本(不带外层花括号也不带逗号——由调用方拼数组)
+     */
+    @Override
+    public String overviewJson() {
+        long now = System.currentTimeMillis();
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+
+        java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> counterPairs = new java.util.ArrayList<>();
+        for (Map.Entry<String, Long> entry : this.counters().entrySet()) {
+            counterPairs.add(b.pair(entry.getKey(), entry.getValue()));
+        }
+
+        return b.object(
+                b.pair("id", this.spec.id()),
+                b.pair("state", this.state().name()),
+                b.pair("controlState", this.controlState.name()),
+                b.pair("hasPeer", this.hasPeer()),
+                b.pair("device", this.spec.equipment().name()),
+                b.pair("units", this.spec.equipment().units().size()),
+                b.pair("port", this.spec.port()),
+                b.pair("counters", b.object(counterPairs)),
+                b.pair("msgsPerMin", this.msgRate.countInWindow(now)),
+                b.pair("s6f11PerMin", this.eventRate.countInWindow(now)),
+                b.pair("lastEventAt", this.lastEventAtMs),
+                b.pair("uptimeMs", now - this.openedAtMs))
+                .toJson();
+    }
+
+    /** 记一次事件上报(速率与最近时刻)。 */
+    private void recordEventFire() {
+        long now = System.currentTimeMillis();
+        this.eventRate.record(now);
+        this.lastEventAtMs = now;
     }
 
     @Override
@@ -1175,6 +1319,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             body = "<不可渲染>";
         }
 
+        this.msgRate.record(System.currentTimeMillis());
         bus.publish(new MessageEvent(this.spec.id(), direction, message.getStream(), message.getFunction(),
                 message.wbit(), body, System.currentTimeMillis()));
     }
@@ -1201,14 +1346,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 }
                 case 113 -> {
                     if (this.controlState == EquipmentControlState.OFFLINE) {
-                        this.controlState = EquipmentControlState.COMMUNICATING;
+                        this.changeControlState(EquipmentControlState.COMMUNICATING);
                     }
                     this.communicator.gem().s1f14(primary, COMMACK.OK);
                     return;
                 }
                 case 115 -> {
                     /* 同理：应答到达时"已离线"必须已生效，否则主机以为下线了，设备还在报 */
-                    this.controlState = EquipmentControlState.OFFLINE;
+                    this.changeControlState(EquipmentControlState.OFFLINE);
                     this.communicator.gem().s1f16(primary);
                     return;
                 }
@@ -1216,7 +1361,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     /* 先迁状态再回应答：主机收到 S1F18 时，"设备已 ONLINE" 必须已经成立。
                        反过来（先回后迁）存在一个窗口——主机收到应答立刻做 S1F13 之后的动作，
                        设备这边还是 COMMUNICATING，主动上报会被状态门槛挡掉。 */
-                    this.controlState = EquipmentControlState.ONLINE;
+                    this.changeControlState(EquipmentControlState.ONLINE);
                     this.communicator.gem().s1f18(primary, ONLACK.OK);
                     return;
                 }

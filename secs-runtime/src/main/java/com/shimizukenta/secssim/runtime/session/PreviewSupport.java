@@ -5,6 +5,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalDouble;
+import java.util.Set;
 
 import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
@@ -36,9 +37,19 @@ public final class PreviewSupport {
                          double[] min, double[] max, double[] avg) {
     }
 
+    /** 窗口内的一条事件标记（运行时窗口为编排重放,草稿窗口为模拟时间线）。 */
+    public record PreviewEvent(long atMs, int ceid, String planId) {
+    }
+
     /** 一次预览的完整结果。 */
     public record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
-                       int svidTotal, List<PreviewSeries> series) {
+                       int svidTotal, List<PreviewSeries> series, List<PreviewEvent> events) {
+
+        /** 兼容旧调用:不带事件标记。 */
+        public PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
+                           int svidTotal, List<PreviewSeries> series) {
+            this(fromMs, toMs, buckets, bucketMs, svidTotal, series, List.of());
+        }
     }
 
     /**
@@ -53,13 +64,34 @@ public final class PreviewSupport {
      */
     public static PreviewData compute(ValueSource values, ResolvedEquipment model,
                                long fromMs, long toMs, int buckets) {
+        return compute(values, model, fromMs, toMs, buckets, Set.of(), List.of());
+    }
+
+    /**
+     * 分桶计算 min/max/avg（schema v6:支持 SVID 过滤与事件标记）。
+     *
+     * @param values    值来源
+     * @param model     设备模型
+     * @param fromMs    起始时刻
+     * @param toMs      结束时刻
+     * @param buckets   桶数
+     * @param svidFilter 只画这些 SVID;空集合表示不过滤
+     * @param events    窗口内的事件标记
+     * @return 预览结果
+     */
+    public static PreviewData compute(ValueSource values, ResolvedEquipment model,
+                               long fromMs, long toMs, int buckets,
+                               Set<Integer> svidFilter, List<PreviewEvent> events) {
         int count = Math.max(1, Math.min(500, buckets));
         long span = Math.max(1L, toMs - fromMs);
         long bucketMs = Math.max(1L, span / count);
         long sampleMs = Math.max(1L, bucketMs / 4L);
 
         List<Integer> allSvids = values.svids().stream().sorted().toList();
-        List<Integer> svids = allSvids.stream().limit(32).toList();
+        List<Integer> selected = allSvids.stream()
+                .filter(svid -> svidFilter.isEmpty() || svidFilter.contains(svid))
+                .toList();
+        List<Integer> svids = selected.stream().limit(32).toList();
         List<PreviewSeries> series = new ArrayList<>();
 
         for (int svid : svids) {
@@ -100,7 +132,8 @@ public final class PreviewSupport {
                     min, max, avg));
         }
 
-        return new PreviewData(fromMs, toMs, count, bucketMs, allSvids.size(), series);
+        return new PreviewData(fromMs, toMs, count, bucketMs, allSvids.size(), series,
+                List.copyOf(events));
     }
 
     /**
@@ -123,6 +156,14 @@ public final class PreviewSupport {
                     b.pair("avg", b.array(numbers(value.avg(), b)))));
         }
 
+        List<JsonHub> events = new ArrayList<>();
+        for (PreviewEvent event : data.events()) {
+            events.add(b.object(
+                    b.pair("at", event.atMs()),
+                    b.pair("ceid", event.ceid()),
+                    b.pair("planId", event.planId())));
+        }
+
         return b.object(
                 b.pair("from", data.fromMs()),
                 b.pair("to", data.toMs()),
@@ -130,7 +171,8 @@ public final class PreviewSupport {
                 b.pair("bucketMs", data.bucketMs()),
                 b.pair("svidTotal", data.svidTotal()),
                 b.pair("truncated", data.svidTotal() > data.series().size()),
-                b.pair("series", b.array(series))).toJson();
+                b.pair("series", b.array(series)),
+                b.pair("events", b.array(events))).toJson();
     }
 
     /**
