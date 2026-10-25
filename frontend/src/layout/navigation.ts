@@ -37,7 +37,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'workbench',
         label: '工作台',
-        description: '所有设备的总览与会话管理:KPI、设备卡墙、开设备/重载/上报。',
+        description: '所有设备的总览与会话管理:KPI、设备总览表、开设备/重载/上报。',
         icon: 'overview',
         route: { name: 'workbench' },
       },
