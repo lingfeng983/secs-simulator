@@ -13,7 +13,7 @@
         "label": "launcher",
         "title": "SECS Simulator",
         "width": 560,
-        "height": 660,
+        "height": 620,
         "resizable": false,
         "center": true,
         "visible": true,
@@ -39,11 +39,6 @@
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false
-      }
-    },
-    "linux": {
-      "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
       }
     }
   }

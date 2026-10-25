@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! SECS Simulator 桌面壳。
+//! SECS Simulator 桌面壳（Windows 安装程序形态）。
 //!
 //! 两层窗口：
-//! - `launcher`：本地页面，配置「本机启动」或「服务器 IP/端口/token」；
-//! - `main`：直接加载模拟器的 Web UI（本机或远程同源页面）。
+//! - `launcher`：本地页面，配置「本机启动」或「远程服务器地址」；
+//! - `main`：直接加载模拟器的 Web UI——本机模式加载本地后端托管的页面，
+//!   远程模式直接加载 Linux 服务端（jar 包）托管的同源页面。
 //!
 //! 远程页面不参与 Tauri IPC，因此不需要给远端域名开权限。
 
@@ -140,21 +141,8 @@ fn resource_root(app: &tauri::AppHandle) -> PathBuf {
 }
 
 fn backend_command(resources: &Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        let exe = resources.join("secs-sim.exe");
-        if exe.exists() {
-            return Some(exe);
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let java = resources.join("backend/runtime/bin/java");
-        if java.exists() {
-            return Some(java);
-        }
-    }
-    None
+    let exe = resources.join("secs-sim.exe");
+    exe.exists().then_some(exe)
 }
 
 fn web_root(resources: &Path) -> PathBuf {
@@ -181,7 +169,7 @@ fn start_local(app: tauri::AppHandle, state: State<'_, Backend>, demo: bool) -> 
     Ok(url)
 }
 
-/// 拉起后端并读 READY。Windows 用打包进去的 secs-sim.exe，Linux 用 jlink 运行时跑 jar。
+/// 拉起后端并读 READY。后端是打包进安装程序的 secs-sim.exe（原生镜像，无需 JVM）。
 fn spawn_backend(resources: &Path, work: &Path, demo: bool) -> Result<(Child, String), String> {
     let backend = backend_command(resources)
         .ok_or_else(|| format!("找不到后端程序，资源目录: {}", resources.display()))?;
@@ -189,15 +177,6 @@ fn spawn_backend(resources: &Path, work: &Path, demo: bool) -> Result<(Child, St
     std::fs::create_dir_all(work).map_err(|e| format!("创建工作目录失败: {e}"))?;
 
     let mut command = Command::new(&backend);
-    #[cfg(not(windows))]
-    {
-        let lib = resources.join("backend/lib");
-        command
-            .arg("-Dfile.encoding=UTF-8")
-            .arg("-cp")
-            .arg(format!("{}/*", lib.display()))
-            .arg("com.shimizukenta.secssim.runtime.Main");
-    }
     command
         .arg("--mode=integrated")
         .arg("--port=0")
@@ -207,7 +186,6 @@ fn spawn_backend(resources: &Path, work: &Path, demo: bool) -> Result<(Child, St
     if demo {
         command.arg("--demo-session");
     }
-    #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);

@@ -183,23 +183,24 @@ S2F33(定义报告)/S2F35(链接事件)/S2F37(启停事件)是**主机→设备*
 | 曲线全是 0 | 配置有 `templates` 段时,没绑定到实例的 SVID 恒为 0(见 schema-v5);删掉 templates 段可回到默认随机曲线 |
 | 校验报 `UNKNOWN_CEID` | 事件计划里的 `ceid` 在该设备的单元/全局 CEID 里没有定义;先在 `equipment` 段补上,或改计划引用的编号 |
 | 主机写完 ECV 后配置被重排 | 正常现象:S2F15 回写只替换 `constants` 段,其余键与值不变,但缩进会统一成 2 空格 |
-| token 忘了 | 重启服务,`READY` 行会打印新 token |
+| 加了 --token 后界面连不上 | 界面为免凭据形态,内网场景去掉 `--token` 用开放访问;受限访问请走 API/脚本 |
 
-## 6. 两种安装包
+## 6. 两种安装形态
 
-| 包 | 内容 | 用法 |
+| 形态 | 内容 | 用法 |
 |---|---|---|
-| **完整安装包** `secs-sim-<版本>-win-x64.zip` | 原生 exe + 界面 + 启动脚本 | 本地解压,双击 `start.cmd` 即起;`scripts/package.ps1` 产出 |
-| **运行时后端** `secs-sim-runtime-<版本>-win-x64.zip` | 原生 exe + server 启动脚本(无界面) | 部署在设备所在的机器,`start-server.cmd` 以 server 模式对外;`scripts/package-runtime.ps1` 产出 |
-| **运行时后端(Linux)** `secs-sim-runtime-<版本>-linux-x64.zip` | 模块 jar + `start-server.sh`(无界面,目标机需 JDK 25+) | 部署在 Linux 设备机,`./start-server.sh` 对外;`scripts/package-runtime.ps1 -IncludeLinux` 产出 |
+| **Windows 安装程序** `SECS Simulator_<版本>_x64-setup.exe` | Tauri 壳 + 原生 exe 后端 + 前端(一并打进安装包) | 安装后启动:「本机运行」一键起本机模拟器(无需 JVM),或「连接服务器」远程;`scripts/package-windows.ps1` 产出 |
+| **Linux 服务端** `secs-sim-server-<版本>-linux.zip` | 模块 jar + 前端 + `start-server.sh` | 部署在 Linux 设备机,`./start-server.sh` 以 server 模式对外并托管界面(目标机需 JDK 25+);`scripts/package-linux.ps1` 产出 |
 
-远程场景:设备在 A 机跑运行时后端,操作者在 B 机用完整安装包的界面,
-顶栏「连接」填 A 机地址(`http://A 机 IP:8080`),配置、批量、曲线、报文全部直连 A 机。
+远程场景:设备在 Linux 机(A)解压服务端包并 `./start-server.sh` 启动;
+操作者在 Windows 机(B)安装程序,启动器选「连接服务器」填 A 机地址(`http://A 机 IP:8080`)。
+界面直接由 A 机提供,配置、批量、曲线、报文全部操作 A 机,不占用 B 机资源。
+本机场景则完全不依赖网络:安装程序内置后端与前端,「本机运行」即起。
 
 ## 7. 一分钟上手清单
 
 1. `secs-sim --mode=integrated --web-root frontend/dist`
-2. 浏览器开 READY 行的地址,贴 token;
+2. 浏览器开 READY 行的地址;
 3. 工作台「会话管理」新建一个配置(没有就先在设备页·配置点「新建」);
 4. 主机连配置里的 HSMS 端口,等控制状态变绿;
 5. 设备页·事件看事件往上跑,设备页·曲线看数值。

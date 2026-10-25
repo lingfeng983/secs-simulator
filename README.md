@@ -46,7 +46,7 @@ powershell -ExecutionPolicy Bypass -File scripts/accept-M1.ps1
 同一个可执行文件，三种形态：
 
 ```powershell
-# 一体化（桌面壳调用）：只绑回环，自动生成 token
+# 一体化（桌面壳调用）：只绑回环，默认开放访问（免令牌）
 secs-sim --mode=integrated
 
 # 带一个两腔体演示会话：主机可以连上来问 S1F3
@@ -59,7 +59,7 @@ secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 scripts\build-frontend.ps1
 secs-sim --mode=integrated --demo-session --web-root frontend/dist
 
-# 服务端：对外绑定，凭据必填（--token 或 --auth-users 二选一）
+# 服务端：对外绑定，默认开放访问（内网工具场景）；--token / --auth-users 二选一可加凭据
 # 提供 keystore 时走 HTTPS
 secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN `
     --tls-keystore ./server.p12 --tls-password $env:SECS_TLS_PASSWORD
@@ -67,8 +67,9 @@ secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN `
 # 多账号分级：viewer 只读 / operator 可下发 / admin 可停机
 secs-sim --mode=server --bind 0.0.0.0 --port 8080 --auth-users ./users.json
 
-# 没有 --tls-keystore 时仍是明文 HTTP，建议置于 TLS 反向代理后
-secs-sim --mode=server --bind 0.0.0.0 --port 8080 --token $env:SECS_TOKEN
+# 不带凭据的开放访问（Linux 服务端包 start-server.sh 的默认形态）
+# 注意：加了凭据后当前界面无法登录（界面为免凭据形态），受限访问请走 API/脚本
+secs-sim --mode=server --bind 0.0.0.0 --port 8080
 
 # keystore 示例：
 # keytool -genkeypair -alias secs-sim -keyalg RSA -storetype PKCS12 `
@@ -81,10 +82,10 @@ secs-sim --mode=probe --hsms-port 5000
 启动后向 stdout 打印一行握手，供桌面壳与脚本读取：
 
 ```
-READY mode=integrated http=53466 token=<64位十六进制> accounts=1 utf8=true sessions=1 hsms=5000 work=C:\Users\...\SecsSimulator
+READY mode=integrated http=53466 token= accounts=0 utf8=true sessions=1 hsms=5000 work=C:\Users\...\SecsSimulator
 ```
 
-`token` 只在单令牌模式下有值；用 `--auth-users` 时它是空的，`accounts` 是账号数。
+`token` 只在单令牌模式下有值（默认开放访问时为空）；用 `--auth-users` 时它是空的，`accounts` 是账号数。
 
 HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `operator` 与 `viewer` 的事：
 
@@ -382,16 +383,23 @@ CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这�
 
 ## 打包
 
+只有两种发布形态，各自一条脚本（都会先自动构建前端）：
+
 ```powershell
-scripts\build-frontend.ps1     # 前端产物
-scripts\package.ps1            # 原生镜像 + 组装 + zip
+# 1. Windows 安装程序（Tauri/NSIS）：桌面壳 + 原生镜像后端 + 前端一并打进安装包
+scripts\package-windows.ps1
+
+# 2. Linux 服务端（jar 包）：模块 jar + 前端 + start-server.sh，目标机需 JDK 25+
+scripts\package-linux.ps1
 ```
 
-- 产物：`package/secs-sim-<version>-win-x64.zip`，内含 `secs-sim.exe`、`web/`、
-  `start.cmd`/`start.ps1`、`README.txt`、配置格式说明与 `VERSION`。
-- 双击 `start.cmd` 即用，目标机器无需安装 JVM。
-- 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）；`package.ps1` 会调用
-  `mvn -Pnative` 生成原生镜像，可用 `-SkipBuild` 复用已有的 `secs-cli/target/secs-sim.exe`。
+- **Windows 安装程序** `package/SECS Simulator_<版本>_x64-setup.exe`：安装后两种用法——
+  「本机运行」启动内置的 `secs-sim.exe`（原生镜像，无需 JVM）连本机；
+  或「连接服务器」不启本机后端，直接加载 Linux 服务端托管的界面。
+- **Linux 服务端** `package/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
+  Linux 机器，`./start-server.sh` 以 server 模式对外并托管 web，被 Windows 端远程操作。
+- 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）+ Node；安装程序另需 Rust
+  工具链（`tauri build` 用）。`-SkipNative` / `-SkipJars` / `-SkipFrontend` 可复用已有产物。
 
 ## 能力边界
 

@@ -57,7 +57,7 @@ docs/reference/pdf/
 *.artifact.json
 
 # ---- Tauri 桌面壳构建产物 ----
-# resources/ 由 scripts/package.ps1 在构建时填充（原生 exe + web 产物），不是源码
+# resources/ 由 scripts/package-windows.ps1 在构建时填充（原生 exe + web 产物），不是源码
 gui/src-tauri/resources/
 gui/src-tauri/gen/
 gui/src-tauri/target/

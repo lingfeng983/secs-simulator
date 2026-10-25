@@ -38,8 +38,8 @@
 
       <section id="panel-remote" class="panel">
         <p class="hint">
-          连接远程 Linux 服务端。地址、端口与 token 由服务端启动参数决定；
-          若服务端使用 keystore，请勾选 HTTPS。
+          连接远程服务端（Linux jar 包，server 模式）。地址与端口由服务端启动参数决定；
+          服务端需以开放访问方式启动（不带 --token）；若服务端使用 keystore，请勾选 HTTPS。
         </p>
         <div class="grid">
           <label>
@@ -51,10 +51,6 @@
             <input id="port" type="number" min="1" max="65535" value="8080" />
           </label>
         </div>
-        <label>
-          <span>访问 token</span>
-          <input id="token" type="password" placeholder="服务端 --token 的值" autocomplete="off" />
-        </label>
         <label class="check">
           <input id="tls" type="checkbox" />
           <span>HTTPS（服务端提供 --tls-keystore）</span>

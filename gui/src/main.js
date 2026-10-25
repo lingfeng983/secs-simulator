@@ -24,7 +24,6 @@ function loadSettings() {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     if (saved.host) $("host").value = saved.host;
     if (saved.port) $("port").value = saved.port;
-    if (saved.token) $("token").value = saved.token;
     $("tls").checked = !!saved.tls;
     $("demo").checked = saved.demo !== false;
     if (saved.tab === "remote") {
@@ -39,7 +38,6 @@ function saveSettings() {
   const data = {
     host: $("host").value.trim(),
     port: $("port").value.trim(),
-    token: $("token").value,
     tls: $("tls").checked,
     demo: $("demo").checked,
     tab: document.querySelector(".tab.active").dataset.tab,
@@ -50,12 +48,10 @@ function saveSettings() {
 function remoteUrl() {
   const host = $("host").value.trim();
   const port = Number($("port").value);
-  const token = $("token").value.trim();
   if (!host) throw new Error("请填写服务器地址");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口必须是 1..65535");
   const scheme = $("tls").checked ? "https" : "http";
-  const base = `${scheme}://${host}:${port}/`;
-  return token ? `${base}#token=${encodeURIComponent(token)}` : base;
+  return `${scheme}://${host}:${port}/`;
 }
 
 async function open(url) {
@@ -107,12 +103,8 @@ $("connect").addEventListener("click", () => {
   }
   run($("connect"), "正在连接服务器…", async () => {
     await open(url);
-    return `已打开 ${url.replace(/#.*/, "")}`;
+    return `已打开 ${url}`;
   });
-});
-
-$("token").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") $("connect").click();
 });
 
 loadSettings();
