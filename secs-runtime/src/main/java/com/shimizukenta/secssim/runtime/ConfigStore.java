@@ -107,6 +107,29 @@ public final class ConfigStore {
         return sb.append(']').toString();
     }
 
+    /**
+     * 取一份配置的最后修改时间（epoch 毫秒）。
+     *
+     * @param name 文件名
+     * @return 修改时间；文件不存在、名字非法或取不到时返回 {@code null}
+     */
+    public Long modifiedMs(String name) {
+        Path file;
+        try {
+            file = this.workDir.resolve(requireFileName(name, "$.name"));
+        } catch (ConfigException e) {
+            return null;
+        }
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     /** 取一个配置文件的大小与修改时间；取不到就报 0/0，列表不该因为一个坏文件整列崩掉。 */
     private Entry describe(String name) {
         Path file = this.workDir.resolve(name);
@@ -259,6 +282,23 @@ public final class ConfigStore {
      * @return 校验/落盘结果，问题清单随结果带回
      */
     public ConfigResult save(String name, String text) {
+        return this.save(name, text, null);
+    }
+
+    /**
+     * 保存配置（带并发保护）。
+     *
+     * <p>{@code expectedModifiedMs} 非空时（界面从 GET 响应里拿到的修改时间，
+     * 经 If-Match 头传回），若文件在这期间被别的窗口/进程改过，就拒绝覆盖并回
+     * CONFLICT——两个窗口同时编辑同一份配置时，后保存的一方不该悄悄抹掉先保存的。
+     * </p>
+     *
+     * @param name               文件名
+     * @param text               JSON 文本
+     * @param expectedModifiedMs 期望的最后修改时间；null 表示不检查
+     * @return 校验/落盘结果，问题清单随结果带回
+     */
+    public ConfigResult save(String name, String text, Long expectedModifiedMs) {
         Path file;
         try {
             file = this.workDir.resolve(requireFileName(name, "$.name"));
@@ -270,6 +310,13 @@ public final class ConfigStore {
         if (!problems.isEmpty()) {
             /* 存一份编译不过的配置，等于给下一次启动埋雷 */
             return ConfigResult.invalid(problems);
+        }
+
+        if (expectedModifiedMs != null) {
+            Long current = this.modifiedMs(name);
+            if (current != null && !current.equals(expectedModifiedMs)) {
+                return ConfigResult.conflict("配置在编辑期间被其他操作修改过，请重新载入后再保存");
+            }
         }
 
         try {

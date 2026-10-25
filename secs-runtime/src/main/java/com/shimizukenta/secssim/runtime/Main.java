@@ -542,17 +542,39 @@ public final class Main {
 
         @Override
         public String messagesJson(int limit, String sessionId, String direction) {
-            return this.messages == null ? null : this.messages.recentJson(limit, sessionId, direction);
+            return this.messagesJson(limit, sessionId, direction, 0L, null, null);
+        }
+
+        @Override
+        public String messagesJson(int limit, String sessionId, String direction,
+                                   long beforeMs, Integer stream, Integer function) {
+            return this.messages == null ? null : this.messages.recentJson(limit, sessionId, direction, beforeMs, stream, function);
         }
 
         @Override
         public String messagesJsonl(int limit, String sessionId, String direction) {
-            return this.messages == null ? null : this.messages.recentJsonl(limit, sessionId, direction);
+            return this.messagesJsonl(limit, sessionId, direction, 0L, null, null);
+        }
+
+        @Override
+        public String messagesJsonl(int limit, String sessionId, String direction,
+                                    long beforeMs, Integer stream, Integer function) {
+            return this.messages == null ? null : this.messages.recentJsonl(limit, sessionId, direction, beforeMs, stream, function);
         }
 
         @Override
         public String auditJson(int limit) {
-            return this.audit == null ? null : this.audit.recentJson(limit);
+            return this.auditJson(limit, "", "");
+        }
+
+        @Override
+        public String auditJson(int limit, String action, String actor) {
+            return this.auditJson(limit, action, actor, 0L);
+        }
+
+        @Override
+        public String auditJson(int limit, String action, String actor, long beforeMs) {
+            return this.audit == null ? null : this.audit.recentJson(limit, action, actor, beforeMs);
         }
 
         @Override
@@ -967,11 +989,21 @@ public final class Main {
 
         @Override
         public ConfigResult saveConfig(String name, String text) {
-            ConfigResult result = this.configs.save(name, text);
+            return this.saveConfig(name, text, null);
+        }
+
+        @Override
+        public ConfigResult saveConfig(String name, String text, Long expectedModifiedMs) {
+            ConfigResult result = this.configs.save(name, text, expectedModifiedMs);
             if (result.outcome() == ConfigOutcome.OK) {
                 this.warnStaleSessions(name);
             }
             return result;
+        }
+
+        @Override
+        public Long configModifiedMs(String name) {
+            return this.configs.modifiedMs(name);
         }
 
         @Override

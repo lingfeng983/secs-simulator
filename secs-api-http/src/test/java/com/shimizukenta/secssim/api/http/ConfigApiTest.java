@@ -37,6 +37,8 @@ class ConfigApiTest {
     private String base;
     private final List<String> saves = new ArrayList<>();
     private String stored = "{\"原文\":true}";
+    /** 当前的"文件修改时间";If-Match 并发保护的测试桩。 */
+    private volatile long currentModifiedMs = 1_700_000_000_000L;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -84,8 +86,21 @@ class ConfigApiTest {
 
             @Override
             public ConfigResult saveConfig(String name, String text) {
+                return this.saveConfig(name, text, null);
+            }
+
+            @Override
+            public Long configModifiedMs(String name) {
+                return "nope.json".equals(name) ? null : ConfigApiTest.this.currentModifiedMs;
+            }
+
+            @Override
+            public ConfigResult saveConfig(String name, String text, Long expectedModifiedMs) {
                 if (name.contains("/") || name.contains("\\") || name.contains("..") || name.contains(":")) {
                     return ConfigResult.notFound("只能是 --work-dir 下的文件名，不能带路径");
+                }
+                if (expectedModifiedMs != null && expectedModifiedMs != ConfigApiTest.this.currentModifiedMs) {
+                    return ConfigResult.conflict("配置在编辑期间被其他操作修改过，请重新载入后再保存");
                 }
                 ConfigApiTest.this.saves.add(name + ":" + text);
                 if (text.contains("坏")) {
@@ -170,6 +185,51 @@ class ConfigApiTest {
 
         assertEquals(200, response.statusCode(), response.body());
         assertEquals(List.of("line1.json:" + body), this.saves, "存回去的必须和发过来的一模一样");
+    }
+
+    /** GET 带回 modifiedMs:编辑器存盘时经 If-Match 带回,是并发保护的依据。 */
+    @Test
+    void readsModifiedMsForTheConcurrencyGuard() throws Exception {
+        HttpResponse<String> response = get("/api/v1/configs/line1.json", OPERATOR_PASS);
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"modifiedMs\":" + this.currentModifiedMs), response.body());
+    }
+
+    /** If-Match 对得上:正常保存。 */
+    @Test
+    void saveWithMatchingIfMatchIsAccepted() throws Exception {
+        HttpResponse<String> response = put("/api/v1/configs/line1.json", "{\"好\":1}", OPERATOR_PASS,
+                String.valueOf(this.currentModifiedMs));
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals(1, this.saves.size());
+    }
+
+    /** If-Match 过期(编辑期间被别人改过):409 拒绝覆盖,不产生副作用。 */
+    @Test
+    void saveWithStaleIfMatchIsRejected() throws Exception {
+        HttpResponse<String> response = put("/api/v1/configs/line1.json", "{\"新\":1}", OPERATOR_PASS, "123");
+
+        assertEquals(409, response.statusCode(), response.body());
+        assertTrue(response.body().contains("重新载入"), response.body());
+        assertTrue(this.saves.isEmpty(), "冲突的保存不得写盘: " + this.saves);
+    }
+
+    /** If-Match 不是数字:400,也不能落盘。 */
+    @Test
+    void saveWithMalformedIfMatchIsBadRequest() throws Exception {
+        HttpResponse<String> response = put("/api/v1/configs/line1.json", "{\"新\":1}", OPERATOR_PASS, "abc");
+
+        assertEquals(400, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"bad-if-match\""), response.body());
+        assertTrue(this.saves.isEmpty());
+    }
+
+    /** 不带 If-Match 的旧客户端行为不变:直接保存。 */
+    @Test
+    void saveWithoutIfMatchKeepsWorking() throws Exception {
+        assertEquals(200, put("/api/v1/configs/line1.json", "{\"好\":1}", OPERATOR_PASS).statusCode());
     }
 
     @Test
@@ -303,8 +363,16 @@ class ConfigApiTest {
     }
 
     private HttpResponse<String> put(String path, String body, String token) throws Exception {
-        return send(HttpRequest.newBuilder(URI.create(this.base + path))
-                .PUT(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)), token);
+        return put(path, body, token, null);
+    }
+
+    private HttpResponse<String> put(String path, String body, String token, String ifMatch) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path))
+                .PUT(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        if (ifMatch != null) {
+            builder.header("If-Match", ifMatch);
+        }
+        return send(builder, token);
     }
 
     private HttpResponse<String> delete(String path, String token) throws Exception {

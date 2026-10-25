@@ -1210,7 +1210,10 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        respond(ex, 200, "{\"name\":\"" + json(name) + "\",\"text\":\"" + json(text) + "\"}");
+        /* modifiedMs 随原文一起回：编辑器存盘时经 If-Match 带回，做并发保护 */
+        Long modifiedMs = this.context.configModifiedMs(name);
+        String meta = modifiedMs == null ? "" : ",\"modifiedMs\":" + modifiedMs;
+        respond(ex, 200, "{\"name\":\"" + json(name) + "\",\"text\":\"" + json(text) + "\"" + meta + "}");
     }
 
     /**
@@ -1257,12 +1260,26 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        ConfigResult result = this.context.saveConfig(name, text);
+        /* If-Match：编辑器把 GET 时拿到的 modifiedMs 原样带回来；编辑期间文件被别人改过就拒绝覆盖 */
+        Long expectedModifiedMs = null;
+        String ifMatch = ex.getRequestHeaders().getFirst("If-Match");
+        if (ifMatch != null && !ifMatch.isBlank()) {
+            try {
+                expectedModifiedMs = Long.parseLong(ifMatch.trim().replace("\"", ""));
+            } catch (NumberFormatException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-if-match\"}");
+                return;
+            }
+        }
+
+        ConfigResult result = this.context.saveConfig(name, text, expectedModifiedMs);
         audit(ex, "config-save", name, "outcome=" + result.outcome() + " bytes=" + text.length());
         switch (result.outcome()) {
             case OK -> respond(ex, 200, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
             /* 内容不合法用 422：请求本身没毛病，是内容过不了关，和 400 的"body 坏了"不是一回事 */
             case INVALID -> respond(ex, 422, problemsJson(false, result.problems()));
+            /* 编辑期间文件被改过：用 409 Conflict，让编辑器提示重新载入 */
+            case CONFLICT -> respond(ex, 409, problemsJson(false, result.problems()));
             /* 名字非法：这是请求字段的问题，不是"文件没找到" */
             case NOT_FOUND -> respond(ex, 400, problemsJson(false, result.problems()));
             case FAILED -> respond(ex, 500, problemsJson(false, result.problems()));
@@ -1860,8 +1877,30 @@ public final class HttpApiServer implements AutoCloseable {
         String session = query.getOrDefault("session", "").trim();
         String format = query.getOrDefault("format", "json").trim().toLowerCase(Locale.ROOT);
 
+        /* before 游标:只取时间早于该值的消息(翻旧账);stream/function 过滤报文类型 */
+        Long beforeParam = longParam(query, "before");
+        if (query.containsKey("before") && beforeParam == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-before\"}");
+            return;
+        }
+        long before = beforeParam == null ? 0L : beforeParam;
+        if (before < 0L) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-before\"}");
+            return;
+        }
+        Integer stream = intParam(query, "stream");
+        if (query.containsKey("stream") && stream == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-stream\"}");
+            return;
+        }
+        Integer function = intParam(query, "function");
+        if (query.containsKey("function") && function == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-function\"}");
+            return;
+        }
+
         if ("jsonl".equals(format)) {
-            String body = this.context.messagesJsonl((int) limit, session, direction);
+            String body = this.context.messagesJsonl((int) limit, session, direction, before, stream, function);
             if (body == null) {
                 respond(ex, 503, "{\"ok\":false,\"error\":\"message-log-unavailable\"}");
                 return;
@@ -1875,7 +1914,7 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        String body = this.context.messagesJson((int) limit, session, direction);
+        String body = this.context.messagesJson((int) limit, session, direction, before, stream, function);
         if (body == null) {
             respond(ex, 503, "{\"ok\":false,\"error\":\"message-log-unavailable\"}");
             return;
@@ -1960,7 +1999,21 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
 
-        String body = this.context.auditJson((int) limit);
+        /* 服务端过滤:action/actor 精确匹配,空串表示全部;before 游标翻更早的记录 */
+        String action = query.getOrDefault("action", "").trim();
+        String actor = query.getOrDefault("actor", "").trim();
+        Long auditBeforeParam = longParam(query, "before");
+        if (query.containsKey("before") && auditBeforeParam == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-before\"}");
+            return;
+        }
+        long auditBefore = auditBeforeParam == null ? 0L : auditBeforeParam;
+        if (auditBefore < 0L) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-before\"}");
+            return;
+        }
+
+        String body = this.context.auditJson((int) limit, action, actor, auditBefore);
         if (body == null) {
             respond(ex, 503, "{\"ok\":false,\"error\":\"audit-log-unavailable\"}");
             return;
@@ -2008,6 +2061,19 @@ public final class HttpApiServer implements AutoCloseable {
         }
         try {
             return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 整数查询参数;缺省回 null,形状不对也回 null(调用方区分 containsKey 判 400)。 */
+    private static Integer intParam(Map<String, String> query, String key) {
+        String raw = query.get(key);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
             return null;
         }

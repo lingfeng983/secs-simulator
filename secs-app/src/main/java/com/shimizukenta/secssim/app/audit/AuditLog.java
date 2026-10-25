@@ -95,10 +95,54 @@ public final class AuditLog implements AutoCloseable {
      * @return JSON 文本
      */
     public synchronized String recentJson(int limit) {
+        return this.recentJson(limit, "", "", 0L);
+    }
+
+    /**
+     * 最近审计记录（带服务端过滤,支持 before 游标翻旧账）。
+     *
+     * @param limit  最多返回条数
+     * @param action 只取这个动作;空串表示全部
+     * @param actor  只取这个操作者;空串表示全部
+     * @param beforeMs 只取时间早于该值的记录;0 表示不限制
+     * @return JSON 文本
+     */
+    public synchronized String recentJson(int limit, String action, String actor, long beforeMs) {
+        return this.recentJsonImpl(limit, action, actor, beforeMs);
+    }
+
+    /**
+     * 最近审计记录（带服务端过滤）。
+     *
+     * <p>action/actor 为精确匹配,空串表示不过滤;过滤后的 total/truncated
+     * 随响应带回,界面能区分"查不到"和"被 limit 截断"。</p>
+     *
+     * @param limit  最多返回条数
+     * @param action 只取这个动作;空串表示全部
+     * @param actor  只取这个操作者;空串表示全部
+     * @return JSON 文本
+     */
+    private synchronized String recentJsonImpl(int limit, String action, String actor, long beforeMs) {
         int wanted = Math.max(1, limit);
-        List<Entry> all = new ArrayList<>(this.recent);
-        int from = Math.max(0, all.size() - wanted);
-        List<Entry> selected = all.subList(from, all.size());
+        String actionFilter = action == null ? "" : action.trim();
+        String actorFilter = actor == null ? "" : actor.trim();
+        List<Entry> matches = new ArrayList<>();
+        for (Entry entry : this.recent) {
+            if (!actionFilter.isEmpty() && !actionFilter.equals(entry.action())) {
+                continue;
+            }
+            if (!actorFilter.isEmpty() && !actorFilter.equals(entry.actor())) {
+                continue;
+            }
+            if (beforeMs > 0L && entry.atMillis() >= beforeMs) {
+                continue;
+            }
+            matches.add(entry);
+        }
+        int total = matches.size();
+        List<Entry> selected = matches.size() > wanted
+                ? matches.subList(matches.size() - wanted, matches.size())
+                : matches;
 
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> entries = new ArrayList<>(selected.size());
@@ -113,7 +157,9 @@ public final class AuditLog implements AutoCloseable {
         }
         return b.object(
                 b.pair("audit", b.array(entries)),
-                b.pair("limit", wanted)).toJson();
+                b.pair("limit", wanted),
+                b.pair("total", total),
+                b.pair("truncated", total > selected.size())).toJson();
     }
 
     /**

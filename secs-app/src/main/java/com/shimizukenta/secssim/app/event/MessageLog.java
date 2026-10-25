@@ -119,7 +119,23 @@ public final class MessageLog implements AutoCloseable {
      * @return JSON 文本
      */
     public synchronized String recentJson(int limit, String sessionId, String direction) {
-        Snapshot snapshot = select(limit, sessionId, direction);
+        return this.recentJson(limit, sessionId, direction, 0L, null, null);
+    }
+
+    /**
+     * 最近历史（JSON,带游标与报文类型过滤）。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @param beforeMs  只取时间早于该值的消息（翻旧账的游标）；0 表示不限制
+     * @param stream    只取这个 Stream；null 表示全部
+     * @param function  只取这个 Function；null 表示全部
+     * @return JSON 文本
+     */
+    public synchronized String recentJson(int limit, String sessionId, String direction,
+                                          long beforeMs, Integer stream, Integer function) {
+        Snapshot snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> messages = new ArrayList<>(snapshot.messages().size());
         for (MessageEvent event : snapshot.messages()) {
@@ -142,7 +158,23 @@ public final class MessageLog implements AutoCloseable {
      * @return 每行一个 JSON 对象
      */
     public synchronized String recentJsonl(int limit, String sessionId, String direction) {
-        Snapshot snapshot = select(limit, sessionId, direction);
+        return this.recentJsonl(limit, sessionId, direction, 0L, null, null);
+    }
+
+    /**
+     * 最近历史（JSON Lines,带游标与报文类型过滤）。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @param beforeMs  只取时间早于该值的消息；0 表示不限制
+     * @param stream    只取这个 Stream；null 表示全部
+     * @param function  只取这个 Function；null 表示全部
+     * @return 每行一个 JSON 对象
+     */
+    public synchronized String recentJsonl(int limit, String sessionId, String direction,
+                                           long beforeMs, Integer stream, Integer function) {
+        Snapshot snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
         StringBuilder sb = new StringBuilder();
         for (MessageEvent event : snapshot.messages()) {
             sb.append(toJson(event)).append('\n');
@@ -239,6 +271,11 @@ public final class MessageLog implements AutoCloseable {
     }
 
     private Snapshot select(int limit, String sessionId, String direction) {
+        return this.select(limit, sessionId, direction, 0L, null, null);
+    }
+
+    private Snapshot select(int limit, String sessionId, String direction,
+                            long beforeMs, Integer stream, Integer function) {
         String session = sessionId == null ? "" : sessionId.trim();
         String dir = direction == null ? "" : direction.trim();
         List<MessageEvent> matches = new ArrayList<>();
@@ -247,6 +284,15 @@ public final class MessageLog implements AutoCloseable {
                 continue;
             }
             if (!dir.isEmpty() && !dir.equals(event.direction())) {
+                continue;
+            }
+            if (beforeMs > 0L && event.atMillis() >= beforeMs) {
+                continue;
+            }
+            if (stream != null && stream.intValue() != event.stream()) {
+                continue;
+            }
+            if (function != null && function.intValue() != event.function()) {
                 continue;
             }
             matches.add(event);

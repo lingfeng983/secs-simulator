@@ -207,6 +207,22 @@ public interface ApiContext {
     }
 
     /**
+     * 最近报文历史（JSON,带游标与报文类型过滤）。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @param beforeMs  只取时间早于该值的消息；0 表示不限制
+     * @param stream    只取这个 Stream；null 表示全部
+     * @param function  只取这个 Function；null 表示全部
+     * @return JSON 文本；报文日志不可用时返回 {@code null}
+     */
+    default String messagesJson(int limit, String sessionId, String direction,
+                                long beforeMs, Integer stream, Integer function) {
+        return this.messagesJson(limit, sessionId, direction);
+    }
+
+    /**
      * 最近报文历史（JSON Lines），供导出。
      *
      * @param limit     最多返回条数
@@ -219,6 +235,22 @@ public interface ApiContext {
     }
 
     /**
+     * 最近报文历史（JSON Lines,带游标与报文类型过滤）。
+     *
+     * @param limit     最多返回条数
+     * @param sessionId 只取这个会话；空串表示全部
+     * @param direction {@code in} / {@code out}；空串表示全部
+     * @param beforeMs  只取时间早于该值的消息；0 表示不限制
+     * @param stream    只取这个 Stream；null 表示全部
+     * @param function  只取这个 Function；null 表示全部
+     * @return 每行一个 JSON 对象；报文日志不可用时返回 {@code null}
+     */
+    default String messagesJsonl(int limit, String sessionId, String direction,
+                                 long beforeMs, Integer stream, Integer function) {
+        return this.messagesJsonl(limit, sessionId, direction);
+    }
+
+    /**
      * 最近审计记录。
      *
      * @param limit 最多返回条数
@@ -226,6 +258,31 @@ public interface ApiContext {
      */
     default String auditJson(int limit) {
         return null;
+    }
+
+    /**
+     * 最近审计记录（带服务端过滤）。
+     *
+     * @param limit  最多返回条数
+     * @param action 只取这个动作;空串表示全部
+     * @param actor  只取这个操作者;空串表示全部
+     * @return JSON 文本；审计不可用时返回 {@code null}
+     */
+    default String auditJson(int limit, String action, String actor) {
+        return this.auditJson(limit);
+    }
+
+    /**
+     * 最近审计记录（带服务端过滤与 before 游标）。
+     *
+     * @param limit    最多返回条数
+     * @param action   只取这个动作;空串表示全部
+     * @param actor    只取这个操作者;空串表示全部
+     * @param beforeMs 只取时间早于该值的记录;0 表示不限制
+     * @return JSON 文本；审计不可用时返回 {@code null}
+     */
+    default String auditJson(int limit, String action, String actor, long beforeMs) {
+        return this.auditJson(limit, action, actor);
     }
 
     /**
@@ -470,6 +527,34 @@ public interface ApiContext {
      */
     default ConfigResult saveConfig(String name, String text) {
         return ConfigResult.notFound("当前形态不支持保存配置");
+    }
+
+    /**
+     * 取一份配置的最后修改时间（epoch 毫秒）。
+     *
+     * <p>与 {@link #saveConfig(String, String, Long)} 配合做保存时的并发保护；
+     * 取不到（不支持或文件不存在）返回 {@code null}。</p>
+     *
+     * @param name 文件名
+     * @return 修改时间；未知时 {@code null}
+     */
+    default Long configModifiedMs(String name) {
+        return null;
+    }
+
+    /**
+     * 保存一份配置（带并发保护）。
+     *
+     * <p>{@code expectedModifiedMs} 非空且与当前文件不一致时必须拒绝覆盖，
+     * 返回 CONFLICT——否则两个编辑窗口会互相静默覆盖。</p>
+     *
+     * @param name               文件名
+     * @param text               JSON 文本
+     * @param expectedModifiedMs 期望的最后修改时间；null 表示不检查
+     * @return 结果（带问题清单）
+     */
+    default ConfigResult saveConfig(String name, String text, Long expectedModifiedMs) {
+        return this.saveConfig(name, text);
     }
 
     /** 按配置<b>草稿文本</b>算曲线预览（不落盘、不需要运行中的会话）。返回 null 表示编译失败。 */
