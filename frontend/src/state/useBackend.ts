@@ -22,6 +22,7 @@ import type { Notifier } from './useToasts';
 import { useSessionCommands } from './useSessionCommands';
 import { useConfigCommands } from './useConfigCommands';
 import { useDataCommands } from './useDataCommands';
+import type { OverviewRow, BurstRequest, BurstResult, CollectorConfigInput, CollectorState } from '../api';
 
 /** 面板里保留的报文条数上限。 */
 export const MAX_MESSAGES = 200;
@@ -145,6 +146,8 @@ export interface BackendController {
   /** 配置草稿的曲线预览（编辑器里改模板直接看效果）。 */
   draftPreview: PreviewData | null;
   previewDraft: (text: string, windowMs: number) => Promise<void>;
+  /** 单 SVID 草稿预览(v6,带事件标记)。 */
+  previewDraftSvid: (text: string, windowMs: number, svid: number) => Promise<PreviewData | null>;
   /** 对比会话 B 的预览数据；null 表示未开启对比。 */
   comparePreview: PreviewData | null;
   /** 对比会话 B 的 id。 */
@@ -159,10 +162,22 @@ export interface BackendController {
   /** 主机模拟器连接状态（随会话明细轮询）。 */
   hostSimOpen: boolean;
   hostSimTarget: string;
-  openHostSim: (sessionId: string) => Promise<void>;
+  openHostSim: (sessionId: string, target?: import('../api').HostSimTarget) => Promise<void>;
   closeHostSim: (sessionId: string) => Promise<void>;
   /** 以主机角色发送 SML；返回发送结果。 */
   sendHostSml: (sessionId: string, sml: string) => Promise<import('../api').SentMessageResult | null>;
+
+  /** 工作台聚合(v6):每台设备的速率/计数一览。 */
+  overview: OverviewRow[];
+  refreshOverview: () => Promise<void>;
+  /** 服务端压测(v6)。 */
+  burst: (sessionId: string, request: BurstRequest) => Promise<BurstResult>;
+  /** 主机模拟 S1F3 采集器状态与数据(v6)。 */
+  collectorState: (sessionId: string) => Promise<CollectorState | null>;
+  /** 下发采集器配置;返回错误文案或 null。 */
+  saveCollector: (sessionId: string, config: CollectorConfigInput) => Promise<string | null>;
+  /** 手动启停采集器。 */
+  collectorCommand: (sessionId: string, start: boolean) => Promise<string | null>;
 }
 
 /**
@@ -217,6 +232,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [refreshing, setRefreshing] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
   const [hostSimOpen, setHostSimOpen] = useState(false);
+  const [overview, setOverview] = useState<OverviewRow[]>([]);
   const [hostSimTarget, setHostSimTarget] = useState('');
 
   const nextMessageKey = useRef(0);
@@ -320,6 +336,21 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
+  /** 单 SVID 草稿预览(v6):带事件标记,给每 SVID 值来源编辑器用。 */
+  const previewDraftSvid = useCallback(
+    async (text: string, windowMs: number, svid: number): Promise<PreviewData | null> => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        return await client.configPreview(text, 0, windowMs, 90, [svid], true);
+      } catch {
+        return null;
+      }
+    },
+    [client],
+  );
+
   const refreshLogLevel = useCallback(async () => {
     if (client === null) {
       return;
@@ -351,6 +382,59 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
+  /** 工作台聚合(v6):速率/计数一览;老后端没有该端点时回空数组。 */
+  const refreshOverview = useCallback(async () => {
+    if (client === null) {
+      return;
+    }
+    const rows = await client.overview();
+    setOverview(rows);
+  }, [client]);
+
+  /** 服务端压测(v6)。 */
+  const burst = useCallback(
+    async (sessionId: string, request: BurstRequest): Promise<BurstResult> => {
+      if (client === null) {
+        throw new Error('未连接后端');
+      }
+      return client.burst(sessionId, request);
+    },
+    [client],
+  );
+
+  /** 采集器状态与数据(v6)。 */
+  const collectorState = useCallback(
+    async (sessionId: string): Promise<CollectorState | null> => {
+      if (client === null) {
+        return null;
+      }
+      return client.collectorState(sessionId);
+    },
+    [client],
+  );
+
+  /** 下发采集器配置;返回错误文案或 null。 */
+  const saveCollector = useCallback(
+    async (sessionId: string, config: CollectorConfigInput): Promise<string | null> => {
+      if (client === null) {
+        return '未连接后端';
+      }
+      return client.setCollector(sessionId, config);
+    },
+    [client],
+  );
+
+  /** 手动启停采集器。 */
+  const collectorCommand = useCallback(
+    async (sessionId: string, start: boolean): Promise<string | null> => {
+      if (client === null) {
+        return '未连接后端';
+      }
+      return client.collectorCommand(sessionId, start);
+    },
+    [client],
+  );
+
   const refreshAll = useCallback(async () => {
     if (client === null) {
       return;
@@ -363,12 +447,13 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         refreshAudit(),
         refreshConfigs(),
         refreshLogLevel(),
+        refreshOverview(),
       ]);
       setLastRefresh(Date.now());
     } finally {
       setRefreshing(false);
     }
-  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs, refreshLogLevel]);
+  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs, refreshLogLevel, refreshOverview]);
 
   /* 单一调度器：按各自节奏到点刷新 */
   useEffect(() => {
@@ -389,6 +474,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       detail: 0,
       audit: 0,
       config: 0,
+      overview: 0,
     };
 
     const tick = async () => {
@@ -414,6 +500,10 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         due.config = now + INTERVAL.config;
         void refreshConfigs();
       }
+      if (now >= due.overview) {
+        due.overview = now + INTERVAL.audit;
+        void refreshOverview();
+      }
     };
 
     void tick();
@@ -433,7 +523,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs]);
+  }, [client, activeSession, refreshSessions, refreshSessionDetail, refreshAudit, refreshConfigs, refreshOverview]);
 
   /* 选中的会话必须真实存在 */
   useEffect(() => {
@@ -519,13 +609,13 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
 
 
   const openHostSim = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, target?: import('../api').HostSimTarget) => {
       if (client === null) {
         return;
       }
-      const status = await client.openHostSim(sessionId).catch(() => 0);
+      const status = await client.openHostSim(sessionId, target).catch(() => 0);
       if (status === 201) {
-        notifierRef.current.success('主机模拟器已连接');
+        notifierRef.current.success(target === undefined ? '主机模拟器已连接' : '主机模拟器已连接（远程）');
       } else if (status === 409) {
         notifierRef.current.error('连接失败', '设备已有主机连接，或模拟器已开启');
       } else {
@@ -743,6 +833,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       comparePreview,
       draftPreview,
       previewDraft,
+      previewDraftSvid,
       compareSession,
       refreshPreview,
       pushMessages,
@@ -752,6 +843,12 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       openHostSim,
       closeHostSim,
       sendHostSml,
+      overview,
+      refreshOverview,
+      burst,
+      collectorState,
+      saveCollector,
+      collectorCommand,
     }),
     [
       health,
@@ -785,10 +882,17 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       comparePreview,
       draftPreview,
       previewDraft,
+      previewDraftSvid,
       compareSession,
       refreshPreview,
       pushMessages,
       clearMessages,
+      overview,
+      refreshOverview,
+      burst,
+      collectorState,
+      saveCollector,
+      collectorCommand,
     ],
   );
 }

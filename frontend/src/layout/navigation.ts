@@ -1,15 +1,16 @@
 import type { IconName } from '../ui/Icon';
+import type { Route } from '../router';
 
 /**
  * 导航结构（单一事实来源）。
  *
- * <p>侧边栏、顶栏标题、命令面板、数字快捷键都从这份表派生，
- * 加一个面板只需要在这里登记一行，不会出现
- * 「菜单里有、快捷键里没有」这种各说各话的情况。</p>
+ * <p>v6 两层信息架构:静态入口只有「工作台」与「系统」两组;
+ * 「设备」组是动态的（来自会话列表）,由 Sidebar 直接渲染。
+ * 设备页内部的 监控/配置/工具 Tab 也不进这份表——它们是设备页的状态。</p>
  */
 
 export interface NavItemDef {
-  /** 面板 id，同时是路由状态与 `#panel-<id>` 的锚。 */
+  /** 面板 id。 */
   id: string;
   /** 菜单上的短名称。 */
   label: string;
@@ -26,61 +27,48 @@ export interface NavGroupDef {
 
 export const NAV_GROUPS: readonly NavGroupDef[] = [
   {
-    id: 'overview',
-    label: '总览',
+    id: 'workbench',
+    label: '工作台',
     items: [
-      { id: 'overview', label: '工作台', description: '全局状态一览：会话、报警、报文与快捷操作。', icon: 'overview' },
-    ],
-  },
-  {
-    id: 'monitor',
-    label: '监控',
-    items: [
-      { id: 'sessions', label: '会话', description: '设备实例的状态、计数与生命周期操作。', icon: 'sessions' },
-      { id: 'messages', label: '报文', description: '实时收发的 SECS-II 报文流，支持过滤与导出。', icon: 'messages' },
-      { id: 'console', label: '事件流', description: 'SSE 事件通道的运行日志与连接状态。', icon: 'console' },
-    ],
-  },
-  {
-    id: 'equipment',
-    label: '设备',
-    items: [
-      { id: 'catalog', label: '设备目录', description: '当前会话的 CEID / RPTID / SVID 清册。', icon: 'catalog' },
-      { id: 'alarms', label: '报警', description: 'S5 报警的置位、清除与终端消息。', icon: 'alarms' },
-      { id: 'events', label: '事件编排', description: 'S6F11 事件计划的启停与触发节奏。', icon: 'events' },
-      { id: 'hostsim', label: '主机模拟', description: '以主机角色连上设备，发 SML 收回复。', icon: 'hostsim' },
-    ],
-  },
-  {
-    id: 'data',
-    label: '数据',
-    items: [
-      { id: 'preview', label: '曲线预览', description: '按时间窗回放 SVID 的 min/max 包络与均值线。', icon: 'preview' },
-      { id: 'audit', label: '审计', description: '谁在什么时候动了什么：操作留痕。', icon: 'audit' },
+      {
+        id: 'workbench',
+        label: '工作台',
+        description: '所有设备的总监控:卡片墙、实时事件流、报文与会话管理。',
+        icon: 'overview',
+      },
     ],
   },
   {
     id: 'system',
     label: '系统',
     items: [
-      { id: 'send', label: '手动发送', description: '直接向设备发一条 SML，看回复与耗时。', icon: 'send' },
-      { id: 'config', label: '配置编辑器', description: '设备配置的表单 / JSON 双视图编辑与校验。', icon: 'config' },
+      { id: 'audit', label: '审计', description: '谁在什么时候动了什么：操作留痕。', icon: 'audit' },
+      { id: 'console', label: '事件流日志', description: 'SSE 事件通道的运行日志与连接状态。', icon: 'console' },
     ],
   },
 ];
 
-/** 所有面板的平铺清单（导航顺序）。 */
+/** 所有静态入口的平铺清单。 */
 export const NAV_ITEMS: readonly NavItemDef[] = NAV_GROUPS.flatMap((group) => group.items);
 
-/** 默认落地面板：总览工作台。 */
-export const DEFAULT_TAB = 'overview';
-
-/** 按 id 找面板定义；找不到返回 undefined。 */
-export function findNavItem(id: string): NavItemDef | undefined {
-  return NAV_ITEMS.find((item) => item.id === id);
-}
-
-/** 面板所属分组名（面包屑用）。 */
-export function groupOf(id: string): NavGroupDef | undefined {
-  return NAV_GROUPS.find((group) => group.items.some((item) => item.id === id));
+/** 路由 → 顶栏标题（设备页在 Sidebar 里动态列出,标题在 App 单独拼）。 */
+export function routeTitle(route: Route): { group: string; label: string; description: string } {
+  if (route.name === 'workbench') {
+    const item = NAV_ITEMS.find((entry) => entry.id === 'workbench');
+    return { group: '工作台', label: item?.label ?? '工作台', description: item?.description ?? '' };
+  }
+  if (route.name === 'system') {
+    const id = route.page === 'audit' ? 'audit' : 'console';
+    const item = NAV_ITEMS.find((entry) => entry.id === id);
+    return { group: '系统', label: item?.label ?? id, description: item?.description ?? '' };
+  }
+  return {
+    group: '设备',
+    label: route.sessionId,
+    description: route.tab === 'monitor'
+      ? '该设备的曲线、事件、报警与目录。'
+      : route.tab === 'config'
+        ? '该设备的配置:分段编辑、每 SVID 值来源与曲线预览。'
+        : '该设备的工具:发送、压测、主机模拟与 S1F3 采集。',
+  };
 }

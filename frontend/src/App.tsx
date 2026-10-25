@@ -3,7 +3,7 @@ import { createClient, readApiBase, saveApiBase } from './api';
 import { useBackend } from './state/useBackend';
 import { usePreferences, type ThemePreference } from './state/usePreferences';
 import { useToasts } from './state/useToasts';
-import { useEventStream, streamStateLabel, type StreamState } from './state/useEventStream';
+import { useEventStream, streamStateLabel, type NoticeWire, type StreamState } from './state/useEventStream';
 import { ToastHost } from './ui/ToastHost';
 import { CommandPalette } from './ui/CommandPalette';
 import { ShortcutHelp, type ShortcutHint } from './ui/ShortcutHelp';
@@ -11,41 +11,37 @@ import { Modal } from './ui/Modal';
 import { useHotkeys } from './ui/useHotkeys';
 import type { CommandItem } from './lib/command';
 
-import { DEFAULT_TAB, NAV_ITEMS, findNavItem, groupOf } from './layout/navigation';
-import { Sidebar } from './layout/Sidebar';
+import { NAV_ITEMS, routeTitle } from './layout/navigation';
+import { Sidebar, type SidebarDevice } from './layout/Sidebar';
 import { Topbar } from './layout/Topbar';
 
-import { OverviewPanel } from './panels/OverviewPanel';
-import { SessionsPanel } from './panels/SessionsPanel';
-import { AlarmsPanel } from './panels/AlarmsPanel';
-import { PreviewPanel } from './panels/PreviewPanel';
-import { CatalogPanel } from './panels/CatalogPanel';
-import { EventsPanel } from './panels/EventsPanel';
-import { SendPanel } from './panels/SendPanel';
-import { MessagesPanel } from './panels/MessagesPanel';
-import { ConfigPanel } from './panels/ConfigPanel';
-import { AuditPanel } from './panels/AuditPanel';
-import { ConsolePanel } from './panels/ConsolePanel';
-import { HostSimPanel } from './panels/HostSimPanel';
+import { useRoute, DEVICE_TABS, type Route } from './router';
+import { WorkbenchPanel } from './pages/WorkbenchPage';
+import { DevicePage } from './pages/DevicePage';
+import { SystemPage } from './pages/SystemPage';
+
+/** SSE 类型化通知的保留条数(事件流 feed 用)。 */
+const MAX_LIVE_EVENTS = 200;
 
 /** 快捷键说明表。 */
 const SHORTCUTS: readonly ShortcutHint[] = [
-  { keys: 'Ctrl+K', description: '打开命令面板：跳面板、找 CEID、执行动作' },
-  { keys: '1..9 / 0', description: '跳到导航里的前 10 个面板' },
+  { keys: 'Ctrl+K', description: '打开命令面板：跳页面、找 CEID、执行动作' },
+  { keys: '1..9 / 0', description: '跳到导航入口' },
   { keys: 'R', description: '立即刷新所有数据' },
-  { keys: '/', description: '聚焦当前面板的搜索框' },
+  { keys: '/', description: '聚焦当前页面的搜索框' },
   { keys: '[', description: '收起 / 展开导航栏' },
   { keys: '?', description: '打开这张快捷键表' },
   { keys: 'Esc', description: '关闭浮层' },
 ];
 
 /**
- * 应用外壳。
+ * 应用外壳（schema v6 两层信息架构）。
  *
- * <p>新版布局：左侧是品牌 + 分组导航 + 连接状态，右侧是
- * 顶栏（当前页标题 / 全局动作）与内容区。这里只做三件事：
- * 把数据接起来、把面板摆好、把快捷键接上——具体逻辑都在
- * {@link useBackend} 与各个面板里，加面板只要在 navigation.ts 登记一行。</p>
+ * <p>hash 路由:<code>#/workbench</code>、<code>#/device/{id}/{tab}</code>、
+ * <code>#/system/{page}</code>。旧面板全部收编:overview/sessions→工作台,
+ * catalog/alarms/events/preview→设备页·监控,config→设备页·配置,
+ * send/hostsim→设备页·工具,audit/console→系统页。
+ * 数据接线、页面摆位、快捷键——仍只做这三件事。</p>
  */
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
@@ -54,6 +50,7 @@ export function App(): JSX.Element {
   const [streamDetail, setStreamDetail] = useState('未连接');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
 
   const notifier = useToasts();
   const { preferences, update, resolvedTheme } = usePreferences();
@@ -61,9 +58,10 @@ export function App(): JSX.Element {
   const client = useMemo(() => createClient(), []);
   const backend = useBackend(client, notifier);
 
-  const { appendLog, pushMessages, activeSession } = backend;
+  const [route, navigate] = useRoute(preferences.activeTab);
+  const { appendLog, pushMessages } = backend;
 
-  /* 事件流：状态、提示与报文都转发给控制器 */
+  /* 事件流：状态、提示与报文都转发给控制器;类型化通知进 liveEvents 缓冲 */
   useEventStream(
     client,
     preferences.pauseStream,
@@ -87,29 +85,91 @@ export function App(): JSX.Element {
       onReconnected: useCallback(() => {
         void backend.backfillAfterReconnect();
       }, [backend]),
+      onNoticeEvent: useCallback(
+        (notice: NoticeWire) => {
+          setLiveEvents((previous) => {
+            const next = [...previous, notice];
+            return next.length > MAX_LIVE_EVENTS ? next.slice(next.length - MAX_LIVE_EVENTS) : next;
+          });
+          if (notice.type === 'session') {
+            /* 设备状态迁移:工作台卡片与侧栏状态点要跟上 */
+            void backend.refreshSessions();
+          }
+        },
+        [backend],
+      ),
     },
   );
 
-  const activeTab = findNavItem(preferences.activeTab) === undefined ? DEFAULT_TAB : preferences.activeTab;
-  const activeItem = findNavItem(activeTab) ?? NAV_ITEMS[0];
-  const activeGroup = groupOf(activeTab);
-  const streamLabel = streamStateLabel(streamState, streamDetail);
-
+  /** 兼容旧面板 id 的导航:面板与命令面板都只会说"去 config / 去 sessions"这类话。 */
   const goTo = useCallback(
     (id: string) => {
-      update({ activeTab: id });
+      if (id.startsWith('device-tab:')) {
+        const [, sessionId, tab] = id.split(':');
+        if (sessionId !== undefined && DEVICE_TABS.includes(tab as never)) {
+          navigate({ name: 'device', sessionId, tab: tab as 'monitor' | 'config' | 'tools' });
+        }
+        return;
+      }
+      if (id.startsWith('device:')) {
+        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'monitor' });
+        return;
+      }
+      switch (id) {
+        case 'workbench':
+        case 'overview':
+        case 'sessions':
+          navigate({ name: 'workbench' });
+          return;
+        case 'audit':
+          navigate({ name: 'system', page: 'audit' });
+          return;
+        case 'console':
+          navigate({ name: 'system', page: 'console' });
+          return;
+        case 'config': {
+          const sessionId = backend.activeSession;
+          if (sessionId !== '') {
+            navigate({ name: 'device', sessionId, tab: 'config' });
+          } else {
+            navigate({ name: 'workbench' });
+          }
+          return;
+        }
+        case 'send':
+        case 'hostsim': {
+          const sessionId = backend.activeSession;
+          if (sessionId !== '') {
+            navigate({ name: 'device', sessionId, tab: 'tools' });
+          } else {
+            navigate({ name: 'workbench' });
+          }
+          return;
+        }
+        default: {
+          /* preview/alarms/events/catalog/messages → 设备页·监控 */
+          const sessionId = backend.activeSession;
+          if (sessionId !== '') {
+            navigate({ name: 'device', sessionId, tab: 'monitor' });
+          } else {
+            navigate({ name: 'workbench' });
+          }
+        }
+      }
     },
-    [update],
+    [backend.activeSession, navigate],
   );
 
-  /* 切面板时立刻拉一次新数据：不要让用户盯着上一个面板的旧值。
+  /* 切页面时立刻拉一次新数据：不要让用户盯着上一页的旧值。
      用 ref 取最新的 refreshAll，避免闭包里钉住旧的 activeSession。 */
   const refreshRef = useRef(backend.refreshAll);
   refreshRef.current = backend.refreshAll;
 
+  const routeKey = route.name === 'device' ? `device:${route.sessionId}:${route.tab}` : route.name === 'system' ? `system:${route.page}` : 'workbench';
+
   useEffect(() => {
     void refreshRef.current();
-  }, [activeTab, client]);
+  }, [routeKey, client]);
 
   /* ---------- 命令面板 ---------- */
 
@@ -120,11 +180,33 @@ export function App(): JSX.Element {
       items.push({
         id: `tab:${tab.id}`,
         label: `前往 ${tab.label}`,
-        group: '跳转面板',
-        hint: groupOf(tab.id)?.label,
+        group: '跳转',
         keywords: [tab.id, tab.label],
         run: () => goTo(tab.id),
       });
+    }
+
+    for (const session of backend.sessions) {
+      items.push({
+        id: `device:${session.id}`,
+        label: `打开设备 ${session.device}（${session.id}）`,
+        group: '设备',
+        hint: session.controlState ?? session.state,
+        keywords: ['device', session.id, session.device],
+        run: () => goTo(`device:${session.id}`),
+      });
+      for (const tab of DEVICE_TABS) {
+        if (tab === 'monitor') {
+          continue;
+        }
+        items.push({
+          id: `device-tab:${session.id}:${tab}`,
+          label: `${session.id} · ${tab === 'config' ? '配置' : '工具'}`,
+          group: '设备',
+          keywords: [session.id, tab],
+          run: () => goTo(`device-tab:${session.id}:${tab}`),
+        });
+      }
     }
 
     items.push(
@@ -183,7 +265,7 @@ export function App(): JSX.Element {
       },
     );
 
-    /* 目录里的 CEID / SVID 直接变成命令：不用先切面板再找 */
+    /* 目录里的 CEID / SVID 直接变成命令：不用先找设备再翻目录 */
     for (const ceid of backend.catalog?.ceids ?? []) {
       items.push({
         id: `ceid:${ceid.ceid}`,
@@ -193,7 +275,7 @@ export function App(): JSX.Element {
         keywords: ['ceid', String(ceid.ceid), ceid.slot ?? ''],
         run: () => {
           backend.setCeid(ceid.ceid);
-          goTo('sessions');
+          goTo('workbench');
           notifier.info(`已把 CEID 填成 ${ceid.ceid}`);
         },
       });
@@ -230,27 +312,32 @@ export function App(): JSX.Element {
           setHelpOpen(false);
         },
       },
-      ...NAV_ITEMS.slice(0, 10).map((tab, index) => ({
-        /* 第十个面板用 0：单字符键位才留得住 */
+      ...NAV_ITEMS.slice(0, 10).map((item, index) => ({
         combo: index === 9 ? '0' : String(index + 1),
-        description: `跳到 ${tab.label}`,
-        handler: () => goTo(tab.id),
+        description: `跳到 ${item.label}`,
+        handler: () => goTo(item.id),
       })),
     ],
     true,
   );
 
-  /* ---------- 顶栏 ---------- */
+  /* ---------- 布局 ---------- */
+
+  const title = routeTitle(route);
+  const streamLabel = streamStateLabel(streamState, streamDetail);
 
   const badgeFor = (id: string): number | null => {
-    if (id === 'alarms') {
-      return backend.alarms.length;
-    }
-    if (id === 'messages') {
-      return backend.messages.length;
+    if (id === 'console') {
+      return backend.messages.length > 0 ? null : null;
     }
     return null;
   };
+
+  const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
+    id: session.id,
+    label: `${session.device}`,
+    online: session.controlState === 'ONLINE',
+  }));
 
   const panelProps = {
     backend,
@@ -260,15 +347,17 @@ export function App(): JSX.Element {
     goTo,
     streamState,
     streamLabel,
+    liveEvents,
   };
 
   return (
     <div className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <Sidebar
-        activeId={activeTab}
+        route={route}
+        devices={sidebarDevices}
         collapsed={preferences.sidebarCollapsed}
         badgeFor={badgeFor}
-        onNavigate={goTo}
+        onNavigate={navigate}
         onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
         version={backend.health?.version ?? '-'}
         mode={backend.health?.mode ?? '-'}
@@ -278,13 +367,15 @@ export function App(): JSX.Element {
 
       <div className="main-col">
         <Topbar
-          item={activeItem}
-          group={activeGroup}
+          title={title}
           streamState={streamState}
           streamLabel={streamLabel}
           sessions={backend.sessions}
-          activeSession={activeSession}
-          onSessionChange={backend.setActiveSession}
+          activeSession={activeSessionOf(route, backend.activeSession)}
+          onSessionChange={(id) => {
+            backend.setActiveSession(id);
+            navigate({ name: 'device', sessionId: id, tab: 'monitor' });
+          }}
           refreshing={backend.refreshing}
           onRefresh={() => void backend.refreshAll()}
           onOpenPalette={() => setPaletteOpen(true)}
@@ -320,18 +411,11 @@ export function App(): JSX.Element {
         )}
 
         <main className="content">
-          {activeTab === 'overview' && <OverviewPanel {...panelProps} />}
-          {activeTab === 'sessions' && <SessionsPanel {...panelProps} />}
-          {activeTab === 'alarms' && <AlarmsPanel {...panelProps} />}
-          {activeTab === 'events' && <EventsPanel {...panelProps} />}
-          {activeTab === 'preview' && <PreviewPanel {...panelProps} />}
-          {activeTab === 'catalog' && <CatalogPanel {...panelProps} />}
-          {activeTab === 'messages' && <MessagesPanel {...panelProps} />}
-          {activeTab === 'send' && <SendPanel {...panelProps} />}
-          {activeTab === 'config' && <ConfigPanel {...panelProps} />}
-          {activeTab === 'audit' && <AuditPanel {...panelProps} />}
-          {activeTab === 'console' && <ConsolePanel {...panelProps} />}
-          {activeTab === 'hostsim' && <HostSimPanel {...panelProps} />}
+          {route.name === 'workbench' && <WorkbenchPanel {...panelProps} />}
+          {route.name === 'device' && (
+            <DevicePage {...panelProps} sessionId={route.sessionId} tab={route.tab} />
+          )}
+          {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
         </main>
       </div>
 
@@ -389,7 +473,12 @@ export function App(): JSX.Element {
   );
 }
 
-/** 聚焦当前面板里第一个搜索框。 */
+/** 设备页钉住该会话;其他页面用全局选择。 */
+function activeSessionOf(route: Route, fallback: string): string {
+  return route.name === 'device' ? route.sessionId : fallback;
+}
+
+/** 聚焦当前页面里第一个搜索框。 */
 function focusSearch(): void {
   const input = document.querySelector<HTMLInputElement>('.content input[type="search"]');
   input?.focus();

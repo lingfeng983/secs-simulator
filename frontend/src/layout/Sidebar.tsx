@@ -1,15 +1,25 @@
 import { Icon } from '../ui/Icon';
 import type { StreamState } from '../state/useEventStream';
+import type { Route } from '../router';
 import { NAV_GROUPS } from './navigation';
 
+/** 侧栏「设备」动态组里的一台设备。 */
+export interface SidebarDevice {
+  id: string;
+  label: string;
+  online: boolean;
+}
+
 export interface SidebarProps {
-  /** 当前面板 id。 */
-  activeId: string;
+  /** 当前路由。 */
+  route: Route;
+  /** 动态设备列表(来自会话)。 */
+  devices: readonly SidebarDevice[];
   /** 折叠为纯图标栏。 */
   collapsed: boolean;
-  /** 徽标计数（报警 / 报文）；返回 null 表示不显示。 */
+  /** 徽标计数;返回 null 表示不显示。 */
   badgeFor: (id: string) => number | null;
-  onNavigate: (id: string) => void;
+  onNavigate: (route: Route) => void;
   onToggleCollapse: () => void;
   /** 后端版本号（未知给 '-'）。 */
   version: string;
@@ -28,7 +38,8 @@ export interface SidebarProps {
  * 悬停靠 title 提示，给内容区让出横向空间。</p>
  */
 export function Sidebar({
-  activeId,
+  route,
+  devices,
   collapsed,
   badgeFor,
   onNavigate,
@@ -65,13 +76,19 @@ export function Sidebar({
             {!collapsed && <div className="nav-group-title">{group.label}</div>}
             {group.items.map((item) => {
               const badge = badgeFor(item.id);
-              const active = activeId === item.id;
+              const active =
+                (group.id === 'workbench' && route.name === 'workbench')
+                || (group.id === 'system' && route.name === 'system'
+                  && (route.page === item.id || (item.id === 'console' && route.page === 'console')));
               return (
                 <button
                   key={item.id}
                   type="button"
                   className={`nav-item${active ? ' active' : ''}`}
-                  onClick={() => onNavigate(item.id)}
+                  onClick={() =>
+                    onNavigate(group.id === 'workbench'
+                      ? { name: 'workbench' }
+                      : { name: 'system', page: item.id === 'console' ? 'console' : 'audit' })}
                   aria-current={active ? 'page' : undefined}
                   title={collapsed ? `${item.label}（${group.label}）` : undefined}
                 >
@@ -90,6 +107,30 @@ export function Sidebar({
             })}
           </div>
         ))}
+
+        {/* 设备组(动态):点击进设备页·监控 */}
+        <div className="nav-group">
+          {!collapsed && <div className="nav-group-title">设备（{devices.length}）</div>}
+          {devices.length === 0 && !collapsed && <p className="nav-empty">暂无设备</p>}
+          {devices.map((device) => {
+            const active = route.name === 'device' && route.sessionId === device.id;
+            return (
+              <button
+                key={device.id}
+                type="button"
+                className={`nav-item${active ? ' active' : ''}`}
+                onClick={() => onNavigate({ name: 'device', sessionId: device.id, tab: 'monitor' })}
+                aria-current={active ? 'page' : undefined}
+                title={collapsed ? `${device.label}（${device.online ? '在线' : '离线'}）` : undefined}
+              >
+                <span className="nav-icon" aria-hidden="true">
+                  <span className={`conn-dot ${device.online ? 'ok' : 'muted'}`} />
+                </span>
+                {!collapsed && <span className="nav-label">{device.label}</span>}
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
       <div className="sidenav-foot">

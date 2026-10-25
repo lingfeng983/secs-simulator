@@ -1,12 +1,10 @@
 import type { SessionSummary } from '../api';
 import { Icon } from '../ui/Icon';
 import type { StreamState } from '../state/useEventStream';
-import type { NavGroupDef, NavItemDef } from './navigation';
 
 export interface TopbarProps {
-  /** 当前面板与分组（面包屑 + 标题）。 */
-  item: NavItemDef;
-  group: NavGroupDef | undefined;
+  /** 顶栏标题（路由派生:分组/标题/描述）。 */
+  title: { group: string; label: string; description: string };
   streamState: StreamState;
   streamLabel: string;
   sessions: readonly SessionSummary[];
@@ -33,8 +31,7 @@ export interface TopbarProps {
  * 主题、密度、快捷键。图标按钮统一 32px 见方，悬停出提示。</p>
  */
 export function Topbar({
-  item,
-  group,
+  title,
   streamState,
   streamLabel,
   sessions,
@@ -58,12 +55,9 @@ export function Topbar({
   return (
     <header className="topbar">
       <div className="page-title">
-        <span className="page-crumb">{group?.label ?? ''}</span>
-        <h1 className="page-name">
-          <Icon name={item.icon} size={18} />
-          {item.label}
-        </h1>
-        <p className="page-desc">{item.description}</p>
+        <span className="page-crumb">{title.group}</span>
+        <h1 className="page-name">{title.label}</h1>
+        <p className="page-desc">{title.description}</p>
       </div>
 
       <div className="topbar-status" title={`事件流：${streamLabel}`}>

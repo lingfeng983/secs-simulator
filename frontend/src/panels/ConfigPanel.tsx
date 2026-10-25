@@ -4,7 +4,7 @@ import { Sparkline } from '../charts/Sparkline';
 import { diffLines, foldUnchanged } from '../lib/textDiff';
 import { TemplateEditor } from '../TemplateEditor';
 import { Panel, PanelFootnote, StatCard } from '../ui/Panel';
-import type { ConfigTemplateEntry } from '../api';
+import type { ConfigTemplateEntry, PreviewData } from '../api';
 import type { PanelBaseProps } from './types';
 
 /** 编辑视图：表单优先，原文兜底，改动看差异，曲线看预览。 */
@@ -18,7 +18,7 @@ type ConfigView = 'form' | 'json' | 'diff' | 'preview';
  * 但会把整份文件重排成 2 空格缩进——这一点在界面上说清楚，
  * 别让人以为文件被"改坏了"。</p>
  */
-export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
+export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const { configList, refreshConfigs } = backend;
 
   const [configName, setConfigName] = useState('');
@@ -31,6 +31,8 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
   const [templates, setTemplates] = useState<ConfigTemplateEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<ConfigView>('form');
+  /** 单 SVID 草稿预览(v6):从 SVID 行的「预览曲线」进入。 */
+  const [svidPreview, setSvidPreview] = useState<{ svid: number; data: PreviewData } | null>(null);
 
   /** 新建选中的模板说明；目录取不到时为空串。 */
   const templateHint = useMemo(
@@ -309,6 +311,37 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
               JSON 原文
             </button>
           </div>
+          {svidPreview !== null && view === 'form' && (
+            <div className="panel-section svid-preview">
+              <div className="section-head">
+                <h2>SVID {svidPreview.svid} 曲线预览（当前草稿 · 60 秒模拟窗）</h2>
+                <button type="button" onClick={() => setSvidPreview(null)}>
+                  关闭
+                </button>
+              </div>
+              <div className="sparks">
+                {svidPreview.data.series.map((item) => (
+                  <Sparkline
+                    key={item.svid}
+                    series={item}
+                    fromMs={0}
+                    bucketMs={svidPreview.data.bucketMs}
+                    zoom={null}
+                    events={svidPreview.data.events}
+                  />
+                ))}
+              </div>
+              {(svidPreview.data.events?.length ?? 0) > 0 && (
+                <p className="hint">
+                  窗口内事件:{(svidPreview.data.events ?? []).map((event) => `CEID ${event.ceid}`).join('、')}
+                </p>
+              )}
+              <p className="hint">
+                时间轴是「以当前时间为右端点的 60 秒模拟」;事件效果引起的跳变直接体现在曲线上。
+                改参数后点 SVID 行的「预览曲线」刷新。
+              </p>
+            </div>
+          )}
           {view === 'preview' ? (
             <>
               <div className="preview-controls">
@@ -327,13 +360,20 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
               ) : (
                 <div className="sparks">
                   {backend.draftPreview.series.map((item) => (
-                    <Sparkline key={item.svid} series={item} fromMs={0} bucketMs={backend.draftPreview!.bucketMs} zoom={null} onZoom={() => undefined} />
+                    <Sparkline
+                      key={item.svid}
+                      series={item}
+                      fromMs={0}
+                      bucketMs={backend.draftPreview!.bucketMs}
+                      zoom={null}
+                      events={backend.draftPreview!.events}
+                    />
                   ))}
                 </div>
               )}
               <p className="hint">
-                草稿预览从随机种子确定性重放（模拟时钟 0 起），不是实时值；
-                改模板参数后点时间窗即可看到新曲线。SVID 超过 32 条时只显示前 32 条。
+                草稿预览从随机种子确定性重放（模拟时钟 0 起），不是实时值；橙色竖线是模拟出的事件(CEID)。
+                改模板参数/效果后点时间窗即可看到新曲线。SVID 超过 32 条时只显示前 32 条。
               </p>
             </>
           ) : view === 'diff' ? (
@@ -373,6 +413,16 @@ export function ConfigPanel({ backend }: PanelBaseProps): JSX.Element {
                   setDraft(next);
                   setProblems([]);
                   setNotice('结构化编辑已修改草稿，保存前请校验');
+                }}
+                onPreviewSvid={(svid) => {
+                  void backend.previewDraftSvid(draft, 60_000, svid).then((data) => {
+                    if (data === null) {
+                      notifier.error('单 SVID 预览失败: 草稿编译不过');
+                      return;
+                    }
+                    setSvidPreview({ svid, data });
+                    setView('form');
+                  });
                 }}
               />
               <TemplateEditor

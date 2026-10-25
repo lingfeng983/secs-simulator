@@ -43,6 +43,9 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
   const [result, setResult] = useState<SentMessageResult | null>(null);
   /** FDC Trace 参数：DSPER 周期 / TOTSMP 总数 / REPGSZ 每条样本数。 */
   const [fdc, setFdc] = useState({ trid: 1, dsper: 1000, totsmp: 100, repgsz: 10, svids: [] as number[] });
+  /** 连接目标(v6):默认本机设备;远程手填 host/port/deviceId。 */
+  const [remoteMode, setRemoteMode] = useState(false);
+  const [remoteTarget, setRemoteTarget] = useState({ host: '', port: '5000', deviceId: '0' });
 
   const { sessions, activeSession, hostSimOpen, hostSimTarget, openHostSim, closeHostSim, sendHostSml } = backend;
   const disabled = activeSession === '';
@@ -62,6 +65,26 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onOpen = async () => {
+    if (disabled) {
+      return;
+    }
+    if (remoteMode) {
+      const port = Number.parseInt(remoteTarget.port, 10);
+      const deviceId = Number.parseInt(remoteTarget.deviceId, 10);
+      if (remoteTarget.host.trim() === '' || !Number.isFinite(port) || port < 1) {
+        return;
+      }
+      await openHostSim(activeSession, {
+        host: remoteTarget.host.trim(),
+        port,
+        deviceId: Number.isFinite(deviceId) ? deviceId : 0,
+      });
+      return;
+    }
+    await openHostSim(activeSession);
   };
 
   const lines: string[] = [];
@@ -98,11 +121,11 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
           <button
             type="button"
             className="primary"
-            onClick={() => void openHostSim(activeSession)}
+            onClick={() => void onOpen()}
             disabled={disabled}
-            title="以主机角色连到该设备（设备只接受一个主机）"
+            title={remoteMode ? '以主机角色连到远程 SECS' : '以主机角色连到该设备（设备只接受一个主机）'}
           >
-            连接设备
+            {remoteMode ? '连接远程 SECS' : '连接设备'}
           </button>
         )
       }
@@ -111,10 +134,53 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
         <p className="hint">先在顶部选择一个会话。</p>
       ) : (
         <>
+          {/* 连接目标(v6):本机默认,可切远程;远程时 catalog 不可用,SVID 全手填 */}
+          {!hostSimOpen && (
+            <div className="form-row hostsim-target">
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={remoteMode}
+                  onChange={(event) => setRemoteMode(event.target.checked)}
+                />
+                连接其他 SECS（远程）
+              </label>
+              {remoteMode && (
+                <>
+                  <label className="field">
+                    主机
+                    <input
+                      value={remoteTarget.host}
+                      onChange={(event) => setRemoteTarget({ ...remoteTarget, host: event.target.value })}
+                      placeholder="如 192.168.1.50"
+                    />
+                  </label>
+                  <label className="field">
+                    端口
+                    <input
+                      value={remoteTarget.port}
+                      onChange={(event) => setRemoteTarget({ ...remoteTarget, port: event.target.value })}
+                      inputMode="numeric"
+                    />
+                  </label>
+                  <label className="field">
+                    Device ID
+                    <input
+                      value={remoteTarget.deviceId}
+                      onChange={(event) => setRemoteTarget({ ...remoteTarget, deviceId: event.target.value })}
+                      inputMode="numeric"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          )}
           <p className="hint">
             {hostSimOpen
               ? `已连接 ${hostSimTarget}（主机角色）。`
-              : '未连接。点「连接设备」以主机角色接入该会话的 HSMS 端口；设备已有真主机时会被拒绝。'}
+              : remoteMode
+                ? '远程模式:没有本机 catalog,S2F23/预设里的 SVID 需按远端设备手填。'
+                : '未连接。点「连接设备」以主机角色接入该会话的 HSMS 端口；设备已有真主机时会被拒绝。'}
           </p>
           <div className="preview-controls">
             {HOST_PRESETS.map((preset) => (

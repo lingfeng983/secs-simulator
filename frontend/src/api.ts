@@ -153,6 +153,13 @@ export interface TerminalMessage {
   atMillis: number;
 }
 
+/** 预览窗口内的一条事件标记（schema v6:运行时=编排重放,草稿=模拟时间线）。 */
+export interface PreviewEventMark {
+  at: number;
+  ceid: number;
+  planId?: string;
+}
+
 export interface PreviewData {
   from: number;
   to: number;
@@ -164,6 +171,77 @@ export interface PreviewData {
   svidTotal?: number;
   /** 是否只返回了前 32 条。 */
   truncated?: boolean;
+  /** 窗口内的事件标记；老后端没有该字段。 */
+  events?: PreviewEventMark[];
+}
+
+/** 工作台聚合里的一台设备（schema v6 overview 端点）。 */
+export interface OverviewRow {
+  id: string;
+  state: string;
+  controlState: string;
+  hasPeer: boolean;
+  device: string;
+  units: number;
+  port: number;
+  counters: Record<string, number>;
+  msgsPerMin: number;
+  s6f11PerMin: number;
+  lastEventAt: number;
+  uptimeMs: number;
+  hostSim?: boolean;
+}
+
+/** 服务端压测请求（schema v6 burst 端点）。 */
+export interface BurstRequest {
+  kind: 'message' | 'ceid' | 'alarm';
+  count: number;
+  intervalMs?: number;
+  sml?: string;
+  ceid?: number;
+  alid?: number;
+  text?: string;
+  category?: number;
+}
+
+export interface BurstResult {
+  sent: number;
+  failed: number;
+  durationMs: number;
+  latencyP50: number;
+  latencyP95: number;
+  latencyMax: number;
+}
+
+/** 主机模拟 S1F3 采集器的配置。 */
+export interface CollectorConfigInput {
+  startCeid: number;
+  stopCeid: number;
+  intervalMs: number;
+  svids: { id: number; name?: string; unit?: string }[];
+}
+
+/** 主机模拟 S1F3 采集器的状态与数据。 */
+export interface CollectorState {
+  configured: boolean;
+  running: boolean;
+  mode?: 'local' | 'remote';
+  startCeid?: number;
+  stopCeid?: number;
+  intervalMs?: number;
+  svids?: { id: number; name?: string; unit?: string }[];
+  samples?: number;
+  decodeErrors?: number;
+  lastRttMs?: number;
+  staleSvids?: number[];
+  series?: { svid: number; name?: string; unit?: string; t: number[]; v: number[] }[];
+}
+
+/** 主机模拟连接目标;remote 为 true 时连这个地址而不是本机。 */
+export interface HostSimTarget {
+  host: string;
+  port: number;
+  deviceId: number;
 }
 
 /** 目录里的一个 CEID（绝对 ID + 语义）。 */
@@ -258,7 +336,7 @@ export interface ApiClient {
   terminalMessages(sessionId: string): Promise<TerminalMessage[]>;
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
-  preview(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  preview(sessionId: string, fromMs: number, toMs: number, buckets: number, svids?: number[], withEvents?: boolean): Promise<PreviewData>;
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
   /** 最近审计记录。 */
@@ -293,15 +371,32 @@ export interface ApiClient {
   /** 切换日志级别。 */
   setLogLevel(level: string): Promise<boolean>;
   /** 主机模拟器状态；会话不存在返回 null。 */
-  hostSimState(sessionId: string): Promise<{ open: boolean; target?: string } | null>;
-  /** 打开主机模拟器连接。 */
-  openHostSim(sessionId: string): Promise<number>;
+  hostSimState(sessionId: string): Promise<{ open: boolean; target?: string; mode?: string; remote?: boolean } | null>;
+  /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
+  openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;
   /** 关闭主机模拟器连接。 */
   closeHostSim(sessionId: string): Promise<number>;
   /** 以主机角色发送 SML。 */
   sendHostSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 按配置草稿文本算曲线预览（不落盘、不需要会话）。 */
-  configPreview(text: string, fromMs: number, toMs: number, buckets: number): Promise<PreviewData>;
+  configPreview(
+    text: string,
+    fromMs: number,
+    toMs: number,
+    buckets: number,
+    svids?: number[],
+    withEvents?: boolean,
+  ): Promise<PreviewData>;
+  /** 工作台聚合（schema v6）。 */
+  overview(): Promise<OverviewRow[]>;
+  /** 服务端压测（schema v6）。 */
+  burst(sessionId: string, request: BurstRequest): Promise<BurstResult>;
+  /** 主机模拟 S1F3 采集器状态与数据（schema v6）。 */
+  collectorState(sessionId: string): Promise<CollectorState | null>;
+  /** 下发采集器配置;返回错误文案或 null(成功)。 */
+  setCollector(sessionId: string, config: CollectorConfigInput): Promise<string | null>;
+  /** 手动启停采集器。 */
+  collectorCommand(sessionId: string, start: boolean): Promise<string | null>;
 }
 
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
@@ -472,11 +567,21 @@ export function createClient(): ApiClient {
         hostAllDisabled: body.hostAllDisabled ?? false,
       };
     },
-    async preview(sessionId, fromMs, toMs, buckets) {
+    async preview(sessionId, fromMs, toMs, buckets, svids, withEvents) {
+      const query = new URLSearchParams({
+        session: sessionId,
+        from: String(fromMs),
+        to: String(toMs),
+        buckets: String(buckets),
+      });
+      if (svids && svids.length > 0) {
+        query.set('svids', svids.join(','));
+      }
+      if (withEvents === false) {
+        query.set('withEvents', 'false');
+      }
       return json<PreviewData>(
-        await fetch(
-          apiUrl(`/api/v1/preview?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`),
-        ),
+        await fetch(apiUrl(`/api/v1/preview?${query}`)),
       );
     },
     async previewBinary(sessionId, fromMs, toMs, buckets) {
@@ -596,22 +701,103 @@ export function createClient(): ApiClient {
     },
     async hostSimState(sessionId) {
       try {
-        const body = await json<{ open?: boolean; target?: string }>(
+        const body = await json<{ open?: boolean; target?: string; mode?: string; remote?: boolean }>(
           await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`)),
         );
-        return { open: body.open ?? false, target: body.target };
+        return { open: body.open ?? false, target: body.target, mode: body.mode, remote: body.remote };
       } catch {
         return null;
       }
     },
-    async openHostSim(sessionId) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'POST' }));
+    async openHostSim(sessionId, target) {
+      return command(
+        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {
+          method: 'POST',
+          headers: target === undefined ? undefined : { 'Content-Type': 'application/json; charset=utf-8' },
+          body: target === undefined ? undefined : JSON.stringify({ target }),
+        }),
+      );
+    },
+    async overview() {
+      try {
+        const body = await json<{ sessions?: OverviewRow[] }>(
+          await fetch(apiUrl('/api/v1/overview')),
+        );
+        return body.sessions ?? [];
+      } catch {
+        /* 老后端没有该端点:回空,工作台退化为会话列表 */
+        return [];
+      }
+    },
+    async burst(sessionId, request) {
+      const response = await fetch(
+        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/burst`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(request),
+        },
+      );
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status} ${text.slice(0, 200)}`);
+      }
+      return JSON.parse(text) as BurstResult;
+    },
+    async collectorState(sessionId) {
+      try {
+        const body = await json<Partial<CollectorState>>(
+          await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`)),
+        );
+        return {
+          configured: body.configured ?? false,
+          running: body.running ?? false,
+          mode: body.mode,
+          startCeid: body.startCeid,
+          stopCeid: body.stopCeid,
+          intervalMs: body.intervalMs,
+          svids: body.svids ?? [],
+          samples: body.samples ?? 0,
+          decodeErrors: body.decodeErrors ?? 0,
+          lastRttMs: body.lastRttMs,
+          staleSvids: body.staleSvids ?? [],
+          series: body.series ?? [],
+        };
+      } catch {
+        return null;
+      }
+    },
+    async setCollector(sessionId, config) {
+      const response = await fetch(
+        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(config),
+        },
+      );
+      const body = (await response.json()) as { ok?: boolean; error?: string };
+      return body.ok ? null : body.error ?? `${response.status}`;
+    },
+    async collectorCommand(sessionId, start) {
+      const response = await fetch(
+        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
+        { method: 'POST' },
+      );
+      const body = (await response.json()) as { ok?: boolean; error?: string };
+      return body.ok ? null : body.error ?? `${response.status}`;
     },
     async closeHostSim(sessionId) {
       return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
     },
-    async configPreview(text, fromMs, toMs, buckets) {
+    async configPreview(text, fromMs, toMs, buckets, svids, withEvents) {
       const query = new URLSearchParams({ from: String(fromMs), to: String(toMs), buckets: String(buckets) });
+      if (svids && svids.length > 0) {
+        query.set('svids', svids.join(','));
+      }
+      if (withEvents === false) {
+        query.set('withEvents', 'false');
+      }
       const response = await fetch(apiUrl(`/api/v1/config-preview?${query}`), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },

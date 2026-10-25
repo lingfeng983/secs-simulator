@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import type { PreviewSeries } from '../api';
+import type { PreviewEventMark, PreviewSeries } from '../api';
 import { formatValue } from '../lib/format';
 
 /** 预览图里选中的桶区间；跨所有 SVID 共享，便于对齐读数。 */
@@ -13,8 +13,14 @@ export interface SparklineProps {
   series: PreviewSeries;
   fromMs: number;
   bucketMs: number;
-  zoom: ZoomRange | null;
-  onZoom: (zoom: ZoomRange | null) => void;
+  /** 缩放区间;不传即整窗(采集卡等简单场景用)。 */
+  zoom?: ZoomRange | null;
+  /** 缩放回调;不传则禁用拖动缩放。 */
+  onZoom?: (zoom: ZoomRange | null) => void;
+  /** 窗口内的事件标记(v6):在对应桶画竖线,悬停可读 CEID。 */
+  events?: PreviewEventMark[];
+  /** 画布高度(px);默认 72。 */
+  height?: number;
 }
 
 export function clamp(value: number, low: number, high: number): number {
@@ -49,7 +55,7 @@ export function formatSeconds(seconds: number): string {
  * <p>画布按设备像素比放大再由 CSS 缩回去：
  * 直接用 CSS 尺寸当画布尺寸的话，高分屏上线条是糊的。</p>
  */
-export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineProps): JSX.Element {
+export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, events, height = 72 }: SparklineProps): JSX.Element {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const dragAnchor = useRef<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -59,6 +65,19 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
   const visible = clampZoom(zoom, count);
   const viewStart = visible.start;
   const viewEnd = visible.end;
+
+  /* 事件标记映射到桶下标:窗口外丢弃 */
+  const eventBuckets = useMemo(() => {
+    if (events === undefined || events.length === 0) {
+      return [] as { bucket: number; ceid: number }[];
+    }
+    return events
+      .filter((event) => event.at >= fromMs && event.at <= fromMs + bucketMs * count)
+      .map((event) => ({
+        bucket: Math.min(count - 1, Math.max(0, Math.floor((event.at - fromMs) / bucketMs))),
+        ceid: event.ceid,
+      }));
+  }, [events, fromMs, bucketMs, count]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -71,12 +90,12 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
     const rect = canvas.getBoundingClientRect();
     const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     const displayWidth = Math.max(1, Math.round(rect.width || 760));
-    const displayHeight = 72;
-    const width = Math.round(displayWidth * ratio);
-    const height = Math.round(displayHeight * ratio);
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    const displayHeight = height;
+    const pixelWidth = Math.round(displayWidth * ratio);
+    const pixelHeight = Math.round(displayHeight * ratio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
     }
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, displayWidth, displayHeight);
@@ -142,6 +161,34 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
     context.lineWidth = 1.5;
     context.stroke();
 
+    /* 事件标记(v6):橙色虚线竖线 + 顶部小三角,提示"事件发生在这里" */
+    if (eventBuckets.length > 0) {
+      context.save();
+      context.strokeStyle = 'rgba(240, 140, 40, 0.85)';
+      context.setLineDash([3, 3]);
+      context.lineWidth = 1;
+      for (const marker of eventBuckets) {
+        if (marker.bucket < viewStart || marker.bucket > viewEnd) {
+          continue;
+        }
+        const atX = x(marker.bucket);
+        context.beginPath();
+        context.moveTo(atX, 0);
+        context.lineTo(atX, displayHeight);
+        context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = 'rgba(240, 140, 40, 0.95)';
+        context.beginPath();
+        context.moveTo(atX - 3, 0);
+        context.lineTo(atX + 3, 0);
+        context.lineTo(atX, 5);
+        context.closePath();
+        context.fill();
+        context.setLineDash([3, 3]);
+      }
+      context.restore();
+    }
+
     if (drag !== null) {
       const from = Math.min(drag.start, drag.end);
       const to = Math.max(drag.start, drag.end);
@@ -166,7 +213,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
       context.arc(atX, y(series.avg[index]), 3, 0, Math.PI * 2);
       context.fill();
     }
-  }, [series, hover, drag, viewStart, viewEnd, count]);
+  }, [series, hover, drag, viewStart, viewEnd, count, eventBuckets, height]);
 
   const bucketAt = (event: ReactPointerEvent<HTMLCanvasElement>): number | null => {
     const canvas = ref.current;
@@ -211,7 +258,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
 
     /* 拖动距离太短当成误触，不触发缩放 */
     if (anchor !== null && index !== null && Math.abs(index - anchor) >= 3) {
-      onZoom({ start: Math.min(anchor, index), end: Math.max(anchor, index) });
+      onZoom?.({ start: Math.min(anchor, index), end: Math.max(anchor, index) });
     }
   };
 
@@ -231,7 +278,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
       </span>
       <canvas
         ref={ref}
-        height={72}
+        height={height}
         title="悬停看读数；横向拖动选择区间放大；双击重置缩放"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -245,7 +292,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom, onZoom }: SparklineP
             setHover(null);
           }
         }}
-        onDoubleClick={() => onZoom(null)}
+        onDoubleClick={() => onZoom?.(null)}
       />
       <span className="spark-readout">{readout}</span>
     </div>

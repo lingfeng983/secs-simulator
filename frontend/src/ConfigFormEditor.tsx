@@ -1,10 +1,18 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { SvidSourceEditor, EffectsEditor } from './SvidSourceEditors';
 import { NumberField, TextField } from './ui/CommitFields';
 import { Collapsible } from './ui/Collapsible';
 import {
   booleanField,
   collectCeids,
+  collectSvids,
+  CURVE_TYPES,
+  curveFieldSpecs,
+  defaultCurveFields,
+  defaultEffect,
+  effectFieldSpecs,
   editDocument,
+  isCurveType,
   isJsonObject,
   numberField,
   objectField,
@@ -12,9 +20,11 @@ import {
   readObjectArray,
   SECS_TYPES,
   stringField,
+  svidSourceKind,
   TRIGGER_TYPES,
   uniqueId,
   type JsonObject,
+  type SourceKind,
   type TriggerType,
 } from './templateConfig';
 
@@ -23,6 +33,8 @@ interface ConfigFormEditorProps {
   text: string;
   /** 写回新的原文（只改草稿，不落盘）。 */
   onChange: (next: string) => void;
+  /** 预览某个 SVID 的曲线(v6:按当前草稿+事件标记画单变量)。 */
+  onPreviewSvid?: (svid: number) => void;
 }
 
 type Edit = (mutate: (root: JsonObject) => void) => void;
@@ -37,7 +49,7 @@ type Edit = (mutate: (root: JsonObject) => void) => void;
  * <p>templates 段的表单在 {@link import('./TemplateEditor').TemplateEditor} 里，
  * 本组件只负责其余三段。</p>
  */
-export function ConfigFormEditor({ text, onChange }: ConfigFormEditorProps): JSX.Element {
+export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEditorProps): JSX.Element {
   const [error, setError] = useState('');
   const parsed = useMemo(() => parseConfigDocument(text), [text]);
 
@@ -77,10 +89,28 @@ export function ConfigFormEditor({ text, onChange }: ConfigFormEditorProps): JSX
       {error !== '' && <p className="problems">{error}</p>}
 
       <SessionForm root={root} edit={edit} />
-      <EquipmentForm root={root} edit={edit} />
+      <EquipmentForm root={root} edit={edit} templateIds={templateIdsOf(root)} onPreviewSvid={onPreviewSvid} />
       <EventsForm root={root} edit={edit} />
     </div>
   );
+}
+
+/** 文档里全部模板 id(曲线 + 组合):SVID 直配引用的候选。 */
+function templateIdsOf(root: JsonObject): string[] {
+  const templates = objectField(root, 'templates');
+  const ids: string[] = [];
+  const groups = [readObjectArray(templates, 'curves', 'templates'), readObjectArray(templates, 'composites', 'templates')];
+  for (const group of groups) {
+    if (typeof group === 'string') {
+      continue;
+    }
+    for (const item of group) {
+      if (typeof item.id === 'string') {
+        ids.push(item.id);
+      }
+    }
+  }
+  return ids;
 }
 
 /* ---------- 通用小件 ---------- */
@@ -284,7 +314,12 @@ function editTimeout(
 
 /* ---------- 设备 ---------- */
 
-function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+function EquipmentForm({ root, edit, templateIds, onPreviewSvid }: {
+  root: JsonObject;
+  edit: Edit;
+  templateIds: string[];
+  onPreviewSvid?: (svid: number) => void;
+}): JSX.Element {
   const equipment = isJsonObject(root.equipment) ? root.equipment : null;
 
   if (equipment === null) {
@@ -311,6 +346,9 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
 
   const units = readObjectArray(equipment, 'units', 'equipment');
   const svidsOk = typeof units !== 'string';
+  const idSpace = objectField(equipment, 'idSpace');
+  const unitSvidBase = numberField(idSpace, 'svidBase') ?? 1000;
+  const unitSvidStride = numberField(idSpace, 'svidStride') ?? 100;
 
   return (
     <div className="cfg-section">
@@ -353,7 +391,7 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
         <IdSpaceForm equipment={equipment} edit={edit} />
       </Collapsible>
       <Collapsible title="全局 SVID">
-        <GlobalSvidsForm equipment={equipment} edit={edit} />
+        <GlobalSvidsForm equipment={equipment} edit={edit} templateIds={templateIds} onPreviewSvid={onPreviewSvid} />
       </Collapsible>
       <Collapsible title="全局 CEID">
         <GlobalCeidsForm equipment={equipment} edit={edit} />
@@ -366,7 +404,16 @@ function EquipmentForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.El
         <p className="problems">equipment.units {units}</p>
       ) : (
         units.map((unit, index) => (
-          <UnitCard key={index} unit={unit} index={index} edit={edit} />
+          <UnitCard
+            key={index}
+            unit={unit}
+            index={index}
+            edit={edit}
+            templateIds={templateIds}
+            onPreviewSvid={onPreviewSvid}
+            unitSvidBase={unitSvidBase}
+            unitSvidStride={unitSvidStride}
+          />
         ))
       )}
       </Collapsible>
@@ -486,7 +533,12 @@ function reserveOf(root: JsonObject): unknown[] {
   return idSpace.reserve as unknown[];
 }
 
-function GlobalSvidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
+function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
+  equipment: JsonObject;
+  edit: Edit;
+  templateIds: string[];
+  onPreviewSvid?: (svid: number) => void;
+}): JSX.Element {
   const list = readObjectArray(equipment, 'globalSvids', 'equipment');
 
   return (
@@ -572,8 +624,17 @@ function GlobalSvidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
           </FormRow>
         ))
       )}
+      {typeof list !== 'string' && list.map((item, index) => (
+        <SvidSourceEditor
+          key={`gsrc-${index}`}
+          def={item}
+          templateIds={templateIds}
+          absoluteId={numberField(item, 'id') ?? 0}
+          onPreviewSvid={onPreviewSvid}
+        />
+      ))}
       {typeof list !== 'string' && list.length > 0 && (
-        <p className="hint">不配 min/max 时默认曲线退化为 0..100 有界随机游走。</p>
+        <p className="hint">不配 min/max 时默认曲线退化为 0..100 有界随机游走;「值来源」可给这个 SVID 单独配曲线或模板。</p>
       )}
     </div>
   );
@@ -771,7 +832,15 @@ function unitsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(units) ? (units as JsonObject[]) : [];
 }
 
-function UnitCard({ unit, index, edit }: { unit: JsonObject; index: number; edit: Edit }): JSX.Element {
+function UnitCard({ unit, index, edit, templateIds, onPreviewSvid, unitSvidBase, unitSvidStride }: {
+  unit: JsonObject;
+  index: number;
+  edit: Edit;
+  templateIds: string[];
+  onPreviewSvid?: (svid: number) => void;
+  unitSvidBase: number;
+  unitSvidStride: number;
+}): JSX.Element {
   const mutateUnit = (mutate: (target: JsonObject) => void) => {
     edit((draft) => {
       const target = unitsOf(draft)[index];
@@ -780,6 +849,9 @@ function UnitCard({ unit, index, edit }: { unit: JsonObject; index: number; edit
       }
     });
   };
+
+  /* 本单元的 SVID 段起点(与 collectSvids 同一套默认值),供值来源预览换算绝对 id */
+  const svidBase = unitSvidBase + index * unitSvidStride;
 
   const svids = readObjectArray(unit, 'svids', 'unit');
   const reports = readObjectArray(unit, 'reports', 'unit');
@@ -925,6 +997,15 @@ function UnitCard({ unit, index, edit }: { unit: JsonObject; index: number; edit
             </FormRow>
           ))
         )}
+        {typeof svids !== 'string' && svids.map((item, row) => (
+          <SvidSourceEditor
+            key={`src-${row}`}
+            def={item}
+            templateIds={templateIds}
+            absoluteId={unitSvidBase + (numberField(item, 'offset') ?? 0)}
+            onPreviewSvid={onPreviewSvid}
+          />
+        ))}
       </div>
 
       {/* 报告定义 */}
@@ -1095,6 +1176,7 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
 function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const events = isJsonObject(root.events) ? root.events : null;
   const ceidChoices = useMemo(() => collectCeids(root), [root]);
+  const svidChoices = useMemo(() => collectSvids(root), [root]);
 
   if (events === null) {
     return (
@@ -1354,6 +1436,12 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                   )}
                 </div>
               )}
+
+              <EffectsEditor
+                plan={plan}
+                mutatePlan={mutatePlan}
+                svidChoices={svidChoices}
+              />
             </div>
           );
         })

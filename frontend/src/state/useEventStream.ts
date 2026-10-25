@@ -4,6 +4,16 @@ import type { ApiClient, WireMessage } from '../api';
 /** 事件流状态。 */
 export type StreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
+/** SSE 类型化通知（schema v6:s6f11/alarm/session）。 */
+export type NoticeType = 's6f11' | 'alarm' | 'session';
+
+export interface NoticeWire {
+  type: NoticeType;
+  sessionId: string;
+  at: number;
+  data: Record<string, unknown>;
+}
+
 /** 事件流回调。 */
 export interface EventStreamHandlers {
   /** 新到的报文（暂停时会被暂存，恢复时一次性吐出）。 */
@@ -14,6 +24,8 @@ export interface EventStreamHandlers {
   onNotice: (text: string) => void;
   /** 重连成功后触发：上层用它在补拉断线期间的增量报文。 */
   onReconnected?: () => void;
+  /** 类型化通知（v6:事件/报警/状态迁移）;工作台与设备页的事件流订阅它。 */
+  onNoticeEvent?: (notice: NoticeWire) => void;
 }
 
 /** 重连间隔（毫秒）。 */
@@ -131,6 +143,25 @@ export function useEventStream(
           }
           handlersRef.current.onFlush([parsed]);
         });
+
+        /* schema v6 类型化通知:同一条 SSE 通道上的 s6f11/alarm/session 帧 */
+        for (const type of ['s6f11', 'alarm', 'session'] as const) {
+          source.addEventListener(type, (event) => {
+            let data: Record<string, unknown>;
+            try {
+              data = JSON.parse((event as MessageEvent).data) as Record<string, unknown>;
+            } catch {
+              return;
+            }
+            const { sessionId, at, ...rest } = data;
+            handlersRef.current.onNoticeEvent?.({
+              type,
+              sessionId: typeof sessionId === 'string' ? sessionId : '',
+              at: typeof at === 'number' ? at : Date.now(),
+              data: rest,
+            });
+          });
+        }
 
         source.addEventListener('error', () => {
           const state = source.readyState === EventSource.CLOSED ? '已关闭' : '连接中断';
