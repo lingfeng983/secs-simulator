@@ -51,11 +51,23 @@ public final class MessageLog implements AutoCloseable {
      * @throws IOException 目录或文件创建失败
      */
     public static MessageLog open(Path workDir) throws IOException {
+        return open(workDir, DEFAULT_RECENT);
+    }
+
+    /**
+     * 打开（或创建）报文日志,内存保留条数可配。
+     *
+     * @param workDir 工作目录；日志写到 {@code workDir/logs/messages.jsonl}
+     * @param recent  内存里保留的最近条数(HTTP 历史接口的回看窗口)
+     * @return 已加载最近历史的日志
+     * @throws IOException 目录或文件创建失败
+     */
+    public static MessageLog open(Path workDir, int recent) throws IOException {
         Path dir = workDir.resolve("logs");
         Files.createDirectories(dir);
         Path file = dir.resolve("messages.jsonl");
         ensureTrailingNewline(file);
-        MessageLog log = new MessageLog(file, DEFAULT_RECENT);
+        MessageLog log = new MessageLog(file, Math.max(1, recent));
         log.loadRecent();
         return log;
     }

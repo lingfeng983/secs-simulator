@@ -758,7 +758,15 @@ paths:
                 template: { type: string, default: bare, example: etch }
       responses:
         '201':
-          description: 已创建
+          description: 已创建（ok 包络与领域字段 name 并列,是该命令端点的既有约定）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name]
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':

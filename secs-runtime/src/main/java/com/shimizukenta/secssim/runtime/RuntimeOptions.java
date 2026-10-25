@@ -26,25 +26,33 @@ import java.util.Set;
  * @param tlsKeystore PKCS#12 keystore，{@code null} 表示明文 HTTP
  * @param tlsPassword keystore 密码
  * @param authUsers   多账号文件（带角色），{@code null} 表示只用单 {@code --token}
- * @param help        是否只打印帮助
- * @param logLevel    日志级别（error/info/debug）
+ * @param help           是否只打印帮助
+ * @param logLevel       日志级别（error/info/debug）
+ * @param messagesRecent 报文日志内存保留条数（HTTP 历史回看窗口）
+ * @param auditRecent    审计日志内存保留条数
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
                              int hsmsPort, int deviceId, boolean demoSession,
                              Path configFile, Path webRoot, Path workDir,
                              Path tlsKeystore, String tlsPassword, Path authUsers, boolean help,
-                             com.shimizukenta.secssim.app.log.Log.Level logLevel) {
+                             com.shimizukenta.secssim.app.log.Log.Level logLevel,
+                             int messagesRecent, int auditRecent) {
 
-    /** 便捷构造：日志级别用默认 INFO（测试与既有调用点）。 */
+    /** 便捷构造：日志级别用默认 INFO,保留条数用默认值（测试与既有调用点）。 */
     public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
                           int hsmsPort, int deviceId, boolean demoSession,
                           Path configFile, Path webRoot, Path workDir,
                           Path tlsKeystore, String tlsPassword, Path authUsers, boolean help) {
         this(mode, bindHost, httpPort, token, hsmsPort, deviceId, demoSession,
                 configFile, webRoot, workDir, tlsKeystore, tlsPassword, authUsers, help,
-                com.shimizukenta.secssim.app.log.Log.Level.INFO);
+                com.shimizukenta.secssim.app.log.Log.Level.INFO, DEFAULT_MESSAGES_RECENT, DEFAULT_AUDIT_RECENT);
     }
 
+
+    /** 报文日志内存保留条数默认值（与 MessageLog.DEFAULT_RECENT 对齐）。 */
+    public static final int DEFAULT_MESSAGES_RECENT = 5_000;
+    /** 审计日志内存保留条数默认值（与 AuditLog.DEFAULT_RECENT 对齐）。 */
+    public static final int DEFAULT_AUDIT_RECENT = 1_000;
 
     /**
      * 校验并创建。
@@ -77,6 +85,12 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
         }
         if (deviceId < 0 || deviceId > 32767) {
             throw new IllegalArgumentException("deviceId out of range: " + deviceId);
+        }
+        if (messagesRecent < 1 || messagesRecent > 1_000_000) {
+            throw new IllegalArgumentException("messages-recent out of range: " + messagesRecent);
+        }
+        if (auditRecent < 1 || auditRecent > 1_000_000) {
+            throw new IllegalArgumentException("audit-recent out of range: " + auditRecent);
         }
     }
 
@@ -114,7 +128,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
 
         Set<String> known = Set.of("mode", "bind", "port", "token", "hsms-port",
                 "device-id", "demo-session", "config", "web-root", "work-dir",
-                "tls-keystore", "tls-password", "auth-users", "help", "log-level");
+                "tls-keystore", "tls-password", "auth-users", "help", "log-level",
+                "messages-recent", "audit-recent");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -139,7 +154,9 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                 values.containsKey("auth-users") ? Path.of(values.get("auth-users")) : null,
                 Boolean.parseBoolean(values.getOrDefault("help", "false")),
                 com.shimizukenta.secssim.app.log.Log.Level.parse(
-                        values.getOrDefault("log-level", "INFO")));
+                        values.getOrDefault("log-level", "INFO")),
+                intValue(values, "messages-recent", DEFAULT_MESSAGES_RECENT),
+                intValue(values, "audit-recent", DEFAULT_AUDIT_RECENT));
     }
 
     /**
@@ -165,6 +182,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                   --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
                   --tls-password <s>                keystore 密码（默认空）
                   --auth-users <path>               多账号文件（带角色）；提供时取代 --token
+                  --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
+                  --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
                   --help                            打印本帮助
 
                 鉴权：默认单 --token（等价于 admin）。--auth-users 的 JSON 形如

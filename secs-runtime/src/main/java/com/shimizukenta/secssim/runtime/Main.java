@@ -127,7 +127,7 @@ public final class Main {
          */
         MessageLog messageLog = null;
         try {
-            messageLog = MessageLog.open(options.workDir());
+            messageLog = MessageLog.open(options.workDir(), options.messagesRecent());
             Log.info("报文日志: " + messageLog.file());
         } catch (IOException e) {
             Log.error("打开报文日志失败（本次不落盘）: " + options.workDir(), e);
@@ -136,7 +136,7 @@ public final class Main {
 
         AuditLog auditLog = null;
         try {
-            auditLog = AuditLog.open(options.workDir());
+            auditLog = AuditLog.open(options.workDir(), options.auditRecent());
             Log.info("审计日志: " + auditLog.file());
         } catch (IOException e) {
             Log.error("打开审计日志失败（本次不审计）: " + options.workDir(), e);
