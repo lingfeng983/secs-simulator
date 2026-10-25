@@ -1342,6 +1342,7 @@ components:
         device: { type: string }
         units: { type: integer }
         lastError: { type: string }
+        config: { type: string, description: 装载时用的配置文件名;演示会话等无来源时为空串 }
         counters: { $ref: '#/components/schemas/Counters' }
     Alarm:
       type: object
