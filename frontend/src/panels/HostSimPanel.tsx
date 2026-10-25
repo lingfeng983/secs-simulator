@@ -4,6 +4,7 @@ import { Panel } from '../ui/Panel';
 import { NumberField } from '../ui/CommitFields';
 import { PresetSelect } from '../ui/PresetSelect';
 import { SmlResult } from '../ui/SmlResult';
+import { CollectorCard } from './tools/CollectorCard';
 import type { PanelBaseProps } from './types';
 
 /**
@@ -38,7 +39,7 @@ function s2f37Sml(ceed: number): string {
  * 这类"只有主机能发"的报文的界面入口。设备只接受一个主机：
  * 真主机在线时连接会被拒（409），这是正确行为。</p>
  */
-export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
+export function HostSimPanel({ backend, notifier, preferences, updatePreferences }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F13 W');
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -50,6 +51,8 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
   const [remoteTarget, setRemoteTarget] = useState({ host: '', port: '5000', deviceId: '0' });
 
   const { sessions, activeSession, hostSimOpen, hostSimTarget, openHostSim, closeHostSim, sendHostSml } = backend;
+  /** 采集卡需要的完整入参(会话已由页面钉住)。 */
+  const propsForCollector = { backend, notifier, preferences, updatePreferences, sessionId: activeSession };
   const disabled = activeSession === '';
 
   useEffect(() => {
@@ -103,7 +106,7 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
     <Panel
       id="panel-hostsim"
       title="主机模拟"
-      description="以主机角色连到选中的设备，发 S2F33/35/37 这类只有主机能发的报文。"
+      description="以主机角色连到选中的设备：FDC Trace 编排、S1F3 数据采集,以及只有主机能发的报文。"
       actions={
         hostSimOpen ? (
           <button
@@ -300,9 +303,12 @@ export function HostSimPanel({ backend }: PanelBaseProps): JSX.Element {
           )}
           <p className="hint">
             S2F33 定义报告（DATAID、RPTID、变量列表）、S2F35 链接事件（CEID→RPTID）、
-            S2F37 启停事件（CEED、CEID 列表）。设备侧的「设备目录」会显示来源变成"主机"，
+            S2F37 启停事件（CEED、CEID 列表）。事件编排页的报告管理会显示来源变成"主机"，
             事件编排的启停状态也会跟着变。
           </p>
+
+          {/* S1F3 数据采集:主动编辑采集计划,与 FDC Trace 同属主机模拟 */}
+          <CollectorCard {...propsForCollector} />
         </>
       )}
     </Panel>

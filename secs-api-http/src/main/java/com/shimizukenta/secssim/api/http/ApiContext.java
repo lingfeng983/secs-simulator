@@ -285,6 +285,66 @@ public interface ApiContext {
         return this.auditJson(limit, action, actor);
     }
 
+    /* ==================================================================
+     * 运行时编辑(设备页·事件/报告/状态变量)。返回 HTTP 状态码:
+     * 200/201 成功、400 请求不合法(解析失败)、404 会话或目标不存在、409 冲突。
+     * ================================================================== */
+
+    /** 新增编排计划;planJson 形如 {"id","ceid","trigger":{...},"effects":[...]}。 */
+    default int addEventPlan(String sessionId, String planJson) {
+        return 404;
+    }
+
+    /** 更新编排计划。 */
+    default int updateEventPlan(String sessionId, String planId, String planJson) {
+        return 404;
+    }
+
+    /** 删除编排计划。 */
+    default int removeEventPlan(String sessionId, String planId) {
+        return 404;
+    }
+
+    /** 新增报告;reportJson 形如 {"id","slot","svids":[...]}。 */
+    default int addReport(String sessionId, String reportJson) {
+        return 404;
+    }
+
+    /** 更新报告。 */
+    default int updateReport(String sessionId, int rptid, String reportJson) {
+        return 404;
+    }
+
+    /** 删除报告。 */
+    default int removeReport(String sessionId, int rptid) {
+        return 404;
+    }
+
+    /** 新增状态变量;svidJson 形如 {"id","slot","type","owner"?,"unit"?}。 */
+    default int addSvid(String sessionId, String svidJson) {
+        return 404;
+    }
+
+    /** 更新状态变量。 */
+    default int updateSvid(String sessionId, int svid, String svidJson) {
+        return 404;
+    }
+
+    /** 删除状态变量。 */
+    default int removeSvid(String sessionId, int svid) {
+        return 404;
+    }
+
+    /** 「设定」状态变量的值(valueJson 形如 {"value":1.25})。 */
+    default int pinSvidValue(String sessionId, int svid, String valueJson) {
+        return 404;
+    }
+
+    /** 取消「设定」。 */
+    default int unpinSvidValue(String sessionId, int svid) {
+        return 404;
+    }
+
     /**
      * 手动发送一条 SML 报文。
      *

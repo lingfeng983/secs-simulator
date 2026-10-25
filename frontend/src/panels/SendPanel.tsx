@@ -42,14 +42,48 @@ function remoteCommandSml(rcmdid: number): string {
  * 常用预设留在按钮上,示例 S2F41 与五个远程命令收进下拉;
  * 批量重复发送走「压测」子页(服务端循环,消除 HTTP 往返失真),这里只做单发。</p>
  */
-export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
+export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F1 W.');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
   const [error, setError] = useState('');
+  /* 自定义消息压测 */
+  const [stressCount, setStressCount] = useState('100');
+  const [stressInterval, setStressInterval] = useState('0');
+  const [stressRunning, setStressRunning] = useState(false);
+  const [stressResult, setStressResult] = useState<string | null>(null);
 
   const { activeSession } = backend;
   const disabled = activeSession === '';
+
+  /** 把编辑框里的这条消息在服务端循环发送 N 次,统计成功率与延迟。 */
+  const runStress = async () => {
+    const count = Number.parseInt(stressCount, 10);
+    if (draft.trim() === '') {
+      notifier.error('SML 不能为空');
+      return;
+    }
+    if (!Number.isFinite(count) || count < 1 || count > 5000) {
+      notifier.error('次数要在 1..5000 之间');
+      return;
+    }
+    setStressRunning(true);
+    setStressResult(null);
+    try {
+      const stats = await backend.burst(activeSession, {
+        kind: 'message',
+        sml: draft,
+        count,
+        intervalMs: Number.parseInt(stressInterval, 10) || 0,
+      });
+      setStressResult(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed} / 总耗时 ${stats.durationMs}ms / P50 ${stats.latencyP50}ms / P95 ${stats.latencyP95}ms`);
+      notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
+    } catch (burstError) {
+      notifier.error(`压测失败: ${(burstError as Error).message}`);
+    } finally {
+      setStressRunning(false);
+    }
+  };
 
   const onSend = async () => {
     if (disabled || draft.trim() === '') {
@@ -132,8 +166,32 @@ export function SendPanel({ backend }: PanelBaseProps): JSX.Element {
       <p className="hint">
         报文头写 <code>SxFy</code>，可带 <code>W</code>；数据项支持
         <code>L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8</code>。W 位会等 T3，
-        没有对端时服务端回 409。要批量重复发送请用「压测」子页。
+        没有对端时服务端回 409。同一条消息要重复发送就用下面的压测。
       </p>
+
+      <h3 className="sub-title">压测发送（服务端循环这条消息）</h3>
+      <div className="toolbar">
+        <label className="field">
+          次数
+          <input value={stressCount} onChange={(event) => setStressCount(event.target.value)} inputMode="numeric" />
+        </label>
+        <label className="field">
+          间隔 ms
+          <input value={stressInterval} onChange={(event) => setStressInterval(event.target.value)} inputMode="numeric" title="0 = 全速" />
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={disabled || stressRunning || draft.trim() === ''}
+          onClick={() => void runStress()}
+          title="在服务端循环发送编辑框里这条 SML,消除 HTTP 往返失真"
+        >
+          {stressRunning ? '压测中…' : '压测发送'}
+        </button>
+      </div>
+      {stressResult !== null && (
+        <div className="burst-result">{stressResult}</div>
+      )}
       {error !== '' && (
         <pre className="sml-result error-result">发送失败：{error}</pre>
       )}

@@ -103,6 +103,50 @@ export interface EventPlanView {
   debounceMs?: number;
   sourcePlan?: string;
   delayMs?: number;
+  effects?: EventEffectView[];
+}
+
+/** 事件效果(schema v6;op 与字段的对应关系同后端 EventEffect)。 */
+export interface EventEffectView {
+  svid: number;
+  op: 'set' | 'add' | 'pulse' | 'shift' | 'resume';
+  value?: number;
+  delta?: number;
+  holdMs?: number;
+  decayMs?: number;
+}
+
+/** 新增/更新编排计划的输入;triggerType 决定哪些参数生效。 */
+export interface EventPlanInput {
+  id: string;
+  ceid: number;
+  triggerType: 'at' | 'periodic' | 'onCondition' | 'afterEvent';
+  atMs?: number;
+  periodMs?: number;
+  jitterMs?: number;
+  expression?: string;
+  debounceMs?: number;
+  sourcePlan?: string;
+  delayMs?: number;
+  effects?: EventEffectInput[];
+}
+
+export type EventEffectInput = EventEffectView;
+
+/** 新增/更新报告的输入。 */
+export interface ReportInput {
+  id: number;
+  slot: string;
+  svids: number[];
+}
+
+/** 新增/更新状态变量的输入。 */
+export interface SvidInput {
+  id: number;
+  slot: string;
+  type: string;
+  owner?: string;
+  unit?: string;
 }
 
 /** 手动发送 SML 的结果。 */
@@ -365,6 +409,28 @@ export interface ApiClient {
   events(sessionId: string): Promise<EventPlanView[]>;
   /** 运行时启用/禁用一个计划。 */
   setEventEnabled(sessionId: string, planId: string, enabled: boolean): Promise<number>;
+  /** 运行时新增编排计划(不写回配置,重载后失效)。返回 HTTP 状态码。 */
+  addEventPlan(sessionId: string, plan: EventPlanInput): Promise<number>;
+  /** 运行时更新编排计划。 */
+  updateEventPlan(sessionId: string, planId: string, plan: EventPlanInput): Promise<number>;
+  /** 运行时删除编排计划。 */
+  deleteEventPlan(sessionId: string, planId: string): Promise<number>;
+  /** 运行时新增报告。 */
+  addReport(sessionId: string, report: ReportInput): Promise<number>;
+  /** 运行时更新报告。 */
+  updateReport(sessionId: string, rptid: number, report: ReportInput): Promise<number>;
+  /** 运行时删除报告。 */
+  deleteReport(sessionId: string, rptid: number): Promise<number>;
+  /** 运行时新增状态变量(默认恒 0 曲线,可用 setSvidValue 钉值)。 */
+  addSvid(sessionId: string, svid: SvidInput): Promise<number>;
+  /** 运行时更新状态变量。 */
+  updateSvid(sessionId: string, svid: number, def: SvidInput): Promise<number>;
+  /** 运行时删除状态变量。 */
+  deleteSvid(sessionId: string, svid: number): Promise<number>;
+  /** 「设定」状态变量的值(钉住,覆盖曲线与事件效果)。 */
+  setSvidValue(sessionId: string, svid: number, value: number): Promise<number>;
+  /** 取消「设定」。 */
+  clearSvidValue(sessionId: string, svid: number): Promise<number>;
   /** 手动发送一条 SML 报文。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
@@ -440,6 +506,29 @@ export function saveApiBase(base: string): void {
   } else {
     window.localStorage.setItem(API_BASE_KEY, trimmed);
   }
+}
+
+/** 把事件计划输入转成后端 wire 形状(trigger 打包成对象)。 */
+function planToWire(plan: EventPlanInput): Record<string, unknown> {
+  const trigger: Record<string, unknown> = { type: plan.triggerType };
+  if (plan.triggerType === 'at') {
+    trigger.atMs = plan.atMs ?? 0;
+  } else if (plan.triggerType === 'periodic') {
+    trigger.periodMs = plan.periodMs ?? 1000;
+    trigger.jitterMs = plan.jitterMs ?? 0;
+  } else if (plan.triggerType === 'onCondition') {
+    trigger.expression = plan.expression ?? '';
+    trigger.debounceMs = plan.debounceMs ?? 0;
+  } else {
+    trigger.sourcePlan = plan.sourcePlan ?? '';
+    trigger.delayMs = plan.delayMs ?? 0;
+  }
+  return {
+    id: plan.id,
+    ceid: plan.ceid,
+    trigger,
+    effects: plan.effects ?? [],
+  };
 }
 
 /** 拼出 API 地址：本地模式同源，远程模式带后端地址。 */
@@ -566,6 +655,75 @@ export function createClient(): ApiClient {
           { method: 'POST' },
         ),
       );
+    },
+    async addEventPlan(sessionId, plan) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(planToWire(plan)),
+      }));
+    },
+    async updateEventPlan(sessionId, planId, plan) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(planToWire(plan)),
+      }));
+    },
+    async deleteEventPlan(sessionId, planId) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
+        method: 'DELETE',
+      }));
+    },
+    async addReport(sessionId, report) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(report),
+      }));
+    },
+    async updateReport(sessionId, rptid, report) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(report),
+      }));
+    },
+    async deleteReport(sessionId, rptid) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
+        method: 'DELETE',
+      }));
+    },
+    async addSvid(sessionId, def) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(def),
+      }));
+    },
+    async updateSvid(sessionId, svid, def) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(def),
+      }));
+    },
+    async deleteSvid(sessionId, svid) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
+        method: 'DELETE',
+      }));
+    },
+    async setSvidValue(sessionId, svid, value) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ value }),
+      }));
+    },
+    async clearSvidValue(sessionId, svid) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
+        method: 'DELETE',
+      }));
     },
     async sendSml(sessionId, sml) {
       const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`), {

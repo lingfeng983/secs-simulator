@@ -113,6 +113,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final ValueStore store;
     /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
     private final ValueSourceHandle values;
+    /** values 委托里的效果层（「设定」钉值要落在它身上）。 */
+    private volatile EffectValueSource effectValues;
     /** 事件效果的运行时记录(v6):手动触发的效果无法重放,只能记录。 */
     private final EventEffectStore effects = new EventEffectStore();
     /** overview 速率统计(60 秒滑动窗口)。 */
@@ -243,7 +245,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         } else {
             initial = values;
         }
-        this.values = new ValueSourceHandle(new EffectValueSource(initial, this.effects));
+        final EffectValueSource initialSource = new EffectValueSource(initial, this.effects);
+        this.effectValues = initialSource;
+        this.values = new ValueSourceHandle(initialSource);
 
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
         this.traces = new TraceManager(model, this.values, Instant.now());
@@ -561,11 +565,15 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         /* 旧模型的效果随旧配置失效:效果记录不能跨热重载残留 */
         this.effects.clear();
         if (values != null) {
-            this.values.set(new EffectValueSource(values, this.effects));
+            final EffectValueSource source = new EffectValueSource(values, this.effects);
+            this.effectValues = source;
+            this.values.set(source);
         } else {
             /* 从模板图切回默认曲线：默认曲线要先重新绑进值存储 */
             DefaultCurves.bind(this.store, this.spec.equipment(), model);
-            this.values.set(new EffectValueSource(new CurveValueSource(this.store), this.effects));
+            final EffectValueSource source = new EffectValueSource(new CurveValueSource(this.store), this.effects);
+            this.effectValues = source;
+            this.values.set(source);
         }
     }
 
@@ -614,6 +622,230 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             }
         }
         return true;
+    }
+
+    /* ======================================================================
+     * 运行时编辑（设备页·事件 / 报告 / 状态变量的增删改;不写回配置,重载后失效）
+     * ====================================================================== */
+
+    /**
+     * 运行时新增编排计划；id 重复返回 {@code false}。
+     *
+     * @param plan 计划
+     * @return 是否成功
+     */
+    public synchronized boolean addEventPlan(EventPlan plan) {
+        List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
+        if (plans.stream().anyMatch(p -> p.id().equals(plan.id()))) {
+            return false;
+        }
+        plans.add(plan);
+        replaceSchedule(new EventSchedule(plans));
+        return true;
+    }
+
+    /**
+     * 运行时更新编排计划；不存在返回 {@code false}。
+     *
+     * @param planId 计划标识（必须与 next.id() 一致）
+     * @param next   新计划
+     * @return 是否成功
+     */
+    public synchronized boolean updateEventPlan(String planId, EventPlan next) {
+        if (!planId.equals(next.id())) {
+            throw new IllegalArgumentException("planId 与新计划的 id 不一致: " + planId + " vs " + next.id());
+        }
+        List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
+        int index = -1;
+        for (int i = 0; i < plans.size(); i++) {
+            if (plans.get(i).id().equals(planId)) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) {
+            return false;
+        }
+        plans.set(index, next);
+        replaceSchedule(new EventSchedule(plans));
+        return true;
+    }
+
+    /**
+     * 运行时删除编排计划（连同其待触发队列与去抖状态）。
+     *
+     * @param planId 计划标识
+     * @return 是否删除了计划
+     */
+    public synchronized boolean removeEventPlan(String planId) {
+        List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
+        boolean existed = plans.removeIf(p -> p.id().equals(planId));
+        if (!existed) {
+            return false;
+        }
+        replaceSchedule(new EventSchedule(plans));
+        this.disabledPlans.remove(planId);
+        this.conditionDebouncers.remove(planId);
+        this.conditionErrorLogged.remove(planId);
+        synchronized (this.pendingFires) {
+            this.pendingFires.removeIf(fire -> fire.planId().equals(planId));
+        }
+        return true;
+    }
+
+    /** 换编排表并重建条件去抖器（计划增删改共用）。 */
+    private void replaceSchedule(EventSchedule next) {
+        this.schedule = next;
+        this.conditionDebouncers.clear();
+        this.conditionErrorLogged.clear();
+        for (EventPlan plan : next.plans()) {
+            if (plan.trigger() instanceof Trigger.OnCondition condition) {
+                this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
+            }
+        }
+    }
+
+    /**
+     * 运行时新增报告；RPTID 重复返回 {@code false}。
+     *
+     * @param report 报告定义
+     * @return 是否成功
+     */
+    public synchronized boolean addReport(ResolvedReport report) {
+        if (this.model.reports().containsKey(report.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedReport> reports = new java.util.HashMap<>(this.model.reports());
+        reports.put(report.id(), report);
+        refreshModelViews(this.model.withReports(reports));
+        return true;
+    }
+
+    /**
+     * 运行时更新报告；不存在返回 {@code false}。
+     *
+     * @param report 报告定义
+     * @return 是否成功
+     */
+    public synchronized boolean updateReport(ResolvedReport report) {
+        if (!this.model.reports().containsKey(report.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedReport> reports = new java.util.HashMap<>(this.model.reports());
+        reports.put(report.id(), report);
+        refreshModelViews(this.model.withReports(reports));
+        return true;
+    }
+
+    /**
+     * 运行时删除报告。
+     *
+     * @param rptid 绝对 RPTID
+     * @return 是否删除了报告
+     */
+    public synchronized boolean removeReport(int rptid) {
+        if (!this.model.reports().containsKey(rptid)) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedReport> reports = new java.util.HashMap<>(this.model.reports());
+        reports.remove(rptid);
+        refreshModelViews(this.model.withReports(reports));
+        return true;
+    }
+
+    /**
+     * 运行时新增状态变量；SVID 重复返回 {@code false}。
+     *
+     * <p>新变量绑定恒 0 曲线（界面上用「设定」钉住实际值）。</p>
+     *
+     * @param def 变量定义
+     * @return 是否成功
+     */
+    public synchronized boolean addSvid(ResolvedSvid def) {
+        if (this.model.svids().containsKey(def.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedSvid> svids = new java.util.HashMap<>(this.model.svids());
+        svids.put(def.id(), def);
+        refreshModelViews(this.model.withSvids(svids));
+        this.store.bind(def.id(), new com.shimizukenta.secssim.core.curve.ConstantCurve(0.0));
+        return true;
+    }
+
+    /**
+     * 运行时更新状态变量（符号名/归属/类型/单位）；不存在返回 {@code false}。
+     *
+     * @param def 变量定义
+     * @return 是否成功
+     */
+    public synchronized boolean updateSvid(ResolvedSvid def) {
+        if (!this.model.svids().containsKey(def.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedSvid> svids = new java.util.HashMap<>(this.model.svids());
+        svids.put(def.id(), def);
+        refreshModelViews(this.model.withSvids(svids));
+        return true;
+    }
+
+    /**
+     * 运行时删除状态变量（连同其值绑定）。
+     *
+     * @param svid 绝对 SVID
+     * @return 是否删除了变量
+     */
+    public synchronized boolean removeSvid(int svid) {
+        if (!this.model.svids().containsKey(svid)) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedSvid> svids = new java.util.HashMap<>(this.model.svids());
+        svids.remove(svid);
+        refreshModelViews(this.model.withSvids(svids));
+        this.store.unbind(svid);
+        return true;
+    }
+
+    /**
+     * 「设定」一个状态变量的值：钉住,覆盖曲线与事件效果,直到取消设定或热重载。
+     *
+     * @param svid  绝对 SVID
+     * @param value 设定值
+     * @return 是否成功（变量必须存在）
+     */
+    public boolean pinSvidValue(int svid, double value) {
+        if (!this.model.svids().containsKey(svid)) {
+            return false;
+        }
+        this.effectValues.pin(svid, value);
+        return true;
+    }
+
+    /**
+     * 取消「设定」。
+     *
+     * @param svid 绝对 SVID
+     * @return 原来是否有设定
+     */
+    public boolean unpinSvidValue(int svid) {
+        return this.effectValues.unpin(svid);
+    }
+
+    /**
+     * 是否被「设定」。
+     *
+     * @param svid 绝对 SVID
+     * @return 已设定返回 {@code true}
+     */
+    public boolean isSvidPinned(int svid) {
+        return this.effectValues.isPinned(svid);
+    }
+
+    /** 换设备模型后重建引用它的视图（S6F11 组装器与 Trace）。 */
+    private void refreshModelViews(ResolvedEquipment next) {
+        this.model = next;
+        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports);
+        this.traces.stopAll();
+        this.traces = new TraceManager(this.model, this.values, Instant.now());
     }
 
 

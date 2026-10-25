@@ -124,6 +124,118 @@ public interface SessionRuntime {
     }
 
     /**
+     * 运行时新增编排计划（不写回配置,重载后失效）。
+     *
+     * @param plan 计划
+     * @return 成功返回 {@code true};id 重复或不支持返回 {@code false}
+     */
+    default boolean addEventPlan(com.shimizukenta.secssim.core.event.EventPlan plan) {
+        return false;
+    }
+
+    /**
+     * 运行时更新编排计划。
+     *
+     * @param planId 计划标识
+     * @param plan   新计划
+     * @return 成功返回 {@code true};计划不存在或不支持返回 {@code false}
+     */
+    default boolean updateEventPlan(String planId, com.shimizukenta.secssim.core.event.EventPlan plan) {
+        return false;
+    }
+
+    /**
+     * 运行时删除编排计划。
+     *
+     * @param planId 计划标识
+     * @return 成功返回 {@code true};计划不存在或不支持返回 {@code false}
+     */
+    default boolean removeEventPlan(String planId) {
+        return false;
+    }
+
+    /**
+     * 运行时新增报告。
+     *
+     * @param report 报告定义
+     * @return 成功返回 {@code true};RPTID 重复或不支持返回 {@code false}
+     */
+    default boolean addReport(com.shimizukenta.secssim.core.compile.ResolvedReport report) {
+        return false;
+    }
+
+    /**
+     * 运行时更新报告。
+     *
+     * @param report 报告定义
+     * @return 成功返回 {@code true};报告不存在或不支持返回 {@code false}
+     */
+    default boolean updateReport(com.shimizukenta.secssim.core.compile.ResolvedReport report) {
+        return false;
+    }
+
+    /**
+     * 运行时删除报告。
+     *
+     * @param rptid 绝对 RPTID
+     * @return 成功返回 {@code true};报告不存在或不支持返回 {@code false}
+     */
+    default boolean removeReport(int rptid) {
+        return false;
+    }
+
+    /**
+     * 运行时新增状态变量。
+     *
+     * @param def 变量定义
+     * @return 成功返回 {@code true};SVID 重复或不支持返回 {@code false}
+     */
+    default boolean addSvid(com.shimizukenta.secssim.core.compile.ResolvedSvid def) {
+        return false;
+    }
+
+    /**
+     * 运行时更新状态变量。
+     *
+     * @param def 变量定义
+     * @return 成功返回 {@code true};变量不存在或不支持返回 {@code false}
+     */
+    default boolean updateSvid(com.shimizukenta.secssim.core.compile.ResolvedSvid def) {
+        return false;
+    }
+
+    /**
+     * 运行时删除状态变量。
+     *
+     * @param svid 绝对 SVID
+     * @return 成功返回 {@code true};变量不存在或不支持返回 {@code false}
+     */
+    default boolean removeSvid(int svid) {
+        return false;
+    }
+
+    /**
+     * 「设定」一个状态变量的值（钉住,覆盖曲线与事件效果）。
+     *
+     * @param svid  绝对 SVID
+     * @param value 设定值
+     * @return 成功返回 {@code true};变量不存在或不支持返回 {@code false}
+     */
+    default boolean pinSvidValue(int svid, double value) {
+        return false;
+    }
+
+    /**
+     * 取消「设定」。
+     *
+     * @param svid 绝对 SVID
+     * @return 原来有设定返回 {@code true}
+     */
+    default boolean unpinSvidValue(int svid) {
+        return false;
+    }
+
+    /**
      * 预览某一时间段的曲线（分桶 min/max/avg）。
      *
      * @param fromMs  起始

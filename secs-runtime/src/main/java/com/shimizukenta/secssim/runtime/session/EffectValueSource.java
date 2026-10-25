@@ -26,6 +26,8 @@ public final class EffectValueSource implements ValueSource {
 
     private final ValueSource base;
     private final EventEffectStore store;
+    /** 「设定」钉住的值（设备页·状态变量）：优先级最高,覆盖曲线与事件效果,直到取消或热重载。 */
+    private final java.util.Map<Integer, Double> pinned = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 创建。
@@ -47,8 +49,42 @@ public final class EffectValueSource implements ValueSource {
         return this.base;
     }
 
+    /**
+     * 钉住一个 SVID 的值（「设定」）。
+     *
+     * @param svid  绝对 SVID
+     * @param value 设定值
+     */
+    public void pin(int svid, double value) {
+        this.pinned.put(svid, value);
+    }
+
+    /**
+     * 取消设定。
+     *
+     * @param svid 绝对 SVID
+     * @return 原来是否有设定
+     */
+    public boolean unpin(int svid) {
+        return this.pinned.remove(svid) != null;
+    }
+
+    /**
+     * 是否被钉住。
+     *
+     * @param svid 绝对 SVID
+     * @return 已设定返回 {@code true}
+     */
+    public boolean isPinned(int svid) {
+        return this.pinned.containsKey(svid);
+    }
+
     @Override
     public OptionalDouble valueAt(int svid, long tMs) {
+        Double manual = this.pinned.get(svid);
+        if (manual != null) {
+            return OptionalDouble.of(manual);
+        }
         OptionalDouble baseValue = this.base.valueAt(svid, tMs);
         if (baseValue.isEmpty()) {
             return baseValue;

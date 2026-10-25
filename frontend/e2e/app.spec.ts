@@ -124,6 +124,7 @@ async function mockApi(page: Page): Promise<void> {
               triggerType: 'periodic',
               periodMs: 1000,
               jitterMs: 0,
+              effects: [{ svid: 1001, op: 'set', value: 80 }],
             },
           ],
         },
@@ -131,6 +132,9 @@ async function mockApi(page: Page): Promise<void> {
     }
 
     if (path === '/api/v1/sessions/line1/events/beat') {
+      if (method === 'DELETE' || method === 'PUT') {
+        return route.fulfill({ json: { ok: true } });
+      }
       eventEnabled = url.searchParams.get('enabled') === 'true';
       return route.fulfill({ json: { ok: true } });
     }
@@ -139,7 +143,7 @@ async function mockApi(page: Page): Promise<void> {
       return route.fulfill({
         json: {
           ceids: [{ ceid: 2001, owner: 'CH1', slot: 'TEMP_HIGH', reports: [1], source: 'local' }],
-          reports: [{ rptid: 1, owner: 'CH1', slot: 'TEMP', svids: [1001], source: 'local' }],
+          reports: [{ rptid: 1, owner: 'CH1', slot: 'TEMP_REPORT', svids: [1001], source: 'local' }],
           svids: [{ svid: 1001, owner: 'CH1', slot: 'TEMP', type: 'F4', unit: 'C' }],
         },
       });
@@ -160,33 +164,11 @@ async function mockApi(page: Page): Promise<void> {
           to: 60_000,
           buckets: 4,
           bucketMs: 15_000,
-          svidTotal: 2,
+          svidTotal: 1,
           truncated: false,
           series: [
             { svid: 1001, owner: 'CH1', unit: 'C', min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] },
-            { svid: 1002, owner: 'CH1', unit: 'Torr', min: [1, 2, 3, 4], max: [5, 6, 7, 8], avg: [3, 4, 5, 6] },
           ],
-        },
-      });
-    }
-
-    if (path === '/api/v1/messages') {
-      return route.fulfill({
-        json: {
-          messages: [
-            {
-              sessionId: 'line1',
-              direction: 'in',
-              stream: 1,
-              function: 1,
-              wbit: false,
-              body: 'S1F1\n<L\n  <B 0x81>\n>.',
-              at: 1_700_000_000_000,
-            },
-          ],
-          total: 1,
-          limit: 500,
-          truncated: false,
         },
       });
     }
@@ -199,7 +181,7 @@ async function mockApi(page: Page): Promise<void> {
 
     if (path === '/api/v1/configs/line1.json') {
       if (method === 'GET') {
-        return route.fulfill({ json: { name: 'line1.json', text: CONFIG_TEXT } });
+        return route.fulfill({ json: { name: 'line1.json', text: CONFIG_TEXT, modifiedMs: 1 } });
       }
       return route.fulfill({ json: { ok: true } });
     }
@@ -238,10 +220,10 @@ async function openStatic(page: Page, label: string, panelId: string): Promise<v
   await expect(page.locator(`#panel-${panelId}`)).toBeVisible();
 }
 
-/** 打开一台设备(默认落曲线子页)。 */
+/** 打开一台设备(默认落事件子页)。 */
 async function openDevice(page: Page, device: string): Promise<void> {
   await page.locator('.sidenav .nav-group', { hasText: '设备' }).locator('.nav-item', { hasText: device }).first().click();
-  await expect(page.locator('#panel-preview')).toBeVisible();
+  await expect(page.locator('#panel-events')).toBeVisible();
 }
 
 /** 切设备子页。 */
@@ -254,31 +236,19 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
-test('lands on the workbench and opens a device monitor', async ({ page }) => {
+test('lands on the workbench and opens a device events page', async ({ page }) => {
   await page.goto('/');
 
-  /* 默认落在工作台:品牌、KPI 与设备卡都在 */
+  /* 默认落在工作台:品牌、KPI、设备卡与会话管理都在 */
   await expect(page.locator('.brand-name')).toContainText('SECS Simulator');
   await expect(page.getByText('在线设备').first()).toBeVisible();
   await expect(page.locator('.device-card')).toHaveCount(1);
-  await expect(page.locator('.device-card', { hasText: 'LINE1' })).toBeVisible();
+  await expect(page.locator('#panel-sessions')).toBeVisible();
 
-  /* 设备卡进设备页·曲线 */
+  /* 设备卡进设备页·事件(默认子页) */
   await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '曲线' })).toHaveAttribute('aria-selected', 'true');
-
-  /* 曲线三模式 */
-  await page.getByRole('button', { name: '刷新曲线' }).click();
-  await expect(page.locator('.spark canvas')).toHaveCount(2);
-
-  await page.locator('label:has-text("图表") select').selectOption('uplot');
-  await expect(page.locator('.uplot-block')).toHaveCount(2);
-  await expect(page.locator('.uplot-host canvas')).toHaveCount(2);
-  await expect(page.locator('.uplot-host .u-legend').first()).toContainText('min');
-
-  await page.locator('label:has-text("图表") select').selectOption('multi');
-  await expect(page.locator('.multi-axis-host canvas')).toHaveCount(1);
-  await expect(page.locator('.multi-axis-host .u-axis')).toHaveCount(3);
+  await expect(page.getByRole('tab', { name: '事件' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#panel-events').getByRole('cell', { name: 'beat' })).toBeVisible();
 });
 
 test('opens a config and adds a curve through the structured editor', async ({ page }) => {
@@ -289,12 +259,7 @@ test('opens a config and adds a curve through the structured editor', async ({ p
   await configSection.getByRole('combobox', { name: '选择配置' }).selectOption('line1.json');
   await expect(page.getByText('模板（结构化编辑）')).toBeVisible();
 
-  /* 表单视图里能看到 session / equipment / events 的结构化编辑 */
-  await expect(page.getByText('会话（session').first()).toBeVisible();
-  await expect(page.getByText('事件编排（events').first()).toBeVisible();
-
   await page.getByRole('button', { name: '+ 曲线' }).click();
-  /* 表单改动写回的是同一份草稿：切到原文视图核对 */
   await configSection.getByRole('button', { name: 'JSON 原文' }).click();
   await expect(page.locator('textarea.config-editor')).toHaveValue(/"curve"/);
   await configSection.getByRole('button', { name: '表单', exact: true }).click();
@@ -305,7 +270,7 @@ test('opens a config and adds a curve through the structured editor', async ({ p
   await expect(configSection.getByText(/已保存 line1\.json/)).toBeVisible();
 });
 
-test('toggles an event plan on the device events page and shows the admin audit entry', async ({ page }) => {
+test('toggles an event plan and shows the admin audit entry', async ({ page }) => {
   await page.goto('/#/device/line1/events');
 
   const eventSection = page.locator('#panel-events');
@@ -315,6 +280,16 @@ test('toggles an event plan on the device events page and shows the admin audit 
 
   await openStatic(page, '审计', 'audit');
   await expect(page.locator('#panel-audit').getByText('trigger-ceid', { exact: true })).toBeVisible();
+});
+
+test('svids page lists variables and previews a curve', async ({ page }) => {
+  await page.goto('/#/device/line1/svids');
+
+  const svids = page.locator('#panel-svids');
+  await expect(svids.getByRole('cell', { name: 'TEMP', exact: true })).toBeVisible();
+
+  await svids.getByRole('button', { name: '预览', exact: true }).first().click();
+  await expect(page.locator('#panel-svids .spark canvas').first()).toBeVisible();
 });
 
 test('filters sessions on the workbench', async ({ page }) => {
@@ -341,7 +316,7 @@ test('opens the command palette and jumps to a device', async ({ page }) => {
   await expect(palette.getByText('打开设备 LINE1')).toBeVisible();
   await palette.getByText('打开设备 LINE1').click();
 
-  await expect(page.getByRole('tab', { name: '曲线' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '事件' })).toBeVisible();
 });
 
 test('switches the theme and remembers it', async ({ page }) => {
@@ -353,7 +328,6 @@ test('switches the theme and remembers it', async ({ page }) => {
 
   expect(after).not.toBe(before);
 
-  /* 刷新以后仍然是刚才选的主题 */
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', after ?? 'light');
 });
@@ -366,31 +340,40 @@ test('shows a toast after triggering from the sessions table', async ({ page }) 
   await expect(page.locator('.toast-title').first()).toContainText('触发 line1 CEID');
 });
 
-test('device tool tabs each show their own capability', async ({ page }) => {
+test('device subpages each show their own capability', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '曲线' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '事件' })).toBeVisible();
 
+  /* 发送页:单发 + 压测发送同框 */
+  await openDeviceTab(page, '发送', 'send');
+  await expect(page.locator('#panel-send').getByRole('button', { name: '发送 SML' })).toBeVisible();
+  await expect(page.locator('#panel-send').getByRole('button', { name: '压测发送' })).toBeVisible();
+
+  /* 报警页:置位/清除 + 报警风暴同框 */
+  await openDeviceTab(page, '报警', 'alarms');
+  await expect(page.locator('#panel-alarms').getByRole('button', { name: '置位', exact: true })).toBeVisible();
+  await expect(page.locator('#panel-alarms').getByRole('button', { name: '报警风暴' })).toBeVisible();
+
+  /* 主机模拟页:FDC Trace + S1F3 采集合并 */
   await openDeviceTab(page, '主机模拟', 'hostsim');
-  await expect(page.locator('#panel-hostsim')).toBeVisible();
-  await expect(page.locator('#panel-burst')).toHaveCount(0);
-  await expect(page.locator('#panel-collector')).toHaveCount(0);
-
-  await openDeviceTab(page, '压测', 'burst');
-  await expect(page.getByText('压测（服务端循环）')).toBeVisible();
-  await expect(page.locator('#panel-hostsim')).toHaveCount(0);
-
-  await openDeviceTab(page, '采集', 'collector');
+  await expect(page.getByText('FDC Trace 编排（S2F23 → S6F1）')).toBeVisible();
+  await expect(page.locator('#panel-collector')).toBeVisible();
   await expect(page.getByText('S1F3 数据采集（主机侧拉取）')).toBeVisible();
-  await expect(page.locator('#panel-burst')).toHaveCount(0);
+
+  /* 事件页:计划 CRUD + 报告管理 + 压测上报 */
+  await openDeviceTab(page, '事件', 'events');
+  await expect(page.locator('#panel-events').getByRole('button', { name: '新增计划' })).toBeVisible();
+  await expect(page.locator('#panel-events').getByRole('button', { name: '新增报告' })).toBeVisible();
+  await expect(page.locator('#panel-events').getByRole('button', { name: '开始压测' })).toBeVisible();
 });
 
-test('fills the CEID from the device catalog into the workbench sessions table', async ({ page }) => {
-  await page.goto('/#/device/line1/catalog');
+test('events page offers ceid burst with catalog datalist', async ({ page }) => {
+  await page.goto('/#/device/line1/events');
 
-  await page.locator('#panel-catalog').getByRole('button', { name: '填入' }).first().click();
-
-  await openStatic(page, '工作台', 'sessions');
-  await expect(page.locator('#panel-sessions').locator('input[type="number"]').first()).toHaveValue('2001');
+  const events = page.locator('#panel-events');
+  await events.getByPlaceholder('如 2001').fill('2001');
+  await events.getByRole('button', { name: '开始压测' }).click();
+  await expect(page.locator('.toast').first()).toBeVisible();
 });

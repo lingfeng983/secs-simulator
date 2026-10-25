@@ -29,6 +29,7 @@ import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
+import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
 import com.shimizukenta.secssim.app.session.SessionState;
 
 /**
@@ -575,6 +576,111 @@ public final class Main {
         @Override
         public String auditJson(int limit, String action, String actor, long beforeMs) {
             return this.audit == null ? null : this.audit.recentJson(limit, action, actor, beforeMs);
+        }
+
+        /* ---------- 运行时编辑(设备页·事件/报告/状态变量) ---------- */
+
+        private SessionRuntime sessionOr404(String sessionId) {
+            return this.sessions.find(sessionId).orElse(null);
+        }
+
+        @Override
+        public int addEventPlan(String sessionId, String planJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.addEventPlan(RuntimeEdits.parseEventPlan(planJson)) ? 201 : 409;
+        }
+
+        @Override
+        public int updateEventPlan(String sessionId, String planId, String planJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.updateEventPlan(planId, RuntimeEdits.parseEventPlan(planJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int removeEventPlan(String sessionId, String planId) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.removeEventPlan(planId) ? 200 : 404;
+        }
+
+        @Override
+        public int addReport(String sessionId, String reportJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.addReport(RuntimeEdits.parseReport(reportJson)) ? 201 : 409;
+        }
+
+        @Override
+        public int updateReport(String sessionId, int rptid, String reportJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.updateReport(RuntimeEdits.parseReport(reportJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int removeReport(String sessionId, int rptid) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.removeReport(rptid) ? 200 : 404;
+        }
+
+        @Override
+        public int addSvid(String sessionId, String svidJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.addSvid(RuntimeEdits.parseSvid(svidJson)) ? 201 : 409;
+        }
+
+        @Override
+        public int updateSvid(String sessionId, int svid, String svidJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.updateSvid(RuntimeEdits.parseSvid(svidJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int removeSvid(String sessionId, int svid) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.removeSvid(svid) ? 200 : 404;
+        }
+
+        @Override
+        public int pinSvidValue(String sessionId, int svid, String valueJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.pinSvidValue(svid, RuntimeEdits.parsePinnedValue(valueJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int unpinSvidValue(String sessionId, int svid) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.unpinSvidValue(svid) ? 200 : 404;
         }
 
         @Override

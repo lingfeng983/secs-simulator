@@ -19,6 +19,7 @@ import {
   type TerminalMessage,
 } from '../api';
 import { mergeMessages, type MessageEntry } from '../messageHistory';
+import type { EventPlanInput, ReportInput, SvidInput } from '../api';
 import { ceidFromS6f11Body } from '../lib/format';
 import type { NoticeWire } from './useEventStream';
 import type { Notifier } from './useToasts';
@@ -147,6 +148,20 @@ export interface BackendController {
   trigger: (sessionId: string, ceid: number) => Promise<void>;
   setAlarm: (sessionId: string, alid: number, set: boolean, text: string, category: number) => Promise<void>;
   toggleEvent: (plan: EventPlanView) => Promise<void>;
+  /* ---------- 运行时编辑(设备页·事件/报告/状态变量;不写回配置,重载后失效) ---------- */
+  addEventPlan: (plan: EventPlanInput) => Promise<boolean>;
+  updateEventPlan: (planId: string, plan: EventPlanInput) => Promise<boolean>;
+  deleteEventPlan: (planId: string) => Promise<boolean>;
+  addReport: (report: ReportInput) => Promise<boolean>;
+  updateReport: (rptid: number, report: ReportInput) => Promise<boolean>;
+  deleteReport: (rptid: number) => Promise<boolean>;
+  addSvid: (def: SvidInput) => Promise<boolean>;
+  updateSvid: (svid: number, def: SvidInput) => Promise<boolean>;
+  deleteSvid: (svid: number) => Promise<boolean>;
+  setSvidValue: (svid: number, value: number) => Promise<boolean>;
+  clearSvidValue: (svid: number) => Promise<boolean>;
+  /** 单个状态变量的曲线预览(窗口相对仿真起点)。 */
+  previewSvid: (sessionId: string, svid: number, windowMs: number) => Promise<PreviewData | null>;
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
   /** 载入报文历史;可按会话与方向过滤,before>0 时向更早翻页(服务端最多保留最近 5000 条)。 */
   loadHistory: (session?: string, direction?: string, before?: number) => Promise<void>;
@@ -419,6 +434,98 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       try {
         return await client.configPreview(text, 0, windowMs, 90, [svid], true);
       } catch {
+        return null;
+      }
+    },
+    [client],
+  );
+
+  /* ---------- 运行时编辑(设备页·事件/报告/状态变量) ---------- */
+
+  /** 编辑通用:调 client、按状态码通知、成功后立刻刷新当前会话明细。 */
+  const runEdit = useCallback(
+    async (action: string, okText: string, run: () => Promise<number>): Promise<boolean> => {
+      if (client === null) {
+        return false;
+      }
+      try {
+        const status = await run();
+        if (status === 200 || status === 201) {
+          notifierRef.current.success(okText);
+          await refreshSessionDetail(activeSession);
+          return true;
+        }
+        if (status === 409) {
+          notifierRef.current.error(`${action}被拒：标识已存在`);
+        } else if (status === 404) {
+          notifierRef.current.error(`${action}失败：目标不存在`);
+        } else {
+          notifierRef.current.error(`${action}失败（HTTP ${status}）`);
+        }
+        return false;
+      } catch (error) {
+        notifierRef.current.error(`${action}失败`, (error as Error).message);
+        return false;
+      }
+    },
+    [client, activeSession, refreshSessionDetail],
+  );
+
+  const addEventPlan = useCallback(
+    (plan: EventPlanInput) => runEdit('新增编排', '已新增编排计划', () => client!.addEventPlan(activeSession, plan)),
+    [runEdit, activeSession],
+  );
+  const updateEventPlan = useCallback(
+    (planId: string, plan: EventPlanInput) => runEdit('更新编排', '已更新编排计划', () => client!.updateEventPlan(activeSession, planId, plan)),
+    [runEdit],
+  );
+  const deleteEventPlan = useCallback(
+    (planId: string) => runEdit('删除编排', '已删除编排计划', () => client!.deleteEventPlan(activeSession, planId)),
+    [runEdit],
+  );
+  const addReport = useCallback(
+    (report: ReportInput) => runEdit('新增报告', '已新增报告', () => client!.addReport(activeSession, report)),
+    [runEdit],
+  );
+  const updateReport = useCallback(
+    (rptid: number, report: ReportInput) => runEdit('更新报告', '已更新报告', () => client!.updateReport(activeSession, rptid, report)),
+    [runEdit],
+  );
+  const deleteReport = useCallback(
+    (rptid: number) => runEdit('删除报告', '已删除报告', () => client!.deleteReport(activeSession, rptid)),
+    [runEdit],
+  );
+  const addSvid = useCallback(
+    (def: SvidInput) => runEdit('新增状态变量', '已新增状态变量', () => client!.addSvid(activeSession, def)),
+    [runEdit],
+  );
+  const updateSvid = useCallback(
+    (svid: number, def: SvidInput) => runEdit('更新状态变量', '已更新状态变量', () => client!.updateSvid(activeSession, svid, def)),
+    [runEdit],
+  );
+  const deleteSvid = useCallback(
+    (svid: number) => runEdit('删除状态变量', '已删除状态变量', () => client!.deleteSvid(activeSession, svid)),
+    [runEdit],
+  );
+  const setSvidValue = useCallback(
+    (svid: number, value: number) => runEdit('设定值', `已设定 SVID ${svid} 的值`, () => client!.setSvidValue(activeSession, svid, value)),
+    [runEdit],
+  );
+  const clearSvidValue = useCallback(
+    (svid: number) => runEdit('取消设定', `已取消 SVID ${svid} 的设定`, () => client!.clearSvidValue(activeSession, svid)),
+    [runEdit],
+  );
+
+  /** 单 SVID 曲线预览:走预览端点的 svids 过滤。 */
+  const previewSvid = useCallback(
+    async (sessionId: string, svid: number, windowMs: number): Promise<PreviewData | null> => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        return await client.preview(sessionId, 0, windowMs, 90, [svid], true);
+      } catch (error) {
+        notifierRef.current.error('曲线预览失败', (error as Error).message);
         return null;
       }
     },
@@ -888,6 +995,18 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setAuditFilter,
       loadAuditOlder,
       loadEventHistory,
+      addEventPlan,
+      updateEventPlan,
+      deleteEventPlan,
+      addReport,
+      updateReport,
+      deleteReport,
+      addSvid,
+      updateSvid,
+      deleteSvid,
+      setSvidValue,
+      clearSvidValue,
+      previewSvid,
       configList,
       messages,
       messageTotal,
@@ -941,6 +1060,18 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setAuditFilter,
       loadAuditOlder,
       loadEventHistory,
+      addEventPlan,
+      updateEventPlan,
+      deleteEventPlan,
+      addReport,
+      updateReport,
+      deleteReport,
+      addSvid,
+      updateSvid,
+      deleteSvid,
+      setSvidValue,
+      clearSvidValue,
+      previewSvid,
       configList,
       messages,
       messageTotal,

@@ -38,4 +38,24 @@ public record ResolvedEquipment(String name, int deviceId,
         ceids = Map.copyOf(ceids);
         unitByCeid = Map.copyOf(unitByCeid);
     }
+
+    /**
+     * 派生一份只换 SVID 表的模型（运行时增删改变量用）。
+     *
+     * @param svids 新的 SVID 表
+     * @return 新模型
+     */
+    public ResolvedEquipment withSvids(Map<Integer, ResolvedSvid> svids) {
+        return new ResolvedEquipment(this.name, this.deviceId, svids, this.reports, this.ceids, this.unitByCeid);
+    }
+
+    /**
+     * 派生一份只换报告表的模型（运行时增删改报告用）。
+     *
+     * @param reports 新的报告表
+     * @return 新模型
+     */
+    public ResolvedEquipment withReports(Map<Integer, ResolvedReport> reports) {
+        return new ResolvedEquipment(this.name, this.deviceId, this.svids, reports, this.ceids, this.unitByCeid);
+    }
 }

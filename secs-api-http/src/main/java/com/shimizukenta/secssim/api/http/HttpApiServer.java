@@ -1470,7 +1470,8 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void handleSessionCommand(HttpExchange ex) throws IOException {
-        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        if (!"POST".equals(method) && !"PUT".equals(method) && !"DELETE".equals(method)) {
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
         }
@@ -1553,6 +1554,16 @@ public final class HttpApiServer implements AutoCloseable {
                 respond(ex, result.contains("\"ok\":true") ? 200 : 409, result);
                 return;
             }
+        }
+
+        /* 运行时编辑:编排计划 / 报告 / 状态变量的增删改与值设定(设备页)。
+           POST events/{planId} 是既有的启停切换,仍走后面的老分支。 */
+        boolean editSub = "events".equals(parts[1]) || "reports".equals(parts[1]) || "svids".equals(parts[1]);
+        if (parts.length >= 2 && editSub
+                && ("PUT".equals(method) || "DELETE".equals(method)
+                    || (parts.length == 2 && "POST".equals(method)))) {
+            handleSessionEdit(ex, method, parts);
+            return;
         }
 
         /* v6:服务端压测 */
@@ -1920,6 +1931,149 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
         respond(ex, 200, body);
+    }
+
+    /**
+     * 会话子路径上的运行时编辑：events / reports / svids 的增删改与值设定。
+     *
+     * <p>写角色要求 operator;解析失败(请求体不合法)统一 400 并带回原因。</p>
+     *
+     * @param ex     交换
+     * @param method 大写方法名
+     * @param parts  路径段(已去掉 /api/v1/sessions 前缀)
+     */
+    private void handleSessionEdit(HttpExchange ex, String method, String[] parts) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String sessionId = parts[0];
+        String sub = parts[1];
+
+        try {
+            /* ---- 编排计划 ---- */
+            if ("events".equals(sub)) {
+                if (parts.length == 2 && "POST".equals(method)) {
+                    String body = requireBody(ex);
+                    int status = this.context.addEventPlan(sessionId, body);
+                    audit(ex, "event-add", sessionId, "status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "PUT".equals(method)) {
+                    String body = requireBody(ex);
+                    int status = this.context.updateEventPlan(sessionId, decode(parts[2]), body);
+                    audit(ex, "event-update", sessionId, "plan=" + decode(parts[2]) + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "DELETE".equals(method)) {
+                    int status = this.context.removeEventPlan(sessionId, decode(parts[2]));
+                    audit(ex, "event-delete", sessionId, "plan=" + decode(parts[2]) + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+            }
+
+            /* ---- 报告 ---- */
+            if ("reports".equals(sub)) {
+                if (parts.length == 2 && "POST".equals(method)) {
+                    String body = requireBody(ex);
+                    int status = this.context.addReport(sessionId, body);
+                    audit(ex, "report-add", sessionId, "status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "PUT".equals(method)) {
+                    String body = requireBody(ex);
+                    int rptid = pathInt(parts[2]);
+                    int status = this.context.updateReport(sessionId, rptid, body);
+                    audit(ex, "report-update", sessionId, "rptid=" + rptid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "DELETE".equals(method)) {
+                    int rptid = pathInt(parts[2]);
+                    int status = this.context.removeReport(sessionId, rptid);
+                    audit(ex, "report-delete", sessionId, "rptid=" + rptid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+            }
+
+            /* ---- 状态变量 ---- */
+            if ("svids".equals(sub)) {
+                if (parts.length == 2 && "POST".equals(method)) {
+                    String body = requireBody(ex);
+                    int status = this.context.addSvid(sessionId, body);
+                    audit(ex, "svid-add", sessionId, "status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "PUT".equals(method)) {
+                    String body = requireBody(ex);
+                    int svid = pathInt(parts[2]);
+                    int status = this.context.updateSvid(sessionId, svid, body);
+                    audit(ex, "svid-update", sessionId, "svid=" + svid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "DELETE".equals(method)) {
+                    int svid = pathInt(parts[2]);
+                    int status = this.context.removeSvid(sessionId, svid);
+                    audit(ex, "svid-delete", sessionId, "svid=" + svid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 4 && "value".equals(parts[3]) && "PUT".equals(method)) {
+                    String body = requireBody(ex);
+                    int svid = pathInt(parts[2]);
+                    int status = this.context.pinSvidValue(sessionId, svid, body);
+                    audit(ex, "svid-pin", sessionId, "svid=" + svid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 4 && "value".equals(parts[3]) && "DELETE".equals(method)) {
+                    int svid = pathInt(parts[2]);
+                    int status = this.context.unpinSvidValue(sessionId, svid);
+                    audit(ex, "svid-unpin", sessionId, "svid=" + svid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+            }
+
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+        } catch (IllegalArgumentException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":" + json(e.getMessage()) + "}");
+        }
+    }
+
+    /** 读请求体;空体视为不合法。 */
+    private static String requireBody(HttpExchange ex) throws IOException {
+        String body = readBody(ex);
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("请求体不能为空");
+        }
+        return body;
+    }
+
+    /** 路径段转整数;形状不对抛 IAE(HTTP 层转 400)。 */
+    private static int pathInt(String raw) {
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("路径里的编号不是整数: " + raw);
+        }
+    }
+
+    /** 把上下文返回的 HTTP 状态码转成响应;2xx 带 ok,其余带对应错误码。 */
+    private static void respondStatus(HttpExchange ex, int status) throws IOException {
+        switch (status) {
+            case 200, 201 -> respond(ex, status, "{\"ok\":true}");
+            case 400 -> respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\"}");
+            case 404 -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            case 409 -> respond(ex, 409, "{\"ok\":false,\"error\":\"conflict\"}");
+            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"edit-failed\"}");
+        }
     }
 
     /**

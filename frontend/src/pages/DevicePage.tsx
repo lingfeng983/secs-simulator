@@ -1,29 +1,23 @@
 import { useEffect } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { controlStateLabel } from '../panels/SessionsPanel';
-import { PreviewPanel } from '../panels/PreviewPanel';
 import { EventsPanel } from '../panels/EventsPanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
-import { CatalogPanel } from '../panels/CatalogPanel';
+import { SvidPanel } from '../panels/SvidPanel';
 import { ConfigPanel } from '../panels/ConfigPanel';
 import { SendPanel } from '../panels/SendPanel';
 import { HostSimPanel } from '../panels/HostSimPanel';
-import { CollectorCard } from '../panels/tools/CollectorCard';
-import { BurstCard } from '../panels/tools/BurstCard';
 import { LiveEventList } from '../ui/LiveEventList';
 import { DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage } from '../router';
 
 /** 设备子页的一句话说明（顶栏描述用）。 */
 const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
-  monitor: '该设备的 SVID 曲线预览(当前时间轴 + 事件标记)。',
-  events: '该设备的事件编排与实时上报。',
-  alarms: '该设备的报警与终端。',
-  catalog: '该设备的 SVID / RPTID / CEID 清册。',
+  events: '该设备的事件编排(增删改/触发/压测)、报告管理与实时上报。',
+  alarms: '该设备的报警与终端,可对编辑好的报警做压测风暴。',
+  svids: '该设备的状态变量:增删改查、曲线预览与值设定。',
   config: '该设备的配置:分段编辑、每 SVID 值来源与曲线预览。',
-  send: '向该设备手动发送 SML。',
-  burst: '对该设备做服务端压测(消息/事件/报警)。',
-  hostsim: '用该设备做主机模拟(本机或远程 SECS)。',
-  collector: '对该设备做 S1F3 数据采集(CEID 触发启停)。',
+  send: '向该设备手动发送 SML,同一条消息可压测发送。',
+  hostsim: '主机模拟:FDC Trace 编排与 S1F3 数据采集(本机或远程 SECS)。',
 };
 
 /**
@@ -32,8 +26,9 @@ const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
  * <p>进入设备页就把该会话钉为全局 activeSession——现有面板全部按
  * "当前会话"取数,钉住之后零改动复用。子页:</p>
  * <ul>
- *   <li>曲线:曲线预览;事件:编排 + 本设备实时事件;报警;目录;配置;</li>
- *   <li>发送:SML 手发;压测;主机模拟;采集:S1F3 拉取。</li>
+ *   <li>事件:编排 CRUD + 报告管理 + 本设备实时事件;报警:报警与风暴压测;</li>
+ *   <li>状态变量:SVID 增删改查 + 曲线预览 + 值设定;配置;</li>
+ *   <li>发送:SML 手发 + 消息压测;主机模拟:FDC Trace + S1F3 采集。</li>
  * </ul>
  */
 export function DevicePage({
@@ -102,8 +97,6 @@ export function DevicePage({
         ))}
       </div>
 
-      {tab === 'monitor' && <PreviewPanel {...baseProps} />}
-
       {tab === 'events' && (
         <div className="panel-stack">
           <EventsPanel {...baseProps} />
@@ -121,17 +114,13 @@ export function DevicePage({
 
       {tab === 'alarms' && <AlarmsPanel {...baseProps} />}
 
-      {tab === 'catalog' && <CatalogPanel {...baseProps} />}
+      {tab === 'svids' && <SvidPanel {...baseProps} />}
 
       {tab === 'config' && <ConfigPanel {...baseProps} />}
 
       {tab === 'send' && <SendPanel {...baseProps} />}
 
-      {tab === 'burst' && <BurstCard {...baseProps} sessionId={sessionId} />}
-
       {tab === 'hostsim' && <HostSimPanel {...baseProps} />}
-
-      {tab === 'collector' && <CollectorCard {...baseProps} sessionId={sessionId} />}
     </div>
   );
 }

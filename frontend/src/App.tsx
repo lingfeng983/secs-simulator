@@ -105,7 +105,7 @@ export function App(): JSX.Element {
         return;
       }
       if (id.startsWith('device:')) {
-        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'monitor' });
+        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'events' });
         return;
       }
       switch (id) {
@@ -121,10 +121,11 @@ export function App(): JSX.Element {
           navigate({ name: 'system', page: 'audit' });
           return;
         default: {
-          /* 设备能力 id(config/send/burst/hostsim/collector/catalog/alarms/preview)→ 当前设备对应子页 */
+          /* 设备能力 id → 当前设备对应子页;旧 id 归到新家(preview/catalog→状态变量,burst/collector→就近) */
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
-            const tab = (DEVICE_PAGES as readonly string[]).includes(id) ? (id as DevicePage) : 'monitor';
+            const legacy = id === 'preview' || id === 'catalog' ? 'svids' : id === 'burst' ? 'send' : id === 'collector' ? 'hostsim' : id;
+            const tab = (DEVICE_PAGES as readonly string[]).includes(legacy) ? (legacy as DevicePage) : 'events';
             navigate({ name: 'device', sessionId, tab });
           } else {
             navigate({ name: 'workbench' });
@@ -173,7 +174,7 @@ export function App(): JSX.Element {
         run: () => goTo(`device:${session.id}`),
       });
       for (const tab of DEVICE_PAGES) {
-        if (tab === 'monitor') {
+        if (tab === 'events') {
           continue;
         }
         items.push({

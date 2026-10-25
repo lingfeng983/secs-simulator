@@ -12,13 +12,42 @@ import type { PanelBaseProps } from './types';
  * 活动报警和终端消息都是"现在"的快照，后端只保留最近若干条，
  * 所以这里也说明了保留上限，免得用户以为消息丢了。</p>
  */
-export function AlarmsPanel({ backend }: PanelBaseProps): JSX.Element {
+export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [alid, setAlid] = useState(1001);
   const [alarmText, setAlarmText] = useState('TEMP HIGH');
   const [alarmCategory, setAlarmCategory] = useState(1);
+  /* 报警风暴 */
+  const [stormCount, setStormCount] = useState('100');
+  const [stormInterval, setStormInterval] = useState('0');
+  const [stormRunning, setStormRunning] = useState(false);
 
   const { alarms, terminalMessages, activeSession } = backend;
   const disabled = activeSession === '';
+
+  /** 对编辑好的报警信息做服务端压测:交替置位/清除。 */
+  const runStorm = async () => {
+    const count = Number.parseInt(stormCount, 10);
+    if (!Number.isFinite(count) || count < 1 || count > 5000) {
+      notifier.error('次数要在 1..5000 之间');
+      return;
+    }
+    setStormRunning(true);
+    try {
+      const stats = await backend.burst(activeSession, {
+        kind: 'alarm',
+        alid,
+        text: alarmText,
+        category: alarmCategory,
+        count,
+        intervalMs: Number.parseInt(stormInterval, 10) || 0,
+      });
+      notifier.info(`报警风暴完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
+    } catch (error) {
+      notifier.error(`报警风暴失败: ${(error as Error).message}`);
+    } finally {
+      setStormRunning(false);
+    }
+  };
 
   const alarmColumns: Column<AlarmState>[] = [
     { key: 'alid', header: 'ALID', align: 'right', sortValue: (row) => row.alid, render: (row) => row.alid },
@@ -103,6 +132,26 @@ export function AlarmsPanel({ backend }: PanelBaseProps): JSX.Element {
         </button>
       </div>
       <p className="hint">置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。</p>
+
+      <div className="toolbar">
+        <label className="field">
+          风暴次数
+          <input value={stormCount} onChange={(event) => setStormCount(event.target.value)} inputMode="numeric" />
+        </label>
+        <label className="field">
+          间隔 ms
+          <input value={stormInterval} onChange={(event) => setStormInterval(event.target.value)} inputMode="numeric" title="0 = 全速" />
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={disabled || stormRunning}
+          onClick={() => void runStorm()}
+          title="在服务端对上面编辑好的报警交替置位/清除,观察主机侧压力"
+        >
+          {stormRunning ? '风暴中…' : '报警风暴'}
+        </button>
+      </div>
 
       <h3 className="sub-title">活动报警</h3>
       <DataTable
