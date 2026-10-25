@@ -787,22 +787,6 @@ textarea::placeholder {
   border-top: 1px solid var(--line-soft);
 }
 
-.sidenav-status {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-  flex: 1 1 auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.sidenav-status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .sidenav-toggle {
   margin-left: auto;
 }
@@ -835,10 +819,6 @@ textarea::placeholder {
   padding: 0.6rem 0.4rem;
 }
 
-.sidenav.collapsed .sidenav-status {
-  justify-content: center;
-  flex: 0 0 auto;
-}
 
 /* ==========================================================================
    6. 顶栏
@@ -899,25 +879,6 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-.topbar-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.22rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-
-.topbar-status-text {
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -927,37 +888,15 @@ textarea::placeholder {
   justify-content: flex-end;
 }
 
-.topbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--line);
-  margin: 0 0.15rem;
-}
-
-.session-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.session-picker label,
-.loglevel-picker span {
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
-.session-picker select {
-  min-width: 8.5rem;
-  font-family: var(--mono);
-  font-size: 12px;
-  padding-top: 0.2rem;
-  padding-bottom: 0.2rem;
-}
-
 .loglevel-picker {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.loglevel-picker span {
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 .loglevel-picker select {
@@ -2156,9 +2095,6 @@ textarea::placeholder {
 
 @media (max-width: 1400px) {
   /* 状态胶囊与侧栏底部重复，窄一点就收起来，给动作区腾地方 */
-  .topbar-status {
-    display: none;
-  }
 }
 
 @media (max-width: 1280px) {
@@ -2299,13 +2235,7 @@ textarea::placeholder {
     font-size: 0.95rem;
   }
 
-  .topbar-status {
-    display: none;
-  }
 
-  .session-picker select {
-    min-width: 6.5rem;
-  }
 
   .palette-btn kbd {
     display: none;
@@ -2364,7 +2294,6 @@ textarea::placeholder {
 
 .kpi-label { font-size: 12px; color: var(--text-muted); }
 .kpi-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.kpi-value-sm { font-size: 13px; font-weight: 500; }
 .kpi-value.danger, .danger { color: var(--danger, #d33); }
 
 .device-grid {
@@ -2423,6 +2352,11 @@ textarea::placeholder {
 
 /* 过滤/操作行:输入框 + 分段控件/按钮的通用排布 */
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* 工作台筛选行:输入框拉宽到能看全占位文案,和状态分段同一行上下居中 */
+.workbench-filter { flex-wrap: nowrap; }
+.workbench-filter .workbench-filter-input { flex: 1 1 22rem; max-width: 34rem; }
+.workbench-filter .segmented { margin-bottom: 0; }
 
 .device-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .device-name { margin: 0; font-size: 20px; }

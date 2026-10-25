@@ -3,7 +3,7 @@ import { createClient, readApiBase, saveApiBase } from './api';
 import { useBackend } from './state/useBackend';
 import { usePreferences, type ThemePreference } from './state/usePreferences';
 import { useToasts } from './state/useToasts';
-import { useEventStream, streamStateLabel, type NoticeWire, type StreamState } from './state/useEventStream';
+import { useEventStream, type NoticeWire } from './state/useEventStream';
 import { ToastHost } from './ui/ToastHost';
 import { CommandPalette } from './ui/CommandPalette';
 import { ShortcutHelp, type ShortcutHint } from './ui/ShortcutHelp';
@@ -15,13 +15,10 @@ import { NAV_ITEMS, routeTitle } from './layout/navigation';
 import { Sidebar, type SidebarDevice } from './layout/Sidebar';
 import { Topbar } from './layout/Topbar';
 
-import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage, type Route } from './router';
+import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage } from './router';
 import { WorkbenchPage } from './pages/WorkbenchPage';
 import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from './pages/DevicePage';
 import { SystemPage } from './pages/SystemPage';
-import { EventsPage } from './pages/EventsPage';
-import { MessagesPage } from './pages/MessagesPage';
-import { SessionsPage } from './pages/SessionsPage';
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
@@ -38,19 +35,16 @@ const SHORTCUTS: readonly ShortcutHint[] = [
 ];
 
 /**
- * 应用外壳（拆分后的单功能页面信息架构）。
+ * 应用外壳（精简后的信息架构）。
  *
- * <p>hash 路由:<code>#/workbench</code>、<code>#/events</code>、
- * <code>#/messages</code>、<code>#/sessions</code>、
- * <code>#/device/{id}/{page}</code>、<code>#/system/{page}</code>。
- * 每个页面只展示一个核心能力:工作台=总览卡墙,事件流/报文/会话管理独立成页,
- * 设备页一页一能力(曲线/事件/报警/目录/配置/发送/压测/主机模拟/采集)。</p>
+ * <p>hash 路由:<code>#/workbench</code>(总览+会话管理)、
+ * <code>#/device/{id}/{page}</code>、<code>#/system/audit</code>。
+ * 事件流/报文/事件流日志等全局页已精简;设备页一页一能力
+ * (曲线/事件/报警/目录/配置/发送/压测/主机模拟/采集)。</p>
  */
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
   const [draftBase, setDraftBase] = useState('');
-  const [streamState, setStreamState] = useState<StreamState>('idle');
-  const [streamDetail, setStreamDetail] = useState('未连接');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
@@ -64,7 +58,7 @@ export function App(): JSX.Element {
   const [route, navigate] = useRoute(preferences.activeTab);
   const { appendLog, pushMessages } = backend;
 
-  /* 事件流：状态、提示与报文都转发给控制器;类型化通知进 liveEvents 缓冲 */
+  /* 事件流：提示与报文都转发给控制器;类型化通知进 liveEvents 缓冲(设备事件子页用) */
   useEventStream(
     client,
     preferences.pauseStream,
@@ -75,10 +69,6 @@ export function App(): JSX.Element {
         },
         [pushMessages],
       ),
-      onState: useCallback((state: StreamState, detail: string) => {
-        setStreamState(state);
-        setStreamDetail(detail);
-      }, []),
       onNotice: useCallback(
         (text: string) => {
           appendLog(text);
@@ -121,22 +111,14 @@ export function App(): JSX.Element {
       switch (id) {
         case 'workbench':
         case 'overview':
+        case 'events':
+        case 'messages':
+        case 'sessions':
           navigate({ name: 'workbench' });
           return;
-        case 'events':
-          navigate({ name: 'view', page: 'events' });
-          return;
-        case 'messages':
-          navigate({ name: 'view', page: 'messages' });
-          return;
-        case 'sessions':
-          navigate({ name: 'view', page: 'sessions' });
-          return;
         case 'audit':
-          navigate({ name: 'system', page: 'audit' });
-          return;
         case 'console':
-          navigate({ name: 'system', page: 'console' });
+          navigate({ name: 'system', page: 'audit' });
           return;
         default: {
           /* 设备能力 id(config/send/burst/hostsim/collector/catalog/alarms/preview)→ 当前设备对应子页 */
@@ -160,9 +142,7 @@ export function App(): JSX.Element {
 
   const routeKey = route.name === 'device'
     ? `device:${route.sessionId}:${route.tab}`
-    : route.name === 'view'
-      ? `view:${route.page}`
-      : route.name === 'system' ? `system:${route.page}` : 'workbench';
+    : route.name === 'system' ? `system:${route.page}` : 'workbench';
 
   useEffect(() => {
     void refreshRef.current();
@@ -213,18 +193,6 @@ export function App(): JSX.Element {
         group: '操作',
         hint: 'R',
         run: () => void backend.refreshAll(),
-      },
-      {
-        id: 'action:history',
-        label: '载入报文历史',
-        group: '操作',
-        run: () => void backend.loadHistory(),
-      },
-      {
-        id: 'action:export',
-        label: '导出报文 JSONL',
-        group: '操作',
-        run: () => void backend.exportMessages(),
       },
       {
         id: 'action:theme',
@@ -323,14 +291,6 @@ export function App(): JSX.Element {
   const title = route.name === 'device'
     ? { group: '设备', label: route.sessionId, description: DEVICE_PAGE_DESCRIPTIONS[route.tab] }
     : routeTitle(route);
-  const streamLabel = streamStateLabel(streamState, streamDetail);
-
-  const badgeFor = (id: string): number | null => {
-    if (id === 'console') {
-      return backend.messages.length > 0 ? null : null;
-    }
-    return null;
-  };
 
   const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
     id: session.id,
@@ -344,8 +304,6 @@ export function App(): JSX.Element {
     preferences,
     updatePreferences: update,
     goTo,
-    streamState,
-    streamLabel,
     liveEvents,
   };
 
@@ -355,26 +313,15 @@ export function App(): JSX.Element {
         route={route}
         devices={sidebarDevices}
         collapsed={preferences.sidebarCollapsed}
-        badgeFor={badgeFor}
         onNavigate={navigate}
         onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
         version={backend.health?.version ?? '-'}
         mode={backend.health?.mode ?? '-'}
-        streamState={streamState}
-        streamLabel={streamLabel}
       />
 
       <div className="main-col">
         <Topbar
           title={title}
-          streamState={streamState}
-          streamLabel={streamLabel}
-          sessions={backend.sessions}
-          activeSession={activeSessionOf(route, backend.activeSession)}
-          onSessionChange={(id) => {
-            backend.setActiveSession(id);
-            navigate({ name: 'device', sessionId: id, tab: 'monitor' });
-          }}
           refreshing={backend.refreshing}
           onRefresh={() => void backend.refreshAll()}
           onOpenPalette={() => setPaletteOpen(true)}
@@ -411,9 +358,6 @@ export function App(): JSX.Element {
 
         <main className="content">
           {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
-          {route.name === 'view' && route.page === 'events' && <EventsPage {...panelProps} />}
-          {route.name === 'view' && route.page === 'messages' && <MessagesPage {...panelProps} />}
-          {route.name === 'view' && route.page === 'sessions' && <SessionsPage {...panelProps} />}
           {route.name === 'device' && (
             <DevicePageView {...panelProps} sessionId={route.sessionId} tab={route.tab} />
           )}
@@ -473,11 +417,6 @@ export function App(): JSX.Element {
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} hints={SHORTCUTS} />
     </div>
   );
-}
-
-/** 设备页钉住该会话;其他页面用全局选择。 */
-function activeSessionOf(route: Route, fallback: string): string {
-  return route.name === 'device' ? route.sessionId : fallback;
 }
 
 /** 聚焦当前页面里第一个搜索框。 */

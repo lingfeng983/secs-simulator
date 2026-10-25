@@ -45,7 +45,6 @@ export function DevicePage({
   updatePreferences,
   goTo,
   liveEvents,
-  streamLabel,
 }: PanelBaseProps & { sessionId: string; tab: DevicePage }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
 
@@ -63,7 +62,6 @@ export function DevicePage({
     updatePreferences,
     goTo,
     liveEvents,
-    streamLabel,
   };
 
   const deviceEvents = (liveEvents ?? []).filter(

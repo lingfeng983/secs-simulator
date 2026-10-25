@@ -230,9 +230,9 @@ async function mockApi(page: Page): Promise<void> {
   });
 }
 
-/** 拆分后单功能页面的导航助手:侧栏静态入口 + 设备动态项 + 设备子页。 */
+/** 精简后的导航助手:侧栏静态入口(工作台/审计) + 设备动态项 + 设备子页。 */
 
-/** 打开侧栏静态入口(工作台/事件流/报文/会话管理/审计/事件流日志)。 */
+/** 打开侧栏静态入口(工作台/审计)。 */
 async function openStatic(page: Page, label: string, panelId: string): Promise<void> {
   await page.locator('.sidenav .nav-item', { hasText: label }).first().click();
   await expect(page.locator(`#panel-${panelId}`)).toBeVisible();
@@ -317,8 +317,8 @@ test('toggles an event plan on the device events page and shows the admin audit 
   await expect(page.locator('#panel-audit').getByText('trigger-ceid', { exact: true })).toBeVisible();
 });
 
-test('filters sessions on the sessions page', async ({ page }) => {
-  await page.goto('/#/sessions');
+test('filters sessions on the workbench', async ({ page }) => {
+  await page.goto('/');
 
   const sessions = page.locator('#panel-sessions');
   await expect(sessions.getByRole('cell', { name: 'line1', exact: true })).toBeVisible();
@@ -359,7 +359,7 @@ test('switches the theme and remembers it', async ({ page }) => {
 });
 
 test('shows a toast after triggering from the sessions table', async ({ page }) => {
-  await page.goto('/#/sessions');
+  await page.goto('/');
 
   await page.locator('#panel-sessions').getByRole('button', { name: '上报', exact: true }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
@@ -386,21 +386,11 @@ test('device tool tabs each show their own capability', async ({ page }) => {
   await expect(page.locator('#panel-burst')).toHaveCount(0);
 });
 
-test('loads message history on the messages page and filters it', async ({ page }) => {
-  await page.goto('/#/messages');
-
-  await page.getByRole('button', { name: '载入历史' }).click();
-  await expect(page.locator('#panel-messages').getByRole('cell', { name: 'S1F1', exact: true })).toBeVisible();
-
-  await page.locator('#panel-messages').getByPlaceholder('搜索报文体 / SxFy').fill('S9F9');
-  await expect(page.locator('#panel-messages').getByText('当前过滤条件下没有报文')).toBeVisible();
-});
-
-test('fills the CEID from the device catalog into the sessions page', async ({ page }) => {
+test('fills the CEID from the device catalog into the workbench sessions table', async ({ page }) => {
   await page.goto('/#/device/line1/catalog');
 
   await page.locator('#panel-catalog').getByRole('button', { name: '填入' }).first().click();
 
-  await openStatic(page, '会话管理', 'sessions');
+  await openStatic(page, '工作台', 'sessions');
   await expect(page.locator('#panel-sessions').locator('input[type="number"]').first()).toHaveValue('2001');
 });

@@ -18,8 +18,8 @@ export interface NoticeWire {
 export interface EventStreamHandlers {
   /** 新到的报文（暂停时会被暂存，恢复时一次性吐出）。 */
   onFlush: (messages: WireMessage[]) => void;
-  /** 状态变化。 */
-  onState: (state: StreamState, detail: string) => void;
+  /** 状态变化(需要展示连接状态的调用方才用;精简后界面不展示了)。 */
+  onState?: (state: StreamState, detail: string) => void;
   /** 需要写进事件流日志的提示（重连、票据失败等）。 */
   onNotice: (text: string) => void;
   /** 重连成功后触发：上层用它在补拉断线期间的增量报文。 */
@@ -71,7 +71,7 @@ export function useEventStream(
 
   useEffect(() => {
     if (client === null) {
-      handlersRef.current.onState('idle', '未连接');
+      handlersRef.current.onState?.('idle', '未连接');
       return;
     }
 
@@ -106,13 +106,13 @@ export function useEventStream(
 
         const source = new EventSource(client.eventsUrl(ticket));
         stream = source;
-        handlersRef.current.onState(
+        handlersRef.current.onState?.(
           openedOnce ? 'reconnecting' : 'connecting',
           openedOnce ? '重连中' : '连接中',
         );
 
         source.addEventListener('open', () => {
-          handlersRef.current.onState('connected', '已连接');
+          handlersRef.current.onState?.('connected', '已连接');
           if (openedOnce) {
             /* 断线期间 SSE 不补发，但上层会按时间戳补拉一次增量 */
             handlersRef.current.onNotice('事件流已重连：正在补拉断线期间的报文');
@@ -123,7 +123,7 @@ export function useEventStream(
 
         source.addEventListener('heartbeat', (event) => {
           const at = Number(event.data);
-          handlersRef.current.onState(
+          handlersRef.current.onState?.(
             'connected',
             Number.isFinite(at) ? `心跳 ${new Date(at).toLocaleTimeString()}` : '心跳',
           );
@@ -165,7 +165,7 @@ export function useEventStream(
 
         source.addEventListener('error', () => {
           const state = source.readyState === EventSource.CLOSED ? '已关闭' : '连接中断';
-          handlersRef.current.onState('reconnecting', `断开（${state}）`);
+          handlersRef.current.onState?.('reconnecting', `断开（${state}）`);
 
           const now = Date.now();
           if (now - lastErrorAt > 5000) {
@@ -186,7 +186,7 @@ export function useEventStream(
           lastTicketErrorAt = now;
           handlersRef.current.onNotice(`获取事件流票据失败: ${(error as Error).message}`);
         }
-        handlersRef.current.onState('reconnecting', '等待重连');
+        handlersRef.current.onState?.('reconnecting', '等待重连');
         scheduleReconnect();
       }
     };
@@ -203,23 +203,3 @@ export function useEventStream(
   }, [client]);
 }
 
-/**
- * 事件流的可见状态文案。
- *
- * <p>状态和心跳时间要能同时显示：心跳时间一直在变，
- * 塞进同一个字段会互相覆盖。</p>
- */
-export function streamStateLabel(state: StreamState, detail: string): string {
-  switch (state) {
-    case 'connected':
-      return detail === '' ? '已连接' : `已连接 · ${detail}`;
-    case 'connecting':
-      return '连接中';
-    case 'reconnecting':
-      return detail === '' ? '重连中' : `重连中 · ${detail}`;
-    case 'closed':
-      return '已关闭';
-    default:
-      return detail === '' ? '未连接' : detail;
-  }
-}

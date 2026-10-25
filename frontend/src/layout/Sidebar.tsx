@@ -1,5 +1,4 @@
 import { Icon } from '../ui/Icon';
-import type { StreamState } from '../state/useEventStream';
 import type { Route } from '../router';
 import { sameRoute } from '../router';
 import { NAV_GROUPS } from './navigation';
@@ -18,17 +17,12 @@ export interface SidebarProps {
   devices: readonly SidebarDevice[];
   /** 折叠为纯图标栏。 */
   collapsed: boolean;
-  /** 徽标计数;返回 null 表示不显示。 */
-  badgeFor: (id: string) => number | null;
   onNavigate: (route: Route) => void;
   onToggleCollapse: () => void;
   /** 后端版本号（未知给 '-'）。 */
   version: string;
   /** 后端运行形态（integrated / runtime …）。 */
   mode: string;
-  /** 事件流状态，用于侧栏底部的状态点。 */
-  streamState: StreamState;
-  streamLabel: string;
 }
 
 /**
@@ -42,17 +36,11 @@ export function Sidebar({
   route,
   devices,
   collapsed,
-  badgeFor,
   onNavigate,
   onToggleCollapse,
   version,
   mode,
-  streamState,
-  streamLabel,
 }: SidebarProps): JSX.Element {
-  const tone =
-    streamState === 'connected' ? 'ok' : streamState === 'reconnecting' ? 'warn' : streamState === 'idle' ? 'muted' : 'danger';
-
   const groupsAbove = NAV_GROUPS.filter((group) => !group.belowDevices);
   const groupsBelow = NAV_GROUPS.filter((group) => group.belowDevices);
 
@@ -60,7 +48,6 @@ export function Sidebar({
     <div className="nav-group" key={group.id}>
       {!collapsed && <div className="nav-group-title">{group.label}</div>}
       {group.items.map((item) => {
-        const badge = badgeFor(item.id);
         const active = sameRoute(item.route, route);
         return (
           <button
@@ -75,12 +62,6 @@ export function Sidebar({
               <Icon name={item.icon} size={17} />
             </span>
             {!collapsed && <span className="nav-label">{item.label}</span>}
-            {!collapsed && badge !== null && badge > 0 && (
-              <span className={`nav-badge${item.id === 'alarms' ? ' alert' : ''}`}>{badge}</span>
-            )}
-            {collapsed && badge !== null && badge > 0 && (
-              <span className={`nav-dot${item.id === 'alarms' ? ' alert' : ''}`} aria-hidden="true" />
-            )}
           </button>
         );
       })}
@@ -136,10 +117,6 @@ export function Sidebar({
       </nav>
 
       <div className="sidenav-foot">
-        <div className={`sidenav-status${collapsed ? ' icon-only' : ''}`} title={`事件流：${streamLabel}`}>
-          <span className={`conn-dot ${tone}`} />
-          {!collapsed && <span className="sidenav-status-text">{streamLabel}</span>}
-        </div>
         <button
           type="button"
           className="icon-btn sidenav-toggle"

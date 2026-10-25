@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { controlStateLabel } from '../panels/SessionsPanel';
+import { SessionsPanel } from '../panels/SessionsPanel';
 
 /**
- * 工作台（总览页）。
+ * 工作台（总览 + 会话管理）。
  *
- * <p>只做一件事:一眼看清所有设备——KPI 行 + 设备卡墙(可按关键字/状态过滤),
- * 点卡片进设备页。事件流、报文、会话管理各自是独立页面。</p>
+ * <p>只做两件事:一眼看清所有设备——KPI 行 + 设备卡墙(可按关键字/状态过滤,
+ * 点卡片进设备页);以及管理现有设备——会话管理(新建/重载/上报/批量操作)直接嵌在下方。</p>
  */
-export function WorkbenchPage({ backend, goTo, streamLabel }: PanelBaseProps): JSX.Element {
+export function WorkbenchPage({ backend, notifier, preferences, updatePreferences, goTo }: PanelBaseProps): JSX.Element {
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'online' | 'offline'>('all');
 
@@ -71,16 +72,13 @@ export function WorkbenchPage({ backend, goTo, streamLabel }: PanelBaseProps): J
           <span className="kpi-label">活动报警</span>
           <span className={`kpi-value${totals.alarms > 0 ? ' danger' : ''}`}>{totals.alarms}</span>
         </div>
-        <div className="kpi-card">
-          <span className="kpi-label">事件流</span>
-          <span className="kpi-value kpi-value-sm">{streamLabel ?? '-'}</span>
-        </div>
       </div>
 
-      {/* 过滤器 */}
-      <div className="toolbar">
+      {/* 过滤器:输入框 + 状态分段同一行,上下居中 */}
+      <div className="toolbar workbench-filter">
         <input
           type="search"
+          className="workbench-filter-input"
           placeholder="按设备 id / 名称 / 端口过滤"
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
@@ -104,7 +102,7 @@ export function WorkbenchPage({ backend, goTo, streamLabel }: PanelBaseProps): J
       {cards.length === 0 ? (
         <p className="hint">
           {rows.length === 0
-            ? '还没有设备。去「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
+            ? '还没有设备。在下方「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
             : '没有匹配过滤条件的设备。'}
         </p>
       ) : (
@@ -140,6 +138,15 @@ export function WorkbenchPage({ backend, goTo, streamLabel }: PanelBaseProps): J
           ))}
         </div>
       )}
+
+      {/* 会话管理:开设备/关设备、批量操作、手动上报 CEID */}
+      <SessionsPanel
+        backend={backend}
+        notifier={notifier}
+        preferences={preferences}
+        updatePreferences={updatePreferences}
+        goTo={goTo}
+      />
     </div>
   );
 }

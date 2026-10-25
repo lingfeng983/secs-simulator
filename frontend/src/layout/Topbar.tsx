@@ -1,15 +1,8 @@
-import type { SessionSummary } from '../api';
 import { Icon } from '../ui/Icon';
-import type { StreamState } from '../state/useEventStream';
 
 export interface TopbarProps {
   /** 顶栏标题（路由派生:分组/标题/描述）。 */
   title: { group: string; label: string; description: string };
-  streamState: StreamState;
-  streamLabel: string;
-  sessions: readonly SessionSummary[];
-  activeSession: string;
-  onSessionChange: (id: string) => void;
   refreshing: boolean;
   onRefresh: () => void;
   onOpenPalette: () => void;
@@ -27,16 +20,11 @@ export interface TopbarProps {
  * 顶栏。
  *
  * <p>左边告诉用户「现在在哪」（分组 / 面板 + 一句话说明），
- * 右边是全局动作：会话选择、刷新、命令面板、连接、日志级别、
- * 主题、密度、快捷键。图标按钮统一 32px 见方，悬停出提示。</p>
+ * 右边是全局动作：刷新、命令面板、连接、日志级别、主题、密度、快捷键。
+ * 会话切换在设备页内完成,连接状态看设备卡与子页徽标——顶栏不再重复。</p>
  */
 export function Topbar({
   title,
-  streamState,
-  streamLabel,
-  sessions,
-  activeSession,
-  onSessionChange,
   refreshing,
   onRefresh,
   onOpenPalette,
@@ -49,9 +37,6 @@ export function Topbar({
   onToggleDensity,
   onShowHelp,
 }: TopbarProps): JSX.Element {
-  const tone =
-    streamState === 'connected' ? 'ok' : streamState === 'reconnecting' ? 'warn' : streamState === 'idle' ? 'muted' : 'danger';
-
   return (
     <header className="topbar">
       <div className="page-title">
@@ -60,29 +45,7 @@ export function Topbar({
         <p className="page-desc">{title.description}</p>
       </div>
 
-      <div className="topbar-status" title={`事件流：${streamLabel}`}>
-        <span className={`conn-dot ${tone}`} />
-        <span className="topbar-status-text">{streamLabel}</span>
-      </div>
-
       <div className="topbar-actions">
-        <div className="session-picker">
-          <label htmlFor="active-session">会话</label>
-          <select
-            id="active-session"
-            value={activeSession}
-            onChange={(event) => onSessionChange(event.target.value)}
-            disabled={sessions.length === 0}
-          >
-            {sessions.length === 0 && <option value="">（无会话）</option>}
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.id}
-              </option>
-            ))}
-          </select>
-        </div>
-
         <button
           type="button"
           className="icon-btn text-btn"

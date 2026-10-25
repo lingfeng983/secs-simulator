@@ -3,14 +3,11 @@ import { useCallback, useEffect, useState } from 'react';
 /**
  * 轻量 hash 路由（零依赖,约 80 行）。
  *
- * <p>拆分后的信息架构——每个页面只做一件事：</p>
+ * <p>精简后的信息架构——每个页面只做一件事：</p>
  * <pre>
- *   #/workbench                 工作台(默认):KPI + 设备卡墙
- *   #/events                    实时事件流(全局)
- *   #/messages                  报文流(全局)
- *   #/sessions                  会话管理
+ *   #/workbench                 工作台(默认):KPI + 设备卡墙 + 会话管理
  *   #/device/{id}/{page}        设备子页(见 DEVICE_PAGES,一页一能力)
- *   #/system/{page}             系统 · audit | console
+ *   #/system/audit              系统 · 审计
  * </pre>
  *
  * <p>用 hash 而不是 history API:界面由后端静态托管,深链刷新不需要服务端
@@ -47,15 +44,11 @@ export const DEVICE_PAGE_LABELS: Record<DevicePage, string> = {
   collector: '采集',
 };
 
-/** 全局单功能页(不属于任何设备)。 */
-export type ViewPage = 'events' | 'messages' | 'sessions';
-export const VIEW_PAGES: readonly ViewPage[] = ['events', 'messages', 'sessions'];
-
-export type SystemPage = 'audit' | 'console';
+/** 全局单功能页已精简掉(events/messages/sessions 并入工作台,console 并入审计);旧 hash 一律回落工作台。 */
+export type SystemPage = 'audit';
 
 export type Route =
   | { name: 'workbench' }
-  | { name: 'view'; page: ViewPage }
   | { name: 'device'; sessionId: string; tab: DevicePage }
   | { name: 'system'; page: SystemPage };
 
@@ -71,11 +64,7 @@ export function parseHash(hash: string, legacyTab?: string): Route {
     return { name: 'device', sessionId: decodeURIComponent(parts[1]), tab };
   }
   if (parts[0] === 'system') {
-    const page: SystemPage = parts[1] === 'console' ? 'console' : 'audit';
-    return { name: 'system', page };
-  }
-  if (VIEW_PAGES.includes(parts[0] as ViewPage) && parts.length === 1) {
-    return { name: 'view', page: parts[0] as ViewPage };
+    return { name: 'system', page: 'audit' };
   }
   if (parts[0] === 'workbench') {
     return { name: 'workbench' };
@@ -88,12 +77,6 @@ function legacyRoute(tab: string | undefined): Route {
   switch (tab) {
     case 'audit':
       return { name: 'system', page: 'audit' };
-    case 'console':
-      return { name: 'system', page: 'console' };
-    case 'messages':
-      return { name: 'view', page: 'messages' };
-    case 'sessions':
-      return { name: 'view', page: 'sessions' };
     default:
       return { name: 'workbench' };
   }
@@ -104,8 +87,6 @@ export function toHash(route: Route): string {
   switch (route.name) {
     case 'workbench':
       return '#/workbench';
-    case 'view':
-      return `#/${route.page}`;
     case 'device':
       return `#/device/${encodeURIComponent(route.sessionId)}/${route.tab}`;
     case 'system':

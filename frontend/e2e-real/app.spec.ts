@@ -4,9 +4,9 @@ const token = process.env.E2E_REAL_TOKEN ?? 'e2e-token';
 
 test.skip(process.env.E2E_REAL_URL === undefined, '需要 E2E_REAL_URL 指向真实 secs-sim');
 
-/** 拆分后的单功能页面导航:会话管理页看设备列表,设备子页一页一能力。 */
+/** 精简后的导航:工作台看设备列表(含会话表),设备子页一页一能力。 */
 
-/** 打开一台设备的某个子页(先经会话管理确认设备在,再走侧栏+子页 Tab)。 */
+/** 打开一台设备的某个子页(先经工作台确认设备在,再走侧栏+子页 Tab)。 */
 async function openDevicePage(page: Page, device: string, tabLabel: string, panelId: string): Promise<void> {
   await page.locator('.sidenav .nav-group', { hasText: '设备' }).locator('.nav-item', { hasText: device }).first().click();
   await expect(page.locator('#panel-preview')).toBeVisible();
@@ -19,8 +19,8 @@ test('real backend: identity, preview, uPlot and event toggle', async ({ page })
 
   await expect(page.getByText('管理员').first()).toBeVisible();
 
-  /* 会话管理页:设备列表 */
-  await page.locator('.sidenav .nav-item', { hasText: '会话管理' }).first().click();
+  /* 工作台:会话表里的设备列表 */
+  await page.locator('.sidenav .nav-item', { hasText: '工作台' }).first().click();
   await expect(page.getByRole('cell', { name: 'demo' }).first()).toBeVisible();
 
   /* 设备页·曲线 */
