@@ -532,11 +532,12 @@ textarea::placeholder {
   min-height: 100vh;
 }
 
+/* v6:内容区自适应——两层 IA 里工作台/设备页都是"满宽仪表盘"形态,
+   居中限宽会在宽屏上留出两侧大片空白 */
 .content {
   min-width: 0;
   width: 100%;
-  max-width: 100rem;
-  margin: 0 auto;
+  max-width: none;
   padding: 1.15rem 1.5rem 3.5rem;
 }
 
@@ -1324,9 +1325,10 @@ textarea::placeholder {
   color: var(--muted);
 }
 
+/* 对比布局:只有一个序列时占满整行(auto-fit 空轨道塌缩),两个时各半 */
 .spark-pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr));
   gap: 0.6rem;
   align-items: center;
 }
@@ -2609,4 +2611,24 @@ textarea::placeholder {
 }
 .collector-chart .spark-readout {
   font-size: 11px;
+}
+
+/* v6 页面骨架:页面级纵向堆叠,吃满内容区宽度 */
+.panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+.panel-stack > .panel,
+.panel-stack > .panel-section {
+  width: 100%;
+}
+.panel-section .panel {
+  margin-bottom: 0;
+}
+
+/* 曲线行在满宽下 too 空:spark 三列的读数列自适应,画布尽量宽 */
+.sparks .spark {
+  grid-template-columns: 6rem minmax(0, 1fr) minmax(10rem, 16rem);
 }
