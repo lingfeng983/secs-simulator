@@ -149,7 +149,7 @@ export function CollectorCard({ backend, notifier, sessionId }: PanelBaseProps &
   return (
     <section className="panel-section" id="panel-collector">
       <div className="section-head">
-        <h2>S1F3 数据采集（主机侧拉取）</h2>
+        <h2>③ S1F3 数据采集（主机侧拉取）</h2>
         <span className={`badge ${state?.running ? 'tone-ok' : 'tone-muted'}`}>
           {state?.running ? '采集中' : state?.configured ? '已就绪' : '未配置'}
         </span>

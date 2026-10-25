@@ -33,11 +33,15 @@ function s2f37Sml(ceed: number): string {
 }
 
 /**
- * 主机模拟面板。
+ * 主机模拟面板——三个分区的"主机侧工作台"。
  *
- * <p>以主机角色连到选中的设备会话（loopback），补上 S2F33/35/37
- * 这类"只有主机能发"的报文的界面入口。设备只接受一个主机：
- * 真主机在线时连接会被拒（409），这是正确行为。</p>
+ * <p>以主机角色连到选中的设备(或远程 SECS),然后三件事分区做:</p>
+ * <ol>
+ *   <li>消息发送:自定义 SML + 预设(连接控制也在这里);</li>
+ *   <li>FDC Trace 数据采集:S2F23 周期采样,设备按 REPGSZ 分条回 S6F1;</li>
+ *   <li>S1F3 数据采集:主机主动轮询拉取,可编辑采集计划。</li>
+ * </ol>
+ * 设备只接受一个主机:真主机在线时连接会被拒(409),这是正确行为。</p>
  */
 export function HostSimPanel({ backend, notifier, preferences, updatePreferences }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F13 W');
@@ -46,14 +50,14 @@ export function HostSimPanel({ backend, notifier, preferences, updatePreferences
   const [result, setResult] = useState<SentMessageResult | null>(null);
   /** FDC Trace 参数：DSPER 周期 / TOTSMP 总数 / REPGSZ 每条样本数。 */
   const [fdc, setFdc] = useState({ trid: 1, dsper: 1000, totsmp: 100, repgsz: 10, svids: [] as number[] });
-  /** 连接目标(v6):默认本机设备;远程手填 host/port/deviceId。 */
+  /** 连接目标:默认本机设备;远程手填 host/port/deviceId。 */
   const [remoteMode, setRemoteMode] = useState(false);
   const [remoteTarget, setRemoteTarget] = useState({ host: '', port: '5000', deviceId: '0' });
 
   const { sessions, activeSession, hostSimOpen, hostSimTarget, openHostSim, closeHostSim, sendHostSml } = backend;
+  const disabled = activeSession === '';
   /** 采集卡需要的完整入参(会话已由页面钉住)。 */
   const propsForCollector = { backend, notifier, preferences, updatePreferences, sessionId: activeSession };
-  const disabled = activeSession === '';
 
   useEffect(() => {
     setResult(null);
@@ -106,7 +110,7 @@ export function HostSimPanel({ backend, notifier, preferences, updatePreferences
     <Panel
       id="panel-hostsim"
       title="主机模拟"
-      description="以主机角色连到选中的设备：FDC Trace 编排、S1F3 数据采集,以及只有主机能发的报文。"
+      description="以主机角色连到设备后分三件事:消息发送、FDC Trace(S2F23→S6F1)与 S1F3 数据采集。"
       actions={
         hostSimOpen ? (
           <button
@@ -135,93 +139,117 @@ export function HostSimPanel({ backend, notifier, preferences, updatePreferences
         <p className="hint">先在顶部选择一个会话。</p>
       ) : (
         <>
-          {/* 连接目标(v6):本机默认,可切远程;远程时 catalog 不可用,SVID 全手填 */}
-          {!hostSimOpen && (
-            <div className="form-row hostsim-target">
-              <label className="check-inline">
-                <input
-                  type="checkbox"
-                  checked={remoteMode}
-                  onChange={(event) => setRemoteMode(event.target.checked)}
-                />
-                连接其他 SECS（远程）
-              </label>
-              {remoteMode && (
-                <>
-                  <label className="field">
-                    主机
-                    <input
-                      value={remoteTarget.host}
-                      onChange={(event) => setRemoteTarget({ ...remoteTarget, host: event.target.value })}
-                      placeholder="如 192.168.1.50"
-                    />
-                  </label>
-                  <label className="field">
-                    端口
-                    <input
-                      value={remoteTarget.port}
-                      onChange={(event) => setRemoteTarget({ ...remoteTarget, port: event.target.value })}
-                      inputMode="numeric"
-                    />
-                  </label>
-                  <label className="field">
-                    Device ID
-                    <input
-                      value={remoteTarget.deviceId}
-                      onChange={(event) => setRemoteTarget({ ...remoteTarget, deviceId: event.target.value })}
-                      inputMode="numeric"
-                    />
-                  </label>
-                </>
-              )}
+          {/* ① 消息发送:自定义 + 预设(连接目标也在这区) */}
+          <section className="panel-section">
+            <div className="section-head">
+              <h2>① 消息发送（自定义 + 预设）</h2>
+              {hostSimOpen && <span className="badge tone-ok">已连接 {hostSimTarget}</span>}
             </div>
-          )}
-          <p className="hint">
-            {hostSimOpen
-              ? `已连接 ${hostSimTarget}（主机角色）。`
-              : remoteMode
-                ? '远程模式:没有本机 catalog,S2F23/预设里的 SVID 需按远端设备手填。'
-                : '未连接。点「连接设备」以主机角色接入该会话的 HSMS 端口；设备已有真主机时会被拒绝。'}
-          </p>
-          <div className="preview-controls">
-            {HOST_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
+            {!hostSimOpen && (
+              <div className="form-row hostsim-target">
+                <label className="check-inline">
+                  <input
+                    type="checkbox"
+                    checked={remoteMode}
+                    onChange={(event) => setRemoteMode(event.target.checked)}
+                  />
+                  连接其他 SECS（远程）
+                </label>
+                {remoteMode && (
+                  <>
+                    <label className="field">
+                      主机
+                      <input
+                        value={remoteTarget.host}
+                        onChange={(event) => setRemoteTarget({ ...remoteTarget, host: event.target.value })}
+                        placeholder="如 192.168.1.50"
+                      />
+                    </label>
+                    <label className="field">
+                      端口
+                      <input
+                        value={remoteTarget.port}
+                        onChange={(event) => setRemoteTarget({ ...remoteTarget, port: event.target.value })}
+                        inputMode="numeric"
+                      />
+                    </label>
+                    <label className="field">
+                      Device ID
+                      <input
+                        value={remoteTarget.deviceId}
+                        onChange={(event) => setRemoteTarget({ ...remoteTarget, deviceId: event.target.value })}
+                        inputMode="numeric"
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+            <p className="hint">
+              {hostSimOpen
+                ? '已以主机角色连接。下面的报文都以主机方向发送。'
+                : remoteMode
+                  ? '远程模式:没有本机 catalog,S2F23/预设里的 SVID 需按远端设备手填。'
+                  : '未连接。点右上「连接设备」以主机角色接入该会话的 HSMS 端口；设备已有真主机时会被拒绝。'}
+            </p>
+            <div className="preview-controls">
+              {HOST_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  disabled={!hostSimOpen}
+                  title={preset.hint}
+                  onClick={() => setDraft(preset.sml)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              <PresetSelect
                 disabled={!hostSimOpen}
-                title={preset.hint}
-                onClick={() => setDraft(preset.sml)}
+                ariaLabel="更多主机预设"
+                groups={[
+                  {
+                    label: 'S2F37 启停事件（CEID 列表可再改）',
+                    items: [
+                      { label: 'S2F37 停用事件', value: s2f37Sml(0) },
+                      { label: 'S2F37 启用事件', value: s2f37Sml(1) },
+                    ],
+                  },
+                ]}
+                onPick={setDraft}
+              />
+              <button
+                type="button"
+                className="primary"
+                disabled={!hostSimOpen || busy || draft.trim() === ''}
+                onClick={() => void onSend()}
               >
-                {preset.label}
+                {busy ? '发送中…' : '发送（主机）'}
               </button>
-            ))}
-            <PresetSelect
-              disabled={!hostSimOpen}
-              ariaLabel="更多主机预设"
-              groups={[
-                {
-                  label: 'S2F37 启停事件（CEID 列表可再改）',
-                  items: [
-                    { label: 'S2F37 停用事件', value: s2f37Sml(0) },
-                    { label: 'S2F37 启用事件', value: s2f37Sml(1) },
-                  ],
-                },
-              ]}
-              onPick={setDraft}
+            </div>
+            <textarea
+              className="sml-editor"
+              spellCheck={false}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={'S2F33 W\n<L\n  <U4 0>\n  <U4 3002>\n  <L\n    <L\n      <U4 3002>\n      <L <U4 1001> <U4 1004>>\n    >\n  >\n>.'}
+              aria-label="主机角色 SML 报文内容"
             />
-            <button
-              type="button"
-              className="primary"
-              disabled={!hostSimOpen || busy || draft.trim() === ''}
-              onClick={() => void onSend()}
-            >
-              {busy ? '发送中…' : '发送（主机）'}
-            </button>
-          </div>
-          {/* FDC Trace 编排：S2F23 周期采样(数据生成→S6F1 分条上报) */}
-          <div className="template-card">
-            <div className="template-head">
-              <h4 style={{ margin: 0 }}>FDC Trace 编排（S2F23 → S6F1）</h4>
+            {result !== null && (
+              <SmlResult header={`发送 ${activeSession}(主机)  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`} result={result} peerLabel="设备" />
+            )}
+            <p className="hint">
+              S2F33 定义报告（DATAID、RPTID、变量列表）、S2F35 链接事件（CEID→RPTID）、
+              S2F37 启停事件（CEED、CEID 列表）。「事件设置」页的定义来源会变成"主机"，
+              事件编排的启停状态也会跟着变。
+            </p>
+          </section>
+
+          {/* ② FDC Trace 数据采集:设备主动推 S6F1 */}
+          <section className="panel-section">
+            <div className="section-head">
+              <h2>② FDC Trace 数据采集（S2F23 → S6F1）</h2>
+              <span className="hint-inline">设备按 DSPER 采样、REPGSZ 分条上报 S6F1</span>
             </div>
             <div className="form-row">
               <label className="field">
@@ -263,7 +291,7 @@ export function HostSimPanel({ backend, notifier, preferences, updatePreferences
               type="button"
               className="primary"
               disabled={!hostSimOpen || fdc.svids.length === 0}
-              title="生成 S2F23 并以主机角色发送；设备按 DSPER 采样、REPGSZ 分条回 S6F1"
+              title="生成 S2F23 并填入①的编辑框;再点「发送（主机）」下发"
               onClick={() => {
                 const NL = String.fromCharCode(10);
                 const list = fdc.svids.map((id) => '      <U4 ' + id + '>').join(NL);
@@ -281,33 +309,15 @@ export function HostSimPanel({ backend, notifier, preferences, updatePreferences
                 );
               }}
             >
-              生成 S2F23（再点发送）
+              生成 S2F23（填入①的编辑框）
             </button>
             <p className="hint">
               DSPER 是 hhmmss 六位数字（整秒）：周期 ms 会收敛到最近的整秒、最小 1 秒。
-              采样数据流到「报文」面板的 S6F1；会话表的 S6F1 列显示已发帧数。
-              TOTSMP=0 用于提前终止该 TRID。
+              采样数据流到 S6F1,会话表的 S6F1 列显示已发帧数;TOTSMP=0 用于提前终止该 TRID。
             </p>
-          </div>
+          </section>
 
-          <textarea
-            className="sml-editor"
-            spellCheck={false}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={'S2F33 W\n<L\n  <U4 0>\n  <U4 3002>\n  <L\n    <L\n      <U4 3002>\n      <L <U4 1001> <U4 1004>>\n    >\n  >\n>.'}
-            aria-label="主机角色 SML 报文内容"
-          />
-          {result !== null && (
-            <SmlResult header={`发送 ${activeSession}(主机)  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`} result={result} peerLabel="设备" />
-          )}
-          <p className="hint">
-            S2F33 定义报告（DATAID、RPTID、变量列表）、S2F35 链接事件（CEID→RPTID）、
-            S2F37 启停事件（CEED、CEID 列表）。事件编排页的报告管理会显示来源变成"主机"，
-            事件编排的启停状态也会跟着变。
-          </p>
-
-          {/* S1F3 数据采集:主动编辑采集计划,与 FDC Trace 同属主机模拟 */}
+          {/* ③ S1F3 数据采集:主机主动拉取(自带分区外壳) */}
           <CollectorCard {...propsForCollector} />
         </>
       )}

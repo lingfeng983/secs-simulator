@@ -77,6 +77,7 @@ async function mockApi(page: Page): Promise<void> {
               device: 'LINE1',
               units: 1,
               lastError: '',
+              config: 'line1.json',
               counters: {},
             },
           ],
@@ -220,10 +221,10 @@ async function openStatic(page: Page, label: string, panelId: string): Promise<v
   await expect(page.locator(`#panel-${panelId}`)).toBeVisible();
 }
 
-/** 打开一台设备(默认落事件子页)。 */
+/** 打开一台设备(默认落事件设置子页)。 */
 async function openDevice(page: Page, device: string): Promise<void> {
   await page.locator('.sidenav .nav-group', { hasText: '设备' }).locator('.nav-item', { hasText: device }).first().click();
-  await expect(page.locator('#panel-events')).toBeVisible();
+  await expect(page.locator('#panel-ceids')).toBeVisible();
 }
 
 /** 切设备子页。 */
@@ -236,27 +237,29 @@ test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
 
-test('lands on the workbench and opens a device events page', async ({ page }) => {
+test('lands on the workbench and opens a device from the table', async ({ page }) => {
   await page.goto('/');
 
-  /* 默认落在工作台:品牌、KPI、设备卡与会话管理都在 */
+  /* 默认落在工作台:品牌、KPI、设备总览表与会话管理都在 */
   await expect(page.locator('.brand-name')).toContainText('SECS Simulator');
   await expect(page.getByText('在线设备').first()).toBeVisible();
-  await expect(page.locator('.device-card')).toHaveCount(1);
   await expect(page.locator('#panel-sessions')).toBeVisible();
+  const deviceTable = page.locator('[data-table="workbench-devices"], .table-scroll table').first();
+  await expect(deviceTable.getByRole('cell', { name: 'LINE1', exact: true })).toBeVisible();
 
-  /* 设备卡进设备页·事件(默认子页) */
-  await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '事件' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#panel-events').getByRole('cell', { name: 'beat' })).toBeVisible();
+  /* 点表格行进设备页·事件设置(默认子页) */
+  await page.locator('tr', { hasText: 'LINE1' }).first().click();
+  await expect(page.getByRole('tab', { name: '事件设置' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#panel-ceids').getByRole('cell', { name: 'TEMP_HIGH' })).toBeVisible();
 });
 
-test('opens a config and adds a curve through the structured editor', async ({ page }) => {
+test('auto-opens the device config and adds a curve through the structured editor', async ({ page }) => {
   await page.goto('/#/device/line1/config');
 
   const configSection = page.locator('#panel-config');
   await expect(configSection).toBeVisible();
-  await configSection.getByRole('combobox', { name: '选择配置' }).selectOption('line1.json');
+  /* 本设备的配置(line1.json)自动打开,不用手选 */
+  await expect(configSection.getByText(/已打开本设备的配置 line1\.json/)).toBeVisible();
   await expect(page.getByText('模板（结构化编辑）')).toBeVisible();
 
   await page.getByRole('button', { name: '+ 曲线' }).click();
@@ -316,7 +319,7 @@ test('opens the command palette and jumps to a device', async ({ page }) => {
   await expect(palette.getByText('打开设备 LINE1')).toBeVisible();
   await palette.getByText('打开设备 LINE1').click();
 
-  await expect(page.getByRole('tab', { name: '事件' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '事件设置' })).toBeVisible();
 });
 
 test('switches the theme and remembers it', async ({ page }) => {
@@ -342,9 +345,18 @@ test('shows a toast after triggering from the sessions table', async ({ page }) 
 
 test('device subpages each show their own capability', async ({ page }) => {
   await page.goto('/');
+  await openDevice(page, 'LINE1');
+  await expect(page.getByRole('tab', { name: '事件设置' })).toBeVisible();
 
-  await page.locator('.device-card', { hasText: 'LINE1' }).click();
-  await expect(page.getByRole('tab', { name: '事件' })).toBeVisible();
+  /* 事件设置:CEID/报告 CRUD + 压测上报 */
+  const ceids = page.locator('#panel-ceids');
+  await expect(ceids.getByRole('button', { name: '新增事件' })).toBeVisible();
+  await expect(ceids.getByRole('button', { name: '新增报告' })).toBeVisible();
+  await expect(ceids.getByRole('button', { name: '开始压测' })).toBeVisible();
+
+  /* 事件编排:计划 CRUD */
+  await openDeviceTab(page, '事件编排', 'events');
+  await expect(page.locator('#panel-events').getByRole('button', { name: '新增计划' })).toBeVisible();
 
   /* 发送页:单发 + 压测发送同框 */
   await openDeviceTab(page, '发送', 'send');
@@ -356,24 +368,18 @@ test('device subpages each show their own capability', async ({ page }) => {
   await expect(page.locator('#panel-alarms').getByRole('button', { name: '置位', exact: true })).toBeVisible();
   await expect(page.locator('#panel-alarms').getByRole('button', { name: '报警风暴' })).toBeVisible();
 
-  /* 主机模拟页:FDC Trace + S1F3 采集合并 */
+  /* 主机模拟页:三面板分区 */
   await openDeviceTab(page, '主机模拟', 'hostsim');
-  await expect(page.getByText('FDC Trace 编排（S2F23 → S6F1）')).toBeVisible();
-  await expect(page.locator('#panel-collector')).toBeVisible();
-  await expect(page.getByText('S1F3 数据采集（主机侧拉取）')).toBeVisible();
-
-  /* 事件页:计划 CRUD + 报告管理 + 压测上报 */
-  await openDeviceTab(page, '事件', 'events');
-  await expect(page.locator('#panel-events').getByRole('button', { name: '新增计划' })).toBeVisible();
-  await expect(page.locator('#panel-events').getByRole('button', { name: '新增报告' })).toBeVisible();
-  await expect(page.locator('#panel-events').getByRole('button', { name: '开始压测' })).toBeVisible();
+  await expect(page.getByText('① 消息发送（自定义 + 预设）')).toBeVisible();
+  await expect(page.getByText('② FDC Trace 数据采集（S2F23 → S6F1）')).toBeVisible();
+  await expect(page.getByText('③ S1F3 数据采集（主机侧拉取）')).toBeVisible();
 });
 
-test('events page offers ceid burst with catalog datalist', async ({ page }) => {
-  await page.goto('/#/device/line1/events');
+test('ceids page offers burst with catalog datalist', async ({ page }) => {
+  await page.goto('/#/device/line1/ceids');
 
-  const events = page.locator('#panel-events');
-  await events.getByPlaceholder('如 2001').fill('2001');
-  await events.getByRole('button', { name: '开始压测' }).click();
+  const ceids = page.locator('#panel-ceids');
+  await ceids.getByPlaceholder('如 2001').fill('2001');
+  await ceids.getByRole('button', { name: '开始压测' }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
 });

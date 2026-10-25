@@ -599,6 +599,60 @@ paths:
       responses:
         '200': { description: 已删除 }
         '404': { description: 会话或计划不存在 }
+  /api/v1/sessions/{id}/ceids:
+    post:
+      tags: [control]
+      summary: 新增采集事件（运行时;CEID 重复回 409）
+      x-required-role: operator
+      description: '事件 JSON:{"id","slot","reports":[RPTID...],"owner"?}。绑定报告属于事件设置页。'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: string }
+      responses:
+        '201': { description: 已新增 }
+        '400': { description: 定义不合法(原因在 error) }
+        '404': { description: 会话不存在 }
+        '409': { description: CEID 已存在 }
+  /api/v1/sessions/{id}/ceids/{ceid}:
+    put:
+      tags: [control]
+      summary: 更新采集事件（事件名/绑定报告）
+      x-required-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ceid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: 已更新 }
+        '404': { description: 会话或事件不存在 }
+    delete:
+      tags: [control]
+      summary: 删除采集事件
+      x-required-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ceid
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: 已删除 }
+        '404': { description: 会话或事件不存在 }
   /api/v1/sessions/{id}/reports:
     post:
       tags: [control]

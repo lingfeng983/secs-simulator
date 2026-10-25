@@ -58,4 +58,15 @@ public record ResolvedEquipment(String name, int deviceId,
     public ResolvedEquipment withReports(Map<Integer, ResolvedReport> reports) {
         return new ResolvedEquipment(this.name, this.deviceId, this.svids, reports, this.ceids, this.unitByCeid);
     }
+
+    /**
+     * 派生一份只换 CEID 表(及其归属)的模型（运行时增删改事件用）。
+     *
+     * @param ceids      新的 CEID 表
+     * @param unitByCeid 新的 CEID 归属表
+     * @return 新模型
+     */
+    public ResolvedEquipment withCeids(Map<Integer, ResolvedCeid> ceids, Map<Integer, String> unitByCeid) {
+        return new ResolvedEquipment(this.name, this.deviceId, this.svids, this.reports, ceids, unitByCeid);
+    }
 }

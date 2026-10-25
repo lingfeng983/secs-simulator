@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.shimizukenta.jsonhub.JsonHub;
+import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.domain.ValueType;
@@ -115,6 +116,27 @@ public final class RuntimeEdits {
             svids.add((int) item.longValue());
         }
         return new ResolvedReport(id, owner, slot, svids);
+    }
+
+    /**
+     * 解析采集事件:{"id","slot","reports":[...],"owner"?}。
+     *
+     * @param json JSON 文本
+     * @return 事件定义
+     */
+    public static ResolvedCeid parseCeid(String json) {
+        JsonHub root = JsonHub.fromJson(json);
+        int id = (int) root.get("id").longValue();
+        String slot = requireString(root, "slot");
+        String owner = root.containsKey("owner") ? root.get("owner").optionalString().orElse("") : "";
+        if (!root.containsKey("reports") || !root.get("reports").isArray()) {
+            throw new IllegalArgumentException("事件缺少 reports 数组(可为空)");
+        }
+        List<Integer> reports = new ArrayList<>();
+        for (JsonHub item : root.get("reports")) {
+            reports.add((int) item.longValue());
+        }
+        return new ResolvedCeid(id, owner, slot, reports);
     }
 
     /**

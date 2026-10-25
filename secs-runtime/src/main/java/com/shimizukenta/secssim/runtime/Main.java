@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
@@ -447,7 +448,40 @@ public final class Main {
 
         @Override
         public String sessionsJson() {
-            return SessionsJson.render(this.sessions.list());
+            /* 包一层带配置名:配置页要用它自动打开本设备的配置文件 */
+            List<SessionRuntime> decorated = new ArrayList<>();
+            for (SessionRuntime session : this.sessions.list()) {
+                final String config = this.launcher.sourceOf(session.id())
+                        .map(path -> path.getFileName().toString())
+                        .orElse("");
+                decorated.add(new SessionRuntime() {
+                    @Override public String id() { return session.id(); }
+                    @Override public void open() throws IOException { session.open(); }
+                    @Override public void close() { session.close(); }
+                    @Override public SessionState state() { return session.state(); }
+                    @Override public String lastError() { return session.lastError(); }
+                    @Override public String deviceName() { return session.deviceName(); }
+                    @Override public String configName() { return config; }
+                    @Override public int unitCount() { return session.unitCount(); }
+                    @Override public boolean hasPeer() { return session.hasPeer(); }
+                    @Override public java.util.Map<String, Long> counters() { return session.counters(); }
+                    @Override public com.shimizukenta.secssim.app.session.EquipmentControlState controlState() { return session.controlState(); }
+                    @Override public String eventsJson() { return session.eventsJson(); }
+                    @Override public String overviewJson() { return session.overviewJson(); }
+                    @Override public boolean setEventEnabled(String planId, boolean enabled) { return session.setEventEnabled(planId, enabled); }
+                    @Override public String previewJson(long fromMs, long toMs, int buckets) { return session.previewJson(fromMs, toMs, buckets); }
+                    @Override public String previewJson(long fromMs, long toMs, int buckets, java.util.Set<Integer> svids, boolean withEvents) { return session.previewJson(fromMs, toMs, buckets, svids, withEvents); }
+                    @Override public byte[] previewBinary(long fromMs, long toMs, int buckets) { return session.previewBinary(fromMs, toMs, buckets); }
+                    @Override public void emitCeid(int ceid) throws IOException { session.emitCeid(ceid); }
+                    @Override public void emitAlarm(int alid, boolean set, String text, int category) throws IOException { session.emitAlarm(alid, set, text, category); }
+                    @Override public String sendSml(String sml) throws IOException { return session.sendSml(sml); }
+                    @Override public com.shimizukenta.secssim.app.session.HsmsConnectionTarget hostTarget() { return session.hostTarget(); }
+                    @Override public String alarmsJson() { return session.alarmsJson(); }
+                    @Override public String terminalMessagesJson() { return session.terminalMessagesJson(); }
+                    @Override public String catalogJson() { return session.catalogJson(); }
+                });
+            }
+            return SessionsJson.render(decorated);
         }
 
         @Override
@@ -627,6 +661,33 @@ public final class Main {
                 return 404;
             }
             return session.updateReport(RuntimeEdits.parseReport(reportJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int addCeid(String sessionId, String ceidJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.addCeid(RuntimeEdits.parseCeid(ceidJson)) ? 201 : 409;
+        }
+
+        @Override
+        public int updateCeid(String sessionId, int ceid, String ceidJson) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.updateCeid(RuntimeEdits.parseCeid(ceidJson)) ? 200 : 404;
+        }
+
+        @Override
+        public int removeCeid(String sessionId, int ceid) {
+            SessionRuntime session = sessionOr404(sessionId);
+            if (session == null) {
+                return 404;
+            }
+            return session.removeCeid(ceid) ? 200 : 404;
         }
 
         @Override

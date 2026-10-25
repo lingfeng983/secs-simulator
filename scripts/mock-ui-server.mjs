@@ -11,7 +11,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const json = (res, obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
 const session = {
-  id: 'line1', state: 'OPEN', controlState: 'ONLINE', device: 'LINE1', units: 1, lastError: '', counters: {},
+  id: 'line1', state: 'OPEN', controlState: 'ONLINE', device: 'LINE1', units: 1, lastError: '', config: 'line1.json', counters: {},
 };
 
 http.createServer(async (req, res) => {

@@ -37,6 +37,7 @@ public final class SessionsJson {
                     b.pair("state", session.state().name()),
                     b.pair("controlState", session.controlState().name()),
                     b.pair("device", session.deviceName()),
+                    b.pair("config", session.configName()),
                     b.pair("units", session.unitCount()),
                     b.pair("lastError", session.lastError() == null ? "" : session.lastError()),
                     b.pair("counters", countersJson(session.counters(), b))));

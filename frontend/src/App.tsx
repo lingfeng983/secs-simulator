@@ -105,7 +105,7 @@ export function App(): JSX.Element {
         return;
       }
       if (id.startsWith('device:')) {
-        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'events' });
+        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'ceids' });
         return;
       }
       switch (id) {
@@ -125,7 +125,7 @@ export function App(): JSX.Element {
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
             const legacy = id === 'preview' || id === 'catalog' ? 'svids' : id === 'burst' ? 'send' : id === 'collector' ? 'hostsim' : id;
-            const tab = (DEVICE_PAGES as readonly string[]).includes(legacy) ? (legacy as DevicePage) : 'events';
+            const tab = (DEVICE_PAGES as readonly string[]).includes(legacy) ? (legacy as DevicePage) : 'ceids';
             navigate({ name: 'device', sessionId, tab });
           } else {
             navigate({ name: 'workbench' });
@@ -174,7 +174,7 @@ export function App(): JSX.Element {
         run: () => goTo(`device:${session.id}`),
       });
       for (const tab of DEVICE_PAGES) {
-        if (tab === 'events') {
+        if (tab === 'ceids') {
           continue;
         }
         items.push({

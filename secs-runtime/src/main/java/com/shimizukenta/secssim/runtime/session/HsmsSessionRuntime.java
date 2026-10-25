@@ -754,6 +754,58 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * 运行时新增采集事件；CEID 重复返回 {@code false}。
+     *
+     * @param def 事件定义
+     * @return 是否成功
+     */
+    public synchronized boolean addCeid(ResolvedCeid def) {
+        if (this.model.ceids().containsKey(def.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedCeid> ceids = new java.util.HashMap<>(this.model.ceids());
+        java.util.Map<Integer, String> unitByCeid = new java.util.HashMap<>(this.model.unitByCeid());
+        ceids.put(def.id(), def);
+        unitByCeid.putIfAbsent(def.id(), def.owner());
+        refreshModelViews(this.model.withCeids(ceids, unitByCeid));
+        return true;
+    }
+
+    /**
+     * 运行时更新采集事件(符号名/绑定报告)。
+     *
+     * @param def 事件定义
+     * @return 是否成功
+     */
+    public synchronized boolean updateCeid(ResolvedCeid def) {
+        if (!this.model.ceids().containsKey(def.id())) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedCeid> ceids = new java.util.HashMap<>(this.model.ceids());
+        ceids.put(def.id(), def);
+        refreshModelViews(this.model.withCeids(ceids, this.model.unitByCeid()));
+        return true;
+    }
+
+    /**
+     * 运行时删除采集事件。
+     *
+     * @param ceid 绝对 CEID
+     * @return 是否删除了事件
+     */
+    public synchronized boolean removeCeid(int ceid) {
+        if (!this.model.ceids().containsKey(ceid)) {
+            return false;
+        }
+        java.util.Map<Integer, ResolvedCeid> ceids = new java.util.HashMap<>(this.model.ceids());
+        ceids.remove(ceid);
+        java.util.Map<Integer, String> unitByCeid = new java.util.HashMap<>(this.model.unitByCeid());
+        unitByCeid.remove(ceid);
+        refreshModelViews(this.model.withCeids(ceids, unitByCeid));
+        return true;
+    }
+
+    /**
      * 运行时新增状态变量；SVID 重复返回 {@code false}。
      *
      * <p>新变量绑定恒 0 曲线（界面上用「设定」钉住实际值）。</p>
@@ -955,7 +1007,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                         Thread.currentThread().interrupt();
                         this.lastError = "等待 S6F12 被中断: " + ceid;
                     } catch (Exception e) {
-                        this.lastError = e.toString();
+                        recordError(e);
                         Log.error("会话 " + this.spec.id() + " 等待 S6F12 失败: " + ceid, e);
                     }
                 });
@@ -1066,7 +1118,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     Thread.currentThread().interrupt();
                     this.lastError = "等待 S5F2 被中断: ALID " + alid;
                 } catch (Exception e) {
-                    this.lastError = e.toString();
+                    recordError(e);
                     Log.error("会话 " + this.spec.id() + " 等待 S5F2 失败: ALID " + alid, e);
                 }
             });
@@ -1146,7 +1198,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             this.state.set(SessionState.OPEN);
             this.startTicker();
         } catch (IOException | RuntimeException e) {
-            this.lastError = e.toString();
+            recordError(e);
             this.state.set(SessionState.FAILED);
             throw e;
         }
@@ -1174,7 +1226,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         try {
             comm.close();
         } catch (IOException e) {
-            this.lastError = e.toString();
+            recordError(e);
         } finally {
             this.communicator = null;
             this.state.set(SessionState.CLOSED);
@@ -1330,6 +1382,35 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.state.get();
     }
 
+    /**
+     * 把异常记为会话错误。
+     *
+     * <p>对端超时(W 位等 T3/T5 没等到回复)不算会话故障——报文已发出,
+     * 只是主机没回;把它钉在 lastError 上,设备页会一直飘着一行红色,
+     * 看起来像设备坏了。这类异常只进计数,不进 lastError。</p>
+     *
+     * @param e 异常
+     */
+    private static boolean isPeerTimeout(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SecsWaitReplyMessageException) {
+                return true;
+            }
+            String name = cause.getClass().getName();
+            if (name.contains("HsmsSsTimeout")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void recordError(Exception e) {
+        if (isPeerTimeout(e)) {
+            return;
+        }
+        this.lastError = e.toString();
+    }
+
     @Override
     public String lastError() {
         return this.lastError;
@@ -1391,7 +1472,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             /* AfterEvent 可能在同一 tick 内到期，甚至级联到下一层 */
             this.pumpPending(now);
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             Log.error("会话 " + this.spec.id() + " 事件上报失败", e);
         }
     }
@@ -1425,7 +1506,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             try {
                 active = condition.expression().evaluate(name -> this.conditionVariable(name, nowMs)) != 0.0;
             } catch (RuntimeException e) {
-                this.lastError = e.toString();
+                recordError(e);
                 if (this.conditionErrorLogged.add(plan.id())) {
                     Log.error("会话 " + this.spec.id() + " 条件表达式失败: plan " + plan.id(), e);
                 }
@@ -1463,7 +1544,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             this.emitCeid(ceid);
             this.recordFire(planId, atMs);
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             Log.error("会话 " + this.spec.id() + " 计划触发失败: plan " + planId, e);
         }
     }
@@ -1663,7 +1744,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
             replyUnsupported(primary);
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             Log.error("会话 " + this.spec.id() + " 处理报文失败", e);
         }
     }
@@ -1693,7 +1774,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             }
             this.s9Replies.incrementAndGet();
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             Log.error("会话 " + this.spec.id() + " 回复 S9Fx 失败", e);
         }
     }
@@ -1729,7 +1810,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             }
             this.terminalReceived.incrementAndGet();
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             ack = ACKC10.MessageWillNotBeDisplayed;
             Log.error("会话 " + this.spec.id() + " 处理 S10F3 失败", e);
         }
@@ -1742,7 +1823,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
              */
             this.communicator.send(primary, 10, 4, false, ack.secs2());
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             Log.error("会话 " + this.spec.id() + " 回复 S10F4 失败", e);
         }
     }
@@ -1920,7 +2001,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
             return true;
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             return false;
         }
     }
@@ -2015,7 +2096,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         try {
             eac = this.applyConstants(primary.secs2());
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             eac = 2;
         }
 
@@ -2063,7 +2144,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             try {
                 pair = pairs.get(i);
             } catch (Exception e) {
-                this.lastError = e.toString();
+                recordError(e);
                 return 2;
             }
 
@@ -2077,7 +2158,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 ecid = Secs2Read.asInt(pair.get(0));
                 value = pair.get(1).getDouble(0);
             } catch (Exception e) {
-                this.lastError = e.toString();
+                recordError(e);
                 return 2;
             }
 
@@ -2180,7 +2261,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 hcack = 0;
             }
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             hcack = 1;
         }
 
@@ -2213,7 +2294,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 }
             }
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             code = 1;
         }
 
@@ -2339,7 +2420,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 }
             }
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             code = 1;
         }
 
@@ -2361,7 +2442,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
             this.hostReports.setEnabled(enabled, ceids);
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             code = 1;
         }
 
@@ -2454,7 +2535,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         try {
             ack = this.initializeTrace(primary.secs2());
         } catch (Exception e) {
-            this.lastError = e.toString();
+            recordError(e);
             ack = TraceManager.TIAACK_INVALID_PERIOD;
         }
 
@@ -2507,7 +2588,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                             Thread.currentThread().interrupt();
                             this.lastError = "等待 S6F2 被中断: TRID " + frame.trid();
                         } catch (Exception e) {
-                            this.lastError = e.toString();
+                            recordError(e);
                             Log.error("会话 " + this.spec.id() + " 等待 S6F2 失败", e);
                         }
                     });
@@ -2518,7 +2599,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this.traceWbitDropped.incrementAndGet();
                 Log.error("会话 " + this.spec.id() + " S6F1 ACK 队列已满", e);
             } catch (Exception e) {
-                this.lastError = e.toString();
+                recordError(e);
                 Log.error("会话 " + this.spec.id() + " 发送 S6F1 失败", e);
             }
         }

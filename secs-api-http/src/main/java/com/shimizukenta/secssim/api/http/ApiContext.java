@@ -320,6 +320,21 @@ public interface ApiContext {
         return 404;
     }
 
+    /** 新增采集事件;ceidJson 形如 {"id","slot","reports":[...]}。 */
+    default int addCeid(String sessionId, String ceidJson) {
+        return 404;
+    }
+
+    /** 更新采集事件(符号名/绑定报告)。 */
+    default int updateCeid(String sessionId, int ceid, String ceidJson) {
+        return 404;
+    }
+
+    /** 删除采集事件。 */
+    default int removeCeid(String sessionId, int ceid) {
+        return 404;
+    }
+
     /** 新增状态变量;svidJson 形如 {"id","slot","type","owner"?,"unit"?}。 */
     default int addSvid(String sessionId, String svidJson) {
         return 404;

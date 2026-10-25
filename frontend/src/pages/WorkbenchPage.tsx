@@ -1,38 +1,29 @@
 import { useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
-import { controlStateLabel } from '../panels/SessionsPanel';
-import { SessionsPanel } from '../panels/SessionsPanel';
+import { controlStateLabel, SessionsPanel } from '../panels/SessionsPanel';
+import { DataTable, type Column } from '../ui/DataTable';
+import type { OverviewRow } from '../api';
 
 /**
  * 工作台（总览 + 会话管理）。
  *
- * <p>只做两件事:一眼看清所有设备——KPI 行 + 设备卡墙(可按关键字/状态过滤,
- * 点卡片进设备页);以及管理现有设备——会话管理(新建/重载/上报/批量操作)直接嵌在下方。</p>
+ * <p>只做两件事:一张设备总览表——所有设备的速率/报警/状态一目了然,
+ * 点行进设备页;以及管理现有设备——会话管理(新建/重载/上报/批量操作)直接嵌在下方。</p>
  */
 export function WorkbenchPage({ backend, notifier, preferences, updatePreferences, goTo }: PanelBaseProps): JSX.Element {
-  const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'online' | 'offline'>('all');
 
   const rows = backend.overview;
 
-  const cards = useMemo(() => {
-    const keyword = filter.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (keyword !== ''
-        && !row.id.toLowerCase().includes(keyword)
-        && !row.device.toLowerCase().includes(keyword)
-        && !String(row.port).includes(keyword)) {
-        return false;
-      }
-      if (stateFilter === 'online' && !(row.controlState === 'ONLINE')) {
-        return false;
-      }
-      if (stateFilter === 'offline' && row.controlState === 'ONLINE') {
-        return false;
-      }
-      return true;
-    });
-  }, [rows, filter, stateFilter]);
+  const visible = useMemo(() => rows.filter((row) => {
+    if (stateFilter === 'online' && row.controlState !== 'ONLINE') {
+      return false;
+    }
+    if (stateFilter === 'offline' && row.controlState === 'ONLINE') {
+      return false;
+    }
+    return true;
+  }), [rows, stateFilter]);
 
   const totals = useMemo(() => {
     let msgs = 0;
@@ -50,7 +41,54 @@ export function WorkbenchPage({ backend, notifier, preferences, updatePreference
     return { msgs, events, alarms, online };
   }, [rows]);
 
-  const maxRate = Math.max(1, ...rows.map((row) => row.s6f11PerMin));
+  const columns: Column<OverviewRow>[] = [
+    {
+      key: 'device',
+      header: '设备',
+      sortValue: (row) => row.device,
+      render: (row) => (
+        <button type="button" className="link" onClick={() => goTo?.(`device:${row.id}`)} title="进入设备页">
+          {row.device}
+        </button>
+      ),
+    },
+    {
+      key: 'state',
+      header: '状态',
+      sortValue: (row) => row.controlState,
+      render: (row) => (
+        <span className={`badge tone-${row.controlState === 'ONLINE' ? 'ok' : row.controlState === 'COMMUNICATING' ? 'warn' : 'muted'}`}>
+          {controlStateLabel(row.controlState)}
+        </span>
+      ),
+    },
+    { key: 'id', header: '会话', sortValue: (row) => row.id, render: (row) => <span className="mono">{row.id}</span> },
+    { key: 'port', header: '端口', align: 'right', sortValue: (row) => row.port, render: (row) => <span className="mono">:{row.port}</span> },
+    { key: 'units', header: '单元', align: 'right', sortValue: (row) => row.units },
+    {
+      key: 'hostSim',
+      header: '角色',
+      sortValue: (row) => (row.hostSim ? '主机模拟' : '设备'),
+      render: (row) => (row.hostSim ? <span className="badge tone-info">主机模拟</span> : <span className="hint-inline">设备</span>),
+    },
+    { key: 'msgs', header: '报文/分钟', align: 'right', sortValue: (row) => row.msgsPerMin, render: (row) => row.msgsPerMin },
+    { key: 'events', header: '事件/分钟', align: 'right', sortValue: (row) => row.s6f11PerMin, render: (row) => row.s6f11PerMin },
+    {
+      key: 'alarms',
+      header: '活动报警',
+      align: 'right',
+      sortValue: (row) => row.counters.activeAlarms ?? 0,
+      render: (row) => (
+        <span className={(row.counters.activeAlarms ?? 0) > 0 ? 'danger' : ''}>{row.counters.activeAlarms ?? 0}</span>
+      ),
+    },
+    {
+      key: 'lastEvent',
+      header: '最近事件',
+      sortValue: (row) => row.lastEventAt,
+      render: (row) => (row.lastEventAt > 0 ? new Date(row.lastEventAt).toLocaleTimeString() : '—'),
+    },
+  ];
 
   return (
     <div className="panel-stack">
@@ -74,70 +112,44 @@ export function WorkbenchPage({ backend, notifier, preferences, updatePreference
         </div>
       </div>
 
-      {/* 过滤器:输入框 + 状态分段同一行,上下居中 */}
-      <div className="toolbar workbench-filter">
-        <input
-          type="search"
-          className="workbench-filter-input"
-          placeholder="按设备 id / 名称 / 端口过滤"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          aria-label="设备过滤"
-        />
-        <div className="segmented" role="tablist">
-          {([['all', '全部'], ['online', '在线'], ['offline', '离线']] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={stateFilter === value ? 'active' : ''}
-              onClick={() => setStateFilter(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 设备卡墙 */}
-      {cards.length === 0 ? (
-        <p className="hint">
-          {rows.length === 0
-            ? '还没有设备。在下方「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
-            : '没有匹配过滤条件的设备。'}
-        </p>
-      ) : (
-        <div className="device-grid">
-          {cards.map((row) => (
-            <button key={row.id} type="button" className="device-card" onClick={() => goTo?.(`device:${row.id}`)}>
-              <div className="device-card-head">
-                <span className="device-card-title">{row.device}</span>
-                <span className={`badge tone-${row.controlState === 'ONLINE' ? 'ok' : row.controlState === 'COMMUNICATING' ? 'warn' : 'muted'}`}>
-                  {controlStateLabel(row.controlState)}
-                </span>
-              </div>
-              <div className="device-card-sub">
-                <span>{row.id}</span>
-                <span>:{row.port}</span>
-                <span>{row.units} 单元</span>
-                {row.hostSim ? <span className="badge tone-info">主机模拟</span> : null}
-              </div>
-              <div className="device-card-stats">
-                <span title="报文/分钟">✉ {row.msgsPerMin}/min</span>
-                <span title="事件/分钟">⚡ {row.s6f11PerMin}/min</span>
-                <span className={(row.counters.activeAlarms ?? 0) > 0 ? 'danger' : ''} title="活动报警">
-                  ⚠ {row.counters.activeAlarms ?? 0}
-                </span>
-              </div>
-              <div className="device-card-bar" aria-hidden>
-                <span style={{ width: `${Math.round((row.s6f11PerMin / maxRate) * 100)}%` }} />
-              </div>
-              <div className="device-card-foot">
-                最近事件:{row.lastEventAt > 0 ? new Date(row.lastEventAt).toLocaleTimeString() : '—'}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* 设备总览表:一行一台设备,点行进设备页 */}
+      <DataTable
+        tableKey="workbench-devices"
+        columns={columns}
+        rows={visible}
+        rowKey={(row) => row.id}
+        searchPlaceholder="搜索设备 / 会话 / 端口"
+        exportName="devices"
+        toolbar={
+          <div className="segmented" role="tablist">
+            {([['all', '全部'], ['online', '在线'], ['offline', '离线']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={stateFilter === value ? 'active' : ''}
+                onClick={() => setStateFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+        emptyText={rows.length === 0
+          ? '还没有设备。在下方「会话管理」从一份配置开一台,或重启后端加 --demo-session 看两台内置演示设备。'
+          : '没有匹配过滤条件的设备。'}
+        exportColumns={[
+          { header: '设备', value: (row) => row.device },
+          { header: '状态', value: (row) => controlStateLabel(row.controlState) },
+          { header: '会话', value: (row) => row.id },
+          { header: '端口', value: (row) => row.port },
+          { header: '单元', value: (row) => row.units },
+          { header: '报文/分钟', value: (row) => row.msgsPerMin },
+          { header: '事件/分钟', value: (row) => row.s6f11PerMin },
+          { header: '活动报警', value: (row) => row.counters.activeAlarms ?? 0 },
+          { header: '最近事件', value: (row) => (row.lastEventAt > 0 ? new Date(row.lastEventAt).toISOString() : '') },
+        ]}
+        onRowClick={(row) => goTo?.(`device:${row.id}`)}
+      />
 
       {/* 会话管理:开设备/关设备、批量操作、手动上报 CEID */}
       <SessionsPanel

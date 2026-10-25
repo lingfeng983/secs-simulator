@@ -1558,7 +1558,8 @@ public final class HttpApiServer implements AutoCloseable {
 
         /* 运行时编辑:编排计划 / 报告 / 状态变量的增删改与值设定(设备页)。
            POST events/{planId} 是既有的启停切换,仍走后面的老分支。 */
-        boolean editSub = "events".equals(parts[1]) || "reports".equals(parts[1]) || "svids".equals(parts[1]);
+        boolean editSub = "events".equals(parts[1]) || "reports".equals(parts[1])
+                || "svids".equals(parts[1]) || "ceids".equals(parts[1]);
         if (parts.length >= 2 && editSub
                 && ("PUT".equals(method) || "DELETE".equals(method)
                     || (parts.length == 2 && "POST".equals(method)))) {
@@ -1995,6 +1996,32 @@ public final class HttpApiServer implements AutoCloseable {
                     int rptid = pathInt(parts[2]);
                     int status = this.context.removeReport(sessionId, rptid);
                     audit(ex, "report-delete", sessionId, "rptid=" + rptid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+            }
+
+            /* ---- 采集事件(事件设置页) ---- */
+            if ("ceids".equals(sub)) {
+                if (parts.length == 2 && "POST".equals(method)) {
+                    String body = requireBody(ex);
+                    int status = this.context.addCeid(sessionId, body);
+                    audit(ex, "ceid-add", sessionId, "status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "PUT".equals(method)) {
+                    String body = requireBody(ex);
+                    int ceid = pathInt(parts[2]);
+                    int status = this.context.updateCeid(sessionId, ceid, body);
+                    audit(ex, "ceid-update", sessionId, "ceid=" + ceid + " status=" + status);
+                    respondStatus(ex, status);
+                    return;
+                }
+                if (parts.length == 3 && "DELETE".equals(method)) {
+                    int ceid = pathInt(parts[2]);
+                    int status = this.context.removeCeid(sessionId, ceid);
+                    audit(ex, "ceid-delete", sessionId, "ceid=" + ceid + " status=" + status);
                     respondStatus(ex, status);
                     return;
                 }

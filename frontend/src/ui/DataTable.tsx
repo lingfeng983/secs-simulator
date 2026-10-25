@@ -43,6 +43,8 @@ export interface DataTableProps<T> {
   caption?: string;
   /** 表格标识；给了就启用列宽拖拽，并把列宽记进 localStorage。 */
   tableKey?: string;
+  /** 行点击(下钻);给了就整行可点、指针变手型。 */
+  onRowClick?: (row: T) => void;
 }
 
 /**
@@ -67,6 +69,7 @@ export function DataTable<T>({
   pageSize,
   caption,
   tableKey,
+  onRowClick,
 }: DataTableProps<T>): JSX.Element {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
@@ -256,7 +259,12 @@ export function DataTable<T>({
             </thead>
             <tbody>
               {visible.map((row) => (
-                <tr key={rowKey(row)} className={rowClassName?.(row)}>
+                <tr
+                  key={rowKey(row)}
+                  className={rowClassName?.(row)}
+                  onClick={onRowClick === undefined ? undefined : () => onRowClick(row)}
+                  style={onRowClick === undefined ? undefined : { cursor: 'pointer' }}
+                >
                   {columns.map((column) => (
                     <td
                       key={column.key}

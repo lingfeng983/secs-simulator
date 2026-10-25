@@ -55,6 +55,8 @@ export interface SessionSummary {
   device: string;
   units: number;
   lastError: string;
+  /** 装载时用的配置文件名;演示会话等无来源时为空串(配置页自动打开用)。 */
+  config?: string;
   counters: Counters;
 }
 
@@ -138,6 +140,13 @@ export interface ReportInput {
   id: number;
   slot: string;
   svids: number[];
+}
+
+/** 新增/更新采集事件的输入(reports 是绑定的 RPTID 列表)。 */
+export interface CeidInput {
+  id: number;
+  slot: string;
+  reports: number[];
 }
 
 /** 新增/更新状态变量的输入。 */
@@ -427,6 +436,12 @@ export interface ApiClient {
   updateSvid(sessionId: string, svid: number, def: SvidInput): Promise<number>;
   /** 运行时删除状态变量。 */
   deleteSvid(sessionId: string, svid: number): Promise<number>;
+  /** 运行时新增采集事件(事件设置页)。 */
+  addCeid(sessionId: string, ceid: CeidInput): Promise<number>;
+  /** 运行时更新采集事件(符号名/绑定报告)。 */
+  updateCeid(sessionId: string, ceid: number, def: CeidInput): Promise<number>;
+  /** 运行时删除采集事件。 */
+  deleteCeid(sessionId: string, ceid: number): Promise<number>;
   /** 「设定」状态变量的值(钉住,覆盖曲线与事件效果)。 */
   setSvidValue(sessionId: string, svid: number, value: number): Promise<number>;
   /** 取消「设定」。 */
@@ -710,6 +725,25 @@ export function createClient(): ApiClient {
     },
     async deleteSvid(sessionId, svid) {
       return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
+        method: 'DELETE',
+      }));
+    },
+    async addCeid(sessionId, ceid) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(ceid),
+      }));
+    },
+    async updateCeid(sessionId, ceid, def) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(def),
+      }));
+    },
+    async deleteCeid(sessionId, ceid) {
+      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
         method: 'DELETE',
       }));
     },

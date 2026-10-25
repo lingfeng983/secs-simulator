@@ -100,7 +100,7 @@ export function Sidebar({
                 key={device.id}
                 type="button"
                 className={`nav-item${active ? ' active' : ''}`}
-                onClick={() => onNavigate({ name: 'device', sessionId: device.id, tab: 'events' })}
+                onClick={() => onNavigate({ name: 'device', sessionId: device.id, tab: 'ceids' })}
                 aria-current={active ? 'page' : undefined}
                 title={collapsed ? `${device.label}（${device.online ? '在线' : '离线'}）` : undefined}
               >

@@ -55,6 +55,15 @@ public interface SessionRuntime {
     }
 
     /**
+     * 本会话装载时用的配置文件名（配置页自动打开用）；演示会话等无来源时为空串。
+     *
+     * @return 配置文件名;未知为 {@code ""}
+     */
+    default String configName() {
+        return "";
+    }
+
+    /**
      * 单元数量。
      *
      * @return 数量，未知时为 0
@@ -181,6 +190,36 @@ public interface SessionRuntime {
      * @return 成功返回 {@code true};报告不存在或不支持返回 {@code false}
      */
     default boolean removeReport(int rptid) {
+        return false;
+    }
+
+    /**
+     * 运行时新增采集事件。
+     *
+     * @param def 事件定义
+     * @return 成功返回 {@code true};CEID 重复或不支持返回 {@code false}
+     */
+    default boolean addCeid(com.shimizukenta.secssim.core.compile.ResolvedCeid def) {
+        return false;
+    }
+
+    /**
+     * 运行时更新采集事件。
+     *
+     * @param def 事件定义
+     * @return 成功返回 {@code true};事件不存在或不支持返回 {@code false}
+     */
+    default boolean updateCeid(com.shimizukenta.secssim.core.compile.ResolvedCeid def) {
+        return false;
+    }
+
+    /**
+     * 运行时删除采集事件。
+     *
+     * @param ceid 绝对 CEID
+     * @return 成功返回 {@code true};事件不存在或不支持返回 {@code false}
+     */
+    default boolean removeCeid(int ceid) {
         return false;
     }
 

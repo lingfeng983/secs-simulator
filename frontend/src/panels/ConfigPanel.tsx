@@ -47,6 +47,29 @@ export function ConfigPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     void backend.configTemplates().then(setTemplates);
   }, [backend]);
 
+  /* 自动打开本设备的配置:进了设备页·配置,不该再让用户自己找文件。
+     会话列表或配置列表没就绪就等下一拍;演示会话没有来源则保持手选。 */
+  const sessionConfig = backend.sessions.find((session) => session.id === backend.activeSession)?.config ?? '';
+  useEffect(() => {
+    if (configName !== '' || sessionConfig === '' || !configList.some((entry) => entry.name === sessionConfig)) {
+      return;
+    }
+    setBusy(true);
+    void backend.readConfig(sessionConfig).then((snapshot) => {
+      if (snapshot !== null) {
+        setConfigName(sessionConfig);
+        setDraft(snapshot.text);
+        setBaseline(snapshot.text);
+        setLoadedMs(snapshot.modifiedMs);
+        setProblems([]);
+        setNotice(`已打开本设备的配置 ${sessionConfig}`);
+      }
+      setBusy(false);
+    });
+    // 只在"会话配置名/目录"就绪时自动开一次;用户手动关掉或切换后(configName 变化)不再抢
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionConfig, configList]);
+
   /** 编辑区里的内容相对磁盘有没有变。 */
   const dirty = draft !== baseline;
 

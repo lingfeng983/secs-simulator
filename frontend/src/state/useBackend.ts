@@ -19,7 +19,7 @@ import {
   type TerminalMessage,
 } from '../api';
 import { mergeMessages, type MessageEntry } from '../messageHistory';
-import type { EventPlanInput, ReportInput, SvidInput } from '../api';
+import type { CeidInput, EventPlanInput, ReportInput, SvidInput } from '../api';
 import { ceidFromS6f11Body } from '../lib/format';
 import type { NoticeWire } from './useEventStream';
 import type { Notifier } from './useToasts';
@@ -153,6 +153,10 @@ export interface BackendController {
   updateEventPlan: (planId: string, plan: EventPlanInput) => Promise<boolean>;
   deleteEventPlan: (planId: string) => Promise<boolean>;
   addReport: (report: ReportInput) => Promise<boolean>;
+  /** 运行时新增采集事件(事件设置页)。 */
+  addCeid: (ceid: CeidInput) => Promise<boolean>;
+  updateCeid: (ceid: number, def: CeidInput) => Promise<boolean>;
+  deleteCeid: (ceid: number) => Promise<boolean>;
   updateReport: (rptid: number, report: ReportInput) => Promise<boolean>;
   deleteReport: (rptid: number) => Promise<boolean>;
   addSvid: (def: SvidInput) => Promise<boolean>;
@@ -483,6 +487,19 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     (planId: string) => runEdit('删除编排', '已删除编排计划', () => client!.deleteEventPlan(activeSession, planId)),
     [runEdit],
   );
+  const addCeid = useCallback(
+    (ceid: CeidInput) => runEdit('新增事件', '已新增采集事件', () => client!.addCeid(activeSession, ceid)),
+    [runEdit, activeSession],
+  );
+  const updateCeid = useCallback(
+    (ceid: number, def: CeidInput) => runEdit('更新事件', '已更新采集事件', () => client!.updateCeid(activeSession, ceid, def)),
+    [runEdit, activeSession],
+  );
+  const deleteCeid = useCallback(
+    (ceid: number) => runEdit('删除事件', '已删除采集事件', () => client!.deleteCeid(activeSession, ceid)),
+    [runEdit, activeSession],
+  );
+
   const addReport = useCallback(
     (report: ReportInput) => runEdit('新增报告', '已新增报告', () => client!.addReport(activeSession, report)),
     [runEdit],
@@ -998,6 +1015,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       addEventPlan,
       updateEventPlan,
       deleteEventPlan,
+      addCeid,
+      updateCeid,
+      deleteCeid,
       addReport,
       updateReport,
       deleteReport,
@@ -1063,6 +1083,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       addEventPlan,
       updateEventPlan,
       deleteEventPlan,
+      addCeid,
+      updateCeid,
+      deleteCeid,
       addReport,
       updateReport,
       deleteReport,

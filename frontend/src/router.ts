@@ -17,20 +17,22 @@ import { useCallback, useEffect, useState } from 'react';
 
 /** 设备子页:一个能力一页。曲线预览并入「状态变量」的逐变量预览;压测拆并到发送/报警/事件;采集并入主机模拟。 */
 export type DevicePage =
-  | 'events'     // 事件编排(计划 CRUD + 报告管理 + 触发/压测) + 本设备实时事件
+  | 'ceids'      // 事件设置:采集事件(CEID)与报告的增删改 + 压测上报
+  | 'events'     // 事件编排:引用已设置的事件做计划(增删改/启停/触发) + 本设备实时事件
   | 'alarms'     // 报警与终端 + 报警风暴
   | 'svids'      // 状态变量:增删改查 + 曲线预览 + 值设定
-  | 'config'     // 配置编辑
+  | 'config'     // 配置编辑(自动打开本设备的配置)
   | 'send'       // SML 发送 + 自定义消息压测
-  | 'hostsim';   // 主机模拟:FDC Trace + S1F3 采集
+  | 'hostsim';   // 主机模拟:消息 + FDC Trace + S1F3 采集
 
 export const DEVICE_PAGES: readonly DevicePage[] = [
-  'events', 'alarms', 'svids', 'config', 'send', 'hostsim',
+  'ceids', 'events', 'alarms', 'svids', 'config', 'send', 'hostsim',
 ];
 
 /** 设备子页的中文名（设备页子导航与命令面板用）。 */
 export const DEVICE_PAGE_LABELS: Record<DevicePage, string> = {
-  events: '事件',
+  ceids: '事件设置',
+  events: '事件编排',
   alarms: '报警',
   svids: '状态变量',
   config: '配置',
@@ -54,7 +56,7 @@ export function parseHash(hash: string, legacyTab?: string): Route {
   }
   const parts = text.split('/').filter((piece) => piece !== '');
   if (parts[0] === 'device' && parts[1] !== undefined && parts[1] !== '') {
-    const tab = DEVICE_PAGES.includes(parts[2] as DevicePage) ? (parts[2] as DevicePage) : 'events';
+    const tab = DEVICE_PAGES.includes(parts[2] as DevicePage) ? (parts[2] as DevicePage) : 'ceids';
     return { name: 'device', sessionId: decodeURIComponent(parts[1]), tab };
   }
   if (parts[0] === 'system') {

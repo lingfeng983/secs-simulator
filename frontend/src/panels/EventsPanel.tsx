@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { EventEffectInput, EventPlanInput, EventPlanView, ReportInput } from '../api';
+import type { EventEffectInput, EventPlanInput, EventPlanView } from '../api';
 import { Panel, PanelFootnote } from '../ui/Panel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { Modal } from '../ui/Modal';
@@ -46,21 +46,12 @@ const EMPTY_PLAN: EventPlanInput = {
   effects: [],
 };
 
-const EMPTY_REPORT: ReportInput = { id: 0, slot: '', svids: [] };
-
-/** 报告表格的行(来自目录)。 */
-interface ReportRow {
-  rptid: number;
-  slot: string;
-  svids: number[];
-}
-
 /**
  * 事件编排面板。
  *
- * <p>运行时编辑:<b>新增 / 编辑 / 删除</b>计划(含效果)、启停、按计划手动触发、
- * 对某个 CEID 压测上报;报告(RPTID)归属于事件,也在这里增删改。
- * 这些改的是<b>运行时状态</b>,不写回配置;重载会话后按配置恢复。</p>
+ * <p>从「事件设置」页已定义的事件里选 CEID 做计划:<b>新增 / 编辑 / 删除</b>
+ * (含效果)、启停、手动触发。这些改的是<b>运行时状态</b>,不写回配置;
+ * 重载会话后按配置恢复。</p>
  */
 export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const { eventPlans, catalog, activeSession } = backend;
@@ -73,24 +64,8 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
   const [planBusy, setPlanBusy] = useState(false);
   const [deletePlanId, setDeletePlanId] = useState<string | null>(null);
 
-  /* 压测上报 */
-  const [burstCeid, setBurstCeid] = useState('');
-  const [burstCount, setBurstCount] = useState('100');
-  const [burstInterval, setBurstInterval] = useState('0');
-  const [burstRunning, setBurstRunning] = useState(false);
-
-  /* 报告编辑 */
-  const [reportEditorOpen, setReportEditorOpen] = useState(false);
-  const [editingReportId, setEditingReportId] = useState<number | null>(null);
-  const [reportDraft, setReportDraft] = useState<ReportInput>(EMPTY_REPORT);
-  const [deleteReportId, setDeleteReportId] = useState<number | null>(null);
-
   const ceidChoices = catalog?.ceids ?? [];
   const svidChoices = catalog?.svids ?? [];
-  const reportRows: ReportRow[] = useMemo(
-    () => (catalog?.reports ?? []).map((report) => ({ rptid: report.rptid, slot: report.slot, svids: [...report.svids] })),
-    [catalog],
-  );
 
   const columns: Column<EventPlanView>[] = [
     { key: 'id', header: '计划', sortValue: (row) => row.id, render: (row) => <span className="mono">{row.id}</span> },
@@ -178,93 +153,19 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     }
   };
 
-  const runBurst = async () => {
-    const ceid = Number.parseInt(burstCeid, 10);
-    const count = Number.parseInt(burstCount, 10);
-    if (!Number.isFinite(ceid) || ceid < 1) {
-      notifier.error('CEID 必须是正整数');
-      return;
-    }
-    if (!Number.isFinite(count) || count < 1 || count > 5000) {
-      notifier.error('次数要在 1..5000 之间');
-      return;
-    }
-    setBurstRunning(true);
-    try {
-      const stats = await backend.burst(activeSession, {
-        kind: 'ceid',
-        ceid,
-        count,
-        intervalMs: Number.parseInt(burstInterval, 10) || 0,
-      });
-      notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
-    } catch (error) {
-      notifier.error(`压测失败: ${(error as Error).message}`);
-    } finally {
-      setBurstRunning(false);
-    }
-  };
 
-  const saveReport = async () => {
-    if (!Number.isFinite(reportDraft.id) || reportDraft.id < 1) {
-      notifier.error('RPTID 必须是正整数');
-      return;
-    }
-    if (reportDraft.slot.trim() === '') {
-      notifier.error('报告名不能为空');
-      return;
-    }
-    setPlanBusy(true);
-    try {
-      const ok = editingReportId === null
-        ? await backend.addReport({ ...reportDraft, slot: reportDraft.slot.trim() })
-        : await backend.updateReport(editingReportId, { ...reportDraft, slot: reportDraft.slot.trim() });
-      if (ok) {
-        setReportEditorOpen(false);
-      }
-    } finally {
-      setPlanBusy(false);
-    }
-  };
 
   const svidHint = useMemo(
     () => new Map(svidChoices.map((choice) => [choice.svid, `${choice.owner}.${choice.slot}`])),
     [svidChoices],
   );
 
-  const reportColumns: Column<ReportRow>[] = [
-    { key: 'rptid', header: 'RPTID', align: 'right', sortValue: (row) => row.rptid, render: (row) => <span className="mono">{row.rptid}</span> },
-    { key: 'slot', header: '名称', sortValue: (row) => row.slot, render: (row) => row.slot },
-    { key: 'svids', header: '变量', sortValue: (row) => row.svids.length, render: (row) => <span className="mono">{row.svids.join(', ')}</span> },
-    {
-      key: 'actions',
-      header: '操作',
-      render: (row) => (
-        <div className="row-actions">
-          <button
-            type="button"
-            onClick={() => {
-              setEditingReportId(row.rptid);
-              setReportDraft({ id: row.rptid, slot: row.slot, svids: [...row.svids] });
-              setReportEditorOpen(true);
-            }}
-            title="编辑报告的变量列表"
-          >
-            编辑
-          </button>
-          <button type="button" className="danger" onClick={() => setDeleteReportId(row.rptid)} title="删除报告">
-            删除
-          </button>
-        </div>
-      ),
-    },
-  ];
 
   return (
     <Panel
       id="panel-events"
       title="事件编排"
-      description="计划的增删改、启停、手动触发与压测;报告(RPTID)归属于事件,一并管理。运行时改动不写回配置。"
+      description="引用「事件设置」里已定义的 CEID 做计划:增删改、启停、手动触发。运行时改动不写回配置。"
       actions={
         <button
           type="button"
@@ -296,81 +197,10 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
         这里改的是<b>运行时状态</b>，不写回配置；重载会话会恢复配置里的编排。
       </p>
 
-      {/* 压测上报 */}
-      <h3 className="sub-title">压测上报</h3>
-      <div className="toolbar">
-        <label className="field">
-          CEID
-          <input
-            value={burstCeid}
-            onChange={(event) => setBurstCeid(event.target.value)}
-            list="events-ceid-choices"
-            inputMode="numeric"
-            placeholder="如 2001"
-          />
-        </label>
-        <datalist id="events-ceid-choices">
-          {ceidChoices.map((choice) => (
-            <option key={choice.ceid} value={choice.ceid}>
-              {choice.slot}
-            </option>
-          ))}
-        </datalist>
-        <label className="field">
-          次数
-          <input value={burstCount} onChange={(event) => setBurstCount(event.target.value)} inputMode="numeric" />
-        </label>
-        <label className="field">
-          间隔 ms
-          <input value={burstInterval} onChange={(event) => setBurstInterval(event.target.value)} inputMode="numeric" title="0 = 全速" />
-        </label>
-        <button
-          type="button"
-          className="primary"
-          disabled={activeSession === '' || burstRunning}
-          onClick={() => void runBurst()}
-          title="在服务端循环上报同一个 CEID(走手动上报路径,不受 events.maxPerSec 限制)"
-        >
-          {burstRunning ? '压测中…' : '开始压测'}
-        </button>
-      </div>
-
-      {/* 报告管理 */}
-      <div className="section-head" style={{ marginTop: '0.75rem' }}>
-        <h3 className="sub-title">报告（RPTID）</h3>
-        <button
-          type="button"
-          disabled={activeSession === ''}
-          onClick={() => {
-            setEditingReportId(null);
-            setReportDraft({ ...EMPTY_REPORT });
-            setReportEditorOpen(true);
-          }}
-          title="新增一个报告"
-        >
-          新增报告
-        </button>
-      </div>
-      <DataTable
-        tableKey="event-reports"
-        columns={reportColumns}
-        rows={reportRows}
-        rowKey={(row) => String(row.rptid)}
-        searchPlaceholder="搜索 RPTID / 名称 / 变量"
-        exportName="event-reports"
-        emptyText="该设备还没有报告定义——点「新增报告」创建"
-        exportColumns={[
-          { header: 'RPTID', value: (row) => row.rptid },
-          { header: '名称', value: (row) => row.slot },
-          { header: '变量', value: (row) => row.svids.join(', ') },
-        ]}
-      />
-
       <PanelFootnote
         items={[
           { label: '计划数', value: eventPlans.length },
           { label: '启用中', value: enabled, tone: enabled > 0 ? 'ok' : undefined },
-          { label: '报告数', value: reportRows.length },
         ]}
       />
 
@@ -612,51 +442,6 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
         ))}
       </Modal>
 
-      {/* 报告编辑弹窗 */}
-      <Modal
-        open={reportEditorOpen}
-        title={editingReportId === null ? '新增报告' : `编辑报告 RPTID ${editingReportId}`}
-        onClose={() => setReportEditorOpen(false)}
-        footer={
-          <>
-            <button type="button" onClick={() => setReportEditorOpen(false)}>取消</button>
-            <button type="button" className="primary" disabled={planBusy} onClick={() => void saveReport()}>保存</button>
-          </>
-        }
-      >
-        <div className="form-row">
-          <label className="field">
-            RPTID
-            <input
-              type="number"
-              min={1}
-              value={reportDraft.id}
-              onChange={(event) => setReportDraft({ ...reportDraft, id: Number(event.target.value) || 0 })}
-              disabled={editingReportId !== null}
-            />
-          </label>
-          <label className="field">
-            名称
-            <input
-              value={reportDraft.slot}
-              onChange={(event) => setReportDraft({ ...reportDraft, slot: event.target.value })}
-              placeholder="如 TEMP_REPORT"
-            />
-          </label>
-          <label className="field field-wide">
-            变量列表（逗号分隔的 SVID）
-            <input
-              value={reportDraft.svids.join(', ')}
-              onChange={(event) => setReportDraft({
-                ...reportDraft,
-                svids: event.target.value.split(/[,\s]+/).map((piece) => Number.parseInt(piece, 10)).filter((value) => Number.isFinite(value) && value > 0),
-              })}
-              placeholder="如 1001, 1003"
-            />
-          </label>
-        </div>
-      </Modal>
-
       {/* 删除确认 */}
       <ConfirmModal
         open={deletePlanId !== null}
@@ -670,20 +455,6 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
             void backend.deleteEventPlan(deletePlanId);
           }
           setDeletePlanId(null);
-        }}
-      />
-      <ConfirmModal
-        open={deleteReportId !== null}
-        title="删除报告"
-        danger
-        confirmLabel="删除"
-        message={deleteReportId === null ? '' : `确定删除报告 RPTID ${deleteReportId}?`}
-        onClose={() => setDeleteReportId(null)}
-        onConfirm={() => {
-          if (deleteReportId !== null) {
-            void backend.deleteReport(deleteReportId);
-          }
-          setDeleteReportId(null);
         }}
       />
     </Panel>
