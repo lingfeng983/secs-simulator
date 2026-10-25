@@ -149,3 +149,89 @@ Schema v5 = Schema v4 + `templates` 段。设备、ID 空间、事件编排的�
 唯一的变化是整份文件的缩进/空行会统一成 2 空格。
 EAC 取值：`0` 全部接受、`1` 有未知 ECID、`2` 值越界或形状非法、
 `3` 未 ONLINE。**整批不生效**，不做部分写入。
+
+## Schema v6 增补（2026-10）
+
+Schema v6 = v5 + 两类**可选**字段：事件效果（`events.plans[].effects`）与
+SVID 直配值来源（`svids[].curve | svids[].template`）。v4/v5 配置零改动即是
+合法 v6；`SCHEMA_VERSION=6`、`MIN_SCHEMA_VERSION=4` 不变。
+
+### 事件效果 effects
+
+`events.plans[]` 可选 `effects` 数组——**以事件为中心**声明"这个 CEID 触发时,
+哪些 SVID 的值怎么变"。手动触发（HTTP）、定时/条件/链式触发统一生效；
+效果在组装 S6F11 **之前**施加,因此事件报文里带的就是变化后的值。
+
+| op | 必填字段 | 可选字段 | 语义 |
+|---|---|---|---|
+| `set` | `value` | `decayMs` | 改写为 value;带 decayMs 时线性衰减回"施加前的组合值" |
+| `add` / `shift` | `delta` | — | 相对基线抬升/下降,持续生效直到 resume 或热重载 |
+| `pulse` | `value`、`holdMs` | — | 瞬时跳变,保持 holdMs 后自动回落 |
+| `resume` | —（且**不允许**带任何字段） | — | 清除该 SVID 的全部活动效果 |
+
+约束（编译期校验,与「校验」按钮同一条路）：
+
+- `svid` 必须在设备模型里存在（`UNKNOWN_EFFECT_SVID`）；
+- 数值类型支持全部 op;BOOLEAN 只支持 `set`(0/1) 与 `resume`；
+  ASCII/BINARY 只支持 `resume`（`EFFECT_TYPE_MISMATCH`）；
+- 多余字段一律拒绝（写错键名不会静默无效）。
+
+运行时值 = 基线曲线（模板图或默认曲线）+ 活动效果按施加顺序叠加。
+手动触发产生的效果只存在于运行时内存,**无法被预览重放**——
+预览是"配置的确定性影子"（下一节）。
+
+### SVID 直配值来源
+
+`equipment.units[].svids[]` 与 `equipment.globalSvids[]` 的每个 SVID 可选配：
+
+```jsonc
+{ "offset": 1, "slot": "TEMP_PV", "type": "F4", "min": 0, "max": 400,
+  "curve":   { "type": "randomWalk", "start": 180, "sigma": 2.5, "min": 0, "max": 400 } }
+// 或
+{ "offset": 2, "slot": "PRESS", "type": "F4",
+  "template": "chamber-press", "output": "V", "params": { "base": 1.2 } }
+```
+
+- `curve` 与 `template` **二选一**（同写报错）；`output`/`params` 只能搭配 `template`；
+- 曲线对象的形状与 `templates.curves[]` 完全一致（去掉 id）；
+- **单写者规则**：同一 SVID 在 `templates.instances` 绑定与直配中只能出现一次——
+  直配在编译期合成为匿名模板实例（id `@svid:<n>` / `@curve:<n>`）,
+  冲突由模板图统一报出；
+- 直配引用的模板必须存在；组合模板多输出时必须用 `output` 指定；
+- 非数值类型（ASCII/BOOLEAN/BINARY）不能直配（`SOURCE_TYPE_MISMATCH`）。
+
+### 值来源的整体语义
+
+- 配置里**没有任何**自定义值来源（templates 段为空且无直配）→ 全部走
+  `DefaultCurves` 默认曲线（数值有界随机游走、UNIT_ID 常量、BOOLEAN 常量 1）；
+- 有**任意一个**（templates 或直配）→ 模板图驱动,未绑定值来源的 SVID 取 0
+  （与 v5 模板语义一致）。
+
+### 预览的事件标记（确定性影子）
+
+`GET /api/v1/preview` 与 `POST /api/v1/config-preview` 返回体新增：
+
+- `events: [{at, ceid, planId}]`——窗口内的确定性事件时间线
+  （periodic/at 按种子重放、onCondition 按 tick 求值、afterEvent 链），
+  且**模拟出的效果已叠加进曲线**：草稿状态下就能看到"事件导致跳变"；
+- 查询参数 `svids=401,402`（只画这几条）、`withEvents=false`（关闭标记）。
+
+### 内置默认设备配置
+
+`--work-dir` 首启播种两份开箱即用的 v6 配置（幂等不覆盖,删掉重启即恢复）：
+
+- `demo-etch.json`——双腔刻蚀机：effects（pulse/set+decay/shift/BOOLEAN set）、
+  OnCondition 闭环（超温→停加热）、每 SVID 直配曲线/模板混用;
+- `demo-cvd.json`——CVD：`templates.instances` 组合模板 + 参数、
+  一对适合做 S1F3 采集启停的 CEID（2001/2002）。
+
+`--demo-session` 直接开这两台（端口取 `--hsms-port` 与 +1,deviceId 错开）。
+
+### 主机模拟（运行时能力,不占 schema）
+
+- `POST /api/v1/sessions/{id}/host-sim` 请求体可选
+  `{"target": {"host": "..", "port": 5000, "deviceId": 0}}`——缺省连本机,
+  给了连远程 SECS（远程无 catalog,SVID/CEID 全手填）；
+- 采集器：`PUT/POST /api/v1/sessions/{id}/host-sim/collector`（配置
+  startCeid/stopCeid/intervalMs/svids）、`.../collector/start|stop`（手动）、
+  `GET .../collector`（状态 + series 数据,按应答项格式码解码,零元数据可画图）。

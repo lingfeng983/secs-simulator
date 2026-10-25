@@ -423,15 +423,25 @@ paths:
   /api/v1/preview:
     get:
       tags: [preview]
-      summary: 曲线预览（JSON，分桶 min/max/avg）
+      summary: 曲线预览（JSON，分桶 min/max/avg；v6 起支持 svids 过滤与事件标记）
       parameters:
         - $ref: '#/components/parameters/SessionQuery'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Buckets'
+        - name: svids
+          in: query
+          required: false
+          description: 只返回这些 SVID（逗号分隔绝对 id）；缺省返回全部（上限 32 条）
+          schema: { type: string }
+        - name: withEvents
+          in: query
+          required: false
+          description: 是否附带窗口内的确定性事件标记（v6）；默认 true
+          schema: { type: boolean, default: true }
       responses:
         '200':
-          description: 分桶预览
+          description: 分桶预览。v6 起 events 数组带窗口内事件（at/ceid/planId），效果已叠加进曲线
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PreviewData' }
@@ -465,6 +475,126 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/overview:
+    get:
+      tags: [sessions]
+      summary: 工作台聚合（v6）
+      description: |
+        全部会话的状态/速率/计数一览：state、controlState、hasPeer、counters、
+        msgsPerMin / s6f11PerMin（60 秒滑动窗口）、lastEventAt、hostSim 占用、uptimeMs。
+      responses:
+        '200':
+          description: 每会话一个片段
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: '#/components/schemas/OverviewRow' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/sessions/{id}/burst:
+    post:
+      tags: [control]
+      summary: 服务端压测（v6）
+      description: |
+        同一条报文/事件在服务端循环发送（消除 HTTP 往返失真）。
+        kind=message 需要 sml；kind=ceid 需要 ceid（走手动上报路径，不受
+        events.maxPerSec 限制）；kind=alarm 交替置位/清除。count 上限 5000。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, count]
+              properties:
+                kind: { type: string, enum: [message, ceid, alarm] }
+                count: { type: integer, minimum: 1, maximum: 5000 }
+                intervalMs: { type: integer, minimum: 0, default: 0 }
+                sml: { type: string }
+                ceid: { type: integer }
+                alid: { type: integer }
+                text: { type: string }
+                category: { type: integer, minimum: 1, maximum: 7 }
+      responses:
+        '200':
+          description: 压测统计（sent/failed/durationMs/latencyP50/P95/Max）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BurstResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/host-sim/collector:
+    put:
+      tags: [control]
+      summary: 下发主机模拟 S1F3 采集器配置（v6）
+      description: |
+        收到 startCeid 的 S6F11 开始按 intervalMs 轮询 S1F3，收到 stopCeid 停止。
+        本机模式校验 SVID 存在；远程模式（host-sim 以 target 打开时）不做存在性校验。
+        与 PUT 等价的 POST 也接受。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollectorConfig' }
+      responses:
+        '200': { description: 已下发 }
+        '400': { description: 配置非法 }
+        '409': { description: 主机模拟未开启 }
+    get:
+      tags: [control]
+      summary: 采集器状态与数据（v6）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: running/samples/series（每 SVID 的 t[]/v[] 环形,上限 3600 点）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorState' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/sessions/{id}/host-sim/collector/start:
+    post:
+      tags: [control]
+      summary: 手动启动采集器（v6；正常流程由 startCeid 的 S6F11 触发）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 已启动 }
+        '409': { description: 未配置或未连接 }
+  /api/v1/sessions/{id}/host-sim/collector/stop:
+    post:
+      tags: [control]
+      summary: 手动停止采集器（v6）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 已停止 }
   /api/v1/messages:
     get:
       tags: [messages]
@@ -885,6 +1015,91 @@ components:
         series:
           type: array
           items: { $ref: '#/components/schemas/PreviewSeries' }
+        events:
+          type: array
+          description: 窗口内的确定性事件标记（v6；草稿预览为模拟时间线）
+          items:
+            type: object
+            properties:
+              at: { type: integer, format: int64 }
+              ceid: { type: integer }
+              planId: { type: string }
+    OverviewRow:
+      type: object
+      description: 工作台聚合里的单会话片段（v6）
+      properties:
+        id: { type: string }
+        state: { type: string }
+        controlState: { type: string }
+        hasPeer: { type: boolean }
+        device: { type: string }
+        units: { type: integer }
+        port: { type: integer }
+        counters:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+        msgsPerMin: { type: integer }
+        s6f11PerMin: { type: integer }
+        lastEventAt: { type: integer, format: int64 }
+        uptimeMs: { type: integer, format: int64 }
+        hostSim: { type: boolean }
+    BurstResult:
+      type: object
+      description: 服务端压测统计（v6）
+      properties:
+        sent: { type: integer }
+        failed: { type: integer }
+        durationMs: { type: integer, format: int64 }
+        latencyP50: { type: integer }
+        latencyP95: { type: integer }
+        latencyMax: { type: integer }
+    CollectorConfig:
+      type: object
+      description: 主机模拟 S1F3 采集器配置（v6）
+      required: [startCeid, stopCeid, svids]
+      properties:
+        startCeid: { type: integer }
+        stopCeid: { type: integer }
+        intervalMs: { type: integer, default: 1000, minimum: 200 }
+        svids:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              unit: { type: string }
+    CollectorState:
+      type: object
+      description: 采集器状态与数据（v6）
+      properties:
+        configured: { type: boolean }
+        running: { type: boolean }
+        mode: { type: string, enum: [local, remote] }
+        startCeid: { type: integer }
+        stopCeid: { type: integer }
+        intervalMs: { type: integer }
+        samples: { type: integer }
+        decodeErrors: { type: integer }
+        lastRttMs: { type: integer }
+        staleSvids:
+          type: array
+          items: { type: integer }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              svid: { type: integer }
+              name: { type: string }
+              unit: { type: string }
+              t:
+                type: array
+                items: { type: integer, format: int64 }
+              v:
+                type: array
+                items: { type: number }
     MessagePage:
       type: object
       required: [messages, total, limit, truncated]

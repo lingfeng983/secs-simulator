@@ -2597,3 +2597,16 @@ textarea::placeholder {
 .badge.tone-warn { color: #b0700f; }
 .badge.tone-info { color: var(--accent, #4493f8); }
 .badge.tone-muted { color: var(--text-muted); }
+
+/* 采集卡里的 spark:卡宽有限,三列 grid 会把画布挤扁,改纵向堆叠 */
+.collector-chart .spark {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+.collector-chart .spark canvas {
+  height: 72px;
+  width: 100%;
+}
+.collector-chart .spark-readout {
+  font-size: 11px;
+}
