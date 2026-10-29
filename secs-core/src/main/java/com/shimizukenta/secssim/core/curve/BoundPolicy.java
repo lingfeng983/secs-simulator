@@ -30,6 +30,11 @@ public enum BoundPolicy {
         if (!(min < max)) {
             return min;
         }
+        if (!Double.isFinite(value)) {
+            /* NaN 无法比较；±Inf 在 WRAP/REFLECT 的取模下也会变成 NaN。
+               统一落到最近的有限边界，而不是把 NaN 传给报文编码器。 */
+            return value == Double.POSITIVE_INFINITY ? max : min;
+        }
         return switch (this) {
             case CLAMP -> Math.min(max, Math.max(min, value));
             case WRAP -> wrap(value, min, max);

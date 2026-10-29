@@ -25,6 +25,20 @@ class ExpressionTest {
         assertEquals(1.0, eval("1 - -1 + -1"), 1e-9);
     }
 
+    /**
+     * 加法链的长度也要有闸：解析是迭代的，求值是递归的。
+     */
+    @Test
+    void overlongOperatorChainIsRejected() {
+        String tooLong = "1" + "+1".repeat(2000);
+        ExpressionException error = assertThrows(ExpressionException.class,
+                () -> Expression.parse(tooLong));
+        assertTrue(error.getMessage().contains("运算符超过"), error.getMessage());
+
+        /* 正常规模仍然可用 */
+        assertEquals(101.0, eval("1" + "+1".repeat(100)), 1e-9);
+    }
+
     @Test
     void builtinFunctionsWork() {
         assertEquals(10.0, eval("clamp(15, 0, 10)"), 1e-9);

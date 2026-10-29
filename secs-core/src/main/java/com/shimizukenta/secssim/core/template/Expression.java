@@ -203,10 +203,21 @@ public final class Expression {
          */
         private static final int MAX_DEPTH = 64;
 
+        /**
+         * 运算符总数上限。
+         *
+         * <p>括号深度有 {@link #MAX_DEPTH} 兜底，但 {@code 1+1+1+…} 是迭代构造的左深树：
+         * 解析不加深 depth，求值却按运算符个数递归。没有这道闸时一条几万项的加法链
+         * 会通过解析、在 {@code evaluate} 里抛 {@code StackOverflowError}（Error，
+         * 事件线程的 {@code catch RuntimeException} 接不住）。</p>
+         */
+        private static final int MAX_OPERATORS = 1024;
+
         private final String src;
         private final Set<String> vars = new LinkedHashSet<>();
         private int pos;
         private int depth;
+        private int operators;
 
         Parser(String src) {
             this.src = src;
@@ -225,6 +236,7 @@ public final class Expression {
                     return left;
                 }
                 this.pos += op.length();
+                this.countOperator();
                 left = new Compare(op, left, this.parseSum());
             }
         }
@@ -235,6 +247,7 @@ public final class Expression {
                 this.skipSpaces();
                 if (this.peek() == '+' || this.peek() == '-') {
                     char op = this.src.charAt(this.pos++);
+                    this.countOperator();
                     left = new Binary(op, left, this.parseTerm());
                 } else {
                     return left;
@@ -264,6 +277,7 @@ public final class Expression {
                 this.skipSpaces();
                 if (this.peek() == '*' || this.peek() == '/') {
                     char op = this.src.charAt(this.pos++);
+                    this.countOperator();
                     left = new Binary(op, left, this.parseUnary());
                 } else {
                     return left;
@@ -314,6 +328,13 @@ public final class Expression {
                 throw this.error("无法识别的字符 '" + c + "'");
             } finally {
                 this.exit();
+            }
+        }
+
+        /** 记一个运算符；超上限即判失控输入。 */
+        private void countOperator() {
+            if (++this.operators > MAX_OPERATORS) {
+                throw this.error("表达式运算符超过 " + MAX_OPERATORS + " 个");
             }
         }
 

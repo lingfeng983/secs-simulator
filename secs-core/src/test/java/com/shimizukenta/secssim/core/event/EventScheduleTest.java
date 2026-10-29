@@ -95,15 +95,16 @@ class EventScheduleTest {
         Trigger.Periodic trigger = new Trigger.Periodic(period, jitter);
 
         // 独立基准：直接按 (planId, k) 派生抖动算出 (0, span] 内所有真实触发时刻。
+        // 用 TreeSet：jitter > period/2 时相邻两个 k 可能落到同一毫秒，
+        // 那种情况只应触发一次（以前基准跟着重复，反而测不出重复触发）。
         Rng stream = RNG.derive("plan:" + planId);
-        List<Long> truth = new ArrayList<>();
+        java.util.TreeSet<Long> truth = new java.util.TreeSet<>();
         for (long k = 1L; k * period <= span + jitter; k++) {
             long at = k * period + Math.round((stream.uniform01(k) * 2.0 - 1.0) * jitter);
             if (0L < at && at <= span) {
                 truth.add(at);
             }
         }
-        truth.sort(Long::compare);
 
         // 像运行期那样按 tick 逐窗累加。
         List<Long> got = new ArrayList<>();
@@ -113,7 +114,8 @@ class EventScheduleTest {
         }
         got.sort(Long::compare);
 
-        assertEquals(truth, got, "跨 tick 累加必须与基准完全一致：不丢、不重、保序");
+        assertEquals(List.copyOf(truth), got, "跨 tick 累加必须与基准完全一致：不丢、不重、保序");
+        assertEquals(got.size(), new java.util.HashSet<>(got).size(), "同一毫秒不得触发两次");
 
         long approx = span / period;
         assertTrue(got.size() >= approx / 2 && got.size() <= approx * 3 / 2,

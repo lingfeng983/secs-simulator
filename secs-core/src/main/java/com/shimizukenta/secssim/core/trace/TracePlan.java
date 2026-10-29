@@ -48,7 +48,8 @@ public final class TracePlan {
         if (totsmp < 1 || repgsz < 1) {
             throw new IllegalArgumentException("totsmp/repgsz must be >= 1");
         }
-        return (totsmp + repgsz - 1) / repgsz;
+        /* 先减一再加一，避免 totsmp + repgsz 在两个大值下溢出成负数 */
+        return (totsmp - 1) / repgsz + 1;
     }
 
     /**
@@ -64,8 +65,8 @@ public final class TracePlan {
         if (frameIndex < 0 || frameIndex >= frames) {
             throw new IllegalArgumentException("frameIndex out of range: " + frameIndex + " / " + frames);
         }
-        int start = frameIndex * repgsz;
-        return Math.min(repgsz, totsmp - start);
+        long start = (long) frameIndex * repgsz;
+        return (int) Math.min(repgsz, totsmp - start);
     }
 
     /**
