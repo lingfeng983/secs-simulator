@@ -122,14 +122,15 @@ class NativeRuntimeIT {
         try {
             String ready = awaitReady(process);
             int httpPort = intToken(ready, "http=");
-            assertTrue(ready.contains("sessions=1"), "演示会话未创建: " + ready);
+            /* --demo-session 现在开两台内置设备（etch-01 / cvd-01），不是一台 */
+            assertTrue(ready.contains("sessions=2"), "演示会话未创建: " + ready);
 
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            assertTrue(health.body().contains("\"sessions\":1"), health.body());
+            assertTrue(health.body().contains("\"sessions\":2"), health.body());
 
             /* 静态前端：与 API 同源，浏览器直接打开即可 */
             HttpResponse<String> page = client.send(
@@ -145,7 +146,8 @@ class NativeRuntimeIT {
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, sessions.statusCode(), sessions.body());
-            assertTrue(sessions.body().contains("\"id\":\"demo\""), sessions.body());
+            assertTrue(sessions.body().contains("\"id\":\"etch-01\""), sessions.body());
+            assertTrue(sessions.body().contains("\"id\":\"cvd-01\""), sessions.body());
             assertTrue(sessions.body().contains("\"state\":\"OPEN\""), sessions.body());
             assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
 
@@ -193,7 +195,8 @@ class NativeRuntimeIT {
     }
 
     private static String hsnsBase(int httpPort) {
-        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/demo/ceid/2001";
+        /* etch-01 是第一个演示会话，监听 --hsms-port 指定的端口 */
+        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/etch-01/ceid/2001";
     }
 
     private static HttpResponse<String> trigger(String url) throws Exception {
