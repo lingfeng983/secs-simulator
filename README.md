@@ -21,6 +21,17 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 
 依赖方向由 `ArchitectureTest` 强制，越界即构建失败。
 
+### 类结构
+
+超过千行的类会拆开——一个类只做一件事，协作对象通过注入拿到自己需要的东西。
+拆分后的主要布局：
+
+| 模块 | 拆分后的主要类 |
+|---|---|
+| `secs-protocol` | `Gem` 按能力域拆成 `GemCommunication` / `GemClock` / `GemRemoteCommand` / `GemEventReport` / `GemError` / `GemTerminal` 六个子接口，`AbstractGem` 组合它们，共享状态在 `GemSupport` |
+| `secs-api-http` | `HttpApiServer` 只留路由表与生命周期，按资源域拆成 `SessionHandler` / `ConfigHandler` / `PreviewHandler` / `HostSimHandler` / `OpsHandler` / `StreamHandler`，公共部分在 `HttpSupport`，路径常量在 `ApiPaths` |
+| `secs-runtime` | `HsmsSessionRuntime` 拆出事件上报（`EventReporter` / `EventScheduler`）、主机侧报文（`HostSideMessages`）、报文分发（`PrimaryDispatcher`）、采样（`TracePump`）、报警（`AlarmReporter`）、终端消息（`TerminalInbox`）、预览（`PreviewBuilder`）、热生效（`HotReloader`）等协作者；`Main` 的 HTTP 上下文拆到 `RuntimeContext` |
+
 ## 构建
 
 需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）。
@@ -33,7 +44,20 @@ mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 fro
 
 `-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
 `NativeRuntimeIT`（API、SSE ticket、HSMS S1F1、S1F3、优雅停机）。
-CI 的 `native` job 每周/手动运行同一命令。
+本地质量门禁不覆盖原生链路，需要时手动跑。
+
+### 本地质量门禁
+
+仓库没有 CI，提交前跑这一条：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/check-all.ps1
+```
+
+依次执行 `mvn -B test` → 前端依赖（缺 `node_modules` 时才 `npm ci`）→ `npx tsc --noEmit`
+→ `npm test` → `npx playwright test`，任一步失败即以该步退出码结束。
+需要 JDK 25（`JAVA_HOME` 指向 JDK 25，推荐 GraalVM 25）；Playwright 浏览器先装一次：
+`npx playwright install chromium`。`-SkipBackend` / `-SkipE2E` 可按需跳过。
 
 里程碑验收脚本：
 
@@ -59,48 +83,49 @@ secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 scripts\build-frontend.ps1
 secs-sim --mode=integrated --demo-session --web-root frontend/dist
 
-# 服务端：对外绑定，默认开放访问（内网工具场景）；--token / --auth-users 二选一可加凭据
-# 提供 keystore 时走 HTTPS
-secs-sim --mode=server --bind 0.0.0.0 --port 8443 --token $env:SECS_TOKEN `
+# 服务端：默认只绑回环（127.0.0.1），对外绑定必须显式 --bind
+# 内部工具不做鉴权，浏览器/脚本直连即可；提供 keystore 时走 HTTPS
+secs-sim --mode=server --bind 0.0.0.0 --port 8443 `
     --tls-keystore ./server.p12 --tls-password $env:SECS_TLS_PASSWORD
 
-# 多账号分级：viewer 只读 / operator 可下发 / admin 可停机
-secs-sim --mode=server --bind 0.0.0.0 --port 8080 --auth-users ./users.json
-
-# 不带凭据的开放访问（Linux 服务端包 start-server.sh 的默认形态）
-# 注意：加了凭据后当前界面无法登录（界面为免凭据形态），受限访问请走 API/脚本
+# 无 TLS 的内网直连
 secs-sim --mode=server --bind 0.0.0.0 --port 8080
 
 # keystore 示例：
 # keytool -genkeypair -alias secs-sim -keyalg RSA -storetype PKCS12 `
 #   -keystore server.p12 -storepass changeit -dname CN=your-host -validity 3650
 
-# 能力探针：开 HSMS 被动端口应答 S1F1，用于现场排障与 CI
+# 能力探针：开 HSMS 被动端口应答 S1F1，用于现场排障与本地脚本
 secs-sim --mode=probe --hsms-port 5000
 ```
 
 启动后向 stdout 打印一行握手，供桌面壳与脚本读取：
 
 ```
-READY mode=integrated http=53466 token= accounts=0 utf8=true sessions=1 hsms=5000 work=C:\Users\...\SecsSimulator
+READY mode=integrated http=53466 utf8=true sessions=1 hsms=5000 work=C:\Users\...\SecsSimulator
 ```
 
-`token` 只在单令牌模式下有值（默认开放访问时为空）；用 `--auth-users` 时它是空的，`accounts` 是账号数。
+`http=` 是界面/API 地址；`sessions=` 是已启动会话数。同时会把 http/端口写进
+`<work-dir>/ready.txt`（不含任何凭据），供部署脚本读取。
 
-HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `operator` 与 `viewer` 的事：
+`--mode=server` 默认绑回环，跨机访问必须显式 `--bind 0.0.0.0`（或具体网卡地址）。
+**本工具是内部工具，不做鉴权**：没有令牌、账号或角色门槛；对外暴露时请用网络策略隔离。
 
-| 端点 | 角色 | 说明 |
+HTTP API（v1）。下表「原角色」是历史能力分级，仅作语义参考——现在所有端点直连可调用：
+
+| 端点 | 原角色 | 说明 |
 |---|---|---|
-| `GET /api/v1/health` | 免鉴权 | 存活与 uptime；带凭据时才返回版本、形态、会话数、`user`/`role` |
-| `POST /api/v1/ticket` | viewer | 换取一次性 SSE 票据（30 秒有效、只能用一次），并回显身份与角色 |
+| `GET /api/v1/health` | 免鉴权 | 存活、uptime、版本、形态、会话数 |
+| `POST /api/v1/ticket` | viewer | 换取一次性 SSE 票据（30 秒有效、只能用一次） |
 | `GET /api/v1/events?ticket=` | 票据 | SSE 事件流；票据从上一个端点取 |
 | `GET /api/v1/sessions` | viewer | 会话列表（状态 / 设备 / 单元数 / 计数器） |
 | `POST /api/v1/sessions` | operator | 新建会话，体为 `{"config":"demo"}` 或 `{"config":"设备.json"}`（201 / 400 / 409） |
 | `GET/PUT /api/v1/log-level` | viewer/operator | 读取 / 运行时切换日志级别（error/info/debug，切换记审计） |
-| `POST /api/v1/sessions/bulk` | operator | 批量新建：一份配置模板 + 数量/前缀/起始端口/device-id，逐台独立创建（201 全成、207 部分失败并逐台给原因） || `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
+| `POST /api/v1/sessions/bulk` | operator | 批量新建：一份配置模板 + 数量/前缀/起始端口/device-id，逐台独立创建（201 全成、207 有失败并逐台给原因，可能全部失败） |
+| `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
 | `POST /api/v1/sessions/{id}/reload` | operator | 按配置热重载（200 / 404 / 409 / 400） |
 | `POST /api/v1/sessions/{id}/ceid/{ceid}` | operator | 手动触发一次 S6F11（202 / 404 / 409） |
-| `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | operator | 置位/清除 S5F1；`set` 默认 true，`category` 0..7（202 / 400 / 404 / 409） |
+| `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | operator | 置位/清除 S5F1；`set` 默认 true，`category` 1..7（202 / 400 / 404 / 409） |
 | `GET /api/v1/sessions/{id}/alarms` | viewer | 当前活动报警（ALID / 类别 / 文本 / 置位时间） |
 | `GET /api/v1/sessions/{id}/terminal` | viewer | 最近 20 条终端消息（S10F3） |
 | `GET /api/v1/sessions/{id}/catalog` | viewer | 设备目录：CEID / RPTID / SVID 的绝对 ID 与语义，按 ID 升序 |
@@ -115,49 +140,52 @@ HTTP API（v1），“角色”一列是**最低**角色，`admin` 可做 `opera
 | `GET /api/v1/configs/{name}` | viewer | 读配置**原文**（编辑器要看到用户写的每一个键） |
 | `POST /api/v1/configs/{name}/validate` | viewer | 只校验不落盘，回 `{"valid":bool,"problems":[...]}` |
 | `PUT /api/v1/configs/{name}` | operator | 校验通过后原子落盘，体就是配置原文（200 / 400 / 422 / 500） |
+| `GET /api/v1/templates` | viewer | 模板列表（内置 + 自定义） |
+| `POST /api/v1/templates` | operator | 新建自定义模板，体 `{"id","text"}` |
+| `GET/PUT/DELETE /api/v1/templates/{id}` | viewer/operator | 读原文 / 更新 / 删除（内置模板只读） |
 | `GET /api/v1/audit` | admin | 最近审计记录（`limit` 默认 200，最大 1000） |
 | `POST /api/v1/shutdown` | admin | 优雅停机 |
 
-鉴权只用 `Authorization: Bearer <口令>`。未认证回 401，认证通过但角色不够回 403
-（两者必须区分，否则"口令打错了"和"权限不够"在现场没法排查）。
+**不做鉴权**：所有端点直连可调用，没有令牌/账号/登录，也不会回 401/403。
 若启动时给了 `--tls-keystore`，上述 `http://` 地址应换成 `https://`（自签证书需客户端信任）。
 `EventSource` 不能设置请求头，所以浏览器先 `POST /api/v1/ticket` 换一张
-30 秒、一次性的票据再连 SSE。打包脚本打开的界面地址形如
-`http://127.0.0.1:<port>/#token=<token>`，token 放在 hash 里，不会发给服务端。
+30 秒、一次性的票据再连 SSE（票据只为解决 EventSource 的限制，不是凭据）。
 
-### 账号与角色
+### 访问控制
 
-`--token` 之外可以给 `--auth-users <path>`，按账号分级。两种凭据**二选一**，
-同时给出时按账号文件走并打日志——悄悄忽略一个用户明确写了的参数比报错更难查。
+内部工具定位：**直连访问**。历史上存在过的 `--token` 与 `--auth-users` 已移除，
+启动参数里再写它们会直接报"未知参数"。默认只绑回环；需要跨机时显式 `--bind`，
+对外部署请用防火墙/网段隔离，必要时加 `--tls-keystore` 保护链路。
 
-```json
-{"users": [
-  {"name": "guest", "role": "viewer",   "secret": "..."},
-  {"name": "line1", "role": "operator", "secret": "..."},
-  {"name": "owner", "role": "admin",    "secret": "..."}
-]}
-```
+审计日志仍记录操作主体（直连访问下为 `local`），用于回答"谁在什么时候改了什么"。
 
-- 分级依据是"这个操作会不会改变设备状态"：读不会，触发 CEID 与报警会，关停会。
-- 账号名为空、口令为空、账号名或口令重复、角色拼错都会在**启动阶段**报错退出，不会带着半个鉴权跑起来；
-  错误信息带 `$.users[0].role` 这样的字段路径。
-- 口令在文件里是**明文**：服务端要在运行时比对，没法只存哈希。
-  账号文件与私钥同级，别进版本库、别打进分发包。
-- 角色常量按能力递增排列，**调整顺序等于给已部署的账号集体降级/升级**，不要重排。
+**浏览器侧防护**（不引入账号体系）：
+
+- **Host 白名单**：只接受回环名/IP、`--bind` 地址、本机网卡地址，其余 `Host` 一律 403。
+  这是 DNS rebinding 的唯一有效防线（浏览器同源判定看 Host）。用**域名**访问远程服务时，
+  把域名加进 `SECS_SIM_ALLOWED_HOSTS`（逗号分隔）或 `-Dsecssim.allowedHosts`。
+- **写请求 Origin 校验**：`PUT/POST/DELETE` 带 `Origin` 且不在白名单时，**在执行前**回 403——
+  CORS 只决定浏览器能不能读响应，挡不住无正文的跨站简单请求（停机、触发上报）。
+  没有 `Origin` 的 curl / 脚本 / 桌面壳首跳不受影响。
+- **请求截止时间**：单请求默认 120 秒（`-Dsecssim.http.requestTimeoutMs`），到点关闭连接，
+  避免慢速正文长期占住请求线程；SSE 长连接由各自的看门狗负责。
 
 ### 会话生命周期
 
 一个进程不再只装一份配置：可以在运行时新建、关闭、按配置重载会话。
 
 ```bash
-curl -X POST  -H 'Authorization: Bearer T' -d '{"config":"line1.json"}' \
+curl -X POST  -d '{"config":"line1.json"}' \
      http://127.0.0.1:PORT/api/v1/sessions
-curl -X POST  -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/sessions/line1/reload
-curl -X DELETE -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/sessions/line1
+curl -X POST  http://127.0.0.1:PORT/api/v1/sessions/line1/reload
+curl -X DELETE http://127.0.0.1:PORT/api/v1/sessions/line1
 ```
 
 - **`--work-dir` 就是配置目录**。接口只接受**文件名**，不含任何路径分隔符——
   接口给的是"名字"不是"路径"，否则一次 API 调用就能把服务器上任意 JSON 当配置读进来试。
+- **一台设备一份配置文件**：文件名为 `<设备名>.json`；工作台「新建设备」只选模板，
+  后端自动生成唯一设备名并写 `<设备名>.json`。模板存放在 `<work-dir>/templates/<模板id>.json`，
+  创建时会记下顶层 `"template"` 标记，供侧栏按模板分组。
 - **重载先编译再动旧会话**：配置有错时旧会话原样跑着，只返回失败。
   一个手滑的逗号不该让设备凭空消失。
 - 内置演示会话（`demo`）没有配置来源，重载返回 **409 `not-reloadable`**，而不是笼统的 500。
@@ -173,11 +201,11 @@ curl -X DELETE -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/session
 配置可以在界面上读、改、校验、保存，不必回到命令行改文件。
 
 ```bash
-curl -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/configs
-curl -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/configs/line1.json
-curl -X POST -H 'Authorization: Bearer T' --data-binary @line1.json \
+curl http://127.0.0.1:PORT/api/v1/configs
+curl http://127.0.0.1:PORT/api/v1/configs/line1.json
+curl -X POST --data-binary @line1.json \
      http://127.0.0.1:PORT/api/v1/configs/line1.json/validate
-curl -X PUT  -H 'Authorization: Bearer T' --data-binary @line1.json \
+curl -X PUT  --data-binary @line1.json \
      http://127.0.0.1:PORT/api/v1/configs/line1.json
 ```
 
@@ -204,16 +232,19 @@ curl -X PUT  -H 'Authorization: Bearer T' --data-binary @line1.json \
 
 ### 报文历史
 
-SSE 只推"现在"。报文同时追加到 `<work-dir>/logs/messages.jsonl`，
-页面刷新或断线后可以在「报文」面板点**载入历史**补齐，也可以导出 JSONL。
+SSE 只推"现在"。报文除了追加到 `<work-dir>/logs/messages.jsonl`，还会按会话拆成
+`logs/devices/<会话>.jsonl`（设备视角，只含该设备进/出报文）与
+`logs/hosts/<会话>.jsonl`（主机视角，方向翻转并带 `perspective:"host"`）——现场排障时
+直接把对应文件发给设备/主机责任人，不必在混合日志里 grep。页面刷新或断线后可以在
+「报文」面板点**载入历史**补齐，也可以导出 JSONL（设备页/主机页各带只导出本实体的按钮）。
 
 ```bash
 # 最近 100 条，按会话与方向过滤
-curl -H 'Authorization: Bearer T' \
+curl \
      'http://127.0.0.1:PORT/api/v1/messages?session=line1&direction=out&limit=100'
 
 # 直接下载 JSONL
-curl -H 'Authorization: Bearer T' -OJ \
+curl -OJ \
      'http://127.0.0.1:PORT/api/v1/messages?format=jsonl&limit=5000'
 ```
 
@@ -228,7 +259,7 @@ curl -H 'Authorization: Bearer T' -OJ \
 `GET /api/v1/preview.bin` 与 JSON 预览走同一份计算，只是换成二进制正文：
 
 ```bash
-curl -H 'Authorization: Bearer T' -o preview.bin \
+curl -o preview.bin \
      'http://127.0.0.1:PORT/api/v1/preview.bin?session=line1&from=0&to=60000&buckets=120'
 ```
 
@@ -242,7 +273,7 @@ curl -H 'Authorization: Bearer T' -o preview.bin \
 设备侧可以手动发一条任意 SML 报文，不用等事件计划或主机请求：
 
 ```bash
-curl -X POST -H 'Authorization: Bearer T' --data-binary @templates/sml/equip/s5f1-example.sml \
+curl -X POST --data-binary @templates/sml/equip/s5f1-example.sml \
      http://127.0.0.1:PORT/api/v1/sessions/line1/message
 ```
 
@@ -256,7 +287,7 @@ curl -X POST -H 'Authorization: Bearer T' --data-binary @templates/sml/equip/s5f
 ### OpenAPI
 
 HTTP API 的机器可读契约在 [docs/openapi.yaml](docs/openapi.yaml)（OpenAPI 3.0.3）。
-CI 会用 `openapi-spec-validator` 校验；改接口时请同步这个文件。
+改接口时请同步这个文件；同一个 path 的多个方法写在一个声明里（YAML 不允许重复键）。
 
 ### 审计
 
@@ -264,12 +295,12 @@ CI 会用 `openapi-spec-validator` 校验；改接口时请同步这个文件。
 也可以由 admin 通过接口查看最近记录：
 
 ```bash
-curl -H 'Authorization: Bearer T' 'http://127.0.0.1:PORT/api/v1/audit?limit=100'
+curl 'http://127.0.0.1:PORT/api/v1/audit?limit=100'
 ```
 
 - 字段：`at / actor / role / action / target / detail`。
 - 覆盖：手动 CEID、报警、会话创建/关闭/重载、配置创建/保存、手动 SML、
-  事件编排切换、停机，以及角色不足的 403 拒绝。
+  事件编排切换、停机等操作。
 - **审计失败不影响业务**；写日志失败只记录一次错误。
 - 查询只给 **admin**：审计比报文历史更敏感。
 - 没有自动轮转；需要按现场磁盘规划归档。
@@ -279,8 +310,8 @@ curl -H 'Authorization: Bearer T' 'http://127.0.0.1:PORT/api/v1/audit?limit=100'
 运行中的编排计划可以列出并临时启用/禁用，不用改配置、不用重载：
 
 ```bash
-curl -H 'Authorization: Bearer T' http://127.0.0.1:PORT/api/v1/sessions/line1/events
-curl -X POST -H 'Authorization: Bearer T' \
+curl http://127.0.0.1:PORT/api/v1/sessions/line1/events
+curl -X POST \
      'http://127.0.0.1:PORT/api/v1/sessions/line1/events/demo-process-start?enabled=false'
 ```
 
@@ -325,7 +356,7 @@ secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打
 ```
 
 开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
-前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；CI 会跑）。
+前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；`scripts/check-all.ps1` 会跑）。
 浏览器 E2E 用 Playwright：
 
 ```powershell
@@ -335,28 +366,73 @@ npm run test:e2e
 ```
 
 - **Mock E2E**：Vite preview + Playwright 路由拦截 API，不启动 Java；
-  CI 的 `frontend-e2e` job 跑 9 条用例。
+  14 条用例覆盖页面能力与焦点管理 / 密度 / 侧栏折叠等交互契约。
 - **真实后端 E2E**：先启动 `secs-sim --demo-session`，再指向它：
 
 ```powershell
 $env:E2E_REAL_URL='http://127.0.0.1:5000'
-$env:E2E_REAL_TOKEN='e2e-token'
 npm --prefix frontend run test:e2e:real
 ```
 
-CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这条真实链路。
+这条真实链路不在 `scripts/check-all.ps1` 里：它需要一个已经起来的后端，按上面的命令手动跑。
 
 ### 界面结构
 
-界面是**侧边栏导航 + 单面板显示**：十个面板按「设备 / 数据 / 工具」分组，
-一次只显示一个，切过去就立刻拉一次新数据——不再九个面板纵向堆叠、越滚越长。
+界面是**左侧导航 + 单功能页面**：工作台(总览 + 设备与会话)、每台设备一组子页、主机模拟(独立入口)、管理页。
+左侧是固定的深色「机箱」——静态入口在上、设备(动态)在中、管理入口在下；
+`[` 可收成图标栏，设备项变成两字母缩写 + 状态色。
 
-- **命令面板**（`Ctrl+K`）：跳面板、找目录里的 CEID/SVID、执行常用动作。
-- **数字键 `1..9` / `0`**：直接跳到第 N 个面板；`R` 立即刷新；`/` 聚焦搜索框；`?` 看快捷键表。
-- **提示条**：操作结果直接弹在右下角（「事件流」面板退居事后查账）。
-- **通用表格**：会话、报警、目录、审计、报文都能搜索、点列头排序、导出 CSV。
-- **报文面板**：按会话 / 方向 / 正文过滤，可暂停接收（服务端照收，界面先攒着）。
-- **主题与密度**：浅色 / 深色 / 跟随系统，紧凑 / 宽松两档；当前面板与这些偏好跨刷新保留。
+- **设备页**：一条设备头(设备名/会话/状态/单元数) + 一行子页标签，子页一页一能力。
+  **事件**与**报告**拆成两页：事件只定义 CEID 及绑定报告，报告只定义 RPTID 及变量，
+  弹框里都从已有数据点选，不再手填 ID 列表。子页内容不重复显示标题/说明，
+  说明挂在页签的悬浮提示上。
+  结构化配置不再挤在「配置」页：**连接**页逐项列出 session（端口/地址/device-id/超时）并解释每个属性的作用；
+  **结构**页拆成「设备全局 / 单元 / 模板」三个页签：全局只留号段规则与设备常量（平铺无折叠），
+  单元只留 unitId/名称/是否注入 UNIT_ID，模板页单独编辑曲线/组合/实例并提供「选模板 + 勾 SVID 一键生成实例」。
+  **配置**页只保留 JSON 原文，支持语法高亮与一键格式化，
+  默认占满窗口剩余高度、内容超出时内部滚动，逐字节写回，覆盖所有字段。
+  「消息」子页实时展示本设备与主机的收发报文，可按探测 / 采集 / Trace / 事件 / 通信 / 报警 / 终端
+  逐类屏蔽；列表可拖拽放大（上下左右）、默认保留 2000 行，支持导出/导入 JSONL。
+  「状态变量」只保留逐变量预览：一个参数一条曲线，
+  事件竖线按计划分色，回放会带上窗口之前仍在生效的事件效果。
+- **主机模拟**：顶层入口。**一台设备只允许一个本机主机**，新建/断开只在「主机实例」页；
+  其它三个子页只能选择已有实例。
+  ① **消息发送**可多选主机，把同一条 SML 依次发出去并逐台显示回复与耗时；
+  内置 16 条常用预设（心跳/建链/上线/下线、S1F3/S1F11/S2F13/S2F17、报告/事件、Trace、终端），
+  每条都带用途说明和正常回复，选中只是填入模板，仍可改 ID/数值再发。
+  ② **S6F1 采集** 每台主机有独立的 TRID/周期/样本/变量配置，汇总表分开展示，可逐行发送。
+  变量用紧凑多选网格（与 ③ 的 S1F3 采集同一套），不再横向铺开留白。
+  **S6F1 只在设备 ONLINE 后上报**：通信中时下发只回 S2F24、没有帧，页面会提示并提供一键 S1F17 上线 / S1F15 下线；
+  默认「每条样本数=1」，下发后约一个采样周期就能看到帧。
+  ③ **S1F3 采集**同样按主机分列状态、采样点与 RTT；每个 SVID 一张带坐标轴的大图，
+  支持框选缩放、滚轮缩放与双击复位。① 页下方还有**主机视角的收发记录**
+  （方向与设备页相反），过滤能力相同；远程主机的报文不经过本进程事件流，页面上会明确说明。
+- **事件驱动曲线**：曲线与事件标记同源——后端把事件效果层叠进值来源再算图，
+  所以事件触发的跳变和「发送事件」的竖线对得上。事件编排列表每行可「预览」单条计划
+  （排除其它计划干扰）；全量周期预览按计划分色，图例与竖线颜色一致。
+  效果编辑以表格呈现，一行一条效果，弹框可四边拖拽放大。
+- **图表交互**：单变量图支持拖动框选放大、滚轮缩放时间轴、Shift+滚轮平移、
+  Ctrl+滚轮纵向缩放、双击复位，并提供 ＋/－/复位按钮；事件周期预览的图例可随时收起，
+  时间窗可选到 30 分钟。
+- **W 位默认**：系统生成的 primary 与手动 SML 的奇数 function 默认带 W（secondary 不允许带 W）。
+  设备的 S6F11/S6F1 配置默认 `true`，S5F1 始终带 W；主机模拟自动回 S1F2/S5F2/S6F12/S6F2/S10F4，
+  设备对主机发来的 W primary 也都回对应 secondary。不需要回复的 secondary 不会误加 W。
+- **工作台**：新建设备只需选模板，自动生成唯一设备名（即 `<设备名>.json`）、端口与 Device ID；
+  勾选多台后可「批量同步配置」——以第一台为源，只改会话 id/端口/设备号/名称，其余配置保持一致。
+  工作台的批量上报与 CEID 输入已移除，上报统一走设备页。
+- **模板管理**（顶层入口）：内置模板只读，可从任意模板复制出自定义模板并直接改 JSON；
+  自定义模板存放在 `<work-dir>/templates/<id>.json`，支持新增、编辑、删除。
+- **侧栏设备**：支持按名称/模板筛选；可一键切换「平铺 / 按模板分组」。
+  分组后是三级菜单：模板 → 设备 → 设备子页，模板组和设备子页都可展开/收起。
+- **弹框**：所有操作弹框（新增/编辑/确认/批量/远程主机）四边四角可拖拽调整大小；
+  字段较少的表单（事件/报告）一栏一行。
+- **命令面板**(`Ctrl+K`)：跳页面、打开某台设备的某个子页、执行常用动作。
+- **快捷键**：数字 `1..9`/`0` 跳静态入口，`R` 刷新，`/` 聚焦搜索框，`?` 看快捷键表。
+- **提示条**：操作结果弹在右下角；浮层带焦点圈定，关闭后焦点还给原来的按钮。
+- **通用表格**：搜索、点列头排序、拖列宽、导出 CSV，全站一套。可编辑表（会话 / 主机实例 / SVID /
+  事件 / 报告）在导出旁都有「导入 CSV」；配置支持导入/导出 JSON，消息支持导入/导出 JSONL，
+  S1F3 采集支持 CSV 离线看图，审计 CSV 可导入只读查看。
+- **主题与密度**：浅色 / 深色 / 跟随系统，紧凑 / 宽松两档；主题在首帧前就定好，不会闪白。
 
 曲线预览有三种渲染模式，切换不会重新请求后端：
 
@@ -369,14 +445,21 @@ CI 的 `frontend-e2e-real` job 会构建后端、启动 demo 会话，再跑这�
 图下方另有**窗口统计表**（min/max/avg/末值/峰峰）：图能看出形状，看不出数值量级，
 值班时先扫一眼统计表，再决定细看哪条线。
 
-面板清单：会话表（状态/控制状态/计数）、活动报警与终端消息、**事件编排控制**、
-曲线预览（Canvas / uPlot / 多轴切换、悬停读数、拖动放大、截断提示、二进制下载、窗口统计）、
-设备目录（CEID/RPTID/SVID）、报文面板（SSE 实时推送 + 历史载入 / JSONL 导出 + 过滤 + 暂停）、
-**手动发送 SML**（带压测）、**主机模拟**（host 角色发 S2F33/35/37）、**配置编辑器**（全段结构化表单 / JSON 原文 / 差异 / 校验 / 保存 / 新建）、
-**审计（admin）**、事件流日志。
+页面清单：工作台（KPI 读数条 + 「设备与会话」一张表，读数与生命周期操作同行）、设备页十个子页
+（事件、报告、事件编排、报警、状态变量、连接、结构、配置 JSON、发送、消息监视）、
+主机模拟（实例 / 消息发送+收发记录 / S6F1 采集 / S1F3 采集）、模板管理、审计。
+运行时的增删改不写回配置，重载会话后按配置恢复；配置层的修改在「连接」「结构」或「配置」页保存，
+相关会话自动重载。
 
 前端源码按职责分层：`src/state/`（轮询、SSE、偏好、通知）、`src/panels/`（面板）、
 `src/ui/`（通用控件）、`src/charts/`（图表）、`src/lib/`（纯函数，可单测）。
+
+样式同样分层，收敛在 `src/styles/`（入口 `src/App.css` 只做 @import）：
+`tokens.css` 是唯一的调色板与尺度来源（深浅两套令牌），`base / controls / layout / panels / responsive`
+各管一层。组件里不写死颜色和间距——换主题只是换一层变量，canvas 曲线也从令牌取色。
+
+截图回归：`SHOTS=1 npx playwright test e2e/shots.spec.ts` 会把浅色/深色/窄屏各页写进
+`frontend/shots/redesign/`，用来比对视觉改动（默认跳过，不参与断言）。
 
 界面的完整使用说明（启动登录、每个面板的操作、常见问题）见
 **[用户手册](docs/user-guide.md)**。
@@ -435,7 +518,6 @@ scripts\package-linux.ps1
 - [ADR 0004 · 模板 DAG 与受限表达式](docs/adr/0004-template-dag.md)
 - [ADR 0005 · 事件调度与设备级限流](docs/adr/0005-event-orchestration.md)
 - [ADR 0006 · 主机动态定义报告](docs/adr/0006-dynamic-reports.md)
-- [ADR 0007 · API 账号与角色分级](docs/adr/0007-api-roles.md)
 - [ADR 0008 · 配置编辑器走原始 JSON 文本](docs/adr/0008-config-editor-raw-text.md)
 - [ADR 0009 · 报文落盘用 JSON Lines](docs/adr/0009-message-log.md)
 - [ADR 0010 · 手动发送 SML 只实现受控子集](docs/adr/0010-manual-sml.md)
@@ -446,7 +528,9 @@ scripts\package-linux.ps1
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
 - [全量代码评审 2026-10-20（协议符合性专项）](docs/code-review-2026-10-20.md)
+- [全量代码评审 2026-10-29（五模块复核 + 整改路线）](docs/audit-2026-10-29.md)
 - [SECS/GEM 标准参考资料](docs/reference/README.md)（E4/E5/E30/E37 中文整理 + 项目对照）
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
 - [配置格式 Schema v5](docs/schema-v5.md)（v4 仍兼容）
 - [配置格式 Schema v4](docs/schema-v4.md)
+- [SVID 值变化机制与规则](docs/svid-value-model.md)（默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界）

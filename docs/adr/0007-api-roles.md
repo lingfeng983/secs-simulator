@@ -1,8 +1,13 @@
 # ADR 0007 · API 账号与角色分级
 
-- 状态：已接受
+- 状态：**已被取代**（2026-10-28）
 - 日期：M10
 - 影响范围：`secs-api-http` 的 `AccessControl` / `ApiRole` / `HttpApiServer`，`secs-runtime` 的 `RuntimeOptions` / `Main`
+
+> **取代说明**：本工具定位为车间/实验室内部工具，远程访问一律直连。
+> 令牌与账号文件（`--token` / `--auth-users`）已全部移除，界面也不再提供令牌输入；
+> `AccessControl` 只保留"恒为本机管理员"的直连语义，角色判断留作将来接入鉴权时的挂点。
+> 下文保留为历史决策记录，不再代表当前行为。
 
 ## 问题
 

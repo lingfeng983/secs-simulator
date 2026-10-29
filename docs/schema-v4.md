@@ -50,8 +50,8 @@
   },
   "events": {
     "maxPerSec": 20,
-    "s6f11Wbit": false,
-    "s6f1Wbit": false,
+    "s6f11Wbit": true,
+    "s6f1Wbit": true,
     "plans": [
       { "id": "start", "ceid": 2001,
         "trigger": { "type": "periodic", "periodMs": 5000, "jitterMs": 200 } },
@@ -75,8 +75,8 @@
 | `injectUnitId` | 为真时，若报告里没有 `UNIT_ID`，组装 S6F11 时会自动加到报告首位。**默认 `true`**；开启时必须在该单元定义 `UNIT_ID` 槽位，否则编译报 `MISSING_UNIT_ID_SVID` |
 | `globalSvids` / `globalCeids` | 设备级共享项，不属于任何单元；全局 CEID 引用跨单元报告要写 `单元名.报告名` |
 | `globalSvids.min/max` | 可选值域（仅数值型）。不配时默认曲线退化为 0..100 的有界随机游走；BOOLEAN 固定 1，ASCII/BINARY 固定 0 |
-| `events.s6f11Wbit` | 可选，默认 `false`。为 `true` 时 S6F11 带 W 位并等待 S6F12；发送走单线程队列，避免 T3 阻塞事件心跳 |
-| `events.s6f1Wbit` | 可选，默认 `false`。为 `true` 时 S6F1 带 W 位并等待 S6F2；发送走独立单线程队列，不阻塞 Trace 采样 |
+| `events.s6f11Wbit` | 可选，默认 `true`。为 `true` 时 S6F11 带 W 位并等待 S6F12；发送走单线程队列，避免 T3 阻塞事件心跳 |
+| `events.s6f1Wbit` | 可选，默认 `true`。为 `true` 时 S6F1 带 W 位并等待 S6F2；发送走独立单线程队列，不阻塞 Trace 采样 |
 | `events.plans[].trigger.type` | `at` / `periodic` / `onCondition` / `afterEvent`。`onCondition` 额外字段：`expression`（支持 `t` 与 `svid.<id>`，比较运算返回 0/1）、`debounceMs`（条件连续成立多久才触发，默认 0）；`afterEvent` 额外字段：`sourcePlan`（源计划 id）、`delayMs`（延迟毫秒，默认 0） |
 | `events.plans[].ceid` | **必须**在设备模型里有定义（单元 `ceids` 或 `globalCeids`）。不存在时配置校验报 `UNKNOWN_CEID`，不会等到运行期才失败 |
 | `session` 缺省值 | `passive` 默认 `true`、`bindHost` 默认 `127.0.0.1`、`port` 默认 `0`（表示用 `--hsms-port`，不是随机端口）、`deviceId` 默认 `10`、`seed` 默认 `0` |
