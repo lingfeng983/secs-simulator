@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 /** 面板外壳：标题、说明、操作区、内容。 */
 export interface PanelProps {
   title: string;
-  /** 一句话说清这个面板能干什么。 */
-  description?: string;
+  /** 一句话说清这个面板能干什么；支持换行（\n 会按行展示）。 */
+  description?: ReactNode;
   /** 标题右侧的操作区。 */
   actions?: ReactNode;
   /** 说明下方、标题上方的"指标条"。 */
@@ -12,23 +12,37 @@ export interface PanelProps {
   children: ReactNode;
   /** 面板 id，便于跳转与测试定位。 */
   id?: string;
+  /** 标题前的序号（多段表单里告诉读者"这是第几步"）。 */
+  index?: string;
+  /** 标题右侧的状态标记（放在动作之前）。 */
+  status?: ReactNode;
 }
 
 /**
  * 面板外壳。
  *
- * <p>统一标题层级、间距和说明位置：
- * 之前每个面板自己排版，加一个面板就要重新调一遍 CSS。</p>
+ * <p>标题 / 说明 / 操作 / 内容四段固定，间距与分隔线由 CSS 决定；
+ * 面板自己不再排版，加一个面板不用重新调样式。</p>
  */
-export function Panel({ title, description, actions, stats, children, id }: PanelProps): JSX.Element {
+export function Panel({ title, description, actions, stats, children, id, index, status }: PanelProps): JSX.Element {
   return (
     <section className="panel" id={id}>
       <div className="panel-head">
         <div className="panel-title-wrap">
-          <h2 className="panel-title">{title}</h2>
+          <div className="panel-title-row">
+            <h2 className="panel-title">
+              {index !== undefined && <span className="panel-index">{index}</span>}
+              {title}
+            </h2>
+            {status}
+          </div>
           {description !== undefined && <p className="panel-desc">{description}</p>}
         </div>
-        {actions !== undefined && <div className="panel-actions">{actions}</div>}
+        {actions !== undefined && (
+          <div className="panel-actions" role="toolbar" aria-label={`${title} 操作`}>
+            {actions}
+          </div>
+        )}
       </div>
       {stats !== undefined && <div className="panel-stats">{stats}</div>}
       <div className="panel-body">{children}</div>
@@ -36,7 +50,7 @@ export function Panel({ title, description, actions, stats, children, id }: Pane
   );
 }
 
-/** 指标卡：一个小块数字 + 说明。 */
+/** 指标格：一个小块数字 + 说明，横排就是一条"仪表刻度"。 */
 export function StatCard({
   label,
   value,
@@ -65,10 +79,9 @@ export interface FootnoteItem {
 }
 
 /**
- * 右下角一行轻量统计。
+ * 面板底部的轻量统计。
  *
- * <p>面板级的统计统一放这里，和会话面板同款：
- * 纯计数不再占一排指标卡，视线落在内容上，数字退到角落。</p>
+ * <p>纯计数不再占一排指标卡，视线落在内容上，数字退到角落。</p>
  */
 export function PanelFootnote({ items }: { items: readonly FootnoteItem[] }): JSX.Element | null {
   if (items.length === 0) {

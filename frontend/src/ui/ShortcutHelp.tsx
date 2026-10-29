@@ -1,3 +1,5 @@
+import { Overlay } from './Overlay';
+
 /** 一条快捷键说明。 */
 export interface ShortcutHint {
   keys: string;
@@ -15,8 +17,8 @@ export function ShortcutHelp({ open, onClose, hints }: { open: boolean; onClose:
     return null;
   }
   return (
-    <div className="overlay" onMouseDown={onClose}>
-      <div className="modal shortcut-help" onMouseDown={(event) => event.stopPropagation()}>
+    <Overlay onClose={onClose}>
+      <div className="modal shortcut-help" role="dialog" aria-modal="true" aria-label="快捷键">
         <div className="modal-head">
           <h2>快捷键</h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
@@ -40,6 +42,6 @@ export function ShortcutHelp({ open, onClose, hints }: { open: boolean; onClose:
           </table>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

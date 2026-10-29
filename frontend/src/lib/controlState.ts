@@ -1,0 +1,34 @@
+/**
+ * E5 控制状态的中文标签与色调。
+ *
+ * <p>工作台(设备与会话)与设备页头都要用,放在这里而不是某个面板里,
+ * 避免为了两个字符串互相 import 一整个面板。</p>
+ */
+
+/** E5 简化控制状态的中文标签。 */
+export function controlStateLabel(state: string | undefined): string {
+  switch (state) {
+    case 'OFFLINE':
+      return '离线';
+    case 'COMMUNICATING':
+      return '通信中';
+    case 'ONLINE':
+      return '在线';
+    default:
+      return state ?? '-';
+  }
+}
+
+/** 控制状态的色调。 */
+export function controlStateTone(state: string | undefined): 'ok' | 'warn' | 'danger' | 'muted' {
+  switch (state) {
+    case 'ONLINE':
+      return 'ok';
+    case 'COMMUNICATING':
+      return 'warn';
+    case 'OFFLINE':
+      return 'danger';
+    default:
+      return 'muted';
+  }
+}

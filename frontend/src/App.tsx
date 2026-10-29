@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createClient, readApiBase, saveApiBase } from './api';
+import type { CSSProperties } from 'react';
+import { createClient, readApiBase, saveApiBase, type WireMessage } from './api';
 import { inDesktopShell, tauriInvoke, type ShellConnection } from './lib/tauri';
+import { mergeMessages } from './lib/messageFilter';
 import { useBackend } from './state/useBackend';
 import { usePreferences, type ThemePreference } from './state/usePreferences';
 import { useToasts } from './state/useToasts';
@@ -16,13 +18,26 @@ import { NAV_ITEMS, routeTitle } from './layout/navigation';
 import { Sidebar, type SidebarDevice } from './layout/Sidebar';
 import { Topbar } from './layout/Topbar';
 
-import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, type DevicePage } from './router';
+import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, HOSTSIM_PAGES, HOSTSIM_PAGE_LABELS, type DevicePage, type HostSimPage } from './router';
 import { WorkbenchPage } from './pages/WorkbenchPage';
 import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from './pages/DevicePage';
+import { HostSimPage as HostSimPageView } from './pages/HostSimPage';
 import { SystemPage } from './pages/SystemPage';
+import { TemplatePage } from './pages/TemplatePage';
+
+/** 主机模拟各子页的一句话说明(顶栏用)。 */
+const HOSTSIM_PAGE_DESCRIPTIONS: Record<HostSimPage, string> = {
+  hosts: '新建 / 断开主机实例：每个主机可以连本库里的任意设备，也可以连远程 SECS。',
+  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文。',
+  fdc: '② FDC Trace 数据采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报。',
+  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停。',
+};
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
+
+/** 界面保留的报文条数（消息监视面板用；与后端内存上限 5000 不同，界面只留最近的）。 */
+const MAX_LIVE_MESSAGES = 5_000;
 
 /** 快捷键说明表。 */
 const SHORTCUTS: readonly ShortcutHint[] = [
@@ -50,6 +65,11 @@ export function App(): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
+  /** 实时报文缓冲：SSE 增量 + 历史补拉，消息监视面板消费。 */
+  const [liveMessages, setLiveMessages] = useState<WireMessage[]>([]);
+  /** SSE 报文先攒 150 ms 再合并：高峰期逐条 setState 会让整页每秒重渲染几十次。 */
+  const pendingMessages = useRef<WireMessage[]>([]);
+  const messageFlushTimer = useRef<number | null>(null);
 
   const notifier = useToasts();
   const { preferences, update, resolvedTheme } = usePreferences();
@@ -74,7 +94,7 @@ export function App(): JSX.Element {
       setDraftBase(readApiBase());
     }
     setConnOpen(true);
-  }, []);
+  }, [client]);
 
   /** 桌面壳内切换后端：local 或远程地址；成功后整页重载（boot 重新取地址）。 */
   const applyShellConnection = useCallback(
@@ -89,12 +109,53 @@ export function App(): JSX.Element {
     [notifier],
   );
 
-  /* 事件流:界面不再展示全局报文/日志,onFlush 置空即可;
-     类型化通知进 liveEvents 缓冲(设备事件子页的实时事件用)。 */
+  /** 补拉最近报文历史：页面刷新/SSE 重连后，消息监视面板不至于从空白开始。 */
+  const reloadMessageHistory = useCallback(() => {
+    void client
+      .messages('', '', 5_000)
+      .then((page) => {
+        setLiveMessages((previous) => mergeMessages(previous, page.messages, MAX_LIVE_MESSAGES));
+      })
+      .catch(() => {
+        /* 后端不支持/不可达时保持现有缓冲，下一轮 SSE 会继续补 */
+      });
+  }, [client]);
+
+  useEffect(() => {
+    reloadMessageHistory();
+  }, [reloadMessageHistory]);
+
+  /** SSE 报文批量入缓冲：150 ms 合并一次，避免高吞吐时整页跟着每条报文重渲染。 */
+  const enqueueMessages = useCallback((batch: WireMessage[]) => {
+    pendingMessages.current.push(...batch);
+    /* 极端情况下（后台标签页）也不让待合并队列无限长 */
+    if (pendingMessages.current.length > 4000) {
+      pendingMessages.current = pendingMessages.current.slice(-4000);
+    }
+    if (messageFlushTimer.current !== null) {
+      return;
+    }
+    messageFlushTimer.current = window.setTimeout(() => {
+      messageFlushTimer.current = null;
+      const pending = pendingMessages.current;
+      pendingMessages.current = [];
+      setLiveMessages((previous) => mergeMessages(previous, pending, MAX_LIVE_MESSAGES));
+    }, 150);
+  }, []);
+
+  useEffect(() => () => {
+    if (messageFlushTimer.current !== null) {
+      window.clearTimeout(messageFlushTimer.current);
+      messageFlushTimer.current = null;
+    }
+  }, []);
+
+  /* 事件流:报文进 liveMessages（消息监视面板），类型化通知进 liveEvents。 */
   useEventStream(client, preferences.pauseStream, {
-    onFlush: () => {
-      /* 报文落盘在服务端 logs/messages.jsonl,界面不缓存 */
+    onFlush: (batch) => {
+      enqueueMessages(batch);
     },
+    onReconnected: reloadMessageHistory,
     onNoticeEvent: useCallback(
       (notice: NoticeWire) => {
         setLiveEvents((previous) => {
@@ -124,6 +185,13 @@ export function App(): JSX.Element {
         navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'ceids' });
         return;
       }
+      if (id.startsWith('hostsim-page:')) {
+        const page = id.slice('hostsim-page:'.length);
+        if (HOSTSIM_PAGES.includes(page as HostSimPage)) {
+          navigate({ name: 'hostsim', page: page as HostSimPage });
+        }
+        return;
+      }
       switch (id) {
         case 'workbench':
         case 'overview':
@@ -135,6 +203,12 @@ export function App(): JSX.Element {
         case 'audit':
         case 'console':
           navigate({ name: 'system', page: 'audit' });
+          return;
+        case 'templates':
+          navigate({ name: 'templates' });
+          return;
+        case 'hostsim':
+          navigate({ name: 'hostsim', page: 'hosts' });
           return;
         default: {
           /* 设备能力 id → 当前设备对应子页;旧 id 归到新家(preview/catalog→状态变量,burst/collector→就近) */
@@ -159,7 +233,9 @@ export function App(): JSX.Element {
 
   const routeKey = route.name === 'device'
     ? `device:${route.sessionId}:${route.tab}`
-    : route.name === 'system' ? `system:${route.page}` : 'workbench';
+    : route.name === 'hostsim'
+      ? `hostsim:${route.page}`
+      : route.name === 'system' ? `system:${route.page}` : route.name === 'templates' ? 'templates' : 'workbench';
 
   useEffect(() => {
     void refreshRef.current();
@@ -201,6 +277,16 @@ export function App(): JSX.Element {
           run: () => goTo(`device-tab:${session.id}:${tab}`),
         });
       }
+    }
+
+    for (const page of HOSTSIM_PAGES) {
+      items.push({
+        id: `hostsim-page:${page}`,
+        label: `主机模拟 · ${HOSTSIM_PAGE_LABELS[page]}`,
+        group: '主机模拟',
+        keywords: ['hostsim', page],
+        run: () => goTo(`hostsim-page:${page}`),
+      });
     }
 
     items.push(
@@ -251,7 +337,8 @@ export function App(): JSX.Element {
     for (const ceid of backend.catalog?.ceids ?? []) {
       items.push({
         id: `ceid:${ceid.ceid}`,
-        label: `上报 CEID ${ceid.ceid}${ceid.slot ? ` · ${ceid.slot}` : ''}`,
+        /* 这个动作只是把 CEID 填进输入框，不触发上报；文案必须说清，免得误操作 */
+        label: `填入 CEID ${ceid.ceid}${ceid.slot ? ` · ${ceid.slot}` : ''}`,
         group: '设备目录',
         hint: ceid.owner,
         keywords: ['ceid', String(ceid.ceid), ceid.slot ?? ''],
@@ -300,19 +387,27 @@ export function App(): JSX.Element {
         handler: () => goTo(item.id),
       })),
     ],
-    true,
+    /* 浮层打开时只放行 Esc：否则在对话框里按 1..9 会在背后跳页、r 会触发全量刷新 */
+    !paletteOpen && !helpOpen && !connOpen,
   );
 
   /* ---------- 布局 ---------- */
 
+  const deviceName = route.name === 'device'
+    ? backend.sessions.find((session) => session.id === route.sessionId)?.device ?? route.sessionId
+    : '';
   const title = route.name === 'device'
-    ? { group: '设备', label: route.sessionId, description: DEVICE_PAGE_DESCRIPTIONS[route.tab] }
-    : routeTitle(route);
+    ? { group: '设备', label: deviceName, description: DEVICE_PAGE_DESCRIPTIONS[route.tab] }
+    : route.name === 'hostsim'
+      ? { group: '主机模拟', label: HOSTSIM_PAGE_LABELS[route.page], description: HOSTSIM_PAGE_DESCRIPTIONS[route.page] }
+      : routeTitle(route);
 
   const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
     id: session.id,
     label: `${session.device}`,
-    online: session.controlState === 'ONLINE',
+    state: session.controlState ?? 'OFFLINE',
+    template: backend.configList.find((entry) => entry.name === session.config)?.template ?? '',
+    config: session.config,
   }));
 
   const panelProps = {
@@ -322,18 +417,23 @@ export function App(): JSX.Element {
     updatePreferences: update,
     goTo,
     liveEvents,
+    messages: liveMessages,
   };
 
   return (
-    <div className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div
+      className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+      /* 宽度用 CSS 变量驱动 grid 布局：拖动时只改这一个变量，不重排 DOM */
+      style={{ '--sidenav-w': `${preferences.sidebarWidth}px` } as CSSProperties}
+    >
       <Sidebar
         route={route}
         devices={sidebarDevices}
         collapsed={preferences.sidebarCollapsed}
+        width={preferences.sidebarWidth}
+        onResize={(sidebarWidth) => update({ sidebarWidth })}
         onNavigate={navigate}
         onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
-        version={backend.health?.version ?? '-'}
-        mode={backend.health?.mode ?? '-'}
       />
 
       <div className="main-col">
@@ -353,7 +453,7 @@ export function App(): JSX.Element {
         />
 
         {backend.backendError !== '' && (
-          <div className="global-error-banner" role="alert">
+          <div className="alert-bar" role="alert">
             <span>后端不可达：{backend.backendError}</span>
             <button type="button" onClick={() => void backend.refreshAll()} title="立即重试">
               重试
@@ -372,7 +472,11 @@ export function App(): JSX.Element {
           {route.name === 'device' && (
             <DevicePageView {...panelProps} sessionId={route.sessionId} tab={route.tab} />
           )}
+          {route.name === 'hostsim' && (
+            <HostSimPageView {...panelProps} page={route.page} />
+          )}
           {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
+      {route.name === 'templates' && <TemplatePage {...panelProps} />}
         </main>
       </div>
 
@@ -438,7 +542,7 @@ export function App(): JSX.Element {
           {inDesktopShell ? (
             <>
               填远程服务端地址（如 <code>http://192.168.1.10:8080</code>）切换到远程，
-              本机后端会停止；留空切回本机。远程端需以开放访问启动（Linux jar 包默认）。
+              本机后端会停止；留空切回本机。远程端直接访问，不需要任何令牌或账号。
             </>
           ) : (
             <>

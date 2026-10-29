@@ -21,4 +21,9 @@ describe('router fallback for removed pages', () => {
     expect(parseHash('#/system/audit')).toEqual({ name: 'system', page: 'audit' });
     expect(parseHash('#/device/line1/config')).toEqual({ name: 'device', sessionId: 'line1', tab: 'config' });
   });
+
+  it('falls back instead of throwing on a broken percent escape', () => {
+    expect(parseHash('#/device/%E0%A4%A/ceids')).toEqual({ name: 'workbench' });
+    expect(parseHash('#/device/line%201/svids')).toEqual({ name: 'device', sessionId: 'line 1', tab: 'svids' });
+  });
 });

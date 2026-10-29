@@ -1,0 +1,223 @@
+/*
+ * 响应式:断点只影响"排布",不改信息。
+ *  <=1280  顶栏收起文字,内容区留白收窄
+ *  <=960   侧栏变成顶部横向导航条
+ *  <=680   卡墙/表单单列,表格横向滚动
+ */
+
+@media (max-width: 1440px) {
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  }
+}
+
+@media (max-width: 1280px) {
+  .content {
+    padding: 16px 16px 48px;
+  }
+
+  .topbar {
+    padding: 0.5rem 16px;
+  }
+
+  .spark {
+    grid-template-columns: 6rem minmax(0, 1fr);
+  }
+
+  .spark-readout {
+    grid-column: 2;
+    margin-top: -0.15rem;
+  }
+}
+
+@media (max-width: 1180px) {
+  .page-desc {
+    display: none;
+  }
+
+  .loglevel-picker > span {
+    display: none;
+  }
+
+  .palette-btn .palette-label {
+    display: none;
+  }
+
+  .form-row {
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .app,
+  .app.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 侧栏降级为横向导航条:品牌缩小、设备项右移、隐藏分组标题 */
+  .sidenav {
+    position: sticky;
+    top: 0;
+    flex-direction: row;
+    align-items: center;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--chrome-line);
+  }
+
+  .sidenav::before {
+    display: none;
+  }
+
+  .brand {
+    min-height: 48px;
+    border-bottom: none;
+    border-right: 1px solid var(--chrome-line);
+    padding: 0 0.8rem;
+  }
+
+  .brand-mark {
+    width: 26px;
+    height: 26px;
+  }
+
+  .brand-text {
+    display: none;
+  }
+
+  .sidenav-nav {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.15rem;
+    overflow-x: auto;
+    padding: 0.4rem 0.5rem;
+    scrollbar-width: none;
+  }
+
+  .sidenav-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-group {
+    flex-direction: row;
+    gap: 0.15rem;
+  }
+
+  .nav-group + .nav-group {
+    margin-top: 0;
+    padding-left: 0.35rem;
+    margin-left: 0.35rem;
+    border-left: 1px solid var(--chrome-line);
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item,
+  .sidenav.collapsed .nav-item {
+    width: auto;
+    min-height: 30px;
+    padding: 0 0.6rem;
+    white-space: nowrap;
+  }
+
+  .nav-item.active::before {
+    display: none;
+  }
+
+  .sidenav.collapsed .nav-label,
+  .nav-label {
+    display: inline;
+  }
+
+  .sidenav.collapsed .nav-state,
+  .nav-state {
+    display: none;
+  }
+
+  .sidenav-foot {
+    display: none;
+  }
+
+  .topbar {
+    position: static;
+    gap: 0.5rem;
+  }
+
+  .topbar-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .content {
+    padding: 14px 12px 40px;
+  }
+
+  .panel-body {
+    padding: 14px;
+  }
+
+  .table-scroll {
+    max-height: 52vh;
+  }
+
+  .config-editor,
+  .sml-editor,
+  .log {
+    min-height: 14rem;
+  }
+}
+
+@media (max-width: 680px) {
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+
+  .kpi-value {
+    font-size: 1.3rem;
+  }
+
+  .panel-head {
+    padding: 12px 14px 10px;
+  }
+
+  .panel-actions {
+    width: 100%;
+  }
+
+  .form-row {
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  }
+
+  .spark,
+  .spark-pair,
+  .collector-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spark-readout {
+    grid-column: 1;
+  }
+
+  .device-header {
+    padding: 0.75rem 0.9rem;
+  }
+
+  .device-tabs > button {
+    padding: 0 0.8rem;
+  }
+
+  .toast-host {
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    width: auto;
+  }
+
+  .overlay {
+    padding: 4vh 10px 10px;
+  }
+}

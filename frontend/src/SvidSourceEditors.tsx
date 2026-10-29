@@ -63,15 +63,18 @@ export function SvidSourceEditor({ def, templateIds, absoluteId, onPreviewSvid }
 
   return (
     <div className="svid-source">
-      <div className="toolbar">
-        <label className="field">
-          {label}
-          <select value={kind} onChange={(event) => setKind(event.target.value as SourceKind)}>
-            <option value="default">默认（随机游走）</option>
-            <option value="curve">内联曲线</option>
-            <option value="template">引用模板</option>
-          </select>
-        </label>
+      <div className="svid-source-bar">
+        <span className="svid-source-label" title={label}>{label}</span>
+        <select
+          className="svid-source-kind"
+          value={kind}
+          onChange={(event) => setKind(event.target.value as SourceKind)}
+          aria-label="值来源类型"
+        >
+          <option value="default">默认（随机游走）</option>
+          <option value="curve">内联曲线</option>
+          <option value="template">引用模板</option>
+        </select>
         {kind !== 'default' && (
           <button type="button" onClick={() => setEditing((previous) => !previous)}>
             {expanded ? '收起' : '展开编辑'}
@@ -212,7 +215,7 @@ function CurveFramesField({ curve, kind }: { curve: JsonObject; kind: 'step' | '
 
   return (
     <label className="field grow">
-      {kind === 'step' ? 'steps（[{fromMs,value}...]）' : 'points（[{tMs,value}...]）'}
+      {kind === 'step' ? 'steps' : 'points'}
       <textarea
         value={text}
         rows={3}
@@ -367,17 +370,28 @@ export function EffectsEditor({ plan, mutatePlan, svidChoices }: {
           const specs = effectFieldSpecs(op);
 
           return (
+            /* 效果条目没有稳定 id（schema 里就是无 id 的数组）：只能按位置做 key。
+               用 `${op}-${svid}` 拼 key 会在改 op/svid 时换 key、把输入框卸载重挂，
+               反而丢失焦点；增删只发生在尾部，位置 key 足够稳定。 */
             <FormRowLite key={index} onRemove={() => removeEffect(index)}>
               <label className="field">
                 SVID
-                <NumberField
-                  value={numberField(effect, 'svid')}
-                  integer
-                  list="cfg-svid-options"
-                  onCommit={(next) => mutateEffect(index, (target) => {
-                    target.svid = next;
-                  })}
-                />
+                <select
+                  value={numberField(effect, 'svid') ?? ''}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (Number.isFinite(next) && next > 0) {
+                      mutateEffect(index, (target) => {
+                        target.svid = next;
+                      });
+                    }
+                  }}
+                >
+                  <option value="">选择 SVID…</option>
+                  {svidChoices.map((choice) => (
+                    <option key={choice.svid} value={choice.svid}>{choice.svid} · {choice.slot}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 op

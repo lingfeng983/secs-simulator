@@ -30,6 +30,8 @@ async function boot(): Promise<void> {
       <App />
     </React.StrictMode>,
   );
+  /* 首屏占位只在等待时存在:渲染完成就撤掉,避免遮住真实界面 */
+  document.getElementById('boot')?.remove();
 }
 
 void boot();

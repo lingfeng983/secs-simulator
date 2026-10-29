@@ -54,12 +54,12 @@ export function Topbar({
           title="立即刷新所有数据（R）"
         >
           <Icon name="refresh" size={15} className={refreshing ? 'spin' : undefined} />
-          {refreshing ? '刷新中' : '刷新'}
+          <span className="refresh-label">{refreshing ? '刷新中' : '刷新'}</span>
         </button>
 
         <button type="button" className="icon-btn text-btn palette-btn" onClick={onOpenPalette} title="命令面板（Ctrl+K）">
           <Icon name="search" size={15} />
-          <span>命令</span>
+          <span className="palette-label">命令</span>
           <kbd>Ctrl K</kbd>
         </button>
 

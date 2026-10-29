@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareValues, filterRows, safeFilename, sortRows, toCsv } from './table';
+import { compareValues, filterRows, parseCsv, safeFilename, sortRows, toCsv } from './table';
 
 interface Row {
   id: string;
@@ -110,6 +110,23 @@ describe('toCsv', () => {
       [{ header: 'id', value: (row) => row.id }],
     );
     expect(csv.split('\r\n')[1]).toBe('');
+  });
+});
+
+describe('parseCsv', () => {
+  it('round-trips CSV with quotes, commas, CRLF and BOM', () => {
+    const text = toCsv(
+      [{ id: 'a,b', note: 'say "hi"' }, { id: 'line\nbreak', note: '' }],
+      [{ header: 'id', value: (row) => row.id }, { header: 'note', value: (row) => row.note }],
+    );
+    const rows = parseCsv(text);
+    expect(rows[0]).toEqual(['id', 'note']);
+    expect(rows[1]).toEqual(['a,b', 'say "hi"']);
+    expect(rows[2]).toEqual(['line\nbreak', '']);
+  });
+
+  it('handles trailing newline without an extra empty row', () => {
+    expect(parseCsv('a,b\r\n1,2\r\n')).toEqual([['a', 'b'], ['1', '2']]);
   });
 });
 

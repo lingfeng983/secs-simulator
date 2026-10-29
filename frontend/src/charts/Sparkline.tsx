@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { PreviewEventMark, PreviewSeries } from '../api';
 import { formatValue } from '../lib/format';
+import { eventColorIndexes, eventColorVar, eventKey } from '../lib/eventColors';
+import { useThemeVersion } from '../state/useThemeVersion';
 
 /** 预览图里选中的桶区间；跨所有 SVID 共享，便于对齐读数。 */
 export interface ZoomRange {
@@ -21,10 +23,34 @@ export interface SparklineProps {
   events?: PreviewEventMark[];
   /** 画布高度(px);默认 72。 */
   height?: number;
+  /** 是否在左侧打印 SVID/归属;外层标题已经写了就关掉,免得同一行出现两次。 */
+  showId?: boolean;
 }
 
 export function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
+}
+
+/** 曲线用色:全部来自 CSS 令牌,深浅两套自动跟随。 */
+interface ChartPalette {
+  accent: string;
+  grid: string;
+  cursor: string;
+  event: string;
+}
+
+function readChartPalette(canvas: HTMLCanvasElement): ChartPalette {
+  const styles = getComputedStyle(canvas);
+  const read = (name: string, fallback: string): string => {
+    const value = styles.getPropertyValue(name).trim();
+    return value === '' ? fallback : value;
+  };
+  return {
+    accent: read('--accent', '#0f766e'),
+    grid: read('--line', '#dde4ed'),
+    cursor: read('--muted', '#5f6f85'),
+    event: read('--warn', '#b45309'),
+  };
 }
 
 /** 把缩放区间夹到合法范围；桶数不足时退化成单点。 */
@@ -55,8 +81,10 @@ export function formatSeconds(seconds: number): string {
  * <p>画布按设备像素比放大再由 CSS 缩回去：
  * 直接用 CSS 尺寸当画布尺寸的话，高分屏上线条是糊的。</p>
  */
-export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, events, height = 72 }: SparklineProps): JSX.Element {
+export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, events, height = 72, showId = true }: SparklineProps): JSX.Element {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  /* 主题切换时重画:曲线取的是 CSS 令牌,不重画就会停在旧配色上 */
+  const themeVersion = useThemeVersion();
   const dragAnchor = useRef<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState<ZoomRange | null>(null);
@@ -66,18 +94,20 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
   const viewStart = visible.start;
   const viewEnd = visible.end;
 
-  /* 事件标记映射到桶下标:窗口外丢弃 */
+  /* 事件标记映射到桶下标:窗口外丢弃；颜色按计划/CEID 区分 */
+  const eventColors = useMemo(() => eventColorIndexes(events ?? []), [events]);
   const eventBuckets = useMemo(() => {
     if (events === undefined || events.length === 0) {
-      return [] as { bucket: number; ceid: number }[];
+      return [] as { bucket: number; ceid: number; colorVar: string }[];
     }
     return events
       .filter((event) => event.at >= fromMs && event.at <= fromMs + bucketMs * count)
       .map((event) => ({
         bucket: Math.min(count - 1, Math.max(0, Math.floor((event.at - fromMs) / bucketMs))),
         ceid: event.ceid,
+        colorVar: eventColorVar(eventColors.get(eventKey(event)) ?? 1),
       }));
-  }, [events, fromMs, bucketMs, count]);
+  }, [events, eventColors, fromMs, bucketMs, count]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -121,8 +151,12 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
     const x = (index: number) => ((index - viewStart) / span) * (displayWidth - 1);
     const y = (value: number) => displayHeight - 2 - ((value - low) / (high - low)) * (displayHeight - 4);
 
+    /* 取色一律走 CSS 令牌:曲线要跟界面同一套颜色,而不是写死一个蓝 */
+    const palette = readChartPalette(canvas);
+
     /* 三条水平参考线：没有刻度也要让人看出"高/中/低" */
-    context.strokeStyle = 'rgba(128, 128, 128, 0.22)';
+    context.globalAlpha = 0.75;
+    context.strokeStyle = palette.grid;
     context.lineWidth = 1;
     for (let line = 0; line <= 3; line += 1) {
       const at = 2 + (line / 3) * (displayHeight - 4);
@@ -131,6 +165,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
       context.lineTo(displayWidth, at);
       context.stroke();
     }
+    context.globalAlpha = 1;
 
     context.beginPath();
     for (let index = viewStart; index <= viewEnd; index += 1) {
@@ -145,8 +180,10 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
       context.lineTo(x(index), y(series.min[index]));
     }
     context.closePath();
-    context.fillStyle = 'rgba(68, 147, 248, 0.22)';
+    context.globalAlpha = 0.16;
+    context.fillStyle = palette.accent;
     context.fill();
+    context.globalAlpha = 1;
 
     context.beginPath();
     for (let index = viewStart; index <= viewEnd; index += 1) {
@@ -157,27 +194,43 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
         context.lineTo(x(index), y(value));
       }
     }
-    context.strokeStyle = '#4493f8';
+    context.strokeStyle = palette.accent;
     context.lineWidth = 1.5;
+    context.lineJoin = 'round';
     context.stroke();
 
-    /* 事件标记(v6):橙色虚线竖线 + 顶部小三角,提示"事件发生在这里" */
+    /* 事件标记(v6):每个计划一种颜色的虚线竖线 + 顶部小三角。
+       同图多计划时，颜色是唯一的归属线索。 */
     if (eventBuckets.length > 0) {
       context.save();
-      context.strokeStyle = 'rgba(240, 140, 40, 0.85)';
+      context.globalAlpha = 0.85;
       context.setLineDash([3, 3]);
       context.lineWidth = 1;
+      const styles = getComputedStyle(canvas);
+      const resolved = new Map<string, string>();
+      const colorOf = (name: string): string => {
+        const cached = resolved.get(name);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const value = styles.getPropertyValue(name).trim();
+        const color = value === '' ? palette.event : value;
+        resolved.set(name, color);
+        return color;
+      };
       for (const marker of eventBuckets) {
         if (marker.bucket < viewStart || marker.bucket > viewEnd) {
           continue;
         }
+        const color = colorOf(marker.colorVar);
+        context.strokeStyle = color;
+        context.fillStyle = color;
         const atX = x(marker.bucket);
         context.beginPath();
         context.moveTo(atX, 0);
         context.lineTo(atX, displayHeight);
         context.stroke();
         context.setLineDash([]);
-        context.fillStyle = 'rgba(240, 140, 40, 0.95)';
         context.beginPath();
         context.moveTo(atX - 3, 0);
         context.lineTo(atX + 3, 0);
@@ -187,6 +240,7 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
         context.setLineDash([3, 3]);
       }
       context.restore();
+      context.globalAlpha = 1;
     }
 
     if (drag !== null) {
@@ -194,26 +248,28 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
       const to = Math.max(drag.start, drag.end);
       const left = clamp(x(from), 0, displayWidth);
       const right = clamp(x(to), 0, displayWidth);
-      context.fillStyle = 'rgba(68, 147, 248, 0.16)';
+      context.globalAlpha = 0.12;
+      context.fillStyle = palette.accent;
       context.fillRect(left, 0, Math.max(1, right - left), displayHeight);
+      context.globalAlpha = 1;
     }
 
     if (hover !== null) {
       const index = clamp(hover, viewStart, viewEnd);
       const atX = x(index);
-      context.strokeStyle = 'rgba(128, 128, 128, 0.75)';
+      context.strokeStyle = palette.cursor;
       context.lineWidth = 1;
       context.beginPath();
       context.moveTo(atX, 0);
       context.lineTo(atX, displayHeight);
       context.stroke();
 
-      context.fillStyle = '#4493f8';
+      context.fillStyle = palette.accent;
       context.beginPath();
       context.arc(atX, y(series.avg[index]), 3, 0, Math.PI * 2);
       context.fill();
     }
-  }, [series, hover, drag, viewStart, viewEnd, count, eventBuckets, height]);
+  }, [series, hover, drag, viewStart, viewEnd, count, eventBuckets, height, themeVersion]);
 
   const bucketAt = (event: ReactPointerEvent<HTMLCanvasElement>): number | null => {
     const canvas = ref.current;
@@ -269,13 +325,15 @@ export function Sparkline({ series, fromMs, bucketMs, zoom = null, onZoom, event
       : `${formatSeconds((fromMs + hovered * bucketMs) / 1000)}  min ${formatValue(series.min[hovered])}  max ${formatValue(series.max[hovered])}  avg ${formatValue(series.avg[hovered])}`;
 
   return (
-    <div className="spark">
-      <span className="spark-id" title={`SVID ${series.svid}`}>
-        {series.svid}
-        {series.owner !== undefined && series.owner !== '' && (
-          <span className="spark-owner"> {series.owner}</span>
-        )}
-      </span>
+    <div className={`spark${showId ? '' : ' spark-no-id'}`}>
+      {showId && (
+        <span className="spark-id" title={`SVID ${series.svid}`}>
+          {series.svid}
+          {series.owner !== undefined && series.owner !== '' && (
+            <span className="spark-owner"> {series.owner}</span>
+          )}
+        </span>
+      )}
       <canvas
         ref={ref}
         height={height}

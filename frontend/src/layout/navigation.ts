@@ -37,9 +37,22 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'workbench',
         label: '工作台',
-        description: '所有设备的总览与会话管理:KPI、设备总览表、开设备/重载/上报。',
+        description: '模拟器的总控台:设备与会话合并成一张表,读数、勾选、生命周期操作都在一行。',
         icon: 'overview',
         route: { name: 'workbench' },
+      },
+    ],
+  },
+  {
+    id: 'hostsim',
+    label: '主机模拟',
+    items: [
+      {
+        id: 'hostsim',
+        label: '主机模拟',
+        description: '以主机角色连设备：可开多个主机实例,各自选本机设备或远程 SECS;三类采集分开成页。',
+        icon: 'hostsim',
+        route: { name: 'hostsim', page: 'hosts' },
       },
     ],
   },
@@ -48,6 +61,13 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
     label: '管理',
     belowDevices: true,
     items: [
+      {
+        id: 'templates',
+        label: '模板管理',
+        description: '设备模板的增删改查；工作台新建设备只从这里选模板。',
+        icon: 'config',
+        route: { name: 'templates' },
+      },
       {
         id: 'audit',
         label: '审计',

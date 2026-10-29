@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { downloadText, filterRows, sortRows, toCsv, type CsvColumn, type SortState } from '../lib/table';
+import { filterRows, parseCsv, sortRows, toCsv, type CsvColumn, type SortState } from '../lib/table';
+import { saveTextFile, type SaveResult } from '../lib/saveFile';
 import { usePersistentState } from '../state/usePersistentState';
 import { EmptyState } from './EmptyState';
 
@@ -31,8 +32,14 @@ export interface DataTableProps<T> {
   emptyText?: string;
   /** 给了就显示"导出 CSV"按钮，值是文件名（不含扩展名）。 */
   exportName?: string;
+  /** 导出完成后的回调：调用方用它提示"文件保存在哪"。 */
+  onExported?: (result: SaveResult) => void;
   /** 导出的列；不给就用 columns（render 不可序列化，必须另给）。 */
   exportColumns?: readonly CsvColumn<T>[];
+  /** 给了就显示"导入 CSV"按钮；参数是按表头映射后的行。 */
+  onImport?: (rows: Record<string, string>[]) => void | Promise<void>;
+  /** 导入按钮的说明（默认按导出时的表头解析）。 */
+  importHint?: string;
   /** 每行的附加类名，用来标异常行。 */
   rowClassName?: (row: T) => string | undefined;
   /** 默认排序。 */
@@ -64,6 +71,9 @@ export function DataTable<T>({
   emptyText = '暂无数据',
   exportName,
   exportColumns,
+  onExported,
+  onImport,
+  importHint,
   rowClassName,
   defaultSort,
   pageSize,
@@ -74,13 +84,25 @@ export function DataTable<T>({
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
   const [page, setPage] = useState(0);
-  /* 列宽（px）：拖拽手柄更新；键为列 key。持久化键按表隔离。 */
-  const widthsKey = tableKey === undefined ? '' : `secs-sim-colw-${tableKey}`;
-  const [columnWidths, setColumnWidths] = usePersistentState<Record<string, number>>(
-    widthsKey === '' ? 'secs-sim-colw-none' : widthsKey,
+  /* 列宽（px）：拖拽手柄更新；键为列 key。
+     有 tableKey 才持久化；没有时只存组件内——用一个共享假键会让两张匿名表互相踩列宽。 */
+  const [localWidths, setLocalWidths] = useState<Record<string, number>>({});
+  const [persistedWidths, setPersistedWidths] = usePersistentState<Record<string, number>>(
+    tableKey === undefined ? 'secs-sim-colw-__scratch__' : `secs-sim-colw-${tableKey}`,
     {},
   );
+  /* 拖动期间只写组件内的 dragWidths；mouseup 才落一次 localStorage。
+     原来的每像素一次写盘会在 JSON 序列化 + 同步 IO 上拖慢拖动。 */
+  const [dragWidths, setDragWidths] = useState<Record<string, number>>({});
+  const baseWidths = tableKey === undefined ? localWidths : persistedWidths;
+  const persistWidths = tableKey === undefined ? setLocalWidths : setPersistedWidths;
+  const columnWidths = { ...baseWidths, ...dragWidths };
+  const baseWidthsRef = useRef(baseWidths);
+  baseWidthsRef.current = baseWidths;
+  const dragWidthsRef = useRef(dragWidths);
+  dragWidthsRef.current = dragWidths;
   const resizing = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (tableKey === undefined) {
@@ -92,11 +114,17 @@ export function DataTable<T>({
         return;
       }
       const next = Math.max(48, Math.round(state.startWidth + event.clientX - state.startX));
-      setColumnWidths((previous) => ({ ...previous, [state.key]: next }));
+      setDragWidths((previous) => ({ ...previous, [state.key]: next }));
     };
     const onUp = () => {
+      if (resizing.current === null) {
+        return;
+      }
       resizing.current = null;
       document.body.style.cursor = '';
+      /* 落一次盘：把拖动期间的临时宽度合并进持久化状态 */
+      persistWidths({ ...baseWidthsRef.current, ...dragWidthsRef.current });
+      setDragWidths({});
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -104,7 +132,7 @@ export function DataTable<T>({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [tableKey, setColumnWidths]);
+  }, [tableKey, persistWidths]);
 
   const startResize = useCallback((key: string, event: React.MouseEvent) => {
     event.preventDefault();
@@ -154,7 +182,7 @@ export function DataTable<T>({
     setPage(0);
   };
 
-  const onExport = () => {
+  const onExport = async () => {
     if (exportName === undefined) {
       return;
     }
@@ -166,14 +194,39 @@ export function DataTable<T>({
           header: column.header,
           value: (row: T) => column.sortValue?.(row) ?? '',
         }));
-    downloadText(`${exportName}.csv`, toCsv(sorted, columnsForCsv), 'text/csv;charset=utf-8');
+    /* 弹保存位置（支持时）并把结果交给调用方提示；取消不提示 */
+    const result = await saveTextFile(
+      `${exportName}.csv`,
+      toCsv(sorted, columnsForCsv),
+      'text/csv;charset=utf-8',
+    );
+    onExported?.(result);
   };
 
   const searching = query.trim() !== '';
 
+  const importCsv = async (file: File) => {
+    if (onImport === undefined) {
+      return;
+    }
+    try {
+      const table = parseCsv(await file.text());
+      if (table.length < 2) {
+        throw new Error('CSV 没有数据行');
+      }
+      const headers = table[0].map((header) => header.trim());
+      const records = table.slice(1)
+        .filter((row) => row.some((cell) => cell.trim() !== ''))
+        .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
+      await onImport(records);
+    } catch (error) {
+      window.alert(`导入失败：${(error as Error).message}`);
+    }
+  };
+
   return (
     <div className="table-wrap">
-      {(searchPlaceholder !== undefined || toolbar !== undefined || exportName !== undefined) && (
+      {(searchPlaceholder !== undefined || toolbar !== undefined || exportName !== undefined || onImport !== undefined) && (
         <div className="table-toolbar">
           {searchPlaceholder !== undefined && (
             <input
@@ -193,9 +246,33 @@ export function DataTable<T>({
             {searching ? `${filtered.length} / ${rows.length}` : `${rows.length}`} 条
           </span>
           {exportName !== undefined && (
-            <button type="button" onClick={onExport} title="导出当前筛选结果为 CSV">
+            <button type="button" onClick={() => void onExport()} title="导出当前筛选结果为 CSV（可选择保存位置）">
               导出 CSV
             </button>
+          )}
+          {onImport !== undefined && (
+            <>
+              <button
+                type="button"
+                onClick={() => importRef.current?.click()}
+                title={importHint ?? '按导出时的表头导入 CSV'}
+              >
+                导入 CSV
+              </button>
+              <input
+                ref={importRef}
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file !== undefined) {
+                    void importCsv(file);
+                  }
+                }}
+              />
+            </>
           )}
         </div>
       )}
@@ -226,8 +303,29 @@ export function DataTable<T>({
                       ]
                         .filter((item) => item !== '')
                         .join(' ')}
-                      aria-sort={active ? (sort?.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+                      aria-sort={
+                        sortable
+                          ? active
+                            ? sort?.direction === 'asc' ? 'ascending' : 'descending'
+                            : 'none'
+                          : undefined
+                      }
+                      /* 可排序表头本身就是按钮：键盘用户也要能排序，
+                         所以给 tabIndex/role 和 Enter/Space 处理 */
+                      role={sortable ? 'button' : undefined}
+                      tabIndex={sortable ? 0 : undefined}
                       onClick={sortable ? () => toggleSort(column.key) : undefined}
+                      onKeyDown={
+                        sortable
+                          ? (event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                /* 空格默认会滚动页面，必须拦掉 */
+                                event.preventDefault();
+                                toggleSort(column.key);
+                              }
+                            }
+                          : undefined
+                      }
                     >
                       {column.header}
                       {sortable && (
@@ -243,7 +341,12 @@ export function DataTable<T>({
                           onMouseDown={(event) => startResize(column.key, event)}
                           onDoubleClick={() => {
                             /* 双击手柄恢复该列默认宽 */
-                            setColumnWidths((previous) => {
+                            persistWidths(() => {
+                              const next = { ...baseWidthsRef.current };
+                              delete next[column.key];
+                              return next;
+                            });
+                            setDragWidths((previous) => {
                               const next = { ...previous };
                               delete next[column.key];
                               return next;

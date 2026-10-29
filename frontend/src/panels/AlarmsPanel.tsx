@@ -1,16 +1,19 @@
 import { useState } from 'react';
-import type { AlarmState, TerminalMessage } from '../api';
-import { Panel, PanelFootnote } from '../ui/Panel';
-import { DataTable, type Column } from '../ui/DataTable';
-import { formatClock, formatRelative } from '../lib/format';
+import { Panel } from '../ui/Panel';
 import type { PanelBaseProps } from './types';
+
+/** 报警文本会进 SECS-II 的 A 类型，只接受 US-ASCII。 */
+function hasNonAscii(text: string): boolean {
+  return /[^\x00-\x7F]/.test(text);
+}
 
 /**
  * 报警面板。
  *
- * <p>置位/清除会向主机发 S5F1（带 W 位，等 S5F2）。
- * 活动报警和终端消息都是"现在"的快照，后端只保留最近若干条，
- * 所以这里也说明了保留上限，免得用户以为消息丢了。</p>
+ * <p>只保留"编辑报警并发送 / 压测"这一个能力。活动报警与终端消息的本地快照
+ * 没有独立触发点（状态由 S5F2 的异步 ACK 决定），容易造成"接口成功但没数据"
+ * 的误解；报警与终端报文是否真的到达主机，去设备「消息」页看 S5F1/S5F2、
+ * S10F3/S10F4 更直接。</p>
  */
 export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [alid, setAlid] = useState(1001);
@@ -21,7 +24,7 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
   const [stormInterval, setStormInterval] = useState('0');
   const [stormRunning, setStormRunning] = useState(false);
 
-  const { alarms, terminalMessages, activeSession } = backend;
+  const { activeSession } = backend;
   const disabled = activeSession === '';
 
   /** 对编辑好的报警信息做服务端压测:交替置位/清除。 */
@@ -49,44 +52,41 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     }
   };
 
-  const alarmColumns: Column<AlarmState>[] = [
-    { key: 'alid', header: 'ALID', align: 'right', sortValue: (row) => row.alid, render: (row) => row.alid },
-    { key: 'category', header: '类别', align: 'right', sortValue: (row) => row.category, render: (row) => row.category },
-    { key: 'text', header: '文本', sortValue: (row) => row.text, render: (row) => row.text },
-    {
-      key: 'at',
-      header: '置位时间',
-      sortValue: (row) => row.atMillis,
-      render: (row) => (
-        <span title={new Date(row.atMillis).toLocaleString()}>{formatClock(row.atMillis)}</span>
-      ),
-    },
-    {
-      key: 'ago',
-      header: '距今',
-      sortValue: (row) => row.atMillis,
-      render: (row) => formatRelative(row.atMillis),
-    },
-  ];
-
-  const terminalColumns: Column<TerminalMessage>[] = [
-    { key: 'tid', header: 'TID', align: 'right', sortValue: (row) => row.tid, render: (row) => row.tid },
-    { key: 'text', header: '文本', sortValue: (row) => row.text, render: (row) => row.text },
-    {
-      key: 'at',
-      header: '收到时间',
-      sortValue: (row) => row.atMillis,
-      render: (row) => (
-        <span title={new Date(row.atMillis).toLocaleString()}>{formatClock(row.atMillis)}</span>
-      ),
-    },
-  ];
+  /** 置位/清除同一入口：文本先过 ASCII 校验，避免服务端才报错。 */
+  const sendAlarm = (active: boolean) => {
+    if (hasNonAscii(alarmText)) {
+      notifier.error('报警文本只能包含 US-ASCII 字符', 'SECS-II 的 A 类型不接受中文等非 ASCII 字符');
+      return;
+    }
+    void backend.setAlarm(activeSession, alid, active, alarmText, alarmCategory);
+  };
 
   return (
     <Panel
       id="panel-alarms"
       title="报警"
-      description="向主机发送 S5F1（带 W 位，等待 S5F2），并查看活动报警与终端消息。"
+      description="向主机发送 S5F1（带 W 位，等待 S5F2），可对同一组参数做报警风暴。"
+      actions={
+        <>
+          <button
+            type="button"
+            onClick={() => sendAlarm(false)}
+            disabled={disabled}
+            title="清除报警（S5F1，带 W 位）"
+          >
+            清除报警
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => sendAlarm(true)}
+            disabled={disabled}
+            title="置位报警（S5F1，带 W 位）"
+          >
+            置位报警
+          </button>
+        </>
+      }
     >
       <div className="preview-controls">
         <label className="field">
@@ -103,35 +103,25 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
           类别
           <input
             type="number"
-            min={0}
+            min={1}
             max={7}
             value={alarmCategory}
-            onChange={(event) => setAlarmCategory(Number(event.target.value) || 0)}
+            onChange={(event) => setAlarmCategory(Math.min(7, Math.max(1, Number(event.target.value) || 1)))}
             disabled={disabled}
+            title="E30：类别 1..7（0 无定义）"
           />
         </label>
         <label className="field field-wide">
           报警文本
-          <input value={alarmText} onChange={(event) => setAlarmText(event.target.value)} disabled={disabled} />
+          <input
+            value={alarmText}
+            onChange={(event) => setAlarmText(event.target.value)}
+            disabled={disabled}
+            title="SECS-II 的 A 类型只接受 US-ASCII"
+          />
         </label>
-        <button
-          type="button"
-          onClick={() => void backend.setAlarm(activeSession, alid, true, alarmText, alarmCategory)}
-          disabled={disabled}
-          title='置位报警（S5F1）'
-        >
-          置位
-        </button>
-        <button
-          type="button"
-          onClick={() => void backend.setAlarm(activeSession, alid, false, alarmText, alarmCategory)}
-          disabled={disabled}
-          title='清除报警（S5F1）'
-        >
-          清除
-        </button>
       </div>
-      <p className="hint">置位/清除会向主机发送 S5F1（带 W 位，等待 S5F2）。</p>
+      <p className="hint">置位/清除在面板右上角：会向主机发送 S5F1（带 W 位，等待 S5F2）。文本只能包含 US-ASCII 字符。</p>
 
       <div className="toolbar">
         <label className="field">
@@ -153,44 +143,11 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
         </button>
       </div>
 
-      <h3 className="sub-title">活动报警</h3>
-      <DataTable
-        tableKey="alarms"
-        columns={alarmColumns}
-        rows={alarms}
-        rowKey={(row) => String(row.alid)}
-        searchPlaceholder="搜索 ALID / 文本"
-        exportName="alarms"
-        emptyText="暂无活动报警"
-        exportColumns={[
-          { header: 'ALID', value: (row) => row.alid },
-          { header: '类别', value: (row) => row.category },
-          { header: '文本', value: (row) => row.text },
-          { header: '置位时间', value: (row) => new Date(row.atMillis).toISOString() },
-        ]}
-      />
-
-      <h3 className="sub-title">终端消息</h3>
-      <DataTable
-        tableKey="alarms-2"
-        columns={terminalColumns}
-        rows={terminalMessages}
-        rowKey={(row) => `${row.atMillis}-${row.tid}`}
-        searchPlaceholder="搜索 TID / 文本"
-        exportName="terminal-messages"
-        emptyText="暂无终端消息"
-        exportColumns={[
-          { header: 'TID', value: (row) => row.tid },
-          { header: '文本', value: (row) => row.text },
-          { header: '收到时间', value: (row) => new Date(row.atMillis).toISOString() },
-        ]}
-      />
-          <PanelFootnote
-        items={[
-          { label: '活动报警', value: alarms.length, tone: alarms.length > 0 ? 'warn' : undefined },
-          { label: '终端消息', value: terminalMessages.length },
-        ]}
-      />
+      <p className="hint">
+        活动报警与终端消息的本地快照已移除（它们没有独立触发点，异步 ACK 失败时会误导）。
+        要确认报警/终端是否真的到达主机，去设备「消息」页按「报警」或「终端」类别看
+        S5F1/S5F2、S10F3/S10F4；完整记录仍在 <code>logs/messages.jsonl</code>。
+      </p>
     </Panel>
   );
 }

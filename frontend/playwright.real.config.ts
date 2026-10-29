@@ -3,8 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * 真实后端 E2E：页面由 Java 进程同源托管，API 不做拦截。
  *
- * 运行前需要外部启动 secs-sim（见 CI 的 frontend-e2e-real job），
- * 并用 E2E_REAL_URL / E2E_REAL_TOKEN 指向它。
+ * 运行前需要外部启动 secs-sim，并用 E2E_REAL_URL 指向它
+ * （内部工具直连访问，不需要令牌）。
  */
 export default defineConfig({
   testDir: './e2e-real',

@@ -11,6 +11,11 @@ export type Density = 'comfortable' | 'compact';
 const STORAGE_KEY = 'secs-sim-ui:preferences';
 
 /** 面板级偏好。 */
+/** 左侧导航宽度：可拖动调整，限制在这个区间内。 */
+export const SIDEBAR_MIN_W = 180;
+export const SIDEBAR_MAX_W = 420;
+export const SIDEBAR_DEFAULT_W = 248;
+
 export interface Preferences {
   theme: ThemePreference;
   density: Density;
@@ -18,6 +23,8 @@ export interface Preferences {
   activeTab: string;
   /** 左侧导航是否折叠为纯图标栏。 */
   sidebarCollapsed: boolean;
+  /** 左侧导航展开时的宽度（px）。 */
+  sidebarWidth: number;
   /** 报文面板是否自动滚动到底。 */
   autoscroll: boolean;
   /** 报文面板是否暂停接收（只冻结显示，不影响服务端）。 */
@@ -33,11 +40,20 @@ export const DEFAULT_PREFERENCES: Preferences = {
   density: 'comfortable',
   activeTab: 'workbench',
   sidebarCollapsed: false,
+  sidebarWidth: SIDEBAR_DEFAULT_W,
   autoscroll: true,
   pauseStream: false,
   chartMode: 'canvas',
   windowMs: 60_000,
 };
+
+/** 把外部来源（localStorage / 旧版本）的宽度收进合法区间。 */
+export function clampSidebarWidth(value: number): number {
+  if (!Number.isFinite(value)) {
+    return SIDEBAR_DEFAULT_W;
+  }
+  return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, Math.round(value)));
+}
 
 /** 系统当前是不是深色。 */
 function systemPrefersDark(): boolean {
@@ -80,7 +96,12 @@ export function usePreferences(): {
 
   /* 老版本存下的键可能缺字段，逐个补齐，别让一个 undefined 把界面搞崩 */
   const preferences = useMemo<Preferences>(
-    () => ({ ...DEFAULT_PREFERENCES, ...stored }),
+    () => ({
+      ...DEFAULT_PREFERENCES,
+      ...stored,
+      /* 宽度可能被手工改过或来自旧版本：越界值会把侧栏撑爆/压没 */
+      sidebarWidth: clampSidebarWidth(stored.sidebarWidth ?? DEFAULT_PREFERENCES.sidebarWidth),
+    }),
     [stored],
   );
 

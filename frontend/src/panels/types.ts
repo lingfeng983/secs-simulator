@@ -2,6 +2,7 @@ import type { BackendController } from '../state/useBackend';
 import type { Preferences } from '../state/usePreferences';
 import type { Notifier } from '../state/useToasts';
 import type { NoticeWire } from '../state/useEventStream';
+import type { WireMessage } from '../api';
 
 /**
  * 所有面板共有的入参。
@@ -22,4 +23,6 @@ export interface PanelBaseProps {
   goTo?: (id: string) => void;
   /** 实时类型化通知（v6:s6f11/alarm/session,设备事件子页用）。 */
   liveEvents?: NoticeWire[];
+  /** 实时报文（SSE + 历史补拉，按时间升序）；消息监视面板用。 */
+  messages?: WireMessage[];
 }

@@ -6,11 +6,13 @@ interface TextFieldProps {
   wide?: boolean;
   /** 占位提示；透传给 input。 */
   placeholder?: string;
+  /** 悬停提示（透传给 input）。 */
+  title?: string;
   onCommit: (next: string) => void;
 }
 
 /** 失焦/回车才提交的文本框：避免每敲一个字就重写整份配置。 */
-export function TextField({ value, allowBlank = false, wide = false, placeholder, onCommit }: TextFieldProps): JSX.Element {
+export function TextField({ value, allowBlank = false, wide = false, placeholder, title, onCommit }: TextFieldProps): JSX.Element {
   const [draft, setDraft] = useState(value);
 
   useEffect(() => {
@@ -31,6 +33,7 @@ export function TextField({ value, allowBlank = false, wide = false, placeholder
     <input
       className={wide ? 'template-input-wide' : undefined}
       placeholder={placeholder}
+      title={title}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
@@ -48,11 +51,13 @@ interface NumberFieldProps {
   integer?: boolean;
   step?: number;
   list?: string;
+  /** 悬停提示（透传给 input）。 */
+  title?: string;
   onCommit: (next: number) => void;
 }
 
 /** 失焦/回车才提交的数字框；非法输入恢复原值，避免把 NaN 写进 JSON。 */
-export function NumberField({ value, integer = false, step, list, onCommit }: NumberFieldProps): JSX.Element {
+export function NumberField({ value, integer = false, step, list, title, onCommit }: NumberFieldProps): JSX.Element {
   const external = value === undefined ? '' : String(value);
   const [draft, setDraft] = useState(external);
 
@@ -75,6 +80,7 @@ export function NumberField({ value, integer = false, step, list, onCommit }: Nu
     <input
       type="number"
       list={list}
+      title={title}
       step={step ?? (integer ? 1 : 'any')}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}

@@ -96,7 +96,7 @@ export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEd
 }
 
 /** 文档里全部模板 id(曲线 + 组合):SVID 直配引用的候选。 */
-function templateIdsOf(root: JsonObject): string[] {
+export function templateIdsOf(root: JsonObject): string[] {
   const templates = objectField(root, 'templates');
   const ids: string[] = [];
   const groups = [readObjectArray(templates, 'curves', 'templates'), readObjectArray(templates, 'composites', 'templates')];
@@ -124,22 +124,50 @@ function SectionHead({ title, children }: { title: string; children?: ReactNode 
   );
 }
 
-/** 子表行：一排字段 + 行尾删除按钮。 */
-function FormRow({ onRemove, children }: { onRemove: () => void; children: ReactNode }): JSX.Element {
+/**
+ * 子表行：一排字段 + 行尾删除按钮。
+ *
+ * <p>用 CSS grid 而不是 flex 换行——字段一多，flex 换行会让每行的
+ * 字段各占一段，列对不齐、右侧还留一大片空白。grid 的列宽由整组行共享，
+ * 每一列的输入框左边缘天然对齐。</p>
+ */
+function FormRow({ onRemove, children, cols }: {
+  onRemove: () => void;
+  children: ReactNode;
+  /** 列数：决定栅格模板，与表头一致。 */
+  cols: 3 | 5 | 7 | 8;
+}): JSX.Element {
   return (
-    <div className="form-row">
+    <div className={`form-grid-row form-grid-row--${cols}`}>
       {children}
-      <button type="button" onClick={onRemove}>
+      <button type="button" className="form-grid-del" onClick={onRemove} title="删除这一行">
         删除
       </button>
     </div>
   );
 }
 
+/**
+ * 子表表头：与 {@link FormRow} 的列一一对应。
+ *
+ * <p>列名写在表头而不是每个字段旁边，是为了让"这一列是什么"只说一遍，
+ * 行内就只剩控件本身。</p>
+ */
+function FormGridHead({ columns }: { columns: string[] }): JSX.Element {
+  return (
+    <div className={`form-grid-row form-grid-head form-grid-row--${columns.length}`}>
+      {columns.map((column) => (
+        <span className="form-grid-label" key={column}>{column}</span>
+      ))}
+      <span className="form-grid-del" aria-hidden="true" />
+    </div>
+  );
+}
+
 function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: string) => void }): JSX.Element {
   return (
-    <label className="field">
-      类型
+    <label className="field field-cell">
+      <span className="field-cell-name">类型</span>
       <select value={value} onChange={(event) => onCommit(event.target.value)}>
         {SECS_TYPES.map((type) => (
           <option key={type} value={type}>
@@ -154,8 +182,8 @@ function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: strin
 /** 逗号分隔的字符串列表（报告引用、CEID 引用等）；全角逗号也认。 */
 function StringListField({ values, onCommit }: { values: string[]; onCommit: (next: string[]) => void }): JSX.Element {
   return (
-    <label className="field">
-      引用（逗号分隔）
+    <label className="field field-cell">
+      <span className="field-cell-name">引用（逗号分隔）</span>
       <TextField
         allowBlank
         wide
@@ -192,23 +220,21 @@ function nextOffset(items: readonly JsonObject[]): number {
 
 /* ---------- 会话 ---------- */
 
-function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const session = isJsonObject(root.session) ? root.session : null;
 
   if (session === null) {
     return (
       <div className="cfg-section">
-        <SectionHead title="会话">
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              draft.session = { id: 'dev-01', passive: true, port: 5000 };
-            })}
-          >
-            插入 session 段
-          </button>
-        </SectionHead>
         <p className="hint">这份配置还没有 session 段（监听端口、设备号等）。</p>
+        <button
+          type="button"
+          onClick={() => edit((draft) => {
+            draft.session = { id: 'dev-01', passive: true, port: 5000 };
+          })}
+        >
+          插入 session 段
+        </button>
       </div>
     );
   }
@@ -220,62 +246,67 @@ function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Elem
   };
 
   return (
-    <div className="cfg-section">
-      <Collapsible title="会话（session · 连接标识，改动需重建连接）" defaultOpen>
-      <div className="form-row">
-        <label className="field">
-          会话 id
+    <div className="cfg-section session-form">
+      <div className="session-fields">
+        <SessionField label="会话 id" help="唯一标识，用于 URL、日志、主机选择；改动会重建连接。">
           <TextField value={stringField(session, 'id')} onCommit={(next) => set('id', next)} />
-        </label>
-        <label className="field">
-          HSMS 端口
+        </SessionField>
+        <SessionField label="HSMS 端口" help="被动监听端口，必须与主机连接的目标端口一致，且不能与其他会话冲突。">
           <NumberField value={numberField(session, 'port')} integer onCommit={(next) => set('port', next)} />
-        </label>
-        <label className="field">
-          绑定地址
+        </SessionField>
+        <SessionField label="绑定地址" help="留空监听所有网卡；填 127.0.0.1 则只允许本机连接。">
           <TextField
             allowBlank
             value={stringField(session, 'bindHost')}
             onCommit={(next) => set('bindHost', next === '' ? undefined : next)}
           />
-        </label>
-        <label className="field">
-          deviceId
+        </SessionField>
+        <SessionField label="deviceId" help="HSMS Device ID（0–32767），主机按它区分设备，两侧必须一致。">
           <NumberField value={numberField(session, 'deviceId')} integer onCommit={(next) => set('deviceId', next)} />
-        </label>
-        <label className="field">
-          随机种子
+        </SessionField>
+        <SessionField label="随机种子" help="决定曲线与事件抖动的随机序列；固定种子便于复现同一条曲线。">
           <NumberField value={numberField(session, 'seed')} integer onCommit={(next) => set('seed', next)} />
-        </label>
-        <label className="check-inline">
-          <input
-            type="checkbox"
-            checked={booleanField(session, 'passive', true)}
-            onChange={(event) => set('passive', event.target.checked)}
-          />
-          被动监听
-        </label>
+        </SessionField>
+        <SessionField label="被动监听" help="勾选 = 设备开端口等主机连；取消 = 设备主动连接主机。">
+          <label className="check-inline">
+            <input
+              type="checkbox"
+              checked={booleanField(session, 'passive', true)}
+              onChange={(event) => set('passive', event.target.checked)}
+            />
+            {booleanField(session, 'passive', true) ? '设备监听' : '设备主动连接'}
+          </label>
+        </SessionField>
       </div>
+
+      <h3 className="session-subhead">HSMS 超时（秒，留空用协议默认）</h3>
       <TimeoutFields session={session} set={set} />
-      <p className="hint">
-        被动监听 = 设备开端口等主机连；取消勾选则由设备主动连主机。
-        会话 id 唯一，端口不能和正在运行的会话冲突。超时单位是秒，留空用协议层默认
-        （T3=45、T5=10、T6=5、T7=10、T8=6）；改超时会让会话重建、主机断连。
-      </p>
-      </Collapsible>
     </div>
+  );
+}
+
+/** 一行"属性 + 说明 + 控件"：说明保证在左侧，控件在右侧。 */
+function SessionField({ label, help, children }: { label: string; help: string; children: ReactNode }): JSX.Element {
+  return (
+    <label className="field session-field">
+      <span className="session-field-text">
+        <span className="session-field-name">{label}</span>
+        <span className="session-field-help">{help}</span>
+      </span>
+      {children}
+    </label>
   );
 }
 
 /** HSMS 超时（秒，可选）：写进 session.timeouts；清空删除键，用协议层默认。 */
 function TimeoutFields({ session, set }: { session: JsonObject; set: (key: string, value: unknown) => void }): JSX.Element {
   const timeouts = isJsonObject(session.timeouts) ? session.timeouts : {};
-  const fields: ReadonlyArray<{ key: string; label: string }> = [
-    { key: 't3', label: 'T3 回复' },
-    { key: 't5', label: 'T5 重连' },
-    { key: 't6', label: 'T6 事务' },
-    { key: 't7', label: 'T7 选择' },
-    { key: 't8', label: 'T8 字符间' },
+  const fields: ReadonlyArray<{ key: string; label: string; help: string }> = [
+    { key: 't3', label: 'T3 回复', help: '发出 W 位报文后等回复的上限；超时记为失败。' },
+    { key: 't5', label: 'T5 重连', help: '连接断开后再次尝试建连的间隔。' },
+    { key: 't6', label: 'T6 事务', help: '控制事务（Sx+Fy 多段交互）的整体超时。' },
+    { key: 't7', label: 'T7 选择', help: '连接建立后等待 Select/控制状态切换的超时。' },
+    { key: 't8', label: 'T8 字符间', help: '单条报文内相邻字节允许的最大间隔。' },
   ];
 
   const commit = (key: string, value: number | undefined) => {
@@ -283,15 +314,14 @@ function TimeoutFields({ session, set }: { session: JsonObject; set: (key: strin
   };
 
   return (
-    <div className="form-row">
+    <div className="session-fields">
       {fields.map((field) => (
-        <label className="field" key={field.key}>
-          {field.label}
+        <SessionField key={field.key} label={field.label} help={field.help}>
           <NumberField
             value={numberField(timeouts, field.key)}
             onCommit={(next) => commit(field.key, next)}
           />
-        </label>
+        </SessionField>
       ))}
     </div>
   );
@@ -314,11 +344,13 @@ function editTimeout(
 
 /* ---------- 设备 ---------- */
 
-function EquipmentForm({ root, edit, templateIds, onPreviewSvid }: {
+export function EquipmentForm({ root, edit, templateIds, onPreviewSvid, section = 'all' }: {
   root: JsonObject;
   edit: Edit;
   templateIds: string[];
   onPreviewSvid?: (svid: number) => void;
+  /** global = 设备名/号段/全局定义；units = 单元列表；all = 两者。 */
+  section?: 'all' | 'global' | 'units';
 }): JSX.Element {
   const equipment = isJsonObject(root.equipment) ? root.equipment : null;
 
@@ -352,71 +384,72 @@ function EquipmentForm({ root, edit, templateIds, onPreviewSvid }: {
 
   return (
     <div className="cfg-section">
-      <Collapsible title={`设备（equipment · ${typeof units === 'string' ? '结构错误' : units.length + ' 个单元'}）`} badge="热生效">
-        {typeof units !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
-              const index = list.length + 1;
-              list.push({
-                unitId: nextId(list, 'unitId', 1),
-                name: `CH${index}`,
-                injectUnitId: index === 1,
-                svids: [],
-                reports: [],
-                ceids: [],
-              });
-              target.units = list;
-            })}
-          >
-            + 单元
-          </button>
-        )}
+      {section !== 'units' && (
+        <>
+          <div className="template-head">
+            <h3>设备全局</h3>
+          </div>
+          <p className="hint">
+            只放设备级内容：号段规则与设备常量（ECV）。SVID / CEID / 报告分别到
+            「状态变量」「事件」「报告」页维护，单元页只保留单元标识。
+          </p>
 
-      <div className="form-row">
-        <label className="field">
-          设备名
-          <TextField
-            value={stringField(equipment, 'name')}
-            onCommit={(next) => edit((draft) => {
-              objectField(draft, 'equipment').name = next;
-            })}
-          />
-        </label>
-      </div>
+          <IdSpaceForm equipment={equipment} edit={edit} />
 
-      <Collapsible title="号段规划（idSpace）">
-        <IdSpaceForm equipment={equipment} edit={edit} />
-      </Collapsible>
-      <Collapsible title="全局 SVID">
-        <GlobalSvidsForm equipment={equipment} edit={edit} templateIds={templateIds} onPreviewSvid={onPreviewSvid} />
-      </Collapsible>
-      <Collapsible title="全局 CEID">
-        <GlobalCeidsForm equipment={equipment} edit={edit} />
-      </Collapsible>
-      <Collapsible title="设备常量（ECV · S2F13/15）">
-        <ConstantsForm equipment={equipment} edit={edit} />
-      </Collapsible>
-
-      {typeof units === 'string' ? (
-        <p className="problems">equipment.units {units}</p>
-      ) : (
-        units.map((unit, index) => (
-          <UnitCard
-            key={index}
-            unit={unit}
-            index={index}
-            edit={edit}
-            templateIds={templateIds}
-            onPreviewSvid={onPreviewSvid}
-            unitSvidBase={unitSvidBase}
-            unitSvidStride={unitSvidStride}
-          />
-        ))
+          <ConstantsForm equipment={equipment} edit={edit} />
+        </>
       )}
-      </Collapsible>
+
+      {section !== 'global' && (
+        <>
+          <div className="template-head">
+            <h3>单元</h3>
+            {typeof units !== 'string' && (
+              <button
+                type="button"
+                onClick={() => edit((draft) => {
+                  const target = objectField(draft, 'equipment');
+                  const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
+                  const index = list.length + 1;
+                  list.push({
+                    unitId: nextId(list, 'unitId', 1),
+                    name: `CH${index}`,
+                    injectUnitId: index === 1,
+                    svids: [],
+                    reports: [],
+                    ceids: [],
+                  });
+                  target.units = list;
+                })}
+              >
+                + 单元
+              </button>
+            )}
+          </div>
+          <p className="hint">
+            单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）。
+            SVID、报告、事件分别到「状态变量」「报告」「事件」页维护，避免同一份数据在三个地方填。
+          </p>
+          {typeof units === 'string' ? (
+            <p className="problems">equipment.units {units}</p>
+          ) : units.length === 0 ? (
+            <p className="hint">还没有单元，点「+ 单元」添加第一台腔体/工位。</p>
+          ) : (
+            units.map((unit, index) => (
+              <UnitCard
+                key={index}
+                unit={unit}
+                index={index}
+                edit={edit}
+                templateIds={templateIds}
+                onPreviewSvid={onPreviewSvid}
+                unitSvidBase={unitSvidBase}
+                unitSvidStride={unitSvidStride}
+              />
+            ))
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -437,28 +470,28 @@ function IdSpaceForm({ equipment, edit }: { equipment: JsonObject; edit: Edit })
         <span className="template-label">号段规划（idSpace）</span>
       </div>
       <div className="form-row">
-        <label className="field">
-          SVID 起点
+        <label className="field field-cell">
+          <span className="field-cell-name">SVID 起点</span>
           <NumberField value={numberField(idSpace, 'svidBase')} integer onCommit={(next) => setNumber('svidBase', next)} />
         </label>
-        <label className="field">
-          CEID 起点
+        <label className="field field-cell">
+          <span className="field-cell-name">CEID 起点</span>
           <NumberField value={numberField(idSpace, 'ceidBase')} integer onCommit={(next) => setNumber('ceidBase', next)} />
         </label>
-        <label className="field">
-          RPTID 起点
+        <label className="field field-cell">
+          <span className="field-cell-name">RPTID 起点</span>
           <NumberField value={numberField(idSpace, 'reportBase')} integer onCommit={(next) => setNumber('reportBase', next)} />
         </label>
-        <label className="field">
-          SVID 步长
+        <label className="field field-cell">
+          <span className="field-cell-name">SVID 步长</span>
           <NumberField value={numberField(idSpace, 'svidStride')} integer onCommit={(next) => setNumber('svidStride', next)} />
         </label>
-        <label className="field">
-          CEID 步长
+        <label className="field field-cell">
+          <span className="field-cell-name">CEID 步长</span>
           <NumberField value={numberField(idSpace, 'ceidStride')} integer onCommit={(next) => setNumber('ceidStride', next)} />
         </label>
-        <label className="field">
-          RPTID 步长
+        <label className="field field-cell">
+          <span className="field-cell-name">RPTID 步长</span>
           <NumberField value={numberField(idSpace, 'reportStride')} integer onCommit={(next) => setNumber('reportStride', next)} />
         </label>
       </div>
@@ -470,12 +503,14 @@ function IdSpaceForm({ equipment, edit }: { equipment: JsonObject; edit: Edit })
           <div className="template-subhead">
             <span>保留号段（禁止占用）</span>
           </div>
+          {/* reserve 是 [起, 止] 数字对，schema 没有 id；用值拼 key 会在编辑时换 key，
+              所以按行位置做 key（增删都走 splice，位置即身份）。 */}
           {reserve.map((pair, index) => (
             <div className="form-row" key={index}>
               {Array.isArray(pair) && pair.length >= 2 ? (
                 <>
-                  <label className="field">
-                    起
+                  <label className="field field-cell">
+                    <span className="field-cell-name">起</span>
                     <NumberField
                       value={typeof pair[0] === 'number' ? pair[0] : undefined}
                       integer
@@ -488,8 +523,8 @@ function IdSpaceForm({ equipment, edit }: { equipment: JsonObject; edit: Edit })
                       })}
                     />
                   </label>
-                  <label className="field">
-                    止
+                  <label className="field field-cell">
+                    <span className="field-cell-name">止</span>
                     <NumberField
                       value={typeof pair[1] === 'number' ? pair[1] : undefined}
                       integer
@@ -568,9 +603,12 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
       ) : list.length === 0 ? (
         <p className="hint">没有全局 SVID。单元内 SVID 用各单元卡片编辑。</p>
       ) : (
-        list.map((item, index) => (
+        <>
+          <FormGridHead columns={['绝对 id', '名称', '类型', 'min', 'max']} />
+          {list.map((item, index) => (
           <FormRow
             key={index}
+            cols={5}
             onRemove={() => edit((draft) => {
               const target = objectField(draft, 'equipment');
               if (Array.isArray(target.globalSvids)) {
@@ -578,8 +616,8 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
               }
             })}
           >
-            <label className="field">
-              绝对 id
+            <label className="field field-cell">
+              <span className="field-cell-name">绝对 id</span>
               <NumberField
                 value={numberField(item, 'id')}
                 integer
@@ -588,8 +626,8 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
                 })}
               />
             </label>
-            <label className="field">
-              名称
+            <label className="field field-cell">
+              <span className="field-cell-name">名称</span>
               <TextField
                 value={stringField(item, 'name')}
                 onCommit={(next) => edit((draft) => {
@@ -603,8 +641,8 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
                 globalSvidsOf(draft)[index].type = next;
               })}
             />
-            <label className="field">
-              min
+            <label className="field field-cell">
+              <span className="field-cell-name">min</span>
               <NumberField
                 value={numberField(item, 'min')}
                 onCommit={(next) => edit((draft) => {
@@ -612,8 +650,8 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
                 })}
               />
             </label>
-            <label className="field">
-              max
+            <label className="field field-cell">
+              <span className="field-cell-name">max</span>
               <NumberField
                 value={numberField(item, 'max')}
                 onCommit={(next) => edit((draft) => {
@@ -622,7 +660,8 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
               />
             </label>
           </FormRow>
-        ))
+        ))}
+        </>
       )}
       {typeof list !== 'string' && list.map((item, index) => (
         <SvidSourceEditor
@@ -676,9 +715,12 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
       ) : list.length === 0 ? (
         <p className="hint">没有全局 CEID。</p>
       ) : (
-        list.map((item, index) => (
+        <>
+          <FormGridHead columns={['绝对 id', '名称', '引用（逗号分隔）']} />
+          {list.map((item, index) => (
           <FormRow
             key={index}
+            cols={3}
             onRemove={() => edit((draft) => {
               const target = objectField(draft, 'equipment');
               if (Array.isArray(target.globalCeids)) {
@@ -686,8 +728,8 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
               }
             })}
           >
-            <label className="field">
-              绝对 id
+            <label className="field field-cell">
+              <span className="field-cell-name">绝对 id</span>
               <NumberField
                 value={numberField(item, 'id')}
                 integer
@@ -696,8 +738,8 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
                 })}
               />
             </label>
-            <label className="field">
-              名称
+            <label className="field field-cell">
+              <span className="field-cell-name">名称</span>
               <TextField
                 value={stringField(item, 'name')}
                 onCommit={(next) => edit((draft) => {
@@ -712,7 +754,8 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
               })}
             />
           </FormRow>
-        ))
+          ))}
+          </>
       )}
     </div>
   );
@@ -755,9 +798,12 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
       ) : list.length === 0 ? (
         <p className="hint">没有设备常量；没有这段时 S2F13 回空列表、S2F15 回 EAC=1。</p>
       ) : (
-        list.map((item, index) => (
+        <>
+          <FormGridHead columns={['ECID', '名称', '类型', '初始值', '单位']} />
+          {list.map((item, index) => (
           <FormRow
             key={index}
+            cols={5}
             onRemove={() => edit((draft) => {
               const target = objectField(draft, 'equipment');
               if (Array.isArray(target.constants)) {
@@ -765,8 +811,8 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
               }
             })}
           >
-            <label className="field">
-              ECID
+            <label className="field field-cell">
+              <span className="field-cell-name">ECID</span>
               <NumberField
                 value={numberField(item, 'id')}
                 integer
@@ -775,8 +821,8 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
                 })}
               />
             </label>
-            <label className="field">
-              名称
+            <label className="field field-cell">
+              <span className="field-cell-name">名称</span>
               <TextField
                 value={stringField(item, 'name')}
                 onCommit={(next) => edit((draft) => {
@@ -790,8 +836,8 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
                 constantsOf(draft)[index].type = next;
               })}
             />
-            <label className="field">
-              初始值
+            <label className="field field-cell">
+              <span className="field-cell-name">初始值</span>
               <NumberField
                 value={numberField(item, 'value')}
                 onCommit={(next) => edit((draft) => {
@@ -799,8 +845,8 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
                 })}
               />
             </label>
-            <label className="field">
-              单位
+            <label className="field field-cell">
+              <span className="field-cell-name">单位</span>
               <TextField
                 allowBlank
                 value={stringField(item, 'unit')}
@@ -810,7 +856,8 @@ function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit 
               />
             </label>
           </FormRow>
-        ))
+        ))}
+        </>
       )}
     </div>
   );
@@ -860,8 +907,8 @@ function UnitCard({ unit, index, edit, templateIds, onPreviewSvid, unitSvidBase,
   return (
     <div className="template-card">
       <div className="template-card-head">
-        <label className="field">
-          unitId
+        <label className="field field-cell">
+          <span className="field-cell-name">unitId</span>
           <NumberField
             value={numberField(unit, 'unitId')}
             integer
@@ -870,8 +917,8 @@ function UnitCard({ unit, index, edit, templateIds, onPreviewSvid, unitSvidBase,
             })}
           />
         </label>
-        <label className="field">
-          单元名
+        <label className="field field-cell">
+          <span className="field-cell-name">单元名</span>
           <TextField
             value={stringField(unit, 'name')}
             onCommit={(next) => mutateUnit((target) => {
@@ -899,239 +946,6 @@ function UnitCard({ unit, index, edit, templateIds, onPreviewSvid, unitSvidBase,
         </button>
       </div>
 
-      {/* SVID 定义 */}
-      <div className="template-subtable">
-        <div className="template-subhead">
-          <span>SVID（绝对 id = 段起点 + offset）</span>
-          {typeof svids !== 'string' && (
-            <button
-              type="button"
-              onClick={() => mutateUnit((target) => {
-                const items = Array.isArray(target.svids) ? (target.svids as JsonObject[]) : [];
-                const offset = nextOffset(items);
-                items.push({ offset, slot: `SVID_${offset}`, type: 'F4' });
-                target.svids = items;
-              })}
-            >
-              + SVID
-            </button>
-          )}
-        </div>
-        {typeof svids === 'string' ? (
-          <p className="problems">svids {svids}</p>
-        ) : svids.length === 0 ? (
-          <p className="hint">还没有 SVID。</p>
-        ) : (
-          svids.map((item, row) => (
-            <FormRow
-              key={row}
-              onRemove={() => mutateUnit((target) => {
-                if (Array.isArray(target.svids)) {
-                  (target.svids as unknown[]).splice(row, 1);
-                }
-              })}
-            >
-              <label className="field">
-                offset
-                <NumberField
-                  value={numberField(item, 'offset')}
-                  integer
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].offset = next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                槽位名
-                <TextField
-                  value={stringField(item, 'slot')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].slot = next;
-                  })}
-                />
-              </label>
-              <TypeSelect
-                value={stringField(item, 'type', 'F4')}
-                onCommit={(next) => mutateUnit((target) => {
-                  svidsOf(target)[row].type = next;
-                })}
-              />
-              <label className="field">
-                单位
-                <TextField
-                  allowBlank
-                  value={stringField(item, 'unit')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].unit = next === '' ? undefined : next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                小数位
-                <NumberField
-                  value={numberField(item, 'decimals')}
-                  integer
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].decimals = next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                min
-                <NumberField
-                  value={numberField(item, 'min')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].min = next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                max
-                <NumberField
-                  value={numberField(item, 'max')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    svidsOf(target)[row].max = next;
-                  })}
-                />
-              </label>
-            </FormRow>
-          ))
-        )}
-        {typeof svids !== 'string' && svids.map((item, row) => (
-          <SvidSourceEditor
-            key={`src-${row}`}
-            def={item}
-            templateIds={templateIds}
-            absoluteId={unitSvidBase + (numberField(item, 'offset') ?? 0)}
-            onPreviewSvid={onPreviewSvid}
-          />
-        ))}
-      </div>
-
-      {/* 报告定义 */}
-      <div className="template-subtable">
-        <div className="template-subhead">
-          <span>报告（RPTID = 段起点 + offset）</span>
-          {typeof reports !== 'string' && (
-            <button
-              type="button"
-              onClick={() => mutateUnit((target) => {
-                const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
-                const offset = nextOffset(items);
-                items.push({ offset, slot: `RPT_${offset}`, svids: [] });
-                target.reports = items;
-              })}
-            >
-              + 报告
-            </button>
-          )}
-        </div>
-        {typeof reports === 'string' ? (
-          <p className="problems">reports {reports}</p>
-        ) : reports.length === 0 ? (
-          <p className="hint">还没有报告。</p>
-        ) : (
-          reports.map((item, row) => (
-            <FormRow
-              key={row}
-              onRemove={() => mutateUnit((target) => {
-                if (Array.isArray(target.reports)) {
-                  (target.reports as unknown[]).splice(row, 1);
-                }
-              })}
-            >
-              <label className="field">
-                offset
-                <NumberField
-                  value={numberField(item, 'offset')}
-                  integer
-                  onCommit={(next) => mutateUnit((target) => {
-                    reportsOf(target)[row].offset = next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                槽位名
-                <TextField
-                  value={stringField(item, 'slot')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    reportsOf(target)[row].slot = next;
-                  })}
-                />
-              </label>
-              <StringListField
-                values={stringListOf(item, 'svids')}
-                onCommit={(next) => mutateUnit((target) => {
-                  reportsOf(target)[row].svids = next;
-                })}
-              />
-            </FormRow>
-          ))
-        )}
-        <p className="hint">引用写槽位名；跨单元引用写「单元名.槽位名」。</p>
-      </div>
-
-      {/* CEID 定义 */}
-      <div className="template-subtable">
-        <div className="template-subhead">
-          <span>CEID（绝对 id = 段起点 + offset）</span>
-          {typeof ceids !== 'string' && (
-            <button
-              type="button"
-              onClick={() => mutateUnit((target) => {
-                const items = Array.isArray(target.ceids) ? (target.ceids as JsonObject[]) : [];
-                const offset = nextOffset(items);
-                items.push({ offset, slot: `EVT_${offset}`, reports: [] });
-                target.ceids = items;
-              })}
-            >
-              + CEID
-            </button>
-          )}
-        </div>
-        {typeof ceids === 'string' ? (
-          <p className="problems">ceids {ceids}</p>
-        ) : ceids.length === 0 ? (
-          <p className="hint">还没有 CEID。</p>
-        ) : (
-          ceids.map((item, row) => (
-            <FormRow
-              key={row}
-              onRemove={() => mutateUnit((target) => {
-                if (Array.isArray(target.ceids)) {
-                  (target.ceids as unknown[]).splice(row, 1);
-                }
-              })}
-            >
-              <label className="field">
-                offset
-                <NumberField
-                  value={numberField(item, 'offset')}
-                  integer
-                  onCommit={(next) => mutateUnit((target) => {
-                    ceidsOf(target)[row].offset = next;
-                  })}
-                />
-              </label>
-              <label className="field">
-                槽位名
-                <TextField
-                  value={stringField(item, 'slot')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    ceidsOf(target)[row].slot = next;
-                  })}
-                />
-              </label>
-              <StringListField
-                values={stringListOf(item, 'reports')}
-                onCommit={(next) => mutateUnit((target) => {
-                  ceidsOf(target)[row].reports = next;
-                })}
-              />
-            </FormRow>
-          ))
-        )}
-      </div>
     </div>
   );
 }
@@ -1202,8 +1016,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
     <div className="cfg-section">
       <Collapsible title={`事件编排（events · ${typeof plans === 'string' ? '结构错误' : plans.length + ' 个计划'}）`} badge="热生效">
       <div className="form-row">
-        <label className="field">
-          每秒事件上限
+        <label className="field field-cell">
+          <span className="field-cell-name">每秒事件上限</span>
           <NumberField
             value={numberField(events, 'maxPerSec')}
             integer
@@ -1290,10 +1104,12 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
           };
 
           return (
-            <div className="template-card" key={index}>
+            /* 计划有稳定 id 就用它：删除中间一条时后面的卡片不会跟着重挂；
+               刚新建还没填 id 时退回位置 key。 */
+            <div className="template-card" key={planId === '' ? `plan-${index}` : planId}>
               <div className="template-card-head">
-                <label className="field">
-                  计划 id
+                <label className="field field-cell">
+                  <span className="field-cell-name">计划 id</span>
                   <TextField
                     value={stringField(plan, 'id')}
                     onCommit={(next) => mutatePlan((target) => {
@@ -1301,8 +1117,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                     })}
                   />
                 </label>
-                <label className="field">
-                  CEID
+                <label className="field field-cell">
+                  <span className="field-cell-name">CEID</span>
                   <NumberField
                     value={numberField(plan, 'ceid')}
                     integer
@@ -1312,8 +1128,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                     })}
                   />
                 </label>
-                <label className="field">
-                  触发方式
+                <label className="field field-cell">
+                  <span className="field-cell-name">触发方式</span>
                   <select
                     value={type ?? ''}
                     onChange={(event) => {
@@ -1352,8 +1168,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
               ) : (
                 <div className="form-row">
                   {type === 'at' && (
-                    <label className="field">
-                      atMs（启动后毫秒）
+                    <label className="field field-cell">
+                      <span className="field-cell-name">atMs（启动后毫秒）</span>
                       <NumberField
                         value={numberField(trigger, 'atMs')}
                         integer
@@ -1365,8 +1181,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                   )}
                   {type === 'periodic' && (
                     <>
-                      <label className="field">
-                        周期 ms
+                      <label className="field field-cell">
+                        <span className="field-cell-name">周期 ms</span>
                         <NumberField
                           value={numberField(trigger, 'periodMs')}
                           integer
@@ -1375,8 +1191,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                           })}
                         />
                       </label>
-                      <label className="field">
-                        抖动 ms
+                      <label className="field field-cell">
+                        <span className="field-cell-name">抖动 ms</span>
                         <NumberField
                           value={numberField(trigger, 'jitterMs')}
                           integer
@@ -1389,8 +1205,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                   )}
                   {type === 'onCondition' && (
                     <>
-                      <label className="field">
-                        条件表达式（t、svid.&lt;id&gt;）
+                      <label className="field field-cell">
+                        <span className="field-cell-name">条件表达式（t、svid.&lt;id&gt;）</span>
                         <TextField
                           wide
                           value={stringField(trigger, 'expression')}
@@ -1399,8 +1215,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                           })}
                         />
                       </label>
-                      <label className="field">
-                        防抖 ms
+                      <label className="field field-cell">
+                        <span className="field-cell-name">防抖 ms</span>
                         <NumberField
                           value={numberField(trigger, 'debounceMs')}
                           integer
@@ -1413,8 +1229,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                   )}
                   {type === 'afterEvent' && (
                     <>
-                      <label className="field">
-                        源计划 id
+                      <label className="field field-cell">
+                        <span className="field-cell-name">源计划 id</span>
                         <TextField
                           value={stringField(trigger, 'sourcePlan')}
                           onCommit={(next) => mutateTrigger((target) => {
@@ -1422,8 +1238,8 @@ function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Eleme
                           })}
                         />
                       </label>
-                      <label className="field">
-                        延迟 ms
+                      <label className="field field-cell">
+                        <span className="field-cell-name">延迟 ms</span>
                         <NumberField
                           value={numberField(trigger, 'delayMs')}
                           integer

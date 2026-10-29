@@ -108,53 +108,53 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     <Panel
       id="panel-send"
       title="手动发送"
-      description="直接往选中的会话发一条 SML。报文头写 SxFy，可带 W 位。"
+      description="直接往选中的会话发一条 SML。primary 不写 W 也默认要求回复；secondary（偶数 function）不能带 W。"
       actions={
-        <>
-          <button type="button" onClick={() => setDraft(EXAMPLES[0].sml)} disabled={disabled}>
-            {EXAMPLES[0].label}
-          </button>
-          <button type="button" onClick={() => setDraft(EXAMPLES[1].sml)} disabled={disabled}>
-            {EXAMPLES[1].label}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDraft(EXAMPLES[3].sml)}
-            disabled={disabled}
-            title="让设备用主机时间对钟（S2F18 回当前时间）"
-          >
-            {EXAMPLES[3].label}
-          </button>
-          <PresetSelect
-            disabled={disabled}
-            ariaLabel="更多发送预设"
-            groups={[
-              {
-                label: '示例',
-                items: [{ label: EXAMPLES[2].label, value: EXAMPLES[2].sml }],
-              },
-              {
-                label: '远程命令（S2F41，参数可再改）',
-                items: REMOTE_COMMANDS.map((command) => ({
-                  label: `${command.label}（RCMID ${command.rcmdid} · ${command.note}）`,
-                  value: remoteCommandSml(command.rcmdid),
-                })),
-              },
-            ]}
-            onPick={setDraft}
-          />
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void onSend()}
-            disabled={disabled || busy || draft.trim() === ''}
-            title='发送到选中的会话（W 位会等待回复）'
-          >
-            {busy ? '发送中…' : '发送 SML'}
-          </button>
-        </>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void onSend()}
+          disabled={disabled || busy || draft.trim() === ''}
+          title="发送到选中的会话（W 位会等待回复）"
+        >
+          {busy ? '发送中…' : '发送 SML'}
+        </button>
       }
     >
+      {/* 预设是"填内容"的工具，不是面板动作：放在编辑器上方更贴近使用位置 */}
+      <div className="editor-tools" role="group" aria-label="发送预设">
+        <span className="editor-tools-label">快速填入</span>
+        {[EXAMPLES[0], EXAMPLES[1], EXAMPLES[3]].map((example) => (
+          <button
+            key={example.label}
+            type="button"
+            className="chip"
+            onClick={() => setDraft(example.sml)}
+            disabled={disabled}
+            title={example.label === EXAMPLES[3].label ? '让设备用主机时间对钟（S2F18 回当前时间）' : undefined}
+          >
+            {example.label}
+          </button>
+        ))}
+        <PresetSelect
+          disabled={disabled}
+          ariaLabel="更多发送预设"
+          groups={[
+            {
+              label: '示例',
+              items: [{ label: EXAMPLES[2].label, value: EXAMPLES[2].sml }],
+            },
+            {
+              label: '远程命令（S2F41，参数可再改）',
+              items: REMOTE_COMMANDS.map((command) => ({
+                label: `${command.label}（RCMID ${command.rcmdid} · ${command.note}）`,
+                value: remoteCommandSml(command.rcmdid),
+              })),
+            },
+          ]}
+          onPick={setDraft}
+        />
+      </div>
       <textarea
         className="sml-editor"
         spellCheck={false}

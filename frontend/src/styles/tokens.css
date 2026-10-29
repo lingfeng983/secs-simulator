@@ -1,0 +1,185 @@
+/*
+ * 设计令牌 —— "Precision Console"（精密仪器控制台）
+ *
+ * 取色的三条约束:
+ *  1. 侧栏是石墨色,两套主题都不变:给界面一个固定的"机箱",内容才是"面板"。
+ *  2. 主色用信号青(teal):仪器读数、示波器、工业 HMI 的语言;
+ *     暖色只留给警告/报警,避免"主按钮看起来像告警"。
+ *  3. 深浅两套各自调色,深色不是浅色的反相:深色更暗、对比更低、发光更少。
+ *
+ * 任何组件都不写死 hex,只用这里的语义令牌。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* —— 画布与层级 —— */
+  --canvas: #f1f4f8;
+  --canvas-glow: rgba(15, 118, 110, 0.05);
+  --surface: #ffffff;
+  --surface-2: #f6f8fb;
+  --surface-3: #eaeff5;
+  --surface-inset: #f8fafc;
+
+  /* —— 侧栏(机箱):跟随主题,浅色不是深色的反相 —— */
+  --chrome: #ffffff;
+  --chrome-2: #f2f5f9;
+  --chrome-fg: #26313f;
+  --chrome-muted: #5f6f85;
+  --chrome-line: #e4eaf1;
+  --chrome-active: rgba(15, 118, 110, 0.08);
+  --chrome-hover: rgba(15, 118, 110, 0.05);
+  --chrome-badge: rgba(15, 23, 42, 0.06);
+  --chrome-badge-fg: #5f6f85;
+
+  /* —— 文字 —— */
+  --ink: #0c1420;
+  --fg: #26313f;
+  --muted: #5f6f85;
+  /* 提示小字的对比度按 --muted 给：旧值 #7d8b9c 在浅底上达不到 4.5:1，
+     小字号几乎看不清；保留 --faint 这个名字，避免大面积改用法。 */
+  --faint: #5f6f85;
+
+  /* —— 线条 —— */
+  --line: #dde4ed;
+  --line-strong: #cbd5e1;
+  --line-soft: #ebf0f5;
+
+  /* —— 信号色 —— */
+  --accent: #0f766e;
+  --accent-bright: #14b8a6;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 118, 110, 0.08);
+  --accent-line: rgba(15, 118, 110, 0.3);
+  --accent-glow: rgba(20, 184, 166, 0.24);
+
+  --ok: #0f6b33;
+  --ok-soft: rgba(21, 128, 61, 0.1);
+  --warn: #9a4706;
+  --warn-soft: rgba(180, 83, 9, 0.11);
+  --danger: #c22626;
+  --danger-soft: rgba(194, 38, 38, 0.09);
+  --info: #1d4ed8;
+  --info-soft: rgba(29, 78, 216, 0.09);
+
+  /* —— 事件区分色：事件预览里每个计划一种颜色 —— */
+  --event-1: #c2410c;
+  --event-2: #1d4ed8;
+  --event-3: #7c3aed;
+  --event-4: #0f766e;
+  --event-5: #b91c1c;
+  --event-6: #4d7c0f;
+  --event-7: #be185d;
+  --event-8: #0369a1;
+  --event-9: #4f46e5;
+  --event-10: #0e7490;
+  --event-11: #a16207;
+  --event-12: #9f1239;
+
+  /* —— 阴影:轻、冷、只在必要时出现 —— */
+  --shadow-1: 0 1px 2px rgba(12, 20, 32, 0.05);
+  --shadow-2: 0 2px 6px rgba(12, 20, 32, 0.06), 0 12px 32px rgba(12, 20, 32, 0.07);
+  --shadow-3: 0 24px 64px rgba(12, 20, 32, 0.22);
+  --ring: 0 0 0 3px rgba(15, 118, 110, 0.16);
+
+  /* —— 尺寸 —— */
+  --radius-panel: 12px;
+  --radius: 9px;
+  --radius-sm: 7px;
+  --radius-xs: 5px;
+  --sidenav-w: 248px;
+  --sidenav-w-collapsed: 66px;
+  --topbar-h: 62px;
+  --row-pad: 0.5rem;
+  --row-h: 36px;
+  --panel-pad: 18px;
+  --gap: 14px;
+  /* 表单:描述列宽与字段间距(全站统一,改这里即可) */
+  --field-label-w: 7rem;
+  --field-gap: 1.5rem;
+
+  /* —— 字体 —— */
+  --font-sans: "Inter var", "Inter", "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", "SF Mono", Consolas,
+    "Liberation Mono", "Microsoft YaHei UI", monospace;
+  --font: 13px/1.55 var(--font-sans);
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --fast: 120ms var(--ease);
+  --med: 180ms var(--ease);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --canvas: #070b10;
+  --canvas-glow: rgba(45, 212, 191, 0.06);
+  --surface: #0e151d;
+  --surface-2: #121a24;
+  --surface-3: #090e15;
+  --surface-inset: #0b1119;
+
+  --chrome: #0b1219;
+  --chrome-2: #121b25;
+  --chrome-fg: #d3deea;
+  --chrome-muted: #7f90a4;
+  --chrome-line: rgba(255, 255, 255, 0.06);
+  --chrome-active: rgba(45, 212, 191, 0.16);
+  --chrome-hover: rgba(255, 255, 255, 0.05);
+  --chrome-badge: rgba(255, 255, 255, 0.1);
+  --chrome-badge-fg: #d3deea;
+
+  --ink: #f1f6fb;
+  --fg: #ccd8e5;
+  --muted: #8a9aad;
+  /* 深色底同理：提示小字至少跟 --muted 一样亮 */
+  --faint: #8a9aad;
+
+  --line: rgba(148, 170, 196, 0.17);
+  --line-strong: rgba(148, 170, 196, 0.3);
+  --line-soft: rgba(148, 170, 196, 0.085);
+
+  --accent: #2dd4bf;
+  --accent-bright: #5eead4;
+  --accent-ink: #032420;
+  --accent-soft: rgba(45, 212, 191, 0.11);
+  --accent-line: rgba(45, 212, 191, 0.34);
+  --accent-glow: rgba(45, 212, 191, 0.22);
+
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.12);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --info: #7aa2f7;
+  --info-soft: rgba(122, 162, 247, 0.12);
+
+  /* —— 事件区分色（深色）：同色相提亮，保证在深底上可读 —— */
+  --event-1: #fb923c;
+  --event-2: #60a5fa;
+  --event-3: #c084fc;
+  --event-4: #2dd4bf;
+  --event-5: #f87171;
+  --event-6: #a3e635;
+  --event-7: #f472b6;
+  --event-8: #38bdf8;
+  --event-9: #818cf8;
+  --event-10: #22d3ee;
+  --event-11: #facc15;
+  --event-12: #fb7185;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 28px 72px rgba(0, 0, 0, 0.6);
+  --ring: 0 0 0 3px rgba(45, 212, 191, 0.22);
+}
+
+/* 密度:只动行高与内边距,不动字号——字号变了会牺牲可读性 */
+[data-density='compact'] {
+  --row-pad: 0.24rem;
+  --row-h: 30px;
+  --panel-pad: 14px;
+  --gap: 10px;
+}

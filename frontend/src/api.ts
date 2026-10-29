@@ -96,6 +96,8 @@ export interface AuditEntryView {
 export interface EventPlanView {
   id: string;
   ceid: number;
+  /** 归属单元：由所引用 CEID 的归属反查（后端计算，只读）。 */
+  owner?: string;
   enabled: boolean;
   triggerType: string;
   atMs?: number;
@@ -280,6 +282,20 @@ export interface BurstResult {
   latencyMax: number;
 }
 
+/**
+ * 压测进度/最近一次结果（GET /sessions/{id}/burst）。
+ *
+ * <p>压测在服务端后台执行，POST 只回 202 受理；这里带 `running` 供界面轮询。</p>
+ */
+export interface BurstStatus extends Partial<BurstResult> {
+  ok: boolean;
+  accepted?: boolean;
+  running: boolean;
+  aborted?: boolean;
+  skipped?: number;
+  error?: string;
+}
+
 /** 主机模拟 S1F3 采集器的配置。 */
 export interface CollectorConfigInput {
   startCeid: number;
@@ -302,6 +318,24 @@ export interface CollectorState {
   lastRttMs?: number;
   staleSvids?: number[];
   series?: { svid: number; name?: string; unit?: string; t: number[]; v: number[] }[];
+}
+
+/** 一个主机实例（多主机：同一台设备可开多个主机，各自独立）。 */
+export interface HostSimInstance {
+  /** 实例 id（host-1、host-2…）。 */
+  id: string;
+  /** 宿主会话 id。 */
+  session: string;
+  /** 连接是否打开。 */
+  open: boolean;
+  /** 目标地址 host:port。 */
+  target: string;
+  port: number;
+  deviceId: number;
+  /** local = 连本机设备；remote = 连远程 SECS。 */
+  mode: 'local' | 'remote';
+  remote: boolean;
+  lastError?: string;
 }
 
 /** 主机模拟连接目标;remote 为 true 时连这个地址而不是本机。 */
@@ -368,6 +402,8 @@ export interface ConfigEntry {
   name: string;
   sizeBytes: number;
   modifiedMs: number;
+  /** 新建时记录的模板 id；旧配置没有。 */
+  template?: string;
 }
 
 /** 内置设备模板目录里的一项。 */
@@ -375,6 +411,10 @@ export interface ConfigTemplateEntry {
   id: string;
   label: string;
   description: string;
+  /** builtin / custom */
+  source?: string;
+  sizeBytes?: number;
+  modifiedMs?: number;
 }
 
 /** 一份配置的原文快照:modifiedMs 用于保存时的 If-Match 并发保护。 */
@@ -411,7 +451,7 @@ export interface ApiClient {
   terminalMessages(sessionId: string): Promise<TerminalMessage[]>;
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
-  preview(sessionId: string, fromMs: number, toMs: number, buckets: number, svids?: number[], withEvents?: boolean): Promise<PreviewData>;
+  preview(sessionId: string, fromMs: number, toMs: number, buckets: number, svids?: number[], withEvents?: boolean, planId?: string): Promise<PreviewData>;
   /** 二进制曲线预览（SCSP v1，小端）。 */
   previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
   /** 最近审计记录。 */
@@ -460,6 +500,16 @@ export interface ApiClient {
   createConfig(name: string, templateId?: string): Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
   configTemplates(): Promise<ConfigTemplateEntry[]>;
+  /** 内置 + 自定义模板。 */
+  templates(): Promise<ConfigTemplateEntry[]>;
+  /** 模板原文。 */
+  templateText(id: string): Promise<string | null>;
+  /** 新建自定义模板。 */
+  createTemplate(id: string, text: string): Promise<number>;
+  /** 更新自定义模板。 */
+  updateTemplate(id: string, text: string): Promise<number>;
+  /** 删除自定义模板。 */
+  deleteTemplate(id: string): Promise<number>;
   /** 读一份配置的原文(带 modifiedMs 快照,保存时经 If-Match 带回做并发保护)。 */
   configText(name: string): Promise<ConfigTextSnapshot>;
   /** 只校验不落盘。 */
@@ -473,6 +523,29 @@ export interface ApiClient {
   logLevel(): Promise<string>;
   /** 切换日志级别。 */
   setLogLevel(level: string): Promise<boolean>;
+  /** 列出全部主机实例（多主机）。 */
+  hostSims(): Promise<HostSimInstance[]>;
+  /** 新建一个主机实例：连本机设备或远程 SECS。 */
+  openHostInstance(request: {
+    session: string;
+    host?: string;
+    port?: number;
+    deviceId?: number;
+    hostId?: string;
+  }): Promise<number>;
+  /** 按实例 id 读主机状态。 */
+  hostInstance(hostId: string): Promise<HostSimInstance | null>;
+  /** 按实例 id 关闭主机。 */
+  closeHostInstance(hostId: string): Promise<number>;
+  /** 按实例 id 以主机角色发送 SML。 */
+  sendHostInstanceSml(hostId: string, sml: string): Promise<SentMessageResult>;
+  /** 按实例 id 读采集器状态。 */
+  hostInstanceCollector(hostId: string): Promise<CollectorState | null>;
+  /** 按实例 id 下发采集器配置。 */
+  setHostInstanceCollector(hostId: string, config: CollectorConfigInput): Promise<{ ok: boolean; error?: string }>;
+  /** 按实例 id 手动启停采集器。 */
+  hostInstanceCollectorCommand(hostId: string, start: boolean): Promise<{ ok: boolean; error?: string }>;
+
   /** 主机模拟器状态；会话不存在返回 null。 */
   hostSimState(sessionId: string): Promise<{ open: boolean; target?: string; mode?: string; remote?: boolean } | null>;
   /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
@@ -494,6 +567,8 @@ export interface ApiClient {
   overview(): Promise<OverviewRow[]>;
   /** 服务端压测（schema v6）。 */
   burst(sessionId: string, request: BurstRequest): Promise<BurstResult>;
+  /** 压测进度/最近一次结果（服务端后台执行，POST 只回受理）。 */
+  burstStatus(sessionId: string): Promise<BurstStatus>;
   /** 主机模拟 S1F3 采集器状态与数据（schema v6）。 */
   collectorState(sessionId: string): Promise<CollectorState | null>;
   /** 下发采集器配置;返回错误文案或 null(成功)。 */
@@ -577,6 +652,66 @@ export class ApiError extends Error {
   }
 }
 
+/* ---------- 请求超时 ---------- */
+
+/** 默认请求超时：GET 与短命令 8 秒。 */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+
+/** 长操作（发送等 T3 回复、配置校验/保存、服务端压测）的宽限窗口。 */
+export const LONG_REQUEST_TIMEOUT_MS = 60_000;
+
+/**
+ * 超时信号。
+ *
+ * <p>优先用 AbortSignal.timeout；老浏览器没有时自己造一个（不清理定时器也无妨：
+ * 请求结束后 abort 已无副作用）。</p>
+ */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+/**
+ * 所有请求的统一入口。
+ *
+ * <p>集中做两件事：超时（默认 8 秒，长操作由调用方传更大的 timeoutMs）与
+ * 请求头。内部工具不做鉴权，因此这里不再注入任何凭据。调用方仍各自 catch
+ * 并把错误转成 toast——这里不弹任何提示，避免同一个失败被弹两次。</p>
+ *
+ * <p>调用方自带 signal 时不覆盖它的取消语义。</p>
+ */
+export async function request(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const signal = init.signal ?? timeoutSignal(timeoutMs);
+  try {
+    return await fetch(url, { ...init, headers, signal });
+  } catch (error) {
+    /* 浏览器的超时是英文 DOMException，直接弹给用户看不懂 */
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new ApiError(408, 'timeout', `请求超时（${Math.round(timeoutMs / 1000)} 秒）：后端没有响应`);
+    }
+    throw error;
+  }
+}
+
+/** 采集器结果:{ok,error?}。错误文案要原样带给用户,不能只留状态码。 */
+function parseCollectorResult(text: string): { ok: boolean; error?: string } {
+  try {
+    const body = JSON.parse(text) as { ok?: boolean; error?: string };
+    return { ok: body.ok === true, error: body.error };
+  } catch {
+    return { ok: false, error: text.slice(0, 200) };
+  }
+}
+
 export function createClient(): ApiClient {
   async function json<T>(response: Response): Promise<T> {
     if (!response.ok) {
@@ -602,28 +737,29 @@ export function createClient(): ApiClient {
 
   return {
     async health() {
-      return json<Health>(await fetch(apiUrl('/api/v1/health')));
+      return json<Health>(await request(apiUrl('/api/v1/health')));
     },
     async sessions() {
       const body = await json<{ sessions: SessionSummary[] }>(
-        await fetch(apiUrl('/api/v1/sessions')),
+        await request(apiUrl('/api/v1/sessions')),
       );
       return body.sessions ?? [];
     },
     async createSession(config, overrides) {
       /* 失败原因全在服务端日志里，界面只报状态码与文案，不自己猜 */
       return command(
-        await fetch(apiUrl('/api/v1/sessions'), {
+        await request(apiUrl('/api/v1/sessions'), {
           method: 'POST',
           body: JSON.stringify({ config, ...overrides }),
-        }),
+        }, LONG_REQUEST_TIMEOUT_MS),
       );
     },
     async bulkSessions(params) {
-      const response = await fetch(apiUrl('/api/v1/sessions/bulk'), {
+      /* 最多 100 台一起建，8 秒不够 */
+      const response = await request(apiUrl('/api/v1/sessions/bulk'), {
         method: 'POST',
         body: JSON.stringify(params),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS);
       const text = await response.text();
       if (!response.ok && response.status !== 207) {
         throw new Error(`${response.status} ${text.slice(0, 200)}`);
@@ -632,21 +768,22 @@ export function createClient(): ApiClient {
     },
     async closeSession(sessionId) {
       return command(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}`), {
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}`), {
           method: 'DELETE',
         }),
       );
     },
     async reloadSession(sessionId) {
+      /* 重载要重新编译配置并重建连接，8 秒容易误判 */
       return command(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reload`), {
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reload`), {
           method: 'POST',
-        }),
+        }, LONG_REQUEST_TIMEOUT_MS),
       );
     },
     async trigger(sessionId, ceid) {
       return command(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`), {
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`), {
           method: 'POST',
         }),
       );
@@ -663,119 +800,120 @@ export function createClient(): ApiClient {
         query.set('before', String(filters.before));
       }
       const body = await json<{ audit?: AuditEntryView[] }>(
-        await fetch(apiUrl(`/api/v1/audit?${query}`)),
+        await request(apiUrl(`/api/v1/audit?${query}`)),
       );
       return body.audit ?? [];
     },
     async events(sessionId) {
       const body = await json<{ events?: EventPlanView[] }>(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`)),
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`)),
       );
       return body.events ?? [];
     },
     async setEventEnabled(sessionId, planId, enabled) {
       const query = new URLSearchParams({ enabled: String(enabled) });
       return command(
-        await fetch(
+        await request(
           apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`),
           { method: 'POST' },
         ),
       );
     },
     async addEventPlan(sessionId, plan) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(planToWire(plan)),
       }));
     },
     async updateEventPlan(sessionId, planId, plan) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(planToWire(plan)),
       }));
     },
     async deleteEventPlan(sessionId, planId) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
         method: 'DELETE',
       }));
     },
     async addReport(sessionId, report) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(report),
       }));
     },
     async updateReport(sessionId, rptid, report) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(report),
       }));
     },
     async deleteReport(sessionId, rptid) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
         method: 'DELETE',
       }));
     },
     async addSvid(sessionId, def) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(def),
       }));
     },
     async updateSvid(sessionId, svid, def) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(def),
       }));
     },
     async deleteSvid(sessionId, svid) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
         method: 'DELETE',
       }));
     },
     async addCeid(sessionId, ceid) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(ceid),
       }));
     },
     async updateCeid(sessionId, ceid, def) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(def),
       }));
     },
     async deleteCeid(sessionId, ceid) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
         method: 'DELETE',
       }));
     },
     async setSvidValue(sessionId, svid, value) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify({ value }),
       }));
     },
     async clearSvidValue(sessionId, svid) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
         method: 'DELETE',
       }));
     },
     async sendSml(sessionId, sml) {
-      const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`), {
+      /* W 位要等主机回复（T3），不能用 8 秒的短超时把正常等待判成失败 */
+      const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/message`), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: sml,
-      });
+      }, LONG_REQUEST_TIMEOUT_MS);
       const text = await response.text();
       if (!response.ok) {
         throw new Error(`${response.status} ${text.slice(0, 300)}`);
@@ -793,24 +931,24 @@ export function createClient(): ApiClient {
         category: String(category),
       });
       return command(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`), {
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`), {
           method: 'POST',
         }),
       );
     },
     async alarms(sessionId) {
       return json<AlarmState[]>(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`)),
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`)),
       );
     },
     async terminalMessages(sessionId) {
       return json<TerminalMessage[]>(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`)),
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`)),
       );
     },
     async catalog(sessionId) {
       const body = await json<Partial<Catalog>>(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`)),
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`)),
       );
       /* 每个字段都要兜底：老后端没有 catalog 端点时缺字段，缺了就当默认值，
          总比整个面板崩掉强 */
@@ -823,7 +961,7 @@ export function createClient(): ApiClient {
         hostAllDisabled: body.hostAllDisabled ?? false,
       };
     },
-    async preview(sessionId, fromMs, toMs, buckets, svids, withEvents) {
+    async preview(sessionId, fromMs, toMs, buckets, svids, withEvents, planId) {
       const query = new URLSearchParams({
         session: sessionId,
         from: String(fromMs),
@@ -836,13 +974,18 @@ export function createClient(): ApiClient {
       if (withEvents === false) {
         query.set('withEvents', 'false');
       }
+      if (planId !== undefined && planId !== '') {
+        query.set('plan', planId);
+      }
       return json<PreviewData>(
-        await fetch(apiUrl(`/api/v1/preview?${query}`)),
+        await request(apiUrl(`/api/v1/preview?${query}`), {}, LONG_REQUEST_TIMEOUT_MS),
       );
     },
     async previewBinary(sessionId, fromMs, toMs, buckets) {
-      const response = await fetch(
+      const response = await request(
         apiUrl(`/api/v1/preview.bin?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`),
+        {},
+        LONG_REQUEST_TIMEOUT_MS,
       );
       if (!response.ok) {
         throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
@@ -851,7 +994,7 @@ export function createClient(): ApiClient {
     },
     async ticket() {
       const body = await json<{ ticket: string }>(
-        await fetch(apiUrl('/api/v1/ticket'), { method: 'POST' }),
+        await request(apiUrl('/api/v1/ticket'), { method: 'POST' }),
       );
       return body.ticket;
     },
@@ -873,7 +1016,7 @@ export function createClient(): ApiClient {
         query.set('function', String(opts.function));
       }
       const body = await json<Partial<MessagePage>>(
-        await fetch(apiUrl(`/api/v1/messages?${query}`)),
+        await request(apiUrl(`/api/v1/messages?${query}`)),
       );
       return {
         messages: body.messages ?? [],
@@ -890,7 +1033,8 @@ export function createClient(): ApiClient {
       if (direction !== '') {
         query.set('direction', direction);
       }
-      const response = await fetch(apiUrl(`/api/v1/messages?${query}`));
+      /* 导出 5000 条 JSONL 可能需要好几秒 */
+      const response = await request(apiUrl(`/api/v1/messages?${query}`), {}, LONG_REQUEST_TIMEOUT_MS);
       if (!response.ok) {
         throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
       }
@@ -898,12 +1042,12 @@ export function createClient(): ApiClient {
     },
     async configs() {
       const body = await json<{ configs?: ConfigEntry[] }>(
-        await fetch(apiUrl('/api/v1/configs')),
+        await request(apiUrl('/api/v1/configs')),
       );
       return body.configs ?? [];
     },
     async createConfig(name, templateId) {
-      const response = await fetch(apiUrl('/api/v1/configs'), {
+      const response = await request(apiUrl('/api/v1/configs'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(templateId ? { name, template: templateId } : { name }),
@@ -912,23 +1056,59 @@ export function createClient(): ApiClient {
     },
     async configTemplates() {
       const body = await json<{ templates?: ConfigTemplateEntry[] }>(
-        await fetch(apiUrl('/api/v1/config-templates')),
+        await request(apiUrl('/api/v1/config-templates')),
       );
       return body.templates ?? [];
     },
+    async templates() {
+      const body = await json<{ templates?: ConfigTemplateEntry[] }>(
+        await request(apiUrl('/api/v1/templates')),
+      );
+      return body.templates ?? [];
+    },
+    async templateText(id) {
+      const response = await request(apiUrl(`/api/v1/templates/${encodeURIComponent(id)}`));
+      if (response.status === 404) {
+        return null;
+      }
+      const body = await json<{ text?: string }>(response);
+      return body.text ?? null;
+    },
+    async createTemplate(id, text) {
+      const response = await request(apiUrl('/api/v1/templates'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ id, text }),
+      });
+      return command(response);
+    },
+    async updateTemplate(id, text) {
+      const response = await request(apiUrl(`/api/v1/templates/${encodeURIComponent(id)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: text,
+      });
+      return command(response);
+    },
+    async deleteTemplate(id) {
+      const response = await request(apiUrl(`/api/v1/templates/${encodeURIComponent(id)}`), {
+        method: 'DELETE',
+      });
+      return command(response);
+    },
     async configText(name) {
       const body = await json<{ name?: string; text?: string; modifiedMs?: number }>(
-        await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`)),
+        await request(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`)),
       );
       return { text: body.text ?? '', modifiedMs: typeof body.modifiedMs === 'number' ? body.modifiedMs : null };
     },
     async validateConfig(name, text) {
       const body = await json<ConfigProblems>(
-        await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}/validate`), {
+        await request(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}/validate`), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain; charset=utf-8' },
           body: text,
-        }),
+        }, LONG_REQUEST_TIMEOUT_MS),
       );
       return { valid: body.valid ?? false, problems: body.problems ?? [] };
     },
@@ -937,11 +1117,11 @@ export function createClient(): ApiClient {
       if (expectedModifiedMs != null) {
         headers['If-Match'] = String(expectedModifiedMs);
       }
-      const response = await fetch(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {
+      const response = await request(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {
         method: 'PUT',
         headers,
         body: text,
-      });
+      }, LONG_REQUEST_TIMEOUT_MS);
 
       /* 失败响应也带 problems，尽量把它带回来；解析不了就当没有 */
       let problems: string[] = [];
@@ -957,21 +1137,118 @@ export function createClient(): ApiClient {
       return apiUrl(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`);
     },
     async logLevel() {
-      const body = await json<{ level?: string }>(await fetch(apiUrl('/api/v1/log-level')));
+      const body = await json<{ level?: string }>(await request(apiUrl('/api/v1/log-level')));
       return body.level ?? 'info';
     },
     async setLogLevel(level) {
-      const response = await fetch(apiUrl('/api/v1/log-level'), {
+      const response = await request(apiUrl('/api/v1/log-level'), {
         method: 'PUT',
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: level,
       });
       return response.ok;
     },
+    async hostSims() {
+      const data = await json<{ hosts?: HostSimInstance[] }>(
+        await request(apiUrl('/api/v1/host-sims')),
+      );
+      return data.hosts ?? [];
+    },
+    async openHostInstance(req) {
+      const response = await request(apiUrl('/api/v1/host-sims'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(req),
+      }, LONG_REQUEST_TIMEOUT_MS);
+      if (!response.ok) {
+        const text = await response.text();
+        if (response.status === 409) {
+          throw new Error('设备已有主机连接，或实例 id 已存在');
+        }
+        /* 后端的 {"ok":false,"error":"..."} 里通常有可读原因，别把整段 JSON 甩给用户 */
+        let detail = text.slice(0, 200);
+        try {
+          const body = JSON.parse(text) as { error?: unknown };
+          if (typeof body.error === 'string' && body.error !== '') {
+            detail = body.error;
+          }
+        } catch {
+          /* 非 JSON 响应就保留原文 */
+        }
+        throw new Error(`${response.status} ${detail}`);
+      }
+      return response.status;
+    },
+    async hostInstance(hostId) {
+      const response = await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}`));
+      if (!response.ok) {
+        return null;
+      }
+      return json<HostSimInstance>(response);
+    },
+    async closeHostInstance(hostId) {
+      const response = await request(
+        apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}`),
+        { method: 'DELETE' },
+      );
+      return response.status;
+    },
+    async sendHostInstanceSml(hostId, sml) {
+      const response = await request(
+        apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/send`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          body: sml,
+        },
+        LONG_REQUEST_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
+      }
+      return json<SentMessageResult>(response);
+    },
+    async hostInstanceCollector(hostId) {
+      const response = await request(
+        apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector`),
+      );
+      if (!response.ok) {
+        return null;
+      }
+      return json<CollectorState>(response);
+    },
+    async setHostInstanceCollector(hostId, config) {
+      const response = await request(
+        apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(config),
+        },
+      );
+      const text = await response.text();
+      const parsed = parseCollectorResult(text);
+      if (!response.ok) {
+        throw new Error(parsed.error ?? text.slice(0, 200));
+      }
+      return parsed;
+    },
+    async hostInstanceCollectorCommand(hostId, start) {
+      const response = await request(
+        apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector/${start ? 'start' : 'stop'}`),
+        { method: 'POST' },
+      );
+      const text = await response.text();
+      const parsed = parseCollectorResult(text);
+      if (!response.ok) {
+        throw new Error(parsed.error ?? text.slice(0, 200));
+      }
+      return parsed;
+    },
     async hostSimState(sessionId) {
       try {
         const body = await json<{ open?: boolean; target?: string; mode?: string; remote?: boolean }>(
-          await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`)),
+          await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`)),
         );
         return { open: body.open ?? false, target: body.target, mode: body.mode, remote: body.remote };
       } catch {
@@ -980,86 +1257,86 @@ export function createClient(): ApiClient {
     },
     async openHostSim(sessionId, target) {
       return command(
-        await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {
           method: 'POST',
           headers: target === undefined ? undefined : { 'Content-Type': 'application/json; charset=utf-8' },
           body: target === undefined ? undefined : JSON.stringify({ target }),
-        }),
+        }, LONG_REQUEST_TIMEOUT_MS),
       );
     },
     async overview() {
-      try {
-        const body = await json<{ sessions?: OverviewRow[] }>(
-          await fetch(apiUrl('/api/v1/overview')),
-        );
-        return body.sessions ?? [];
-      } catch {
-        /* 老后端没有该端点:回空,工作台退化为会话列表 */
-        return [];
-      }
+      /* 不吞错:工作台拉不到聚合数据时要让调用方知道,而不是显示"没有设备" */
+      const body = await json<{ sessions?: OverviewRow[] }>(await request(apiUrl('/api/v1/overview')));
+      return body.sessions ?? [];
     },
-    async burst(sessionId, request) {
-      const response = await fetch(
+    async burst(sessionId, payload) {
+      /* 压测在服务端后台执行：这里的响应只是"受理"，最终统计由 burstStatus 轮询取回 */
+      const response = await request(
         apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/burst`),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json; charset=utf-8' },
-          body: JSON.stringify(request),
+          body: JSON.stringify(payload),
         },
+        LONG_REQUEST_TIMEOUT_MS,
       );
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(`${response.status} ${text.slice(0, 200)}`);
+        const error = new ApiError(response.status, '', `${response.status} ${text.slice(0, 200)}`);
+        throw error;
       }
       return JSON.parse(text) as BurstResult;
     },
+    async burstStatus(sessionId) {
+      return json<BurstStatus>(
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/burst`)),
+      );
+    },
     async collectorState(sessionId) {
-      try {
-        const body = await json<Partial<CollectorState>>(
-          await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`)),
-        );
-        return {
-          configured: body.configured ?? false,
-          running: body.running ?? false,
-          mode: body.mode,
-          startCeid: body.startCeid,
-          stopCeid: body.stopCeid,
-          intervalMs: body.intervalMs,
-          svids: body.svids ?? [],
-          samples: body.samples ?? 0,
-          decodeErrors: body.decodeErrors ?? 0,
-          lastRttMs: body.lastRttMs,
-          staleSvids: body.staleSvids ?? [],
-          series: body.series ?? [],
-        };
-      } catch {
-        return null;
-      }
+      /* 不吞错:采集器状态拿不到时调用方要能提示"后端不支持/不可达" */
+      const body = await json<Partial<CollectorState>>(
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`)),
+      );
+      return {
+        configured: body.configured ?? false,
+        running: body.running ?? false,
+        mode: body.mode,
+        startCeid: body.startCeid,
+        stopCeid: body.stopCeid,
+        intervalMs: body.intervalMs,
+        svids: body.svids ?? [],
+        samples: body.samples ?? 0,
+        decodeErrors: body.decodeErrors ?? 0,
+        lastRttMs: body.lastRttMs,
+        staleSvids: body.staleSvids ?? [],
+        series: body.series ?? [],
+      };
     },
     async setCollector(sessionId, config) {
-      const response = await fetch(
-        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`),
-        {
+      /* 先判 ok 再解析:网关 502 的 HTML 错误页不能当 JSON 解析 */
+      const body = await json<{ ok?: boolean; error?: string }>(
+        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json; charset=utf-8' },
           body: JSON.stringify(config),
-        },
+        }),
       );
-      const body = (await response.json()) as { ok?: boolean; error?: string };
-      return body.ok ? null : body.error ?? `${response.status}`;
+      return body.ok === true ? null : body.error ?? '下发被后端拒绝';
     },
     async collectorCommand(sessionId, start) {
-      const response = await fetch(
-        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
-        { method: 'POST' },
+      const body = await json<{ ok?: boolean; error?: string }>(
+        await request(
+          apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
+          { method: 'POST' },
+        ),
       );
-      const body = (await response.json()) as { ok?: boolean; error?: string };
-      return body.ok ? null : body.error ?? `${response.status}`;
+      return body.ok === true ? null : body.error ?? '采集器命令被后端拒绝';
     },
     async closeHostSim(sessionId) {
-      return command(await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
+      return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
     },
     async configPreview(text, fromMs, toMs, buckets, svids, withEvents) {
+      /* 草稿预览要现场编译配置，8 秒不够 */
       const query = new URLSearchParams({ from: String(fromMs), to: String(toMs), buckets: String(buckets) });
       if (svids && svids.length > 0) {
         query.set('svids', svids.join(','));
@@ -1067,22 +1344,22 @@ export function createClient(): ApiClient {
       if (withEvents === false) {
         query.set('withEvents', 'false');
       }
-      const response = await fetch(apiUrl(`/api/v1/config-preview?${query}`), {
+      const response = await request(apiUrl(`/api/v1/config-preview?${query}`), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: text,
-      });
+      }, LONG_REQUEST_TIMEOUT_MS);
       if (!response.ok) {
         throw new Error(response.status === 422 ? '422 配置编译不过，先看校验问题' : `${response.status}`);
       }
       return (await response.json()) as PreviewData;
     },
     async sendHostSml(sessionId, sml) {
-      const response = await fetch(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {
+      const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         body: sml,
-      });
+      }, LONG_REQUEST_TIMEOUT_MS);
       const text = await response.text();
       if (!response.ok) {
         throw new Error(`${response.status} ${text.slice(0, 300)}`);

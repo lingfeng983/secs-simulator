@@ -131,6 +131,54 @@ export function downloadText(filename: string, text: string, mime = 'text/plain;
   downloadBlob(filename, new Blob([text], { type: mime }));
 }
 
+/**
+ * 解析 CSV（支持双引号、引号内逗号/换行、CRLF、UTF-8 BOM）。
+ *
+ * <p>只给"导出的 CSV 再导入"用，不追求 Excel 公式/编码探测。</p>
+ */
+export function parseCsv(text: string): string[][] {
+  const source = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const ch = source[index];
+    if (quoted) {
+      if (ch === '"') {
+        if (source[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (ch !== '\r') {
+      cell += ch;
+    }
+  }
+  if (cell !== '' || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
 /** 把文件名里的非法字符换成下划线。 */
 export function safeFilename(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, '_').trim();

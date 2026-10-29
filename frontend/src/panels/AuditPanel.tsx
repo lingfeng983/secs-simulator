@@ -4,6 +4,7 @@ import { Panel, PanelFootnote } from '../ui/Panel';
 import { DataTable, type Column } from '../ui/DataTable';
 import { formatDateTime } from '../lib/format';
 import type { PanelBaseProps } from './types';
+import { saveHint } from '../lib/saveFile';
 
 /**
  * 审计面板。
@@ -13,10 +14,11 @@ import type { PanelBaseProps } from './types';
  * 动作/操作者是<b>服务端</b>过滤(精确匹配),轮询也带着它取数;
  * 表格内建搜索是本地包含式过滤,两者互补。</p>
  */
-export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
-  const { auditEntries, auditOlder, auditFilter, setAuditFilter, loadAuditOlder, health } = backend;
+export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
+  const { auditEntries, auditOlder, auditFilter, setAuditFilter, auditError, loadAuditOlder, health } = backend;
   const [actionInput, setActionInput] = useState(auditFilter.action);
   const [actorInput, setActorInput] = useState(auditFilter.actor);
+  const [imported, setImported] = useState<AuditEntryView[] | null>(null);
 
   /** 轮询只刷新最近窗口;翻出来的旧页在这里合并去重,按时间倒序。 */
   const allEntries = useMemo(() => {
@@ -32,22 +34,24 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
     {
       key: 'at',
       header: '时间',
+      width: '170px',
       sortValue: (row) => row.at,
       render: (row) => <span className="mono nowrap">{formatDateTime(row.at)}</span>,
     },
-    { key: 'actor', header: '操作者', sortValue: (row) => row.actor },
+    { key: 'actor', header: '操作者', width: '110px', sortValue: (row) => row.actor },
     {
       key: 'role',
       header: '角色',
+      width: '80px',
       sortValue: (row) => row.role,
       render: (row) => <span className="badge badge-muted">{row.role}</span>,
     },
-    { key: 'action', header: '动作', sortValue: (row) => row.action, render: (row) => <span className="mono">{row.action}</span> },
-    { key: 'target', header: '目标', sortValue: (row) => row.target, render: (row) => <span className="mono">{row.target}</span> },
+    { key: 'action', header: '动作', width: '140px', sortValue: (row) => row.action, render: (row) => <span className="mono">{row.action}</span> },
+    { key: 'target', header: '目标', width: '170px', sortValue: (row) => row.target, render: (row) => <span className="mono">{row.target}</span> },
     {
       key: 'detail',
       header: '细节',
-      className: 'audit-detail',
+      className: 'audit-detail-cell',
       sortValue: (row) => row.detail,
       render: (row) => <span className="mono audit-detail">{row.detail}</span>,
     },
@@ -64,14 +68,17 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
   };
 
   const filterActive = auditFilter.action !== '' || auditFilter.actor !== '';
+  const rows = imported ?? allEntries;
 
   return (
     <Panel
       id="panel-audit"
       title="审计"
       description="谁在什么时候动了什么。完整历史在服务端日志文件里。"
-      actions={
-        <>
+    >
+      {/* 过滤条:精确匹配动作/操作者,和表格内的模糊搜索互补 */}
+      {!notAdmin && (
+        <div className="preview-controls">
           <input
             type="search"
             className="table-search"
@@ -104,23 +111,50 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
           <button type="button" onClick={clearFilter} disabled={!filterActive}>
             清除过滤
           </button>
-          <button type="button" onClick={() => void loadAuditOlder()} disabled={allEntries.length === 0} title="以当前最早一条为游标,向服务端要更早的一页审计">
+          <span className="spacer" />
+          <button
+            type="button"
+            onClick={() => void loadAuditOlder()}
+            disabled={allEntries.length === 0}
+            title="以当前最早一条为游标,向服务端要更早的一页审计"
+          >
             载入更早
           </button>
-        </>
-      }
-    >
+        </div>
+      )}
+
       {notAdmin ? (
         <p className="hint">审计只对管理员开放;当前账号角色是「{health?.role}」。找管理员查操作留痕。</p>
       ) : (
         <>
+          {auditError !== '' && (
+            <p className="inline-note">审计刷新失败：{auditError}（表格保留上一次成功的数据）</p>
+          )}
           <DataTable
             tableKey="audit"
             columns={columns}
-            rows={allEntries}
+            rows={rows}
             rowKey={(row) => `${row.at}-${row.actor}-${row.action}`}
             searchPlaceholder="搜索操作者 / 动作 / 目标"
             exportName="audit"
+        onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
+            onImport={(importedRows) => {
+              const entries: AuditEntryView[] = importedRows.flatMap((row) => {
+                const at = Date.parse(row['时间'] ?? '');
+                if (!Number.isFinite(at)) {
+                  return [];
+                }
+                return [{
+                  at,
+                  actor: row['操作者'] ?? '',
+                  role: row['角色'] ?? '',
+                  action: row['动作'] ?? '',
+                  target: row['目标'] ?? '',
+                  detail: row['细节'] ?? '',
+                }];
+              });
+              setImported(entries);
+            }}
             emptyText={filterActive ? '当前过滤条件下没有审计记录' : '暂无审计记录'}
             defaultSort={{ key: 'at', direction: 'desc' }}
             exportColumns={[
@@ -135,7 +169,11 @@ export function AuditPanel({ backend }: PanelBaseProps): JSX.Element {
           <p className="hint">
             最近 200 条操作记录{filterActive ? '（按动作/操作者过滤后）' : ''}，「载入更早」继续往前翻；
             完整历史在 <code>--work-dir/logs/audit.jsonl</code>（重启后仍保留最近 1000 条）。
+            导入 CSV 可把导出的审计放在本页只读查看，不会写回服务端。
           </p>
+          {imported !== null && (
+            <button type="button" onClick={() => setImported(null)}>退出导入视图</button>
+          )}
           <PanelFootnote
             items={[
               { label: '当前视图', value: allEntries.length },

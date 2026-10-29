@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { PreviewData, SvidInput } from '../api';
-import { Sparkline } from '../charts/Sparkline';
+import { VariableChart } from '../charts/VariableChart';
 import { Panel, PanelFootnote } from '../ui/Panel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { Modal } from '../ui/Modal';
 import { DataTable, type Column } from '../ui/DataTable';
 import type { PanelBaseProps } from './types';
+import { saveHint } from '../lib/saveFile';
 
 /** 后端支持的 SECS-II 数据类型(与 ValueType 一致)。 */
 const TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4', 'F8', 'ASCII', 'BOOLEAN'] as const;
@@ -33,6 +34,14 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const { catalog, activeSession } = backend;
   const svidChoices = catalog?.svids ?? [];
 
+  /* 预览窗口用引擎 uptime，坐标轴要换算成墙钟才看得出来"这是几点"。
+     偏移在进程生命周期内基本恒定，按 uptime 缓存一次即可。 */
+  const uptimeMs = backend.health?.uptimeMs ?? 0;
+  const timeOriginMs = useMemo(
+    () => (uptimeMs > 0 ? Date.now() - uptimeMs : 0),
+    [uptimeMs],
+  );
+
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<SvidInput>(EMPTY_SVID);
@@ -44,9 +53,12 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [pinTarget, setPinTarget] = useState<number | null>(null);
   const [pinValue, setPinValue] = useState('0');
 
-  /* 曲线预览 */
-  const [preview, setPreview] = useState<{ svid: number; data: PreviewData } | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
+  /* 单变量预览：只画当前选中的那一个变量,坐标轴齐全(见 VariableChart) */
+  const [singlePreview, setSinglePreview] = useState<PreviewData | null>(null);
+  const [singleSvid, setSingleSvid] = useState<number | null>(null);
+  const [previewWindowMs, setPreviewWindowMs] = useState(120_000);
+  const [showEvents, setShowEvents] = useState(true);
+  const [singleBusy, setSingleBusy] = useState(false);
 
   /* 已设定的变量:目录视图直接带 pinned 标志(后端钉住状态的真值),刷新不丢 */
   const rows: SvidRow[] = useMemo(
@@ -61,8 +73,23 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     [svidChoices],
   );
 
+  /** 归属直接选已有单元/全局，不再手打。 */
+  const ownerChoices = useMemo(
+    () => [...new Set(svidChoices.map((choice) => choice.owner).filter((owner) => owner !== ''))].sort(),
+    [svidChoices],
+  );
+
+  /* 图例里用符号名,别只给编号 */
+  const previewLabels = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const row of rows) {
+      map.set(row.svid, row.slot);
+    }
+    return map;
+  }, [rows]);
+
   const columns: Column<SvidRow>[] = [
-    { key: 'svid', header: 'SVID', align: 'right', sortValue: (row) => row.svid, render: (row) => <span className="mono">{row.svid}</span> },
+    { key: 'svid', header: 'SVID', sortValue: (row) => row.svid, render: (row) => <span className="mono">{row.svid}</span> },
     { key: 'slot', header: '符号名', sortValue: (row) => row.slot, render: (row) => <span className="mono">{row.slot}</span> },
     { key: 'owner', header: '归属', sortValue: (row) => row.owner, render: (row) => row.owner },
     { key: 'type', header: '类型', sortValue: (row) => row.type, render: (row) => <span className="mono">{row.type}</span> },
@@ -80,9 +107,9 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
         <div className="row-actions">
           <button
             type="button"
-            disabled={previewBusy}
-            onClick={() => void loadPreview(row.svid)}
-            title="预览该变量的曲线(最近 1 分钟)"
+            disabled={activeSession === '' || singleBusy}
+            onClick={() => void loadSinglePreview(row.svid)}
+            title="预览这个变量最近一段时间的曲线（含事件效果与事件竖线）"
           >
             预览
           </button>
@@ -113,15 +140,20 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     },
   ];
 
-  const loadPreview = async (svid: number) => {
-    setPreviewBusy(true);
+  /** 只预览一个变量：坐标轴齐全，事件竖线按计划分色。 */
+  const loadSinglePreview = async (svid: number) => {
+    if (activeSession === '') {
+      return;
+    }
+    setSingleBusy(true);
     try {
-      const data = await backend.previewSvid(activeSession, svid, 60_000);
+      const data = await backend.previewSvid(activeSession, svid, previewWindowMs);
       if (data !== null) {
-        setPreview({ svid, data });
+        setSinglePreview(data);
+        setSingleSvid(svid);
       }
     } finally {
-      setPreviewBusy(false);
+      setSingleBusy(false);
     }
   };
 
@@ -182,9 +214,6 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     await backend.clearSvidValue(svid);
   };
 
-  const previewSeries = preview?.data.series[0];
-  const fromMs = preview?.data.from ?? 0;
-  const bucketMs = preview?.data.bucketMs ?? 500;
 
   return (
     <Panel
@@ -210,6 +239,29 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
         rowKey={(row) => String(row.svid)}
         searchPlaceholder="搜索 SVID / 符号名 / 归属"
         exportName="svids"
+        onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
+        onImport={async (imported) => {
+          let done = 0;
+          for (const row of imported) {
+            const id = Number.parseInt(row.SVID ?? '', 10);
+            if (!Number.isFinite(id) || id < 1) {
+              continue;
+            }
+            const input = {
+              id,
+              slot: (row['符号名'] ?? '').trim() || `SVID_${id}`,
+              owner: (row['归属'] ?? '').trim(),
+              type: (row['类型'] ?? 'F4').trim() || 'F4',
+              unit: (row['单位'] ?? '').trim(),
+            };
+            const exists = rows.some((item) => item.svid === id);
+            const ok = exists ? await backend.updateSvid(id, input) : await backend.addSvid(input);
+            if (ok) {
+              done += 1;
+            }
+          }
+          notifier.success(`已导入 ${done} 个状态变量`);
+        }}
         emptyText={activeSession === '' ? '先在会话表里选一个会话' : '该设备还没有状态变量——点「新增状态变量」创建'}
         exportColumns={[
           { header: 'SVID', value: (row) => row.svid },
@@ -221,25 +273,70 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
       />
       <p className="hint">
         「设定」把变量钉在给定值上(覆盖曲线与事件效果,直到取消设定或重载会话);
-        「预览」画该变量最近 1 分钟的曲线。CEID 与报告的清册在「事件」页管理。
+        「预览」只画这一个变量最近一段时间的曲线,事件竖线按计划用不同颜色标出。
+        CEID 与报告的清册在「事件」页管理。
       </p>
 
-      {/* 单变量曲线预览 */}
-      {preview !== null && previewSeries !== undefined && (
-        <div className="collector-chart">
-          <div className="collector-chart-head">
-            <span className="mono">{preview.svid}</span>
-            <span>{previewSeries.owner ?? ''}</span>
-            {(previewSeries.unit ?? '') !== '' && <span className="hint-inline">{previewSeries.unit}</span>}
-            <button type="button" className="link" onClick={() => setPreview(null)}>收起</button>
+      {/* 只保留单变量预览：一个参数的曲线 + 事件效果，不再提供"全部曲线"入口 */}
+
+      {/* 单变量预览:只画选中的那一个变量,Y 轴是数值、X 轴是时间,
+          事件竖线直接标出 CEID 与计划名。 */}
+      {singlePreview !== null && singleSvid !== null && (
+        <section className="panel-section block">
+          <div className="section-head">
+            <h2>
+              单变量预览 · SVID {singleSvid}
+              {previewLabels.get(singleSvid) !== undefined && (
+                <span className="hint-inline"> {previewLabels.get(singleSvid)}</span>
+              )}
+            </h2>
+            <div className="preview-controls">
+              <label className="field">
+                时间窗
+                <select
+                  value={previewWindowMs}
+                  onChange={(event) => setPreviewWindowMs(Number(event.target.value))}
+                  aria-label="单变量预览时间窗"
+                >
+                  {[30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000].map((ms) => (
+                    <option key={ms} value={ms}>{ms >= 60_000 ? `${ms / 60_000} 分钟` : `${ms / 1000} 秒`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="check-inline" title="关闭后只画曲线，不画事件竖线/图例">
+                <input
+                  type="checkbox"
+                  checked={showEvents}
+                  onChange={(event) => setShowEvents(event.target.checked)}
+                />
+                事件标记
+              </label>
+              <button type="button" disabled={singleBusy} onClick={() => void loadSinglePreview(singleSvid)}>
+                {singleBusy ? '计算中…' : '重算'}
+              </button>
+              <button type="button" onClick={() => { setSinglePreview(null); setSingleSvid(null); }}>收起</button>
+            </div>
           </div>
-          <Sparkline
-            series={{ svid: preview.svid, owner: previewSeries.owner, unit: previewSeries.unit, min: previewSeries.min, max: previewSeries.max, avg: previewSeries.avg }}
-            fromMs={fromMs}
-            bucketMs={bucketMs}
-            height={96}
-          />
-        </div>
+          {singlePreview.series.length > 0 ? (
+            <VariableChart
+              series={singlePreview.series[0]}
+              fromMs={singlePreview.from}
+              timeOriginMs={timeOriginMs}
+              bucketMs={singlePreview.bucketMs}
+              events={showEvents ? (singlePreview.events ?? []) : []}
+              height={200}
+              eventLabel="发送事件"
+            />
+          ) : (
+            <p className="hint">这个变量没有可预览的曲线。</p>
+          )}
+          <p className="hint">
+            曲线是"最近一段时间的确定性重放"：回放会从窗口之前开始，窗口内仍在生效的
+            set/shift 效果也会带上，所以不会出现"只有窗口里恰好触发的那条事件"。
+            竖线按计划分色；关闭「事件标记」可只看曲线。
+            拖动框选放大、滚轮缩放时间、Shift+滚轮平移、Ctrl+滚轮纵向缩放、双击复位。
+          </p>
+        </section>
       )}
 
       <PanelFootnote
@@ -287,12 +384,17 @@ export function SvidPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
             </select>
           </label>
           <label className="field">
-            归属（GLOBAL = 设备级）
-            <input
-              value={draft.owner}
+            归属
+            <select
+              value={draft.owner ?? ''}
               onChange={(event) => setDraft({ ...draft, owner: event.target.value })}
-              placeholder="GLOBAL"
-            />
+            >
+              {draft.owner !== undefined && !ownerChoices.includes(draft.owner) && (
+                <option value={draft.owner}>{draft.owner}</option>
+              )}
+              {ownerChoices.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+              {!ownerChoices.includes('GLOBAL') && <option value="GLOBAL">GLOBAL</option>}
+            </select>
           </label>
           <label className="field">
             单位

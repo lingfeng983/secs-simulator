@@ -31,6 +31,9 @@ export interface EventStreamHandlers {
 /** 重连间隔（毫秒）。 */
 const RECONNECT_MS = 2000;
 
+/** 暂停期间最多暂存的报文条数；超了丢最旧的。 */
+const MAX_PAUSED_BUFFER = 5000;
+
 /**
  * 事件流（SSE）连接。
  *
@@ -139,6 +142,11 @@ export function useEventStream(
           }
           if (pausedRef.current) {
             bufferRef.current.push(parsed);
+            /* 暂停可能持续很久（后台标签页/用户忘了恢复）：
+               不设上限会把整页内存拖爆，只留最近的 5000 条 */
+            if (bufferRef.current.length > MAX_PAUSED_BUFFER) {
+              bufferRef.current.splice(0, bufferRef.current.length - MAX_PAUSED_BUFFER);
+            }
             return;
           }
           handlersRef.current.onFlush([parsed]);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { groupCommands, matchCommands, type CommandItem } from '../lib/command';
+import { Overlay } from './Overlay';
 
 export interface CommandPaletteProps {
   open: boolean;
@@ -98,8 +99,8 @@ export function CommandPalette({
   let flatIndex = -1;
 
   return (
-    <div className="overlay" onMouseDown={onClose}>
-      <div className="palette" onMouseDown={(event) => event.stopPropagation()}>
+    <Overlay onClose={onClose}>
+      <div className="palette" role="dialog" aria-modal="true" aria-label="命令面板">
         <input
           ref={inputRef}
           className="palette-input"
@@ -140,6 +141,6 @@ export function CommandPalette({
           <span>Esc 关闭</span>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

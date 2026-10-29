@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  type AlarmState,
   type ApiClient,
   type SessionBulkParams,
   type SessionBulkResult,
@@ -16,10 +15,11 @@ import {
   type PreviewData,
   type SentMessageResult,
   type SessionSummary,
-  type TerminalMessage,
 } from '../api';
 import type { CeidInput, EventPlanInput, ReportInput, SvidInput } from '../api';
+import { previewWindow } from '../lib/previewWindow';
 import type { Notifier } from './useToasts';
+import { createRequestSeq } from './requestSeq';
 import { useSessionCommands } from './useSessionCommands';
 import { useConfigCommands } from './useConfigCommands';
 import { useDataCommands } from './useDataCommands';
@@ -43,8 +43,6 @@ const INTERVAL = {
 /** 事件流日志保留的条数。 */
 const MAX_LOG = 400;
 
-/** 事件流日志的一行。 */
-
 /**
  * 控制器返回的东西。
  *
@@ -53,6 +51,8 @@ const MAX_LOG = 400;
  */
 export interface BackendController {
   health: Health | null;
+  /** API 客户端:主机模拟页直接用它建多主机实例。 */
+  client: ApiClient | null;
 
   sessions: SessionSummary[];
   /** 当前选中的会话；所有面板共用它。 */
@@ -62,8 +62,6 @@ export interface BackendController {
   ceid: number;
   setCeid: (ceid: number) => void;
 
-  alarms: AlarmState[];
-  terminalMessages: TerminalMessage[];
   catalog: Catalog | null;
   eventPlans: EventPlanView[];
   auditEntries: AuditEntryView[];
@@ -75,14 +73,9 @@ export interface BackendController {
   setAuditFilter: (filter: { action?: string; actor?: string }) => Promise<void>;
   /** 审计「载入更早」:以当前视图最早一条为游标向更早翻一页。 */
   loadAuditOlder: () => Promise<void>;
+  /** 最近一次审计拉取失败的原因；空串 = 正常。失败时保留上一份数据。 */
+  auditError: string;
   configList: ConfigEntry[];
-
-  /** 服务端记录的报文总数（可能大于面板里保留的条数）。 */
-
-  /** 事件流日志。 */
-
-  preview: PreviewData | null;
-  previewSession: string;
 
   /** 正在刷新（用于按钮上的等待态）。 */
   refreshing: boolean;
@@ -147,27 +140,14 @@ export interface BackendController {
   deleteSvid: (svid: number) => Promise<boolean>;
   setSvidValue: (svid: number, value: number) => Promise<boolean>;
   clearSvidValue: (svid: number) => Promise<boolean>;
-  /** 单个状态变量的曲线预览(窗口相对仿真起点)。 */
+  /** 单个状态变量的曲线预览（窗口右端点取进程 uptime，即"最近 N 毫秒"）。 */
   previewSvid: (sessionId: string, svid: number, windowMs: number) => Promise<PreviewData | null>;
+  /** 只回放某一条编排计划的预览（事件及其效果）。 */
+  previewPlan: (sessionId: string, planId: string, windowMs: number) => Promise<PreviewData | null>;
+  /** 拉整台设备的曲线(全部 SVID + 事件标记),用于"事件串起来"的预览。 */
+  previewAll: (sessionId: string, windowMs: number) => Promise<PreviewData | null>;
+  /** 手动发送一条 SML；返回发送结果。 */
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
-  downloadPreview: (windowMs: number) => Promise<void>;
-  /** 配置草稿的曲线预览（编辑器里改模板直接看效果）。 */
-  draftPreview: PreviewData | null;
-  previewDraft: (text: string, windowMs: number) => Promise<void>;
-  /** 单 SVID 草稿预览(v6,带事件标记)。 */
-  previewDraftSvid: (text: string, windowMs: number, svid: number) => Promise<PreviewData | null>;
-  /** 对比会话 B 的预览数据；null 表示未开启对比。 */
-  comparePreview: PreviewData | null;
-  /** 对比会话 B 的 id。 */
-  compareSession: string;
-  /** 拉取/清除对比预览；空 sessionId 关闭对比。 */
-  setComparePreview: (sessionId: string, fromMs: number, toMs: number) => Promise<void>;
-  /** 按时间窗刷新曲线（先取一次 uptime，时间窗才是"最近 N 分钟"而不是"开局 N 秒"）。 */
-  refreshPreview: (windowMs: number) => Promise<void>;
-
-  /** 主机模拟器连接状态（随会话明细轮询）。 */
-  hostSimOpen: boolean;
-  hostSimTarget: string;
   openHostSim: (sessionId: string, target?: import('../api').HostSimTarget) => Promise<void>;
   closeHostSim: (sessionId: string) => Promise<void>;
   /** 以主机角色发送 SML；返回发送结果。 */
@@ -194,8 +174,11 @@ export interface BackendController {
  */
 export function lifecycleMessage(status: number, what: string): string {
   switch (status) {
+    case 200:
+    case 201:
+      return `${what}成功`;
     case 400:
-      return `${what}失败（配置不合法或读不到，详见服务端日志）`;
+      return `${what}失败（配置不合法/读不到，或端口被占；详见服务端日志）`;
     case 404:
       return `${what}失败：会话不存在`;
     case 409:
@@ -220,25 +203,20 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState('');
   const [ceid, setCeid] = useState(2001);
-  const [alarms, setAlarms] = useState<AlarmState[]>([]);
-  const [terminalMessages, setTerminalMessages] = useState<TerminalMessage[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntryView[]>([]);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
   const [logLevel, setLogLevelState] = useState('info');
-  const [preview, setPreview] = useState<PreviewData | null>(null);
-  const [comparePreview, setComparePreviewData] = useState<PreviewData | null>(null);
-  const [draftPreview, setDraftPreview] = useState<PreviewData | null>(null);
-  const [compareSession, setCompareSessionId] = useState('');
-  const [previewSession, setPreviewSession] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [hostSimOpen, setHostSimOpen] = useState(false);
   const [overview, setOverview] = useState<OverviewRow[]>([]);
-  const [hostSimTarget, setHostSimTarget] = useState('');
 
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
+
+  /** 当前活跃会话的同步镜像：异步响应回来时判断"是不是已经切走了"。 */
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
 
   /* ---------- 读取 ---------- */
 
@@ -269,36 +247,30 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }
   }, [client]);
 
-  /** 拉某个会话的报警 / 终端消息 / 目录 / 事件计划。 */
+  /* 报警 / 终端消息 / 主机模拟开关的本地快照已删除：
+     它们没有独立触发点（状态由异步 ACK 决定），主机模拟也已迁到独立页，
+     原来每 2 秒拉一次纯属白跑。报警是否真的到达主机去「消息」页看 S5F1/S5F2。 */
+
+  /** 拉某个会话的目录 / 事件计划。 */
   const refreshSessionDetail = useCallback(
     async (sessionId: string) => {
       if (client === null || sessionId === '') {
         return;
       }
-      const [alarmsResult, terminalResult, catalogResult, eventsResult] = await Promise.allSettled([
-        client.alarms(sessionId),
-        client.terminalMessages(sessionId),
+      const [catalogResult, eventsResult] = await Promise.allSettled([
         client.catalog(sessionId),
         client.events(sessionId),
       ]);
-      if (alarmsResult.status === 'fulfilled') {
-        setAlarms(alarmsResult.value);
-      }
-      if (terminalResult.status === 'fulfilled') {
-        setTerminalMessages(terminalResult.value);
+      /* 响应回来时可能已经切到别的设备：过期结果不能写进当前面板，
+         否则"结构/事件"页会短暂挂着上一台设备的数据 */
+      if (activeSessionRef.current !== sessionId) {
+        return;
       }
       if (catalogResult.status === 'fulfilled') {
         setCatalog(catalogResult.value);
       }
       if (eventsResult.status === 'fulfilled') {
         setEventPlans(eventsResult.value);
-      }
-      try {
-        const sim = await client.hostSimState(sessionId);
-        setHostSimOpen(sim?.open ?? false);
-        setHostSimTarget(sim?.target ?? '');
-      } catch {
-        /* 老后端没有主机模拟端点 */
       }
     },
     [client],
@@ -310,30 +282,60 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   auditFilterRef.current = auditFilter;
   /** 「载入更早」翻出来的更旧审计页;轮询只刷新最近窗口,不碰这里。 */
   const [auditOlder, setAuditOlder] = useState<AuditEntryView[]>([]);
+  /** 审计最近一次失败原因；有数据时保留旧数据，只把错误亮出来。 */
+  const [auditError, setAuditError] = useState('');
+  /** 审计请求序号：切换过滤与轮询共用，后发先至的旧响应不能覆盖新过滤的结果。 */
+  const auditSeqRef = useRef(createRequestSeq());
 
   const refreshAudit = useCallback(async () => {
     if (client === null) {
       setAuditEntries([]);
+      setAuditError('');
       return;
     }
+    const token = auditSeqRef.current.begin();
     try {
-      setAuditEntries(await client.audit(200, auditFilterRef.current));
-    } catch {
-      setAuditEntries([]);
+      const entries = await client.audit(200, auditFilterRef.current);
+      if (!auditSeqRef.current.isCurrent(token)) {
+        return;
+      }
+      setAuditEntries(entries);
+      setAuditError('');
+    } catch (error) {
+      if (!auditSeqRef.current.isCurrent(token)) {
+        return;
+      }
+      /* 保留旧数据：后端短暂抖动时把表格闪空，会让人以为审计记录丢了 */
+      setAuditError((error as Error).message);
     }
   }, [client]);
 
   /** 设置审计过滤并立刻按新过滤取一次(轮询此后也一直带着它);翻页缓存随之清空。 */
   const setAuditFilter = useCallback(async (filter: { action?: string; actor?: string }) => {
-    setAuditFilterState((previous) => ({ ...previous, ...filter }));
+    /* 先同步更新 ref：否则紧接着触发的轮询还会带着旧过滤，
+       它的响应会因为序号更新而胜出，界面就停在旧过滤结果上 */
+    const nextFilter = { ...auditFilterRef.current, ...filter };
+    auditFilterRef.current = nextFilter;
+    setAuditFilterState(nextFilter);
     setAuditOlder([]);
-    /* 用最新过滤直接取,不等下一次轮询 */
-    if (client !== null) {
-      try {
-        setAuditEntries(await client.audit(200, { ...auditFilterRef.current, ...filter }));
-      } catch {
-        /* 取失败就留给下一轮轮询 */
+    if (client === null) {
+      return;
+    }
+    /* 用最新过滤直接取,不等下一次轮询；同时抢到新序号，
+       让还在路上的旧过滤响应（以及旧轮询）自动作废 */
+    const token = auditSeqRef.current.begin();
+    try {
+      const entries = await client.audit(200, nextFilter);
+      if (!auditSeqRef.current.isCurrent(token)) {
+        return;
       }
+      setAuditEntries(entries);
+      setAuditError('');
+    } catch (error) {
+      if (!auditSeqRef.current.isCurrent(token)) {
+        return;
+      }
+      setAuditError((error as Error).message);
     }
   }, [client]);
 
@@ -360,43 +362,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       notifierRef.current.error('载入更早的审计失败', (error as Error).message);
     }
   }, [client, auditEntries, auditOlder]);
-
-
-  /**
-   * 统一刷新入口。
-   *
-   * <p>切面板、回到前台、点"全部刷新"都走这里。</p>
-   */
-  /** 配置草稿预览：模拟时钟 0..windowMs，从种子确定性重放。 */
-  const previewDraft = useCallback(
-    async (text: string, windowMs: number) => {
-      if (client === null) {
-        return;
-      }
-      try {
-        setDraftPreview(await client.configPreview(text, 0, windowMs, 120));
-      } catch (error) {
-        notifierRef.current.error('草稿预览失败', (error as Error).message);
-        setDraftPreview(null);
-      }
-    },
-    [client],
-  );
-
-  /** 单 SVID 草稿预览(v6):带事件标记,给每 SVID 值来源编辑器用。 */
-  const previewDraftSvid = useCallback(
-    async (text: string, windowMs: number, svid: number): Promise<PreviewData | null> => {
-      if (client === null) {
-        return null;
-      }
-      try {
-        return await client.configPreview(text, 0, windowMs, 90, [svid], true);
-      } catch {
-        return null;
-      }
-    },
-    [client],
-  );
 
   /* ---------- 运行时编辑(设备页·事件/报告/状态变量) ---------- */
 
@@ -494,9 +459,31 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         return null;
       }
       try {
-        return await client.preview(sessionId, 0, windowMs, 90, [svid], true);
+        /* 预览"最近 N 秒"：以进程 uptime 为右端点。
+           从 0 开始会把周期 60s 的计划整个漏掉（窗口只到 60s 边界）。 */
+        const fresh = await client.health();
+        const { from, to } = previewWindow(fresh.uptimeMs, windowMs);
+        return await client.preview(sessionId, from, to, 90, [svid], true);
       } catch (error) {
         notifierRef.current.error('曲线预览失败', (error as Error).message);
+        return null;
+      }
+    },
+    [client],
+  );
+
+  /** 只回放某一条编排计划，用于「这个事件及其参数的周期预览」。 */
+  const previewPlan = useCallback(
+    async (sessionId: string, planId: string, windowMs: number): Promise<PreviewData | null> => {
+      if (client === null || planId === '') {
+        return null;
+      }
+      try {
+        const fresh = await client.health();
+        const { from, to } = previewWindow(fresh.uptimeMs, windowMs);
+        return await client.preview(sessionId, from, to, 120, undefined, true, planId);
+      } catch (error) {
+        notifierRef.current.error('事件预览失败', (error as Error).message);
         return null;
       }
     },
@@ -534,22 +521,65 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
-  /** 工作台聚合(v6):速率/计数一览;老后端没有该端点时回空数组。 */
+  /** 工作台聚合(v6):速率/计数一览；失败时保留上一份，不让 KPI 闪成 0。 */
   const refreshOverview = useCallback(async () => {
     if (client === null) {
       return;
     }
-    const rows = await client.overview();
-    setOverview(rows);
+    try {
+      setOverview(await client.overview());
+    } catch (error) {
+      /* 这里不占全局 backendError（health 轮询会把它清掉），但要留痕迹：
+         老后端缺端点或瞬时失败时，保留上一份读数比清空更有用 */
+      console.warn('[overview] 拉取失败，保留上一份数据', error);
+    }
   }, [client]);
 
-  /** 服务端压测(v6)。 */
+  /**
+   * 服务端压测(v6)。
+   *
+   * <p>服务端把压测放到后台执行，POST 只回 202 受理；这里轮询 GET 进度直到
+   * `running === false`，把最终统计返回给调用方。否则界面会把"受理"当成结果，
+   * 显示"成功 0 / 失败 0"。</p>
+   */
   const burst = useCallback(
     async (sessionId: string, request: BurstRequest): Promise<BurstResult> => {
       if (client === null) {
         throw new Error('未连接后端');
       }
-      return client.burst(sessionId, request);
+
+      try {
+        await client.burst(sessionId, request);
+      } catch (error) {
+        /* 409 = 该会话已有一个压测在跑：接着轮询那一轮，而不是报错 */
+        if ((error as { status?: number }).status !== 409) {
+          throw error;
+        }
+      }
+
+      /* 服务端预算是 5 分钟；这里给 1 分钟底 + 请求本身的理论时长，最多 6 分钟 */
+      const deadline = Date.now() + Math.min(
+        6 * 60_000,
+        60_000 + request.count * (request.intervalMs ?? 0),
+      );
+
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const status = await client.burstStatus(sessionId);
+        if (status.running !== true) {
+          return {
+            sent: status.sent ?? 0,
+            failed: status.failed ?? 0,
+            durationMs: status.durationMs ?? 0,
+            latencyP50: status.latencyP50 ?? 0,
+            latencyP95: status.latencyP95 ?? 0,
+            latencyMax: status.latencyMax ?? 0,
+          };
+        }
+        if (Date.now() > deadline) {
+          throw new Error('压测仍未结束（服务端可能仍在执行，可稍后重试或查看服务端日志）');
+        }
+      }
     },
     [client],
   );
@@ -611,8 +641,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     if (client === null) {
       setHealth(null);
       setSessions([]);
-      setAlarms([]);
-      setTerminalMessages([]);
       setCatalog(null);
       setEventPlans([]);
       setAuditEntries([]);
@@ -689,11 +717,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }
   }, [sessions, activeSession]);
 
-  /* 会话没了就把它的明细清掉，别留着上一个会话的报警糊弄人 */
+  /* 会话没了就把它的明细清掉，别留着上一个会话的目录糊弄人 */
   useEffect(() => {
     if (activeSession === '') {
-      setAlarms([]);
-      setTerminalMessages([]);
       setCatalog(null);
       setEventPlans([]);
     }
@@ -710,12 +736,19 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
    * 连接标识没变的会话走热生效不断连，变化了才重建。</p>
    */
   const reloadSessionsUsing = useCallback(
-    async (_configName: string) => {
+    async (configName: string) => {
       if (client === null) {
         return;
       }
+      /* 只重载用这份配置的会话。老版本 sessions JSON 没有 config 字段，
+         这时退回"全部重载"以保持行为不变。 */
+      const matched = configName === ''
+        ? []
+        : sessions.filter((session) => session.config === configName);
+      const targets = matched.length > 0 ? matched : sessions;
+
       let hot = 0;
-      for (const session of sessions) {
+      for (const session of targets) {
         try {
           const status = await client.reloadSession(session.id);
           if (status === 200) {
@@ -734,26 +767,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   );
 
   const configCommands = useConfigCommands({ client, notifier, refreshConfigs, reloadSessionsUsing });
-  const dataCommands = useDataCommands({
-    client,
-    notifier,
-    setComparePreviewData,
-    setCompareSessionId,
-    setPreview,
-    setPreviewSession,
-    setHealth,
-    activeSession,
-  });
-
-
-
-
-
-
-
-
-
-
+  const dataCommands = useDataCommands({ client, notifier, setHealth });
 
   const openHostSim = useCallback(
     async (sessionId: string, target?: import('../api').HostSimTarget) => {
@@ -874,62 +888,27 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [client],
   );
 
-
-
-
-
-
-
-  /**
-   * 按时间窗刷新曲线。
-   *
-   * <p>时间窗要相对"现在"而不是相对 0：后端引擎时钟从进程启动起算，
-   * 所以每次都要先取一次 uptime 再算 from/to。</p>
-   */
-  const refreshPreview = useCallback(
-    async (windowMs: number) => {
-      if (client === null || activeSession === '') {
-        return;
-      }
-      try {
-        const fresh = await client.health();
-        setHealth(fresh);
-        const to = Math.max(1, fresh.uptimeMs ?? 0);
-        const from = Math.max(0, to - windowMs);
-        await dataCommands.fetchPreview(activeSession, from, to);
-      } catch (error) {
-        notifierRef.current.error('预览失败', (error as Error).message);
-      }
-    },
-    [client, activeSession, dataCommands],
-  );
-
   /* ---------- 配置目录 ---------- */
-
-
-
-
-
 
   return useMemo<BackendController>(
     () => ({
       ...sessionCommands,
       ...configCommands,
       ...dataCommands,
+      client,
       health,
       sessions,
       activeSession,
       setActiveSession,
       ceid,
       setCeid,
-      alarms,
-      terminalMessages,
       catalog,
       eventPlans,
       auditEntries,
       auditOlder,
       auditFilter,
       setAuditFilter,
+      auditError,
       loadAuditOlder,
       addEventPlan,
       updateEventPlan,
@@ -946,9 +925,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setSvidValue,
       clearSvidValue,
       previewSvid,
+      previewPlan,
+      previewAll: dataCommands.previewAll,
       configList,
-      preview,
-      previewSession,
       refreshing,
       refreshAll,
       refreshSessions,
@@ -959,14 +938,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setAlarm,
       toggleEvent,
       sendSml,
-      comparePreview,
-      draftPreview,
-      previewDraft,
-      previewDraftSvid,
-      compareSession,
-      refreshPreview,
-      hostSimOpen,
-      hostSimTarget,
       openHostSim,
       closeHostSim,
       sendHostSml,
@@ -982,14 +953,13 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       sessions,
       activeSession,
       ceid,
-      alarms,
-      terminalMessages,
       catalog,
       eventPlans,
       auditEntries,
       auditOlder,
       auditFilter,
       setAuditFilter,
+      auditError,
       loadAuditOlder,
       addEventPlan,
       updateEventPlan,
@@ -1006,9 +976,8 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setSvidValue,
       clearSvidValue,
       previewSvid,
+      previewPlan,
       configList,
-      preview,
-      previewSession,
       refreshing,
       refreshAll,
       refreshSessions,
@@ -1019,12 +988,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       setAlarm,
       toggleEvent,
       sendSml,
-      comparePreview,
-      draftPreview,
-      previewDraft,
-      previewDraftSvid,
-      compareSession,
-      refreshPreview,
+      openHostSim,
+      closeHostSim,
+      sendHostSml,
       overview,
       refreshOverview,
       burst,
