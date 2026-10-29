@@ -182,6 +182,23 @@ public interface ApiContext {
     }
 
     /**
+     * 曲线预览，可只回放某一条编排计划。
+     *
+     * @param sessionId  会话标识
+     * @param fromMs     起始
+     * @param toMs       结束
+     * @param buckets    桶数
+     * @param svids      只画这些 SVID;空/null 不过滤
+     * @param withEvents 是否附带事件标记
+     * @param planId     只回放这个计划；空/null 表示全部
+     * @return JSON 文本；会话不存在时返回 {@code null}
+     */
+    default String previewJson(String sessionId, long fromMs, long toMs, int buckets,
+                               java.util.Set<Integer> svids, boolean withEvents, String planId) {
+        return previewJson(sessionId, fromMs, toMs, buckets, svids, withEvents);
+    }
+
+    /**
      * 曲线预览的二进制正文。
      *
      * @param sessionId 会话标识
@@ -443,6 +460,90 @@ public interface ApiContext {
     }
 
     /**
+     * 打开主机模拟器连接，可指定实例 id（多主机场景）。
+     *
+     * @param sessionId  会话标识
+     * @param targetJson 远程目标 JSON；{@code null}/空 连本机
+     * @param hostId     实例 id；{@code null}/空 由实现生成
+     * @return 结果
+     */
+    default SessionOutcome openHostSim(String sessionId, String targetJson, String hostId) {
+        return openHostSim(sessionId, targetJson);
+    }
+
+    /**
+     * 列出全部主机实例。
+     *
+     * @return JSON；未实现返回 {@code null}
+     */
+    default String hostSimsJson() {
+        return null;
+    }
+
+    /**
+     * 按实例 id 读主机状态。
+     *
+     * @param hostId 实例 id
+     * @return JSON；实例不存在返回 {@code null}
+     */
+    default String hostSimJsonById(String hostId) {
+        return null;
+    }
+
+    /**
+     * 按实例 id 关闭主机。
+     *
+     * @param hostId 实例 id
+     * @return 结果
+     */
+    default SessionOutcome closeHostSimById(String hostId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * 按实例 id 以主机角色发送 SML。
+     *
+     * @param hostId 实例 id
+     * @param sml    SML 文本
+     * @return 结果 JSON；实例不存在返回 {@code null}
+     */
+    default String sendHostSmlById(String hostId, String sml) throws java.io.IOException {
+        return null;
+    }
+
+    /**
+     * 按实例 id 下发采集器配置。
+     *
+     * @param hostId     实例 id
+     * @param requestJson 采集器配置 JSON
+     * @return 结果 JSON
+     */
+    default String setHostSimCollectorById(String hostId, String requestJson) {
+        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    }
+
+    /**
+     * 按实例 id 手动启停采集器。
+     *
+     * @param hostId 实例 id
+     * @param start  启动/停止
+     * @return 结果 JSON
+     */
+    default String hostSimCollectorCommandById(String hostId, boolean start) {
+        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    }
+
+    /**
+     * 按实例 id 读采集器状态。
+     *
+     * @param hostId 实例 id
+     * @return JSON；实例不存在返回 {@code null}
+     */
+    default String hostSimCollectorJsonById(String hostId) {
+        return null;
+    }
+
+    /**
      * 下发主机模拟 S1F3 采集器配置（schema v6）。
      *
      * @param sessionId   会话标识
@@ -549,6 +650,33 @@ public interface ApiContext {
     }
 
     /**
+     * 配置正文 + 修改时间的一次性快照。
+     *
+     * @param text       原文
+     * @param modifiedMs 修改时间（epoch 毫秒）；{@code null} 表示取不到
+     */
+    record ConfigSnapshot(String text, Long modifiedMs) {
+    }
+
+    /**
+     * 一次读取配置正文与修改时间。
+     *
+     * <p>编辑器保存时把 {@code modifiedMs} 作为 If-Match 带回。分两次取会出现
+     * 「旧正文 + 新 mtime」：保存时被判为"没有人改过"，于是<b>绕过</b>并发保护、
+     * 覆盖掉别人的修改。默认实现是兼容旧调用方的退化版本，运行时实现应一次性读。</p>
+     *
+     * @param name 文件名
+     * @return 快照；文件不存在返回 {@code null}
+     */
+    default ConfigSnapshot configSnapshot(String name) {
+        String text = configText(name);
+        if (text == null) {
+            return null;
+        }
+        return new ConfigSnapshot(text, configModifiedMs(name));
+    }
+
+    /**
      * 校验一段配置文本（不落盘）。
      *
      * @param text JSON 文本
@@ -588,6 +716,26 @@ public interface ApiContext {
      */
     default ConfigResult createConfig(String name, String templateId) {
         return this.createConfig(name);
+    }
+
+    /** 全部模板（内置 + 自定义）的 JSON 数组。 */
+    default String templatesJson() {
+        return this.configTemplatesJson();
+    }
+
+    /** 模板原文；不存在返回空。 */
+    default java.util.Optional<String> templateText(String id) {
+        return java.util.Optional.empty();
+    }
+
+    /** 新建/更新自定义模板。 */
+    default ConfigResult saveTemplate(String id, String text) {
+        return ConfigResult.notFound("当前形态不支持模板管理");
+    }
+
+    /** 删除自定义模板。 */
+    default ConfigResult deleteTemplate(String id) {
+        return ConfigResult.notFound("当前形态不支持模板管理");
     }
 
     /**

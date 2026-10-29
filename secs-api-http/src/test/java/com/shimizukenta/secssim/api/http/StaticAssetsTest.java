@@ -25,8 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class StaticAssetsTest {
 
-    private static final String TOKEN = "t";
-
+    
     @TempDir
     Path root;
 
@@ -39,7 +38,7 @@ class StaticAssetsTest {
                 StandardCharsets.UTF_8);
         Files.writeString(this.root.resolve("app.js"), "console.log('hi');", StandardCharsets.UTF_8);
 
-        this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), TOKEN,
+        this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
                 new StubContext(), this.root);
         this.base = "http://127.0.0.1:" + this.server.port();
     }

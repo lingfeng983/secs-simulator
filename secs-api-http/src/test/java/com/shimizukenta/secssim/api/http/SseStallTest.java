@@ -30,15 +30,14 @@ import com.shimizukenta.secssim.app.event.MessageEvent;
  */
 class SseStallTest {
 
-    private static final String TOKEN = "t";
-    private static final String STALL_PROPERTY = "secssim.sse.stallTimeoutMs";
+        private static final String STALL_PROPERTY = "secssim.sse.stallTimeoutMs";
 
     @Test
     void stalledClientIsDroppedByWatchdog() throws Exception {
         System.setProperty(STALL_PROPERTY, "800");
 
         EventBus bus = new EventBus();
-        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), TOKEN,
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
                 new StubContext(), null, bus);
         Socket socket = new Socket();
 
@@ -91,7 +90,6 @@ class SseStallTest {
     private static String ticket(String base) throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
-                        .header("Authorization", "Bearer " + TOKEN)
                         .timeout(Duration.ofSeconds(5))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .build(),

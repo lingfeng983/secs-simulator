@@ -28,12 +28,11 @@ import com.shimizukenta.secssim.app.event.EventBus;
  */
 class SseConcurrencyTest {
 
-    private static final String TOKEN = "t";
-    private static final int STREAMS = 6;
+        private static final int STREAMS = 6;
 
     @Test
     void manyStreamsDoNotStarveRequestPool() throws Exception {
-        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), TOKEN,
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
                 new StubContext(), null, new EventBus());
         String base = "http://127.0.0.1:" + server.port();
 
@@ -83,7 +82,6 @@ class SseConcurrencyTest {
                 .connectTimeout(Duration.ofSeconds(5))
                 .build()
                 .send(HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
-                                .header("Authorization", "Bearer " + TOKEN)
                                 .timeout(Duration.ofSeconds(5))
                                 .POST(HttpRequest.BodyPublishers.noBody())
                                 .build(),

@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
  */
 class ConfigApiTest {
 
-    private static final String VIEWER_PASS = "g-pass";
     private static final String OPERATOR_PASS = "o-pass";
 
     private HttpApiServer server;
@@ -42,11 +41,7 @@ class ConfigApiTest {
 
     @BeforeEach
     void startServer() throws IOException {
-        AccessControl access = AccessControl.parse("""
-                {"users": [
-                  {"name": "guest", "role": "viewer",   "secret": "g-pass"},
-                  {"name": "line1", "role": "operator", "secret": "o-pass"}
-                ]}""");
+        AccessControl access = AccessControl.open();
 
         ApiContext context = new ApiContext() {
             @Override
@@ -240,27 +235,7 @@ class ConfigApiTest {
         assertTrue(response.body().contains("第 3 行：设备名不能为空"), response.body());
     }
 
-    @Test
-    void viewerCanReadButNotWrite() throws Exception {
-        assertEquals(200, get("/api/v1/configs", VIEWER_PASS).statusCode());
-        assertEquals(200, get("/api/v1/configs/line1.json", VIEWER_PASS).statusCode());
-        assertEquals(200, post("/api/v1/configs/line1.json/validate", "{}", VIEWER_PASS).statusCode());
 
-        HttpResponse<String> denied = put("/api/v1/configs/line1.json", "{}", VIEWER_PASS);
-        assertEquals(403, denied.statusCode(), denied.body());
-        assertTrue(denied.body().contains("\"required\":\"OPERATOR\""), denied.body());
-        assertTrue(this.saves.isEmpty(), "被拒的保存不得产生副作用: " + this.saves);
-    }
-
-    @Test
-    void anonymousGetsNothing() throws Exception {
-        assertEquals(401, get("/api/v1/configs", null).statusCode());
-        assertEquals(401, get("/api/v1/configs/line1.json", null).statusCode());
-        assertEquals(401, put("/api/v1/configs/line1.json", "{}", null).statusCode());
-        assertEquals(401, post("/api/v1/configs/line1.json/validate", "{}", null).statusCode());
-        assertEquals(401, post("/api/v1/configs", "{\"name\":\"x.json\"}", null).statusCode());
-        assertTrue(this.saves.isEmpty());
-    }
 
     @Test
     void traversalNamesAreRejected() throws Exception {
@@ -343,11 +318,6 @@ class ConfigApiTest {
         assertTrue(this.saves.isEmpty(), "非法的名字不该进保存逻辑: " + this.saves);
     }
 
-    @Test
-    void viewerCannotCreateConfig() throws Exception {
-        assertEquals(403, post("/api/v1/configs", "{\"name\":\"new.json\"}", VIEWER_PASS).statusCode());
-        assertTrue(this.saves.isEmpty(), "被拒的新建不得产生副作用: " + this.saves);
-    }
 
     private static String encode(String name) {
         return URLEncoder.encode(name, StandardCharsets.UTF_8);

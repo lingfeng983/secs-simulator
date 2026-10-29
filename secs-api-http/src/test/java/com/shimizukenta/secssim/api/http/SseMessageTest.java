@@ -25,12 +25,11 @@ import com.shimizukenta.secssim.app.event.MessageEvent;
  */
 class SseMessageTest {
 
-    private static final String TOKEN = "t";
-
+    
     @Test
     void publishedMessageReachesSubscriber() throws Exception {
         EventBus bus = new EventBus();
-        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), TOKEN,
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
                 new StubContext(), null, bus);
         ExecutorService pool = Executors.newSingleThreadExecutor();
 
@@ -65,7 +64,6 @@ class SseMessageTest {
     private static String ticket(String base) throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
-                        .header("Authorization", "Bearer " + TOKEN)
                         .timeout(Duration.ofSeconds(5))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .build(),
