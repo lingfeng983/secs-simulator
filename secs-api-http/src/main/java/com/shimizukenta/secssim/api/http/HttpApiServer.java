@@ -58,6 +58,12 @@ public final class HttpApiServer {
     /** 看门狗巡检间隔。 */
     private static final long SSE_WATCHDOG_TICK_MS = 5_000L;
 
+    /** 慢请求线程数。 */
+    private static final int SLOW_THREADS = Math.max(2, Integer.getInteger("secssim.http.slowThreads", 4));
+
+    /** 慢请求排队上限；满了直接 503，不无限堆。 */
+    private static final int SLOW_QUEUE = Math.max(SLOW_THREADS, Integer.getInteger("secssim.http.slowQueue", 16));
+
     /**
      * 普通请求线程数。
      *
@@ -122,6 +128,14 @@ public final class HttpApiServer {
      */
     private final java.util.Set<String> allowedHosts;
 
+    /**
+     * 慢请求专用池。
+     *
+     * <p>手动发送（等 T3，最长 45 秒）、host-sim 建连、配置草稿编译、5000 条报文历史
+     * 都不是短任务；放在通用池里，几个并发就能把 health/轮询/取票全部堵住。</p>
+     */
+    private final java.util.concurrent.ThreadPoolExecutor slowExecutor;
+
     /** 流式推送域（票据 + SSE + 看门狗）。 */
     private final StreamHandler streams;
 
@@ -157,6 +171,17 @@ public final class HttpApiServer {
         this.server = server;
         this.executor = executor;
         this.allowedHosts = allowedHostNames(server.getAddress());
+
+        java.util.concurrent.atomic.AtomicInteger slowSeq = new java.util.concurrent.atomic.AtomicInteger();
+        this.slowExecutor = new java.util.concurrent.ThreadPoolExecutor(
+                SLOW_THREADS, SLOW_THREADS, 30L, TimeUnit.SECONDS,
+                new java.util.concurrent.ArrayBlockingQueue<>(SLOW_QUEUE),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "http-slow-" + slowSeq.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        this.slowExecutor.allowCoreThreadTimeOut(true);
         this.context = context;
         this.access = access;
         this.audit = audit;
@@ -392,6 +417,7 @@ public final class HttpApiServer {
 
         this.server.stop(0);
         this.streams.shutdown();
+        this.slowExecutor.shutdownNow();
         this.deadlines.shutdownNow();
         this.executor.shutdownNow();
         try {
@@ -599,6 +625,27 @@ public final class HttpApiServer {
                 return;
             }
 
+            if (isSlowRequest(ex)) {
+                /* 慢路由交给专用池：请求线程立刻返回，health/轮询/取票不再排在它们后面。 */
+                try {
+                    this.slowExecutor.execute(() -> invokeHandler(handler, ex));
+                } catch (java.util.concurrent.RejectedExecutionException e) {
+                    respond(ex, 503, "{\"ok\":false,\"error\":\"busy\"}");
+                }
+                return;
+            }
+
+            invokeHandler(handler, ex);
+        };
+    }
+
+    /**
+     * 执行处理器：挂截止时间、兜底 500、结束后取消定时。
+     *
+     * @param handler 处理器
+     * @param ex      交换
+     */
+    private void invokeHandler(HttpHandler handler, HttpExchange ex) {
             java.util.concurrent.ScheduledFuture<?> deadline = scheduleDeadline(ex);
             try {
                 handler.handle(ex);
@@ -621,7 +668,28 @@ public final class HttpApiServer {
                     deadline.cancel(false);
                 }
             }
-        };
+    }
+
+    /** 慢路由：等 T3、建连、编译、大历史序列化。 */
+    private static boolean isSlowRequest(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        if (path == null) {
+            return false;
+        }
+        if (ApiPaths.EVENTS.equals(path)) {
+            return false;
+        }
+        if (ApiPaths.HOST_SIMS.equals(path) || path.startsWith(ApiPaths.HOST_SIM_PREFIX)) {
+            return true;
+        }
+        if (path.equals(ApiPaths.CONFIG_PREVIEW) || path.equals(ApiPaths.MESSAGES)) {
+            return true;
+        }
+        return path.endsWith("/message")
+                || path.endsWith("/reload")
+                || path.endsWith("/burst")
+                || path.endsWith("/validate")
+                || path.contains("/host-sim");
     }
 
     /**

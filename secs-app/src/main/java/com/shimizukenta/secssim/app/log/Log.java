@@ -44,6 +44,18 @@ public final class Log {
     /** 日志文件；{@code null} 表示只写 stderr。 */
     private static volatile Path file;
 
+    /**
+     * 常开的写句柄。
+     *
+     * <p>以前每行 {@code Files.writeString}（open+write+close 三次系统调用），
+     * 且全程持有类锁：日志一多就把事件线程与看门狗一起拖慢。改成常开 + 每行 flush：
+     * 崩溃丢行上限仍是一行，但系统调用少了一个数量级。</p>
+     */
+    private static BufferedWriter writer;
+
+    /** 当前文件字节数（按 UTF-8 计）；用于轮转判断，避免每行 Files.size。 */
+    private static long bytes;
+
     /** 当前级别；低于它的日志直接丢弃。ERROR=0 … DEBUG=3。 */
     private static volatile Level level = Level.INFO;
 
@@ -91,6 +103,7 @@ public final class Log {
      * @param path 日志文件路径
      */
     public static synchronized void toFile(Path path) {
+        closeWriter();
         try {
             Path dir = path.getParent();
             if (dir != null) {
@@ -99,12 +112,29 @@ public final class Log {
             if (! Files.exists(path)) {
                 Files.createFile(path);
             }
+            writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            bytes = Files.size(path);
             file = path;
         } catch (IOException e) {
             System.err.println("[LOG] 无法启用文件日志 " + path + "：" + e
                     + "（继续使用 stderr）");
             file = null;
+            closeWriter();
         }
+    }
+
+    /** 关闭写句柄（测试 reset 与重新 toFile 用）。 */
+    private static void closeWriter() {
+        if (writer != null) {
+            try {
+                writer.close();
+            } catch (IOException ignore) {
+                /* 关不上没有更安全的去处 */
+            }
+            writer = null;
+        }
+        bytes = 0L;
     }
 
     /**
@@ -140,6 +170,7 @@ public final class Log {
      * 关闭文件日志（测试用；正常进程退出时无需调用）。
      */
     public static synchronized void reset() {
+        closeWriter();
         file = null;
         level = Level.INFO;
     }
@@ -203,10 +234,19 @@ public final class Log {
         }
 
         synchronized (Log.class) {
+            if (writer == null) {
+                return;
+            }
             try {
-                rotateIfNeeded(target);
-                Files.writeString(target, text + System.lineSeparator(), StandardCharsets.UTF_8,
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                long length = text.getBytes(StandardCharsets.UTF_8).length + 1L;
+                if (bytes + length > MAX_BYTES) {
+                    rotate(target);
+                }
+                writer.write(text);
+                writer.newLine();
+                /* 每行 flush：崩溃最多丢最后一行，测试也能立刻读到 */
+                writer.flush();
+                bytes += length;
             } catch (IOException e) {
                 /* 日志写不进去不是业务错误：只在 stderr 提一次，不要把异常抛给调用方 */
                 System.err.println("[LOG] 写日志失败：" + e);
@@ -219,21 +259,28 @@ public final class Log {
      *
      * <p>从最老的开始挪，避免覆盖。只在写之前检查一次，不用后台线程。</p>
      */
-    private static void rotateIfNeeded(Path target) throws IOException {
-        if (! Files.exists(target) || Files.size(target) < MAX_BYTES) {
-            return;
+    private static void rotate(Path target) throws IOException {
+        if (writer != null) {
+            writer.close();
+            writer = null;
         }
-
-        for (int i = KEEP_ROTATED - 1; i >= 1; i--) {
-            Path older = target.resolveSibling(target.getFileName() + "." + i);
-            if (Files.exists(older)) {
-                Files.move(older, target.resolveSibling(target.getFileName() + "." + (i + 1)),
-                        StandardCopyOption.REPLACE_EXISTING);
+        try {
+            for (int i = KEEP_ROTATED - 1; i >= 1; i--) {
+                Path older = target.resolveSibling(target.getFileName() + "." + i);
+                if (Files.exists(older)) {
+                    Files.move(older, target.resolveSibling(target.getFileName() + "." + (i + 1)),
+                            StandardCopyOption.REPLACE_EXISTING);
+                }
             }
-        }
 
-        Files.move(target, target.resolveSibling(target.getFileName() + ".1"),
-                StandardCopyOption.REPLACE_EXISTING);
+            Files.move(target, target.resolveSibling(target.getFileName() + ".1"),
+                    StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            /* 无论轮转是否成功都必须把句柄重新打开：否则后续日志静默停写 */
+            writer = Files.newBufferedWriter(target, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            bytes = 0L;
+        }
     }
 
     /** 级别名 → 严重性序号：ERROR=0、WARN/INFO=1、DEBUG=2。 */

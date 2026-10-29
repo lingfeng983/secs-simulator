@@ -1723,6 +1723,10 @@ button.active:not(.segment):not(.segmented > button) {
   padding: 0.22rem 0.6rem;
   border-bottom: 1px solid var(--line);
   font-size: 11.5px;
+  /* 长列表只渲染视口附近的几十行：报文面板默认保留 2000 行，
+     全量布局在 trace/压测时每秒重排多次，很容易把主线程占满。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
 }
 
 .message-row:last-child {

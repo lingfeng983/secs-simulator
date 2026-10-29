@@ -73,6 +73,8 @@ export interface Health {
 
 /** SSE 推送的报文事件（与后端 MessageEvent 对应）。 */
 export interface WireMessage {
+  /** 后端单调序号；历史补拉与 SSE 用它去重（旧日志行可能没有）。 */
+  seq?: number;
   sessionId: string;
   direction: 'in' | 'out';
   stream: number;

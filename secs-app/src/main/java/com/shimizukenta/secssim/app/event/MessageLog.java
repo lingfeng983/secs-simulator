@@ -74,8 +74,13 @@ public final class MessageLog implements AutoCloseable {
 
     private final Deque<MessageEvent> recent = new ArrayDeque<>();
 
-    /** 待写行（文件正文由写线程独占）。 */
-    private final BlockingQueue<Line> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+    /**
+     * 待写报文（文件正文由写线程独占）。
+     *
+     * <p>队列里放事件而不是已序列化的字符串：JSON 组装（两条）也从调用线程
+     * （协议分发线程）挪到写线程，append 只剩入队。</p>
+     */
+    private final BlockingQueue<MessageEvent> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
 
     /** 因队列满而丢弃的行数（诊断用）。 */
     private final AtomicLong dropped = new AtomicLong();
@@ -165,23 +170,22 @@ public final class MessageLog implements AutoCloseable {
      * @param event 报文事件
      */
     public void append(MessageEvent event) {
-        /* 两次序列化放到锁外：append 是从协议分发线程调用的，锁只保护
-           "最近窗口 + 待写队列"。以前连序列化一起锁住，刷历史（recentJson）
-           持同一把锁时会把所有会话的收发都堵在这里。 */
-        final String json = toJson(event);
-        final String session = sanitizeSession(event.sessionId());
-        final String hostJson = toHostJson(event);
-        final Line line = new Line(json, session, hostJson);
-
+        /* 只做入队：序列化（主文件 + 主机视角两份 JSON）交给写线程。
+           append 从协议分发线程调用，这里越轻越好。 */
         synchronized ( this ) {
             addRecent(event);
-            if ( ! this.queue.offer(line) ) {
-                /* 队列满：丢最旧的一行，保证写线程永远跟得上 */
+            if ( ! this.queue.offer(event) ) {
+                /* 队列满：丢最旧的一条，保证写线程永远跟得上 */
                 this.queue.poll();
-                this.queue.offer(line);
+                this.queue.offer(event);
                 this.dropped.incrementAndGet();
             }
         }
+    }
+
+    /** 把事件组装成待写行（只在写线程调用）。 */
+    private static Line toLine(MessageEvent event) {
+        return new Line(toJson(event), sanitizeSession(event.sessionId()), toHostJson(event));
     }
 
     /** 写线程：批量 flush，避免每帧一次系统调用。 */
@@ -189,17 +193,17 @@ public final class MessageLog implements AutoCloseable {
         long lastFlush = System.currentTimeMillis();
 
         while ( this.running || ! this.queue.isEmpty() ) {
-            Line line;
+            MessageEvent event;
             try {
-                line = this.queue.poll(FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                event = this.queue.poll(FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
             }
             catch ( InterruptedException e ) {
                 Thread.currentThread().interrupt();
                 break;
             }
 
-            if ( line != null ) {
-                write(line);
+            if ( event != null ) {
+                write(toLine(event));
             }
 
             long now = System.currentTimeMillis();
@@ -406,9 +410,9 @@ public final class MessageLog implements AutoCloseable {
             return;
         }
 
-        Line line;
-        while ( (line = this.queue.poll()) != null ) {
-            this.write(line);
+        MessageEvent event;
+        while ( (event = this.queue.poll()) != null ) {
+            this.write(toLine(event));
         }
 
         this.mainWriter.close();
@@ -470,6 +474,8 @@ public final class MessageLog implements AutoCloseable {
         }
         try {
             JsonHub root = JsonHub.fromJson(line);
+            /* 旧日志行没有 seq：读回 0，前端会退回旧的复合去重键 */
+            long seq = root.get("seq") == null ? 0L : root.get("seq").longValue();
             String sessionId = root.get("sessionId").optionalString().orElse("");
             String direction = root.get("direction").optionalString().orElse("");
             String body = root.get("body").optionalString().orElse("");
@@ -480,7 +486,7 @@ public final class MessageLog implements AutoCloseable {
             if (!"in".equals(direction) && !"out".equals(direction)) {
                 return;
             }
-            addRecent(new MessageEvent(sessionId, direction, stream, function, wbit, body, at));
+            addRecent(new MessageEvent(seq, sessionId, direction, stream, function, wbit, body, at));
         } catch (RuntimeException e) {
             /* 日志文件允许被人工编辑，一条坏行不该让整个历史不可用 */
         }
@@ -526,6 +532,7 @@ public final class MessageLog implements AutoCloseable {
 
     private static JsonHub toJsonHub(MessageEvent event, JsonHubBuilder b) {
         return b.object(
+                b.pair("seq", event.seq()),
                 b.pair("sessionId", event.sessionId()),
                 b.pair("direction", event.direction()),
                 b.pair("stream", event.stream()),
@@ -549,6 +556,7 @@ public final class MessageLog implements AutoCloseable {
         JsonHubBuilder b = JsonHub.getBuilder();
         String direction = "in".equals(event.direction()) ? "out" : "in";
         return b.object(
+                b.pair("seq", event.seq()),
                 b.pair("sessionId", event.sessionId()),
                 b.pair("perspective", "host"),
                 b.pair("direction", direction),

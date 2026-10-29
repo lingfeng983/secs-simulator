@@ -61,8 +61,16 @@ export function categorizeMessage(stream: number, func: number): MessageCategory
   return 'other';
 }
 
-/** 去重键：SSE 与历史补拉可能给出同一条报文。 */
+/**
+ * 去重键：SSE 与历史补拉可能给出同一条报文。
+ *
+ * <p>优先用后端序号：时间戳只有毫秒，压测时同一毫秒内两条完全相同的报文
+ * 会被误判成重复吞掉。旧日志行没有 seq，退回复合键。</p>
+ */
 export function messageKey(message: WireMessage): string {
+  if (typeof message.seq === 'number' && message.seq > 0) {
+    return `${message.sessionId}|seq:${message.seq}`;
+  }
   return `${message.sessionId}|${message.at}|${message.direction}|${message.stream}|${message.function}|${message.wbit}|${message.body}`;
 }
 

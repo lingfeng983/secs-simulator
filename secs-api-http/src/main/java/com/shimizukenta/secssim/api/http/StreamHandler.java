@@ -188,7 +188,7 @@ final class StreamHandler extends HttpSupport {
         }
 
         String frame = "event: message\ndata: "
-                + "{\"sessionId\":\"" + json(event.sessionId()) + "\""
+                + "{\"seq\":" + event.seq() + ",\"sessionId\":\"" + json(event.sessionId()) + "\""
                 + ",\"direction\":\"" + json(event.direction()) + "\""
                 + ",\"stream\":" + event.stream()
                 + ",\"function\":" + event.function()
