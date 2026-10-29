@@ -2,15 +2,17 @@ package com.shimizukenta.secssim.app.audit;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.stream.Stream;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
@@ -30,8 +32,18 @@ public final class AuditLog implements AutoCloseable {
     /** 内存中保留的最近条数，也是 HTTP 审计接口的默认上限。 */
     public static final int DEFAULT_RECENT = 1_000;
 
+    /** 单个审计文件上限；超过就轮转。 */
+    private static final long MAX_BYTES = 8L * 1024L * 1024L;
+
+    /** 保留的历史份数（audit.jsonl.1 … .N）。 */
+    private static final int KEEP_ROTATED = 3;
+
+    /** 重启时最多从文件尾部读这么多字节（与报文日志一致）。 */
+    private static final long MAX_TAIL_BYTES = 4L * 1024L * 1024L;
+
     private final Path file;
-    private final BufferedWriter writer;
+    private BufferedWriter writer;
+    private long bytes;
     private final int capacity;
     private final Deque<Entry> recent = new ArrayDeque<>();
     private boolean writeFailed;
@@ -68,6 +80,7 @@ public final class AuditLog implements AutoCloseable {
         this.capacity = capacity;
         this.writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        this.bytes = Files.exists(file) ? Files.size(file) : 0L;
     }
 
     /**
@@ -88,14 +101,52 @@ public final class AuditLog implements AutoCloseable {
                 detail == null ? "" : detail);
         addRecent(entry);
         try {
-            this.writer.write(toJson(entry));
+            String json = toJson(entry);
+            /* 先轮转再写：停机前最后一条审计留在当前文件里，重启就能读到 */
+            if ( this.bytes >= MAX_BYTES ) {
+                rotate();
+            }
+            this.writer.write(json);
             this.writer.newLine();
             this.writer.flush();
+            this.bytes += json.length() + 1L;
             this.writeFailed = false;
         } catch (IOException e) {
             if (!this.writeFailed) {
                 this.writeFailed = true;
                 Log.error("写审计日志失败（后续仍继续运行）: " + this.file, e);
+            }
+        }
+    }
+
+    /** 关闭当前文件并轮转；最旧的 .N 被覆盖。 */
+    private void rotate() {
+        try {
+            this.writer.close();
+        } catch ( IOException ignore ) {
+        }
+
+        try {
+            for (int i = KEEP_ROTATED - 1; i >= 1; --i) {
+                Path from = this.file.resolveSibling(this.file.getFileName() + "." + i);
+                Path to = this.file.resolveSibling(this.file.getFileName() + "." + (i + 1));
+                if ( Files.exists(from) ) {
+                    Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            Files.move(this.file, this.file.resolveSibling(this.file.getFileName() + ".1"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            this.writer = Files.newBufferedWriter(this.file, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            this.bytes = 0L;
+        } catch ( IOException e ) {
+            Log.error("审计日志轮转失败（继续追加当前文件）: " + this.file, e);
+            /* 轮转失败后仍要有可写的 writer：重新打开失败也只能记录，不能抛出 */
+            try {
+                this.writer = Files.newBufferedWriter(this.file, StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch ( IOException ignored ) {
+                /* 下次 record 会暴露 */
             }
         }
     }
@@ -192,9 +243,42 @@ public final class AuditLog implements AutoCloseable {
         }
     }
 
+    /**
+     * 从文件尾部恢复最近历史。
+     *
+     * <p>只读最后 {@value #MAX_TAIL_BYTES} 字节：审计文件长期运行会到几十 MB，
+     * 全量 {@code Files.lines} 会让启动变慢、内存峰值变高，而启动只需要"最近"。</p>
+     */
     private void loadRecent() {
-        try (Stream<String> lines = Files.lines(this.file, StandardCharsets.UTF_8)) {
-            lines.forEach(this::parse);
+        try {
+            long size = Files.size(this.file);
+            if ( size <= 0L ) {
+                return;
+            }
+            long start = Math.max(0L, size - MAX_TAIL_BYTES);
+            int length = (int) (size - start);
+            byte[] bytes = new byte[length];
+            try ( FileChannel channel = FileChannel.open(this.file, StandardOpenOption.READ) ) {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                long position = start;
+                while ( buffer.hasRemaining() ) {
+                    int read = channel.read(buffer, position);
+                    if ( read < 0 ) {
+                        break;
+                    }
+                    position += read;
+                }
+            }
+
+            String text = new String(bytes, StandardCharsets.UTF_8);
+            if ( start > 0L ) {
+                /* 从中间开始读时第一行大概率是半截 */
+                int newline = text.indexOf('\n');
+                text = newline >= 0 ? text.substring(newline + 1) : "";
+            }
+            for ( String line : text.split("\n") ) {
+                parse(line);
+            }
         } catch (IOException | RuntimeException e) {
             Log.error("读取审计历史失败（继续运行）: " + this.file, e);
         }

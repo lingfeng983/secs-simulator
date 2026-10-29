@@ -4,6 +4,7 @@ import com.shimizukenta.secssim.app.session.DefaultCurves;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.template.TemplateGraph;
+import com.shimizukenta.secssim.core.value.BoundedValueSource;
 import com.shimizukenta.secssim.core.value.CurveValueSource;
 import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.core.value.ValueSource;
@@ -36,13 +37,19 @@ public final class ValueSources {
      * @throws ConfigException 模板图构建失败（未知引用/环/单写者冲突）
      */
     public static ValueSource of(SessionConfig config, ResolvedEquipment equipment) {
+        final ValueSource values;
+
         if (!config.hasCustomValues()) {
             ValueStore store = new ValueStore(config.spec().seed());
             DefaultCurves.bind(store, config.spec().equipment(), equipment);
-            return new CurveValueSource(store);
+            values = new CurveValueSource(store);
+        } else {
+            TemplateGraph graph = config.buildValues(equipment);
+            values = new GraphValueSource(graph, new Rng(config.spec().seed()).derive("graph"));
         }
 
-        TemplateGraph graph = config.buildValues(equipment);
-        return new GraphValueSource(graph, new Rng(config.spec().seed()).derive("graph"));
+        /* 值域在取值处收紧：类型宽度是硬约束，越界/NaN 不能留到报文编码时才炸。
+           启动、热生效、草稿预览都走这里，三种形态的语义因此一致。 */
+        return new BoundedValueSource(values, equipment.svids());
     }
 }

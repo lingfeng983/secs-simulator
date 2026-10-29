@@ -498,7 +498,10 @@ class SessionConfigJsonTest {
         assertTrue(result.ok());
 
         var values = ValueSources.of(config, result.equipment());
-        assertTrue(values instanceof GraphValueSource);
+        /* 值来源统一包一层值域钳制（P1-6）：模板图是它的下游 */
+        assertTrue(values instanceof com.shimizukenta.secssim.core.value.BoundedValueSource);
+        assertTrue(((com.shimizukenta.secssim.core.value.BoundedValueSource) values).inner()
+                instanceof GraphValueSource);
         /* 直配 constant 曲线:任意时刻都是 180 */
         assertEquals(180.0, values.valueAt(1001, 12345L).orElse(-1), 1e-9);
         /* 模板图里未绑定值来源的 SVID 取不到(上层按 0 处理) */

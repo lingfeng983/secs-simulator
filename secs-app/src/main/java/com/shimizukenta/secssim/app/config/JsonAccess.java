@@ -43,12 +43,14 @@ final class JsonAccess {
     }
 
     static List<JsonHub> elements(JsonHub array, String path) {
+        /* 先判类型再遍历：原来的 "items.isEmpty() && !array.isArray()" 永不可达
+           （循环已经保证了是数组），真收到非数组时只会得到空列表而不报错 */
+        if (array == null || !array.isArray()) {
+            throw new ConfigException(path, "应为数组");
+        }
         List<JsonHub> items = new ArrayList<>();
         for (int i = 0; i < array.length(); i++) {
             items.add(array.get(i));
-        }
-        if (items.isEmpty() && !array.isArray()) {
-            throw new ConfigException(path, "应为数组");
         }
         return items;
     }
@@ -80,11 +82,18 @@ final class JsonAccess {
             return OptionalInt.empty();
         }
         JsonHub value = parent.get(key);
-        OptionalInt number = value.optionalInt();
+        OptionalDouble number = value.optionalDouble();
         if (number.isEmpty()) {
             throw new ConfigException(path + "." + key, "应为整数");
         }
-        return number;
+        /* 小数必须拒绝：JsonHub 的 intValue() 会静默截断（port:5000.9 → 5000），
+           调用方以为自己的值生效了 */
+        double d = number.getAsDouble();
+        if (!Double.isFinite(d) || d != Math.rint(d)
+                || d < Integer.MIN_VALUE || d > Integer.MAX_VALUE) {
+            throw new ConfigException(path + "." + key, "应为整数");
+        }
+        return OptionalInt.of((int) d);
     }
 
     static long longValue(JsonHub parent, String key, String path) {
@@ -95,7 +104,16 @@ final class JsonAccess {
         if (!value.isNumber()) {
             throw new ConfigException(path + "." + key, "应为数字");
         }
-        return value.optionalLong().orElse(value.optionalInt().orElse(0));
+        OptionalDouble number = value.optionalDouble();
+        if (number.isEmpty()) {
+            throw new ConfigException(path + "." + key, "应为整数");
+        }
+        double d = number.getAsDouble();
+        if (!Double.isFinite(d) || d != Math.rint(d)
+                || d < Long.MIN_VALUE || d > Long.MAX_VALUE) {
+            throw new ConfigException(path + "." + key, "应为整数");
+        }
+        return (long) d;
     }
 
     static OptionalDouble optionalDouble(JsonHub parent, String key, String path) {

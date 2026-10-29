@@ -70,6 +70,25 @@ class HostReportTableTest {
     }
 
     @Test
+    void disablingAllThenReenablingOneCeid() {
+        HostReportTable table = new HostReportTable();
+
+        /* 现场常见序列：S2F37 先整体禁用，再单独启用某几个事件 */
+        table.setEnabled(false, List.of());
+        assertFalse(table.isEnabled(2001));
+
+        table.setEnabled(true, List.of(2001));
+
+        assertTrue(table.isEnabled(2001), "整体禁用后单独启用的事件必须恢复上报");
+        assertFalse(table.isEnabled(2002), "未被单独启用的仍保持禁用");
+        assertTrue(table.isAllDisabled(), "整体禁用状态仍成立（只有覆盖项例外）");
+
+        /* 再单独禁用回来 */
+        table.setEnabled(false, List.of(2001));
+        assertFalse(table.isEnabled(2001));
+    }
+
+    @Test
     void disablingAllAndReenablingAll() {
         HostReportTable table = new HostReportTable();
 

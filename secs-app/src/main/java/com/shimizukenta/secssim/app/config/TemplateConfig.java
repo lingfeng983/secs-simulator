@@ -168,6 +168,10 @@ public record TemplateConfig(List<CurveDef> curves, List<CompositeDef> composite
             return graph.build();
         } catch (GraphException e) {
             throw new ConfigException("$.templates.instances", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            /* 组合模板缺 outputs 这类构造期错误抛的是裸 IAE；不转换的话会一路
+               冒到 createSession，被当成 409「标识冲突」，误导排查 */
+            throw new ConfigException("$.templates.instances", e.getMessage());
         }
     }
 

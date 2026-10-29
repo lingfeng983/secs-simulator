@@ -7,11 +7,21 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
@@ -24,10 +34,14 @@ import com.shimizukenta.secssim.app.log.Log;
  * 所以每条报文同时追加到 {@code <work-dir>/logs/messages.jsonl}，
  * 并保留最近 {@value #DEFAULT_RECENT} 条在内存里给 HTTP 历史接口用。</p>
  *
- * <p>为什么不是数据库：这是诊断材料，不是业务数据。JSONL 能直接用
- * {@code Select-String} / {@code jq} / Excel 打开，断线后也能手工 grep。
- * 写日志失败不能影响设备运行——{@link #append(MessageEvent)} 自己吞掉 IOException，
- * 只记录一次错误。</p>
+ * <p><b>写盘不落在收发线程上</b>：{@link #append(MessageEvent)} 只把一行放进有界队列，
+ * 由单独的写线程批量 flush。原先每帧同步 flush 三份文件（主文件 + 设备/主机视角），
+ * 而 append 是从协议分发线程的 EventBus 回调里调用的——磁盘一慢就拖慢应答，
+ * 高报文速率下会连锁触发主机侧 T3 超时。队列满时丢最旧的诊断行：这是诊断材料，
+ * 不能反过来把设备拖死。</p>
+ *
+ * <p>主文件与按会话拆分的文件都按大小轮转，保留 {@value #KEEP_ROTATED} 份历史；
+ * 拆分文件同时限制同时打开的数量（LRU），反复建删会话不会累积文件句柄。</p>
  */
 public final class MessageLog implements AutoCloseable {
 
@@ -37,11 +51,45 @@ public final class MessageLog implements AutoCloseable {
     /** 重启时最多从文件尾部读这么多字节，避免日志很大时启动变慢。 */
     private static final long MAX_TAIL_BYTES = 4L * 1024L * 1024L;
 
+    /** 单个日志文件上限；可用 {@code -Dsecssim.messages.maxBytes} 覆盖（测试用）。 */
+    private static final long DEFAULT_MAX_BYTES = 16L * 1024L * 1024L;
+
+    /** 保留的历史份数（messages.jsonl.1 … .N）。 */
+    private static final int KEEP_ROTATED = 3;
+
+    /** 待写队列上限：满了丢最旧，绝不阻塞调用方。 */
+    private static final int QUEUE_CAPACITY = 8_192;
+
+    /** 同时打开的“按会话拆分”文件上限（LRU 淘汰）。 */
+    private static final int SPLIT_WRITERS_MAX = 64;
+
+    /** 批量 flush 的最大间隔。 */
+    private static final long FLUSH_INTERVAL_MS = 200L;
+
     private final Path file;
-    private final BufferedWriter writer;
+    private final Path devicesDir;
+    private final Path hostsDir;
     private final int capacity;
+    private final long maxBytes;
+
     private final Deque<MessageEvent> recent = new ArrayDeque<>();
-    private boolean writeFailed;
+
+    /** 待写行（文件正文由写线程独占）。 */
+    private final BlockingQueue<Line> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+
+    /** 因队列满而丢弃的行数（诊断用）。 */
+    private final AtomicLong dropped = new AtomicLong();
+
+    /** 写线程；{@code null} 表示构造失败，只保留内存历史。 */
+    private final Thread writerThread;
+
+    private volatile boolean running = true;
+
+    /* 以下字段只由写线程（或 close 时已停止写线程的调用方）访问 */
+    private RotatingWriter mainWriter;
+    private final Map<String, RotatingWriter> deviceWriters = new LinkedHashMap<>(16, 0.75F, true);
+    private final Map<String, RotatingWriter> hostWriters = new LinkedHashMap<>(16, 0.75F, true);
+    private final Set<Path> failedSplits = new HashSet<>();
 
     /**
      * 打开（或创建）workDir 下的报文日志。
@@ -55,7 +103,7 @@ public final class MessageLog implements AutoCloseable {
     }
 
     /**
-     * 打开（或创建）报文日志,内存保留条数可配。
+     * 打开（或创建）workDir 下的报文日志,内存保留条数可配。
      *
      * @param workDir 工作目录；日志写到 {@code workDir/logs/messages.jsonl}
      * @param recent  内存里保留的最近条数(HTTP 历史接口的回看窗口)
@@ -67,7 +115,7 @@ public final class MessageLog implements AutoCloseable {
         Files.createDirectories(dir);
         Path file = dir.resolve("messages.jsonl");
         ensureTrailingNewline(file);
-        MessageLog log = new MessageLog(file, Math.max(1, recent));
+        MessageLog log = new MessageLog(dir, file, Math.max(1, recent));
         log.loadRecent();
         return log;
     }
@@ -93,33 +141,152 @@ public final class MessageLog implements AutoCloseable {
         }
     }
 
-    private MessageLog(Path file, int capacity) throws IOException {
+    private MessageLog(Path dir, Path file, int capacity) throws IOException {
         this.file = file;
+        this.devicesDir = dir.resolve("devices");
+        this.hostsDir = dir.resolve("hosts");
+        Files.createDirectories(this.devicesDir);
+        Files.createDirectories(this.hostsDir);
         this.capacity = capacity;
-        this.writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        this.maxBytes = Long.getLong("secssim.messages.maxBytes", DEFAULT_MAX_BYTES);
+        this.mainWriter = new RotatingWriter(file, this.maxBytes, KEEP_ROTATED);
+
+        this.writerThread = new Thread(this::writeLoop, "message-log-writer");
+        this.writerThread.setDaemon(true);
+        this.writerThread.start();
     }
 
     /**
      * 追加一条报文。
      *
-     * <p>订阅者回调里调用，不能向外抛异常：一条日志写不进去不该让会话线程崩掉。</p>
+     * <p>订阅者回调里调用，不能向外抛异常，也不能做磁盘 I/O：
+     * 一条日志写不进去不该让会话线程崩掉，更不该拖慢应答。</p>
      *
      * @param event 报文事件
      */
-    public synchronized void append(MessageEvent event) {
-        addRecent(event);
+    public void append(MessageEvent event) {
+        /* 两次序列化放到锁外：append 是从协议分发线程调用的，锁只保护
+           "最近窗口 + 待写队列"。以前连序列化一起锁住，刷历史（recentJson）
+           持同一把锁时会把所有会话的收发都堵在这里。 */
+        final String json = toJson(event);
+        final String session = sanitizeSession(event.sessionId());
+        final String hostJson = toHostJson(event);
+        final Line line = new Line(json, session, hostJson);
+
+        synchronized ( this ) {
+            addRecent(event);
+            if ( ! this.queue.offer(line) ) {
+                /* 队列满：丢最旧的一行，保证写线程永远跟得上 */
+                this.queue.poll();
+                this.queue.offer(line);
+                this.dropped.incrementAndGet();
+            }
+        }
+    }
+
+    /** 写线程：批量 flush，避免每帧一次系统调用。 */
+    private void writeLoop() {
+        long lastFlush = System.currentTimeMillis();
+
+        while ( this.running || ! this.queue.isEmpty() ) {
+            Line line;
+            try {
+                line = this.queue.poll(FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+            }
+            catch ( InterruptedException e ) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+
+            if ( line != null ) {
+                write(line);
+            }
+
+            long now = System.currentTimeMillis();
+            if ( now - lastFlush >= FLUSH_INTERVAL_MS ) {
+                flushAll();
+                lastFlush = now;
+            }
+        }
+
+        flushAll();
+    }
+
+    /** 主文件写失败只报一次；写线程继续消费队列，不能因为磁盘满就死掉。 */
+    private boolean mainWriteFailed;
+
+    private void write(Line line) {
         try {
-            this.writer.write(toJson(event));
-            this.writer.newLine();
-            this.writer.flush();
-            this.writeFailed = false;
-        } catch (IOException e) {
-            if (!this.writeFailed) {
-                this.writeFailed = true;
+            this.mainWriter.write(line.json());
+            this.mainWriteFailed = false;
+        }
+        catch ( RuntimeException e ) {
+            if ( ! this.mainWriteFailed ) {
+                this.mainWriteFailed = true;
                 Log.error("写报文日志失败（后续仍继续运行）: " + this.file, e);
             }
         }
+
+        if ( ! line.session().isEmpty() ) {
+            writeSplit(this.deviceWriters, this.devicesDir, line.session(), line.json());
+            writeSplit(this.hostWriters, this.hostsDir, line.session(), line.hostJson());
+        }
+    }
+
+    /** 追加到 {@code devices/} 或 {@code hosts/} 下的单会话文件；失败只报一次。 */
+    private void writeSplit(Map<String, RotatingWriter> writers, Path dir, String session, String json) {
+        Path target = dir.resolve(session + ".jsonl");
+        RotatingWriter writer = writers.get(session);
+
+        if ( writer == null ) {
+            try {
+                writer = new RotatingWriter(target, this.maxBytes, KEEP_ROTATED);
+            }
+            catch ( IOException e ) {
+                if ( this.failedSplits.add(target) ) {
+                    Log.error("打开拆分报文日志失败（后续仍继续运行）: " + target, e);
+                }
+                return;
+            }
+            writers.put(session, writer);
+            evictOverflow(writers);
+        }
+
+        try {
+            writer.write(json);
+            this.failedSplits.remove(target);
+        }
+        catch ( RuntimeException e ) {
+            if ( this.failedSplits.add(target) ) {
+                Log.error("写拆分报文日志失败（后续仍继续运行）: " + target, e);
+            }
+        }
+    }
+
+    /** 同时打开的文件太多时，关掉最久没写的那几个（LRU 表头）。 */
+    private static void evictOverflow(Map<String, RotatingWriter> writers) {
+        while ( writers.size() > SPLIT_WRITERS_MAX ) {
+            String oldest = writers.keySet().iterator().next();
+            RotatingWriter evicted = writers.remove(oldest);
+            if ( evicted != null ) {
+                evicted.close();
+            }
+        }
+    }
+
+    private void flushAll() {
+        this.mainWriter.flush();
+        this.deviceWriters.values().forEach(RotatingWriter::flush);
+        this.hostWriters.values().forEach(RotatingWriter::flush);
+    }
+
+    /** 会话 id 只保留文件名安全字符，避免路径穿越与 Windows 非法字符。 */
+    private static String sanitizeSession(String sessionId) {
+        if (sessionId == null) {
+            return "";
+        }
+        String safe = sessionId.trim().replaceAll("[^A-Za-z0-9._-]", "_");
+        return safe.length() > 80 ? safe.substring(0, 80) : safe;
     }
 
     /**
@@ -145,9 +312,13 @@ public final class MessageLog implements AutoCloseable {
      * @param function  只取这个 Function；null 表示全部
      * @return JSON 文本
      */
-    public synchronized String recentJson(int limit, String sessionId, String direction,
-                                          long beforeMs, Integer stream, Integer function) {
-        Snapshot snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
+    public String recentJson(int limit, String sessionId, String direction,
+                             long beforeMs, Integer stream, Integer function) {
+        final Snapshot snapshot;
+        synchronized ( this ) {
+            /* 锁内只复制快照：5000 条序列化不能阻塞协议线程的 append */
+            snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
+        }
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> messages = new ArrayList<>(snapshot.messages().size());
         for (MessageEvent event : snapshot.messages()) {
@@ -184,9 +355,12 @@ public final class MessageLog implements AutoCloseable {
      * @param function  只取这个 Function；null 表示全部
      * @return 每行一个 JSON 对象
      */
-    public synchronized String recentJsonl(int limit, String sessionId, String direction,
-                                           long beforeMs, Integer stream, Integer function) {
-        Snapshot snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
+    public String recentJsonl(int limit, String sessionId, String direction,
+                              long beforeMs, Integer stream, Integer function) {
+        final Snapshot snapshot;
+        synchronized ( this ) {
+            snapshot = select(limit, sessionId, direction, beforeMs, stream, function);
+        }
         StringBuilder sb = new StringBuilder();
         for (MessageEvent event : snapshot.messages()) {
             sb.append(toJson(event)).append('\n');
@@ -203,13 +377,50 @@ public final class MessageLog implements AutoCloseable {
         return this.file;
     }
 
+    /**
+     * 因队列满被丢弃的行数（诊断用）。
+     *
+     * @return 丢弃行数
+     */
+    public long droppedLines() {
+        return this.dropped.get();
+    }
+
     @Override
-    public synchronized void close() {
+    public void close() {
+        this.running = false;
+
         try {
-            this.writer.close();
-        } catch (IOException e) {
-            Log.error("关闭报文日志失败: " + this.file, e);
+            this.writerThread.join(2_000L);
         }
+        catch ( InterruptedException e ) {
+            Thread.currentThread().interrupt();
+        }
+
+        /* 写线程已停：剩下的由当前线程补写，保证不丢已入队的行。
+           线程没停下来（磁盘卡住）时不再并发写同一个文件，直接关闭。 */
+        if ( this.writerThread.isAlive() ) {
+            /* 写线程还卡在磁盘上：这时关 writer 会与它并发写同一个 BufferedWriter，
+               可能写出半行或抛异常。宁可让 JVM 退出时丢弃缓冲，也不要破坏文件。 */
+            Log.warn("报文日志写线程未在 2 秒内结束，跳过关闭以避免并发写: " + this.file);
+            return;
+        }
+
+        Line line;
+        while ( (line = this.queue.poll()) != null ) {
+            this.write(line);
+        }
+
+        this.mainWriter.close();
+        closeAll(this.deviceWriters);
+        closeAll(this.hostWriters);
+    }
+
+    private static void closeAll(Map<String, RotatingWriter> writers) {
+        for (RotatingWriter writer : writers.values()) {
+            writer.close();
+        }
+        writers.clear();
     }
 
     private void loadRecent() {
@@ -282,10 +493,6 @@ public final class MessageLog implements AutoCloseable {
         }
     }
 
-    private Snapshot select(int limit, String sessionId, String direction) {
-        return this.select(limit, sessionId, direction, 0L, null, null);
-    }
-
     private Snapshot select(int limit, String sessionId, String direction,
                             long beforeMs, Integer stream, Integer function) {
         String session = sessionId == null ? "" : sessionId.trim();
@@ -332,6 +539,128 @@ public final class MessageLog implements AutoCloseable {
         return toJsonHub(event, JsonHub.getBuilder()).toJson();
     }
 
+    /**
+     * 主机视角：同一条线上报文，方向与设备相反。
+     *
+     * <p>本机主机与设备会话一一对应（一台设备只允许一个本机主机），
+     * 所以主机拆分文件按会话 id 命名；远程主机不经过本进程，不在这里。</p>
+     */
+    private static String toHostJson(MessageEvent event) {
+        JsonHubBuilder b = JsonHub.getBuilder();
+        String direction = "in".equals(event.direction()) ? "out" : "in";
+        return b.object(
+                b.pair("sessionId", event.sessionId()),
+                b.pair("perspective", "host"),
+                b.pair("direction", direction),
+                b.pair("stream", event.stream()),
+                b.pair("function", event.function()),
+                b.pair("wbit", event.wbit()),
+                b.pair("body", event.body()),
+                b.pair("at", event.atMillis())).toJson();
+    }
+
     private record Snapshot(List<MessageEvent> messages, int total) {
+    }
+
+    /** 一行待写内容：正文 + 会话名 + 主机视角正文。 */
+    private record Line(String json, String session, String hostJson) {
+    }
+
+    /**
+     * 按大小轮转的追加写器。
+     *
+     * <p>缓冲写 + 显式 flush：只有写线程调用，无需再加锁。</p>
+     */
+    private static final class RotatingWriter {
+
+        private final Path file;
+        private final long maxBytes;
+        private final int keepRotated;
+        private BufferedWriter out;
+        private long bytes;
+
+        RotatingWriter(Path file, long maxBytes, int keepRotated) throws IOException {
+            this.file = file;
+            this.maxBytes = maxBytes <= 0L ? DEFAULT_MAX_BYTES : maxBytes;
+            this.keepRotated = Math.max(1, keepRotated);
+            this.out = open(file);
+            this.bytes = Files.exists(file) ? Files.size(file) : 0L;
+        }
+
+        private static BufferedWriter open(Path file) throws IOException {
+            return Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
+
+        void write(String json) {
+            /* 先判断再写：轮转发生在两条日志之间，当前文件永远保有最新的一行。
+               反过来（写完再轮转）会让正常停机时最后一批日志全落进 .1、
+               当前文件变空，重启后"最近历史"反而读不到。 */
+            if ( this.bytes >= this.maxBytes ) {
+                rotate();
+            }
+            try {
+                this.out.write(json);
+                this.out.newLine();
+                /* 按 UTF-8 字节数计：中文报文体按字符数算会让实际文件超出上限近一倍 */
+                this.bytes += json.getBytes(StandardCharsets.UTF_8).length + 1L;
+            }
+            catch ( IOException e ) {
+                throw new IllegalStateException("write failed: " + this.file, e);
+            }
+        }
+
+        void flush() {
+            try {
+                this.out.flush();
+            }
+            catch ( IOException e ) {
+                /* flush 失败交给下一次 write 暴露；这里不能抛给停机流程 */
+            }
+        }
+
+        /** 关闭当前文件并轮转；最旧的 .N 被覆盖。 */
+        private void rotate() {
+            try {
+                this.out.close();
+            }
+            catch ( IOException ignore ) {
+            }
+
+            try {
+                for (int i = this.keepRotated - 1; i >= 1; --i) {
+                    Path from = this.file.resolveSibling(this.file.getFileName() + "." + i);
+                    Path to = this.file.resolveSibling(this.file.getFileName() + "." + (i + 1));
+                    if ( Files.exists(from) ) {
+                        Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+                Files.move(this.file, this.file.resolveSibling(this.file.getFileName() + ".1"),
+                        StandardCopyOption.REPLACE_EXISTING);
+                this.out = open(this.file);
+                this.bytes = 0L;
+            }
+            catch ( IOException e ) {
+                Log.error("报文日志轮转失败（重新打开当前文件继续写）: " + this.file, e);
+                try {
+                    /* 失败路径必须把 writer 重新打开：rotate() 已经关掉了它，
+                       不重开的话后续每次 write 都抛异常，报文日志会静默停写。 */
+                    this.out = open(this.file);
+                    this.bytes = Files.exists(this.file) ? Files.size(this.file) : 0L;
+                }
+                catch ( IOException reopen ) {
+                    Log.error("报文日志重新打开失败（后续写入将失败）: " + this.file, reopen);
+                }
+            }
+        }
+
+        void close() {
+            try {
+                this.out.close();
+            }
+            catch ( IOException e ) {
+                Log.error("关闭报文日志失败: " + this.file, e);
+            }
+        }
     }
 }

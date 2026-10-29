@@ -314,11 +314,8 @@ public final class SessionConfigJson {
     }
 
     private static JsonHub idSpaceJson(IdSpacePolicy policy, JsonHubBuilder b) {
-        List<JsonHub> reserves = new ArrayList<>();
-        for (IdRange range : policy.reservedSvid()) {
-            reserves.add(b.array(b.number(range.from()), b.number(range.to())));
-        }
-
+        /* 三个保留区间分别写：只写 reserve（SVID 的）会让 reservedCeid/report
+           在"程序化构造策略 → 保存 → 重读"后丢失 */
         return b.object(
                 b.pair("svidBase", policy.svidBase()),
                 b.pair("ceidBase", policy.ceidBase()),
@@ -326,7 +323,17 @@ public final class SessionConfigJson {
                 b.pair("svidStride", policy.svidStride()),
                 b.pair("ceidStride", policy.ceidStride()),
                 b.pair("reportStride", policy.reportStride()),
-                b.pair("reserve", b.array(reserves)));
+                b.pair("reserve", rangesJson(policy.reservedSvid(), b)),
+                b.pair("reserveCeid", rangesJson(policy.reservedCeid(), b)),
+                b.pair("reserveReport", rangesJson(policy.reservedReport(), b)));
+    }
+
+    private static JsonHub rangesJson(List<IdRange> ranges, JsonHubBuilder b) {
+        List<JsonHub> items = new ArrayList<>();
+        for (IdRange range : ranges) {
+            items.add(b.array(b.number(range.from()), b.number(range.to())));
+        }
+        return b.array(items);
     }
 
     private static JsonHub unitJson(UnitSpec unit, JsonHubBuilder b) {
@@ -404,13 +411,9 @@ public final class SessionConfigJson {
         List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
         pairs.add(b.pair("maxPerSec", config.maxEventsPerSec()));
         pairs.add(b.pair("plans", b.array(plans)));
-        if (config.s6f11Wbit()) {
-            /* 默认 false 不写回，保持旧配置的 JSON 往返稳定 */
-            pairs.add(b.pair("s6f11Wbit", true));
-        }
-        if (config.s6f1Wbit()) {
-            pairs.add(b.pair("s6f1Wbit", true));
-        }
+        /* W 位默认 true：两个字段都显式写回，显式配 false 的配置不会在往返时被默认值翻回去 */
+        pairs.add(b.pair("s6f11Wbit", config.s6f11Wbit()));
+        pairs.add(b.pair("s6f1Wbit", config.s6f1Wbit()));
 
         return b.object(pairs);
     }
@@ -540,18 +543,14 @@ public final class SessionConfigJson {
     private static IdSpacePolicy parseIdSpace(JsonHub jh, String path) {
         IdSpacePolicy defaults = IdSpacePolicy.defaults();
 
-        List<IdRange> reserves = new ArrayList<>();
-        if (jh.containsKey("reserve")) {
-            List<JsonHub> ranges = JsonAccess.elements(JsonAccess.array(jh, "reserve", path), path + ".reserve");
-            for (int i = 0; i < ranges.size(); i++) {
-                String rangePath = path + ".reserve[" + i + "]";
-                JsonHub range = ranges.get(i);
-                if (range.length() != 2) {
-                    throw new ConfigException(rangePath, "区间必须是 [from, to]");
-                }
-                reserves.add(new IdRange(range.get(0).intValue(), range.get(1).intValue()));
-            }
-        }
+        List<IdRange> svidReserves = parseRanges(jh, "reserve", path);
+        /* 旧文件只有 reserve：那时三类保留区间共用一份，读回来保持一致 */
+        List<IdRange> ceidReserves = jh.containsKey("reserveCeid")
+                ? parseRanges(jh, "reserveCeid", path)
+                : svidReserves;
+        List<IdRange> reportReserves = jh.containsKey("reserveReport")
+                ? parseRanges(jh, "reserveReport", path)
+                : svidReserves;
 
         int svidBase = JsonAccess.optionalInt(jh, "svidBase", path).orElse(defaults.svidBase());
         int ceidBase = JsonAccess.optionalInt(jh, "ceidBase", path).orElse(defaults.ceidBase());
@@ -561,7 +560,25 @@ public final class SessionConfigJson {
         int reportStride = JsonAccess.optionalInt(jh, "reportStride", path).orElse(defaults.reportStride());
 
         return new IdSpacePolicy(svidBase, ceidBase, reportBase, svidStride, ceidStride, reportStride,
-                reserves, reserves, reserves);
+                svidReserves, ceidReserves, reportReserves);
+    }
+
+    /** 解析一个保留区间数组；键不存在时返回空列表。 */
+    private static List<IdRange> parseRanges(JsonHub jh, String key, String path) {
+        List<IdRange> ranges = new ArrayList<>();
+        if (!jh.containsKey(key)) {
+            return ranges;
+        }
+        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(jh, key, path), path + "." + key);
+        for (int i = 0; i < items.size(); i++) {
+            String rangePath = path + "." + key + "[" + i + "]";
+            JsonHub range = items.get(i);
+            if (range.length() != 2) {
+                throw new ConfigException(rangePath, "区间必须是 [from, to]");
+            }
+            ranges.add(new IdRange(range.get(0).intValue(), range.get(1).intValue()));
+        }
+        return ranges;
     }
 
     private static UnitSpec parseUnit(JsonHub jh, String path) {
@@ -870,7 +887,7 @@ public final class SessionConfigJson {
             return false;
         }
         JsonHub events = JsonAccess.object(root, "events", ROOT);
-        return JsonAccess.bool(events, "s6f11Wbit", false, ROOT + ".events");
+        return JsonAccess.bool(events, "s6f11Wbit", true, ROOT + ".events");
     }
 
     private static boolean parseS6f1Wbit(JsonHub root) {
@@ -878,7 +895,7 @@ public final class SessionConfigJson {
             return false;
         }
         JsonHub events = JsonAccess.object(root, "events", ROOT);
-        return JsonAccess.bool(events, "s6f1Wbit", false, ROOT + ".events");
+        return JsonAccess.bool(events, "s6f1Wbit", true, ROOT + ".events");
     }
 
     private static int parseMaxPerSec(JsonHub root) {

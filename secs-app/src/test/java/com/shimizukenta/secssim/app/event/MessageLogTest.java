@@ -57,6 +57,34 @@ class MessageLogTest {
     }
 
     @Test
+    void splitsDeviceAndHostLogsPerSession() throws Exception {
+        try (MessageLog log = MessageLog.open(this.temp)) {
+            log.append(new MessageEvent("line1", "in", 1, 3, true, "<A \"REQ\">", 1_000L));
+            log.append(new MessageEvent("line1", "out", 1, 4, false, "<A \"ACK\">", 1_100L));
+            log.append(new MessageEvent("line2", "in", 6, 11, false, "<L>", 1_200L));
+            log.append(new MessageEvent("a/b", "out", 2, 17, false, "<L>", 1_300L));
+        }
+
+        Path devices = this.temp.resolve("logs").resolve("devices");
+        Path hosts = this.temp.resolve("logs").resolve("hosts");
+
+        String deviceLine1 = Files.readString(devices.resolve("line1.jsonl"), StandardCharsets.UTF_8);
+        assertEquals(2, deviceLine1.lines().count(), "设备文件只含本会话的进出报文");
+        assertTrue(deviceLine1.contains("\"sessionId\":\"line1\""), deviceLine1);
+
+        String hostLine1 = Files.readString(hosts.resolve("line1.jsonl"), StandardCharsets.UTF_8);
+        assertEquals(2, hostLine1.lines().count());
+        assertTrue(hostLine1.contains("\"perspective\":\"host\""), hostLine1);
+        /* 设备侧 in = 主机侧 out，方向必须翻过来 */
+        assertTrue(hostLine1.contains("\"direction\":\"out\""), hostLine1);
+        assertTrue(hostLine1.contains("\"direction\":\"in\""), hostLine1);
+
+        assertEquals(1, Files.readString(devices.resolve("line2.jsonl"), StandardCharsets.UTF_8)
+                .lines().count(), "另一台设备的文件不串");
+        assertTrue(Files.isRegularFile(devices.resolve("a_b.jsonl")), "非法字符要转义成安全文件名");
+    }
+
+    @Test
     void filtersAndMarksTruncation() throws Exception {
         try (MessageLog log = MessageLog.open(this.temp)) {
             for (int i = 0; i < 5; i++) {
@@ -97,6 +125,40 @@ class MessageLogTest {
             JsonHub root = JsonHub.fromJson(log.recentJson(10, "", ""));
             assertEquals(1, root.get("messages").length(), "半截旧行仍应被跳过");
             assertEquals("after-crash", root.get("messages").get(0).get("body").optionalString().orElse(""));
+        }
+    }
+
+    @Test
+    void rotatesWhenFileExceedsConfiguredSize() throws Exception {
+        System.setProperty("secssim.messages.maxBytes", "1024");
+        try {
+            try (MessageLog log = MessageLog.open(this.temp)) {
+                for (int i = 0; i < 60; i++) {
+                    log.append(new MessageEvent("s1", "in", 1, 3, false,
+                            "payload-" + i + "-" + "x".repeat(40), 1_000L + i));
+                }
+            }
+        }
+        finally {
+            System.clearProperty("secssim.messages.maxBytes");
+        }
+
+        Path dir = this.temp.resolve("logs");
+        Path rotated = dir.resolve("messages.jsonl.1");
+        assertTrue(Files.isRegularFile(rotated), "超过上限后必须轮转出 .1 文件");
+        assertTrue(Files.size(dir.resolve("messages.jsonl")) < 4_096L,
+                "当前文件应在轮转后保持较小体积");
+
+        /* 轮转不丢可读性：主文件仍然是合法 JSONL */
+        for (String line : Files.readAllLines(dir.resolve("messages.jsonl"), StandardCharsets.UTF_8)) {
+            if ( ! line.isBlank() ) {
+                JsonHub.fromJson(line);
+            }
+        }
+
+        try (MessageLog reopened = MessageLog.open(this.temp)) {
+            assertTrue(reopened.recentJson(100, "", "").contains("payload-59"),
+                    "重启后从当前文件尾部恢复");
         }
     }
 

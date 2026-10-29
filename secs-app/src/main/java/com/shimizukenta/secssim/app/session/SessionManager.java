@@ -16,6 +16,9 @@ public final class SessionManager {
 
     private final ConcurrentMap<String, SessionRuntime> sessions = new ConcurrentHashMap<>();
 
+    /** 关闭后不再接受注册（见 {@link #closeAll()}）。 */
+    private volatile boolean closed;
+
     /**
      * 注册会话。
      *
@@ -23,9 +26,14 @@ public final class SessionManager {
      * @throws IllegalArgumentException 标识重复
      */
     public void register(SessionRuntime runtime) {
-        SessionRuntime previous = this.sessions.putIfAbsent(runtime.id(), runtime);
-        if (previous != null) {
-            throw new IllegalArgumentException("session already registered: " + runtime.id());
+        synchronized ( this ) {
+            if ( this.closed ) {
+                throw new IllegalStateException("session manager is already closed: " + runtime.id());
+            }
+            SessionRuntime previous = this.sessions.putIfAbsent(runtime.id(), runtime);
+            if (previous != null) {
+                throw new IllegalArgumentException("session already registered: " + runtime.id());
+            }
         }
     }
 
@@ -50,10 +58,19 @@ public final class SessionManager {
 
     /**
      * 关闭并移除全部会话。
+     *
+     * <p>先原子换出整张表再逐个关闭：原来的"遍历后 clear"在并发 register 时
+     * 会把新会话从表中抹掉却不关闭它——端口与线程泄漏，且再也找不到这个会话。
+     * 关闭后 {@link #register} 会直接拒绝，避免"关闭中的管理器又长出新会话"。</p>
      */
     public void closeAll() {
-        this.sessions.values().forEach(SessionRuntime::close);
-        this.sessions.clear();
+        final List<SessionRuntime> snapshot;
+        synchronized ( this ) {
+            this.closed = true;
+            snapshot = List.copyOf(this.sessions.values());
+            this.sessions.clear();
+        }
+        snapshot.forEach(SessionRuntime::close);
     }
 
     /**

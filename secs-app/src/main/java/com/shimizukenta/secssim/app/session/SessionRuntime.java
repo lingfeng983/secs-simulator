@@ -302,6 +302,24 @@ public interface SessionRuntime {
     }
 
     /**
+     * 曲线预览，可只回放某一条编排计划。
+     *
+     * <p>「看这个事件及其效果」需要排除其它计划的干扰；planId 为空表示全部计划。</p>
+     *
+     * @param fromMs     起始
+     * @param toMs       结束
+     * @param buckets    桶数
+     * @param svids      只画这些 SVID;空集合不过滤
+     * @param withEvents 是否附带事件标记
+     * @param planId     只回放这个计划；空/null 表示全部
+     * @return JSON 文本
+     */
+    default String previewJson(long fromMs, long toMs, int buckets,
+                               java.util.Set<Integer> svids, boolean withEvents, String planId) {
+        return previewJson(fromMs, toMs, buckets, svids, withEvents);
+    }
+
+    /**
      * 预览的二进制格式；不支持时返回 {@code null}。
      *
      * @param fromMs  起始

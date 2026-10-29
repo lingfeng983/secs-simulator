@@ -15,6 +15,7 @@ import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
+import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.template.TemplateGraph;
 
 import java.util.ArrayList;
@@ -28,8 +29,8 @@ import java.util.Map;
  * @param spec            会话参数
  * @param schedule        事件编排
  * @param maxEventsPerSec 设备级每秒最大上报数
- * @param s6f11Wbit        S6F11 是否带 W 位并等待 S6F12（默认 false）
- * @param s6f1Wbit         S6F1 是否带 W 位并等待 S6F2（默认 false）
+ * @param s6f11Wbit        S6F11 是否带 W 位并等待 S6F12（配置缺省 true）
+ * @param s6f1Wbit         S6F1 是否带 W 位并等待 S6F2（配置缺省 true）
  * @param templates        模板/曲线配置（默认空）
  */
 public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEventsPerSec,
@@ -145,6 +146,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
                                     + "（" + svid.type() + "），只支持 set(0/1) 与 resume"));
                 }
             }
+            checkTrigger(plan, this.schedule, compiled.equipment(), issues);
         }
 
         for (Map.Entry<Integer, DirectSource> entry : directSources().entrySet()) {
@@ -156,6 +158,58 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
         }
 
         return new CompilationResult(compiled.equipment(), issues);
+    }
+
+    /**
+     * 校验触发条件里的引用。
+     *
+     * <p>{@code onCondition} 的表达式在运行期求值：变量写错时每个 tick 抛异常、
+     * 只记首条日志，现场表现为"计划启用却永不触发"，极难定位。AfterEvent 的来源
+     * 计划也是同一类引用。与 CEID/SVID 一样，必须在编译期拦下。</p>
+     *
+     * @param plan      事件计划
+     * @param schedule  整份编排（AfterEvent 需要查来源计划）
+     * @param equipment 已解析的设备模型
+     * @param issues    问题清单（追加）
+     */
+    private static void checkTrigger(EventPlan plan, EventSchedule schedule,
+                                     ResolvedEquipment equipment, List<Issue> issues) {
+        Trigger trigger = plan.trigger();
+
+        if (trigger instanceof Trigger.OnCondition onCondition) {
+            for (String variable : onCondition.expression().variables()) {
+                if ("t".equals(variable)) {
+                    continue;
+                }
+                if (!variable.startsWith("svid.")) {
+                    issues.add(Issue.error("UNKNOWN_CONDITION_VARIABLE",
+                            "事件计划 " + plan.id() + " 的条件变量 " + variable
+                                    + " 不受支持（只支持 t 与 svid.<id>）"));
+                    continue;
+                }
+                final int svid;
+                try {
+                    svid = Integer.parseInt(variable.substring("svid.".length()).trim());
+                } catch (NumberFormatException e) {
+                    issues.add(Issue.error("UNKNOWN_CONDITION_VARIABLE",
+                            "事件计划 " + plan.id() + " 的条件变量格式非法：" + variable));
+                    continue;
+                }
+                if (!equipment.svids().containsKey(svid)) {
+                    issues.add(Issue.error("UNKNOWN_CONDITION_SVID",
+                            "事件计划 " + plan.id() + " 的条件引用了不存在的 SVID " + svid));
+                }
+            }
+        } else if (trigger instanceof Trigger.AfterEvent afterEvent) {
+            if (afterEvent.sourcePlan().equals(plan.id())) {
+                issues.add(Issue.error("SELF_REFERENCING_TRIGGER",
+                        "事件计划 " + plan.id() + " 的 afterEvent 来源指向自己（永远不会触发）"));
+            } else if (schedule.plans().stream().noneMatch(p -> p.id().equals(afterEvent.sourcePlan()))) {
+                issues.add(Issue.error("UNKNOWN_SOURCE_PLAN",
+                        "事件计划 " + plan.id() + " 的 afterEvent 来源计划 "
+                                + afterEvent.sourcePlan() + " 不存在"));
+            }
+        }
     }
 
     /**

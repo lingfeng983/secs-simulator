@@ -21,7 +21,19 @@ public final class HostReportTable {
 
     private final Map<Integer, List<Integer>> reports = new ConcurrentHashMap<>();
     private final Map<Integer, List<Integer>> links = new ConcurrentHashMap<>();
+
+    /** 逐事件禁用；{@code allDisabled == false} 时生效。 */
     private final Set<Integer> disabledCeids = ConcurrentHashMap.newKeySet();
+
+    /**
+     * "全部禁用"之后被单独重新启用的事件；{@code allDisabled == true} 时生效。
+     *
+     * <p>没有这张覆盖表时，S2F37 的「先全部禁用、再启用某几个事件」是无效的：
+     * 启用操作只把 CEID 从 {@link #disabledCeids} 移除，而 {@code allDisabled}
+     * 仍是 true，{@link #isEnabled(int)} 恒返回 false——主机以为已生效，
+     * 设备却永远不上报。</p>
+     */
+    private final Set<Integer> enabledCeids = ConcurrentHashMap.newKeySet();
 
     private volatile boolean allDisabled;
 
@@ -76,17 +88,26 @@ public final class HostReportTable {
      * @param enabled 是否启用
      * @param ceids   目标事件；空表示全部
      */
-    public void setEnabled(boolean enabled, Collection<Integer> ceids) {
+    public synchronized void setEnabled(boolean enabled, Collection<Integer> ceids) {
         if (ceids == null || ceids.isEmpty()) {
             this.allDisabled = !enabled;
             this.disabledCeids.clear();
+            this.enabledCeids.clear();
             return;
         }
 
         if (enabled) {
-            this.disabledCeids.removeAll(ceids);
+            if (this.allDisabled) {
+                this.enabledCeids.addAll(ceids);
+            } else {
+                this.disabledCeids.removeAll(ceids);
+            }
         } else {
-            this.disabledCeids.addAll(new HashSet<>(ceids));
+            if (this.allDisabled) {
+                this.enabledCeids.removeAll(ceids);
+            } else {
+                this.disabledCeids.addAll(new HashSet<>(ceids));
+            }
         }
     }
 
@@ -96,8 +117,10 @@ public final class HostReportTable {
      * @param ceid CEID
      * @return 允许返回 {@code true}
      */
-    public boolean isEnabled(int ceid) {
-        return !this.allDisabled && !this.disabledCeids.contains(ceid);
+    public synchronized boolean isEnabled(int ceid) {
+        return this.allDisabled
+                ? this.enabledCeids.contains(ceid)
+                : !this.disabledCeids.contains(ceid);
     }
 
     /**
