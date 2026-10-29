@@ -58,13 +58,11 @@ class NativeRuntimeIT {
         try {
             String ready = awaitReady(process);
             int httpPort = intToken(ready, "http=");
-            String token = textToken(ready, "token=");
 
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
-                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, health.statusCode(), health.body());
@@ -73,19 +71,18 @@ class NativeRuntimeIT {
             assertTrue(health.body().contains("\"utf8\":true"), "中文路径回归失败: " + health.body());
             assertTrue(health.body().contains("\"vm\":\"runtime\""), "不是原生镜像: " + health.body());
 
-            assertSseStreams(httpPort, token, client);
+            assertSseStreams(httpPort, client);
 
-            HttpResponse<String> denied = client.send(
+            HttpResponse<String> notPost = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            assertEquals(401, denied.statusCode(), "未带 token 的停机请求必须被拒绝");
+            assertEquals(405, notPost.statusCode(), "停机只接受 POST（内部工具直连，不做鉴权）");
 
             assertS1F1GetsS1F2(hsmsPort);
 
             HttpResponse<String> shutdown = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
-                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10))
                             .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -125,13 +122,11 @@ class NativeRuntimeIT {
         try {
             String ready = awaitReady(process);
             int httpPort = intToken(ready, "http=");
-            String token = textToken(ready, "token=");
             assertTrue(ready.contains("sessions=1"), "演示会话未创建: " + ready);
 
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
-                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertTrue(health.body().contains("\"sessions\":1"), health.body());
@@ -147,7 +142,6 @@ class NativeRuntimeIT {
             /* 会话列表：真实运行时的 sessionsJson 组装 */
             HttpResponse<String> sessions = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/sessions"))
-                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, sessions.statusCode(), sessions.body());
@@ -156,7 +150,7 @@ class NativeRuntimeIT {
             assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
 
             /* 没有主机在线时触发应得到 409（设备状态），而不是 500（服务器错误） */
-            assertEquals(409, trigger(hsnsBase(httpPort), token).statusCode(),
+            assertEquals(409, trigger(hsnsBase(httpPort)).statusCode(),
                     "无主机会话时触发 S6F11 应返回 409");
 
             HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
@@ -182,12 +176,11 @@ class NativeRuntimeIT {
                 assertEquals(1, unitId, "UNIT_ID 应为 CH1");
 
                 /* 主机在线时，API 触发的 S6F11 才能真正发出去 */
-                assertEquals(202, trigger(hsnsBase(httpPort), token).statusCode(),
+                assertEquals(202, trigger(hsnsBase(httpPort)).statusCode(),
                         "主机在线时触发 S6F11 应为 202");
             }
 
             client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
-                            .header("Authorization", "Bearer " + token)
                             .timeout(Duration.ofSeconds(10))
                             .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding());
@@ -203,20 +196,18 @@ class NativeRuntimeIT {
         return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/demo/ceid/2001";
     }
 
-    private static HttpResponse<String> trigger(String url, String token) throws Exception {
+    private static HttpResponse<String> trigger(String url) throws Exception {
         return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
                 .send(HttpRequest.newBuilder(URI.create(url))
-                                .header("Authorization", "Bearer " + token)
                                 .timeout(Duration.ofSeconds(10))
                                 .POST(HttpRequest.BodyPublishers.noBody())
                                 .build(),
                         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
-    private static void assertSseStreams(int httpPort, String token, HttpClient client) throws Exception {
+    private static void assertSseStreams(int httpPort, HttpClient client) throws Exception {
         HttpResponse<String> ticketResponse = client.send(
                 HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/ticket"))
-                        .header("Authorization", "Bearer " + token)
                         .timeout(Duration.ofSeconds(10))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .build(),

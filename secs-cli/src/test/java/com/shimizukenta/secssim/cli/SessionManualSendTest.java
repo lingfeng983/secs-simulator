@@ -77,7 +77,7 @@ class SessionManualSendTest {
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
             SessionTestSupport.awaitPeer(session);
-            JsonHub result = JsonHub.fromJson(session.sendSml("S1F1"));
+            JsonHub result = JsonHub.fromJson(session.sendSml("S1F2"));
             assertFalse(result.get("wbit").booleanValue());
             assertFalse(result.get("timedOut").booleanValue());
             assertTrue(result.get("replySml").isNull());

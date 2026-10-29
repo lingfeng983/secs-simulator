@@ -191,7 +191,7 @@ class ConfigDrivenSessionTest {
         assertTrue(json.contains("{\"rptid\":3001,\"owner\":\"CH5\",\"slot\":\"STATUS\","
                 + "\"svids\":[1090,1001],\"source\":\"local\"}"),
                 "报告内 SVID 顺序应与 S6F11 组包一致（UNIT_ID 在前）: " + json);
-        assertTrue(json.contains("{\"svid\":1001,\"owner\":\"CH5\",\"slot\":\"TEMP_PV\",\"type\":\"F4\",\"unit\":\"C\"}"),
+        assertTrue(json.contains("{\"svid\":1001,\"owner\":\"CH5\",\"slot\":\"TEMP_PV\",\"type\":\"F4\",\"unit\":\"C\",\"pinned\":false}"),
                 json);
         assertTrue(json.contains("{\"svid\":1090,\"owner\":\"CH5\",\"slot\":\"UNIT_ID\",\"type\":\"U4\""),
                 json);
