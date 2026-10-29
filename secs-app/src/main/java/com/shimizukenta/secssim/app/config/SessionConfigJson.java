@@ -462,11 +462,15 @@ public final class SessionConfigJson {
                     b.pair("delayMs", after.delayMs()));
         }
 
-        Trigger.Periodic periodic = (Trigger.Periodic) trigger;
-        return b.object(
-                b.pair("type", "periodic"),
-                b.pair("periodMs", periodic.periodMs()),
-                b.pair("jitterMs", periodic.jitterMs()));
+        if (trigger instanceof Trigger.Periodic periodic) {
+            return b.object(
+                    b.pair("type", "periodic"),
+                    b.pair("periodMs", periodic.periodMs()),
+                    b.pair("jitterMs", periodic.jitterMs()));
+        }
+
+        /* 新增 Trigger 子类型时这里是编译可见的兜底，而不是对 Periodic 的盲转（CCE） */
+        throw new IllegalStateException("未支持的触发类型: " + trigger.getClass().getName());
     }
 
     private static EquipmentSpec parseEquipment(JsonHub root, int deviceId) {
@@ -576,9 +580,26 @@ public final class SessionConfigJson {
             if (range.length() != 2) {
                 throw new ConfigException(rangePath, "区间必须是 [from, to]");
             }
-            ranges.add(new IdRange(range.get(0).intValue(), range.get(1).intValue()));
+            ranges.add(new IdRange(exactInt(range.get(0), rangePath + "[0]"), exactInt(range.get(1), rangePath + "[1]")));
         }
         return ranges;
+    }
+
+    /** 保留段的端点必须是整数：{@code intValue()} 会把 0.5 静默截成 0。 */
+    private static int exactInt(JsonHub value, String path) {
+        java.util.OptionalLong asLong = value.optionalLong();
+        if (asLong.isEmpty()) {
+            throw new ConfigException(path, "应为整数");
+        }
+        double asDouble = value.optionalDouble().orElse(Double.NaN);
+        if (!Double.isFinite(asDouble) || asDouble != (double) asLong.getAsLong()) {
+            throw new ConfigException(path, "应为整数，不接受小数: " + value.toJson());
+        }
+        long l = asLong.getAsLong();
+        if (l < 1 || l > Integer.MAX_VALUE) {
+            throw new ConfigException(path, "应为 1.." + Integer.MAX_VALUE + " 的整数");
+        }
+        return (int) l;
     }
 
     private static UnitSpec parseUnit(JsonHub jh, String path) {

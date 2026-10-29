@@ -567,18 +567,12 @@ final class SessionHandler extends HttpSupport {
                 respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
                 return;
             }
-            audit(ex, "burst", parts[0], "ok=" + !result.contains("error"));
+            audit(ex, "burst", parts[0], "accepted=" + burstFlag(result));
             /* 压测已改成后台任务：受理回 202，统计用 GET /sessions/{id}/burst 取。
-               参数错误仍按 400；执行器/该会话已有任务在跑按 409（可重试）。 */
-            int status;
-            if (result.contains("\"accepted\":true")) {
-                status = 202;
-            } else if (result.contains("\"ok\":false")) {
-                status = result.contains("burst-busy") || result.contains("burst-running") ? 409 : 400;
-            } else {
-                status = 200;
-            }
-            respond(ex, status, result);
+               参数错误仍按 400；执行器/该会话已有任务在跑按 409（可重试）。
+               状态码由解析字段决定，不用 contains 猜——错误消息里出现同名子串
+               （比如回显了 "burst-busy"）就会把 400 报成 409。 */
+            respond(ex, burstStatus(result), result);
             return;
         }
 
@@ -722,6 +716,44 @@ final class SessionHandler extends HttpSupport {
             Log.error("手动发送 SML 失败", e);
             respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
+    }
+
+
+    /** 压测响应里的 accepted 标志（解析失败按 false 处理）。 */
+    private static boolean burstFlag(String result) {
+        try {
+            JsonHub root = JsonHub.fromJson(result);
+            JsonHub v = root.get("accepted");
+            return v != null && v.optionalBoolean().orElse(false);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 压测响应的状态码：受理 202；忙 409；ok=false 的其余情况 400；其他 200。
+     *
+     * <p>用字段而不是 {@code contains}：错误消息里出现 "burst-busy" 之类的
+     * 字样时，子串判断会把 400 误报成 409。</p>
+     */
+    private static int burstStatus(String result) {
+        JsonHub root;
+        try {
+            root = JsonHub.fromJson(result);
+        } catch (RuntimeException e) {
+            return 500;
+        }
+        JsonHub accepted = root.get("accepted");
+        if (accepted != null && accepted.optionalBoolean().orElse(false)) {
+            return 202;
+        }
+        JsonHub ok = root.get("ok");
+        if (ok != null && !ok.optionalBoolean().orElse(true)) {
+            JsonHub error = root.get("error");
+            String code = error == null ? "" : error.optionalString().orElse("");
+            return "burst-busy".equals(code) || "burst-running".equals(code) ? 409 : 400;
+        }
+        return 200;
     }
 
 

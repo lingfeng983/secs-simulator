@@ -449,13 +449,9 @@ export interface ApiClient {
   reloadSession(sessionId: string): Promise<number>;
   trigger(sessionId: string, ceid: number): Promise<number>;
   alarm(sessionId: string, alid: number, set: boolean, text: string, category: number): Promise<number>;
-  alarms(sessionId: string): Promise<AlarmState[]>;
-  terminalMessages(sessionId: string): Promise<TerminalMessage[]>;
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number, svids?: number[], withEvents?: boolean, planId?: string): Promise<PreviewData>;
-  /** 二进制曲线预览（SCSP v1，小端）。 */
-  previewBinary(sessionId: string, fromMs: number, toMs: number, buckets: number): Promise<Blob>;
   /** 最近审计记录。 */
   audit(limit: number, filters?: AuditFilters): Promise<AuditEntryView[]>;
   /** 事件编排列表。 */
@@ -548,23 +544,12 @@ export interface ApiClient {
   /** 按实例 id 手动启停采集器。 */
   hostInstanceCollectorCommand(hostId: string, start: boolean): Promise<{ ok: boolean; error?: string }>;
 
-  /** 主机模拟器状态；会话不存在返回 null。 */
-  hostSimState(sessionId: string): Promise<{ open: boolean; target?: string; mode?: string; remote?: boolean } | null>;
   /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
   openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;
   /** 关闭主机模拟器连接。 */
   closeHostSim(sessionId: string): Promise<number>;
   /** 以主机角色发送 SML。 */
   sendHostSml(sessionId: string, sml: string): Promise<SentMessageResult>;
-  /** 按配置草稿文本算曲线预览（不落盘、不需要会话）。 */
-  configPreview(
-    text: string,
-    fromMs: number,
-    toMs: number,
-    buckets: number,
-    svids?: number[],
-    withEvents?: boolean,
-  ): Promise<PreviewData>;
   /** 工作台聚合（schema v6）。 */
   overview(): Promise<OverviewRow[]>;
   /** 服务端压测（schema v6）。 */
@@ -943,16 +928,6 @@ export function createClient(): ApiClient {
         }),
       );
     },
-    async alarms(sessionId) {
-      return json<AlarmState[]>(
-        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`)),
-      );
-    },
-    async terminalMessages(sessionId) {
-      return json<TerminalMessage[]>(
-        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/terminal`)),
-      );
-    },
     async catalog(sessionId) {
       const body = await json<Partial<Catalog>>(
         await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/catalog`)),
@@ -987,17 +962,6 @@ export function createClient(): ApiClient {
       return json<PreviewData>(
         await request(apiUrl(`/api/v1/preview?${query}`), {}, LONG_REQUEST_TIMEOUT_MS),
       );
-    },
-    async previewBinary(sessionId, fromMs, toMs, buckets) {
-      const response = await request(
-        apiUrl(`/api/v1/preview.bin?session=${encodeURIComponent(sessionId)}&from=${fromMs}&to=${toMs}&buckets=${buckets}`),
-        {},
-        LONG_REQUEST_TIMEOUT_MS,
-      );
-      if (!response.ok) {
-        throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
-      }
-      return response.blob();
     },
     async ticket() {
       const body = await json<{ ticket: string }>(
@@ -1252,16 +1216,6 @@ export function createClient(): ApiClient {
       }
       return parsed;
     },
-    async hostSimState(sessionId) {
-      try {
-        const body = await json<{ open?: boolean; target?: string; mode?: string; remote?: boolean }>(
-          await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`)),
-        );
-        return { open: body.open ?? false, target: body.target, mode: body.mode, remote: body.remote };
-      } catch {
-        return null;
-      }
-    },
     async openHostSim(sessionId, target) {
       return command(
         await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {
@@ -1340,25 +1294,6 @@ export function createClient(): ApiClient {
     },
     async closeHostSim(sessionId) {
       return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));
-    },
-    async configPreview(text, fromMs, toMs, buckets, svids, withEvents) {
-      /* 草稿预览要现场编译配置，8 秒不够 */
-      const query = new URLSearchParams({ from: String(fromMs), to: String(toMs), buckets: String(buckets) });
-      if (svids && svids.length > 0) {
-        query.set('svids', svids.join(','));
-      }
-      if (withEvents === false) {
-        query.set('withEvents', 'false');
-      }
-      const response = await request(apiUrl(`/api/v1/config-preview?${query}`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: text,
-      }, LONG_REQUEST_TIMEOUT_MS);
-      if (!response.ok) {
-        throw new Error(response.status === 422 ? '422 配置编译不过，先看校验问题' : `${response.status}`);
-      }
-      return (await response.json()) as PreviewData;
     },
     async sendHostSml(sessionId, sml) {
       const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {

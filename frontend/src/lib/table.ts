@@ -99,11 +99,16 @@ export interface CsvColumn<T> {
  * 生成 CSV 文本。
  *
  * <p>字段里的引号、逗号、换行都要转义，否则 Excel 打开就是错列。
+ * 以 {@code = + - @} 开头的单元格前置单引号：不防的话导出 SML 回显、
+ * 槽位名之类可控文本时，Excel/WPS 会把它当公式执行。
  * 前面加 BOM：没有 BOM 的话 Excel 会按本地编码猜，中文全变乱码。</p>
  */
 export function toCsv<T>(rows: readonly T[], columns: readonly CsvColumn<T>[]): string {
   const escape = (raw: string | number | undefined): string => {
-    const text = raw === undefined || raw === null ? '' : String(raw);
+    let text = raw === undefined || raw === null ? '' : String(raw);
+    if (/^[=+\-@]/.test(text)) {
+      text = `'${text}`;
+    }
     return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const lines = [columns.map((column) => escape(column.header)).join(',')];
