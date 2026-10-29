@@ -251,11 +251,11 @@ public final class EquipmentCompiler {
             List<Integer> reportIds = new ArrayList<>();
             for (String name : def.reportNames()) {
                 ResolvedReport report = this.findReport(name);
-                if (report == null) {
+                if (report == null && ! this.reportRefAmbiguous) {
                     this.issues.add(Issue.error("UNKNOWN_REPORT_REF",
                             "设备级 CEID " + def.name() + " 引用了不存在的报告: " + name
                                     + "（跨单元引用请写成 单元名.报告名）"));
-                } else {
+                } else if (report != null) {
                     reportIds.add(report.id());
                 }
             }
@@ -273,7 +273,11 @@ public final class EquipmentCompiler {
         }
     }
 
+    /** 上一次 {@link #findReport(String)} 是否因为"多单元同名"失败（而不是不存在）。 */
+    private boolean reportRefAmbiguous;
+
     private ResolvedReport findReport(String name) {
+        this.reportRefAmbiguous = false;
         ResolvedReport qualified = this.reportByQualified.get(name);
         if (qualified != null) {
             return qualified;
@@ -285,6 +289,7 @@ public final class EquipmentCompiler {
         if (candidates.size() > 1) {
             this.issues.add(Issue.error("AMBIGUOUS_REPORT_REF",
                     "报告名 " + name + " 在多个单元中存在，请写成 单元名.报告名"));
+            this.reportRefAmbiguous = true;
         }
         return null;
     }

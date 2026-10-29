@@ -71,7 +71,7 @@ public record IdSpacePolicy(int svidBase, int ceidBase, int reportBase,
      * @return 段起点
      */
     public int svidBaseFor(int position) {
-        return this.svidBase + (requirePositive(position) - 1) * this.svidStride;
+        return baseFor(this.svidBase, this.svidStride, position, "SVID");
     }
 
     /**
@@ -81,7 +81,7 @@ public record IdSpacePolicy(int svidBase, int ceidBase, int reportBase,
      * @return 段起点
      */
     public int ceidBaseFor(int position) {
-        return this.ceidBase + (requirePositive(position) - 1) * this.ceidStride;
+        return baseFor(this.ceidBase, this.ceidStride, position, "CEID");
     }
 
     /**
@@ -91,7 +91,23 @@ public record IdSpacePolicy(int svidBase, int ceidBase, int reportBase,
      * @return 段起点
      */
     public int reportBaseFor(int position) {
-        return this.reportBase + (requirePositive(position) - 1) * this.reportStride;
+        return baseFor(this.reportBase, this.reportStride, position, "RPTID");
+    }
+
+    /**
+     * 第 {@code position} 个单元的段起点，带 32 位 ID 上界校验。
+     *
+     * <p>原来的 {@code base + (pos-1)*stride} 在 {@code svidBase=2147483000} 这类配置下
+     * 会 int 溢出成负数，编译期不报、运行期发出负 ID。</p>
+     */
+    private static int baseFor(int base, int stride, int position, String kind) {
+        long value = (long) base + (long) (requirePositive(position) - 1) * (long) stride;
+        if (value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    kind + " id out of range: base=" + base + ", stride=" + stride
+                            + ", position=" + position + " -> " + value);
+        }
+        return (int) value;
     }
 
     /**

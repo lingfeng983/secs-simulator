@@ -57,6 +57,7 @@ public record EventEffect(int svid, Op op, Double value, Double delta, Long hold
         switch (op) {
             case SET -> {
                 requireField(value, "value", op);
+                rejectFields(delta, "delta", op);
                 rejectFields(holdMs, "holdMs", op);
                 if (decayMs != null && decayMs < 0) {
                     throw new IllegalArgumentException("decayMs must be >= 0");
@@ -86,8 +87,13 @@ public record EventEffect(int svid, Op op, Double value, Double delta, Long hold
     }
 
     private static void requireField(Number field, String name, Op op) {
-        if (field == null || field.doubleValue() == Double.NaN) {
+        /* NaN 只能这样判：== Double.NaN 恒为 false，原来的写法等于没校验 */
+        if (field == null) {
             throw new IllegalArgumentException(op.name().toLowerCase() + " 需要 " + name);
+        }
+        final double v = field.doubleValue();
+        if (!Double.isFinite(v)) {
+            throw new IllegalArgumentException(op.name().toLowerCase() + " 的 " + name + " 必须是有限数值");
         }
     }
 
