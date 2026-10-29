@@ -22,6 +22,9 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, RunEvent, State};
 
+/// 后端 stderr 的保留上限：只留最后 64 KiB 用于报错，避免长跑时无限增长。
+const STDERR_LIMIT: usize = 64 * 1024;
+
 /// 界面可读的当前连接。
 #[derive(Clone, Serialize)]
 struct ConnectionInfo {
@@ -60,6 +63,11 @@ fn main() {
     }
 
     tauri::Builder::default()
+        // 单实例：第二次启动不再开一份新进程（两份会抢同一组 HSMS 端口与同一个 work-dir），
+        // 而是把已有窗口拉到前台。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }))
         .manage(AppState {
             backend: Mutex::new(None),
             connection: Mutex::new(None),
@@ -209,6 +217,76 @@ fn resource_root(app: &tauri::AppHandle) -> PathBuf {
     candidates.into_iter().next().unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// 把后端进程放进「GUI 消失就杀掉成员」的 Job Object（仅 Windows）。
+///
+/// 任务管理器结束进程、崩溃、断电式退出时，Rust 侧的清理代码不会执行；
+/// 只有内核在关闭最后一个 Job 句柄时才会杀掉成员进程，所以句柄要故意留着不关。
+#[cfg(windows)]
+fn attach_to_kill_on_close_job(child: &Child) -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle;
+    use std::ptr;
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    // 进程级单例：句柄泄漏是刻意的（关掉句柄 = 立刻杀掉 Job 里的后端）。
+    static JOB: OnceLock<usize> = OnceLock::new();
+
+    let job = *JOB.get_or_init(|| unsafe {
+        let handle = CreateJobObjectW(ptr::null(), ptr::null());
+        if handle.is_null() {
+            return 0;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+        let ok = SetInformationJobObject(
+            handle,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            size,
+        );
+        if ok == 0 {
+            let _ = CloseHandle(handle);
+            return 0;
+        }
+        handle as usize
+    });
+
+    if job == 0 {
+        return Err("CreateJobObjectW / SetInformationJobObject 失败".to_string());
+    }
+    let process: HANDLE = child.as_raw_handle() as HANDLE;
+    if unsafe { AssignProcessToJobObject(job as HANDLE, process) } == 0 {
+        return Err("AssignProcessToJobObject 失败（进程可能已在别的 Job 里）".to_string());
+    }
+    Ok(())
+}
+
+/// 非 Windows：没有等价的 Job Object 语义，退化为「进程内正常退出时 kill」。
+#[cfg(not(windows))]
+fn attach_to_kill_on_close_job(_child: &Child) -> Result<(), String> {
+    Ok(())
+}
+
+/// 选一个能绑定的 HSMS 端口：5000 起，被占用就顺延，最多试到 5010。
+///
+/// 探测是「试绑一下立刻放掉」，后端真正绑定时仍可能被抢；但先把最常见的
+/// 「上一个后端进程没退干净、5000 还占着」挡掉，比让后端起不来有用。
+fn pick_hsms_port() -> u16 {
+    for port in 5000..=5010u16 {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
+    eprintln!("HSMS 端口 5000-5010 都被占用，仍交给后端 5000（预计会启动失败）");
+    5000
+}
+
 /// 拉起本机后端并读 READY；成功返回子进程与 API 地址，调用方负责接管子进程。
 fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
     let resources = resource_root(app);
@@ -220,11 +298,12 @@ fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
     let work = work_dir(app);
     std::fs::create_dir_all(&work).map_err(|e| format!("创建工作目录失败: {e}"))?;
 
+    let hsms_port = pick_hsms_port();
     let mut command = Command::new(&backend);
     command
         .arg("--mode=integrated")
         .arg("--port=0")
-        .arg("--hsms-port=5000")
+        .arg(format!("--hsms-port={hsms_port}"))
         .arg("--demo-session")
         .arg(format!("--work-dir={}", work.display()));
     {
@@ -234,6 +313,10 @@ fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = command.spawn().map_err(|e| format!("启动后端失败: {e}"))?;
+    if let Err(error) = attach_to_kill_on_close_job(&child) {
+        // 挂不上不致命：正常退出路径仍会 kill；只是 GUI 被强杀时可能留下孤儿进程。
+        eprintln!("后端进程加入 Job Object 失败（继续运行）: {error}");
+    }
     let stdout = child.stdout.take().ok_or("无法读取后端输出")?;
     let stderr = child.stderr.take().ok_or("无法读取后端错误输出")?;
 
@@ -250,6 +333,14 @@ fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
             if let Ok(mut guard) = errors_for_thread.lock() {
                 guard.push_str(&line);
                 guard.push('\n');
+                // 只留最后 64 KiB：长跑时无上限累积会把错误缓冲变成内存泄漏。
+                if guard.len() > STDERR_LIMIT {
+                    let mut cut = guard.len() - STDERR_LIMIT;
+                    while cut < guard.len() && !guard.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    guard.drain(..cut);
+                }
             }
         }
     });
@@ -309,10 +400,36 @@ fn switch_backend(
     target: String,
 ) -> Result<ConnectionInfo, String> {
     if target.eq_ignore_ascii_case("local") {
-        // 已是本机且后端活着：不折腾（避免白白重启设备会话）
-        if let Some(current) = state.connection.lock().unwrap().clone() {
-            if current.mode == "local" && state.backend.lock().unwrap().is_some() {
-                return Ok(current);
+        // 先探活：后端可能已经自己退了（崩溃/被结束），此时"已是本机"不能当成还活着，
+        // 否则切回本机会得到一个指向死进程的地址。
+        let mut exited: Option<String> = None;
+        let alive = {
+            let mut backend = state.backend.lock().unwrap();
+            match backend.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(None) => true,
+                    Ok(Some(status)) => {
+                        exited = Some(format!("已退出（{status}）"));
+                        false
+                    }
+                    Err(error) => {
+                        exited = Some(format!("状态探测失败（{error}）"));
+                        false
+                    }
+                },
+                None => false,
+            }
+        };
+        if let Some(reason) = exited {
+            eprintln!("本机后端{reason}，重新拉起");
+            *state.backend.lock().unwrap() = None;
+        }
+        if alive {
+            // 后台还活着且当前就是本机：不折腾（避免白白重启设备会话）
+            if let Some(current) = state.connection.lock().unwrap().clone() {
+                if current.mode == "local" {
+                    return Ok(current);
+                }
             }
         }
         state.stop_backend();

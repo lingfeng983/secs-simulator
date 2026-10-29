@@ -1,8 +1,11 @@
 [package]
 name = "secs-sim-gui"
-version = "2.0.0"
+# 与 pom.xml / tauri.conf.json 保持同一字符串：版本只有一个来源（pom.xml），
+# scripts/package-windows.ps1 会核对三处是否一致。
+version = "2.0.0-SNAPSHOT"
 edition = "2021"
-rust-version = "1.77"
+# tauri-plugin-single-instance 2.5 起需要 1.90（edition 2024）
+rust-version = "1.90"
 description = "SECS Simulator desktop shell"
 license = "Apache-2.0"
 
@@ -11,9 +14,16 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+# 单实例：第二次启动只唤醒已有窗口，不再开一份抢端口的进程
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+
+# Windows Job Object：GUI 被强杀时由内核一起带走 secs-sim.exe
+[target.'cfg(windows)'.dependencies]
+# Win32_Security 是 CreateJobObjectW 的前置（它声明在 Security 特性下）
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }
 
 [profile.release]
 strip = true

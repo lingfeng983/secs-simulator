@@ -14,8 +14,27 @@ $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
+# 版本只有一个来源：pom.xml。tauri.conf.json / Cargo.toml 必须跟它是同一个字符串，
+# 否则安装包文件名、应用版本与服务端 jar 会悄悄对不上（三处各写各的是最典型的漂移）。
 $version = (Select-String -Path (Join-Path $root 'pom.xml') -Pattern '<version>([^<]+)</version>' |
     Select-Object -First 1).Matches.Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($version)) { throw '无法从 pom.xml 读到版本号' }
+
+$confPath = Join-Path $root 'gui/src-tauri/tauri.conf.json'
+$cargoPath = Join-Path $root 'gui/src-tauri/Cargo.toml'
+
+$confVersion = (Get-Content $confPath -Raw | ConvertFrom-Json).version
+if ($confVersion -ne $version) {
+    throw "版本不一致: tauri.conf.json=$confVersion, pom.xml=$version（改 tauri.conf.json 的 version 与 pom 对齐）"
+}
+
+$cargoVersion = (Select-String -Path $cargoPath -Pattern '^version\s*=\s*"([^"]+)"' |
+    Select-Object -First 1).Matches.Groups[1].Value
+if ($cargoVersion -ne $version) {
+    throw "版本不一致: gui/src-tauri/Cargo.toml=$cargoVersion, pom.xml=$version（改 Cargo.toml 的 package.version 与 pom 对齐）"
+}
+
+Write-Host "--- version: $version（pom.xml / tauri.conf.json / Cargo.toml 一致）---"
 
 # ---- 1. 前端产物（安装程序内置，本机模式由 secs-sim.exe 托管）----
 if (-not $SkipFrontend) {
@@ -61,6 +80,11 @@ $nsisDir = Join-Path $root 'gui/src-tauri/target/release/bundle/nsis'
 $installer = Get-ChildItem $nsisDir -Filter '*-setup.exe' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $installer) { throw "NSIS 安装程序未找到: $nsisDir" }
+
+# 文件名由 Tauri 用 tauri.conf.json 的 version 拼出来；对不上说明版本又漂了。
+if ($installer.Name -notlike "*_${version}_*-setup.exe") {
+    throw "安装包文件名里没有版本 ${version}: $($installer.Name)（检查 tauri.conf.json 的 version）"
+}
 
 $packageDir = Join-Path $root 'package'
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
