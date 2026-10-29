@@ -7,6 +7,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Objects;
 
+/**
+ * ASCII 数据项（SECS-II 格式码 0x20）。
+ *
+ * <p><b>编解码固定用 US-ASCII</b>：收到 ≥0x80 的字节会变成 {@code U+FFFD}，
+ * 再编码回去是 {@code '?'}——长度不变、内容被改。SECS 的 A 项按标准就是 7 位
+ * ASCII，现场若有人往里塞 GBK/UTF-8 字节，视图与回发都会失真。</p>
+ *
+ * <p>另外 {@link #size()} 返回的是<b>字符数</b>而不是字节数：对 A 项两者相等，
+ * 但不要把 size() 当作线上的字节长度去做长度校验（历史评审在这里踩过）。</p>
+ */
 public class Secs2Ascii extends AbstractSecs2 {
 	
 	private static final long serialVersionUID = -1511335317630097868L;

@@ -46,7 +46,8 @@ public class Secs2Unicode extends AbstractSecs2 {
 	
 	@Override
 	protected String toJsonValue() {
-		return "false";
+		/* 同 JIS8：未支持解码的类型输出 null，而不是容易被误读的 false */
+		return "null";
 	}
 	
 	@Override

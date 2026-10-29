@@ -46,7 +46,9 @@ public class Secs2Jis8 extends AbstractSecs2 {
 	
 	@Override
 	protected String toJsonValue() {
-		return "false";
+		/* 未支持解码的类型输出 JSON null：原来返回字面量 false，
+		   报文详情里会显示成"false"，被误读成布尔值 */
+		return "null";
 	}
 	
 	@Override

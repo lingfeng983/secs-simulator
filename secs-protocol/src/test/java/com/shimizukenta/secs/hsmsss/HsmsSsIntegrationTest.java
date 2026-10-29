@@ -425,8 +425,8 @@ class HsmsSsIntegrationTest {
     }
 
     @Test
-    @DisplayName("a short frame (length < 10) is logged and does not break the connection")
-    void shortFrameDoesNotTerminateConnection() throws IOException {
+    @DisplayName("a short frame (length < 10) terminates the connection: the stream cannot be re-synchronized")
+    void shortFrameTerminatesConnection() throws IOException {
         int port = freePort();
 
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
@@ -436,7 +436,9 @@ class HsmsSsIntegrationTest {
 
         try ( Socket client = new Socket("127.0.0.1", port) ) {
             /* short frame: the length field declares only 5 total bytes,
-             * followed by a valid SELECT_REQ */
+             * followed by a valid SELECT_REQ. The header (10 bytes) is consumed
+             * anyway, so the next frame's bytes are already misaligned: the only
+             * safe behavior is to drop the connection. */
             byte[] shortFrame = ByteBuffer.allocate(14)
                     .putInt(5)
                     .put(controlHead((byte)0, (byte)0, 1))
@@ -450,14 +452,20 @@ class HsmsSsIntegrationTest {
                     && String.valueOf(((SecsThrowableLog) log).getCause().getMessage())
                         .contains("short frame: length=5"), 8000L);
 
-            byte[] rsp = readFrame(client, 8000);
-            assertEquals(2, rsp[5] & 0xFF, "SELECT_RSP expected: connection survived the short frame");
+            awaitCondition(() -> {
+                try {
+                    return client.getInputStream().read() < 0;   /* EOF */
+                }
+                catch ( IOException e ) {
+                    return false;
+                }
+            }, 8000L);
         }
     }
 
     @Test
-    @DisplayName("DESELECT_REQ (S-Type 3) is a supported S-Type and is not rejected")
-    void deselectReqIsNotRejectedAsUnsupportedSType() throws IOException {
+    @DisplayName("DESELECT_REQ in NOT_SELECTED is answered with status 1 (not rejected)")
+    void deselectReqInNotSelectedIsAnswered() throws IOException {
         int port = freePort();
 
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
@@ -466,24 +474,18 @@ class HsmsSsIntegrationTest {
         openPassive(config);
 
         try ( Socket client = new Socket("127.0.0.1", port) ) {
+            /* 未 SELECT 时收到 Deselect.req：E37 的状态码是 1（通信未建立），
+               但不能沉默、更不能回 REJECT——以前这里既不回也不报，对端只能等 T6。 */
             write(client, frame(10, controlHead((byte)0, (byte)3, 1)));
 
-            /* no response: S-Type 3 is valid, so no REJECT must be sent */
-            client.setSoTimeout(1500);
-            try {
-                int r = client.getInputStream().read();
-                if ( r >= 0 ) {
-                    fail("unexpected response to DESELECT_REQ, first byte " + r);
-                }
-                fail("connection closed unexpectedly");
-            }
-            catch ( SocketTimeoutException expected ) {
-            }
+            byte[] rsp = readFrame(client, 3000);
+            assertEquals(4, rsp[5] & 0xFF, "DESELECT_RSP expected");
+            assertEquals(1, rsp[3] & 0xFF, "status must be 1 when not selected");
 
             /* the connection is still usable: LINKTEST_REQ is answered */
             write(client, frame(10, controlHead((byte)0, (byte)5, 2)));
-            byte[] rsp = readFrame(client, 8000);
-            assertEquals(6, rsp[5] & 0xFF, "LINKTEST_RSP expected");
+            byte[] linkRsp = readFrame(client, 8000);
+            assertEquals(6, linkRsp[5] & 0xFF, "LINKTEST_RSP expected");
         }
     }
 
@@ -552,6 +554,72 @@ class HsmsSsIntegrationTest {
     }
 
     @Test
+    @DisplayName("a second TCP connection must not unregister the selected link")
+    void secondConnectionDoesNotUnregisterSelectedLink() throws Exception {
+        int port = freePort();
+
+        HsmsSsCommunicatorConfig passiveConfig = new HsmsSsCommunicatorConfig();
+        passiveConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        HsmsSsCommunicator passive = openPassive(passiveConfig);
+
+        List<Boolean> communicatable = new CopyOnWriteArrayList<>();
+        passive.addSecsCommunicatableStateChangeListener(communicatable::add);
+        passive.addSecsMessageReceiveListener(msg -> {
+            try {
+                passive.send(msg, 1, 2, false, Secs2.ascii("PONG"));
+            }
+            catch ( Exception ignore ) {
+            }
+        });
+
+        HsmsSsCommunicatorConfig activeConfig = new HsmsSsCommunicatorConfig();
+        activeConfig.protocol(HsmsSsProtocol.ACTIVE);
+        activeConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        activeConfig.timeout().t3(3F);
+        activeConfig.timeout().t5(1F);
+        activeConfig.timeout().t6(3F);
+        activeConfig.timeout().t8(30F);
+        HsmsSsCommunicator active = HsmsSsCommunicator.newInstance(activeConfig);
+        communicators.add(active);
+        active.open();
+
+        try {
+            active.openAndWaitUntilCommunicating();
+            awaitCondition(() -> communicatable.contains(Boolean.TRUE), 5000L);
+            final int firstTrue = communicatable.indexOf(Boolean.TRUE);
+
+            /* 第二条连接：SELECT 被拒（ALREADY_USED）后立即关闭。
+               修复前，这条连接结束时的 finally 会把它"自己"当成选中连接注销掉，
+               把 active 已经建立的链路打成 NOT_CONNECTED。 */
+            try ( Socket second = new Socket("127.0.0.1", port) ) {
+                write(second, frame(10, controlHead((byte)0, (byte)1, 7)));
+                byte[] rsp = readFrame(second, 8000);
+                assertEquals(2, rsp[5] & 0xFF, "SELECT_RSP expected");
+                assertEquals(3, rsp[3] & 0xFF, "ALREADY_USED expected");
+            }
+
+            /* 给被动端时间走完第二条连接的 EOF 清理（mainTask 的 finally） */
+            sleep(800L);
+
+            assertTrue(communicatable.subList(firstTrue, communicatable.size())
+                            .stream().allMatch(Boolean::booleanValue),
+                    "closing another connection must not flip the selected link to NOT_CONNECTED: "
+                            + communicatable);
+
+            /* 修复前这里会抛 NotConnected：getSelectedConnection() 已被置空 */
+            passive.send(1, 1, false, Secs2.ascii("STILL-ALIVE"));
+
+            Optional<SecsMessage> r = active.send(1, 1, true, Secs2.ascii("PING"));
+            assertTrue(r.isPresent(), "the selected link must still carry transactions");
+            assertEquals("PONG", r.get().secs2().getAscii());
+        }
+        finally {
+            active.close();
+            passive.close();
+        }
+    }
+
+    @Test
     @DisplayName("deviceId >= 0x8000 travels through a real active session")
     void highDeviceIdSession() throws Exception {
         int port = freePort();
@@ -592,4 +660,44 @@ class HsmsSsIntegrationTest {
             passive.close();
         }
     }
+
+    @Test
+    @DisplayName("DESELECT.req is answered and releases the selection before the connection closes")
+    void deselectReqIsAnsweredAndReleasesSelection() throws Exception {
+        int port = freePort();
+
+        HsmsSsCommunicatorConfig passiveConfig = new HsmsSsCommunicatorConfig();
+        passiveConfig.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        passiveConfig.timeout().t6(3F);
+        openPassive(passiveConfig);
+
+        try ( Socket socket = new Socket("127.0.0.1", port) ) {
+            socket.setTcpNoDelay(true);
+
+            write(socket, frame(10, controlHead((byte)0, (byte)1, 900)));
+            byte[] selectRsp = readFrame(socket, 3000);
+            assertEquals(2, selectRsp[5] & 0xFF, "SELECT.rsp expected");
+            assertEquals(0, selectRsp[3] & 0xFF, "SELECT status must be 0");
+
+            /* E37 7.4：SELECTED 态收到 Deselect.req 必须回 Deselect.rsp。
+               修复前这里落到 default 分支，什么也不发，对端只能等 T6 超时。 */
+            write(socket, frame(10, controlHead((byte)0, (byte)3, 901)));
+            byte[] deselectRsp = readFrame(socket, 3000);
+            assertEquals(4, deselectRsp[5] & 0xFF, "DESELECT.rsp expected");
+            assertEquals(0, deselectRsp[3] & 0xFF, "DESELECT status must be 0");
+            assertEquals(901,
+                    ((deselectRsp[6] & 0xFF) << 24) | ((deselectRsp[7] & 0xFF) << 16)
+                    | ((deselectRsp[8] & 0xFF) << 8) | (deselectRsp[9] & 0xFF),
+                    "Deselect.rsp must reuse the request system bytes");
+
+            /* 同一 TCP 连接上重新 SELECT：修复前 selectedConnection 没释放，
+               这里会拿到 ALREADY_USED(3)，现场表现为"必须重开会话才能连上"。 */
+            write(socket, frame(10, controlHead((byte)0, (byte)1, 902)));
+            byte[] secondSelect = readFrame(socket, 3000);
+            assertEquals(2, secondSelect[5] & 0xFF, "second SELECT.rsp expected");
+            assertEquals(0, secondSelect[3] & 0xFF,
+                    "selection must be released by Deselect (got ALREADY_USED?)");
+        }
+    }
+
 }

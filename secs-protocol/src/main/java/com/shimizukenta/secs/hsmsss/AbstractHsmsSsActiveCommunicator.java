@@ -254,8 +254,14 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 				notifyLog(t);
 			}
 			finally {
-				notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.NOT_CONNECTED);
-				removeSelectedConnection(this);
+				/* 先注销再降级（通知在原子方法内部完成）：反过来会让 send() 在
+				   "状态还没降、连接已关"的窗口里报成写失败，而不是语义正确的"未连接"。 */
+				if ( ! removeSelectedConnection(this)
+						&& hsmsSsCommunicateState() == HsmsSsCommunicateState.NOT_SELECTED ) {
+					/* Deselect 之后连接关闭：从 NOT_SELECTED 收尾到 NOT_CONNECTED。
+					   选中连接结束时，removeSelectedConnection 内部已经发过 NOT_CONNECTED。 */
+					notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.NOT_CONNECTED);
+				}
 			}
 			
 		}
@@ -274,7 +280,9 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 				}
 				case SELECT_REQ: {
 					
-					send(createRejectRequest(msg, HsmsSsMessageRejectReason.NOT_SUPPORT_TYPE_S));
+					/* SELECT.req 是合法的 S-Type：主动端本就已经建立了选中连接，
+					   应回 Select.rsp(ACTIVED)，而不是用"不支持的 SType"误导对端排障 */
+					send(createSelectResponse(msg, HsmsSsMessageSelectStatus.ACTIVED));
 					break;
 				}
 				case LINKTEST_REQ: {
@@ -288,13 +296,20 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 					/* break; */
 				}
 				case SELECT_RSP:
-				case DESELECT_REQ:
 				case DESELECT_RSP:
 				case LINKTEST_RSP:
 				case REJECT_REQ:
 				default: {
 					
 					/* ignore */
+				}
+				case DESELECT_REQ: {
+					
+					/* E37 7.4：收到 Deselect.req 必须应答并离开 SELECTED。
+					   主动端随后会关闭连接并按 T5 重连，所以这里只降状态、不拆链路。 */
+					send(createDeselectResponse(msg));
+					removeSelectedConnection(this, HsmsSsCommunicateState.NOT_SELECTED);
+					return;
 				}
 				}
 			}

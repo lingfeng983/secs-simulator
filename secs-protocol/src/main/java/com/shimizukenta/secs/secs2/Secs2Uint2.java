@@ -41,7 +41,7 @@ public class Secs2Uint2 extends Secs2BigInteger {
 
 	@Override
 	protected void byteBufferPutter(ByteBuffer bf, BigInteger value) {
-		bf.putShort(value.shortValue());
+		bf.putShort((short)unsignedValue(value, 2));
 	}
 
 	@Override

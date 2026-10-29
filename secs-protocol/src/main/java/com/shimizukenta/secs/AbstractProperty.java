@@ -33,11 +33,16 @@ public abstract class AbstractProperty<T> implements Property<T>, Serializable {
 	
 	@Override
 	public void set(T v) {
+		boolean changed;
 		synchronized ( sync ) {
-			if ( ! Objects.equals(v, this.present) ) {
+			changed = ! Objects.equals(v, this.present);
+			if ( changed ) {
 				this.present = v;
-				notifyChanged();
+				sync.notifyAll();
 			}
+		}
+		if ( changed ) {
+			dispatch(v);
 		}
 	}
 	
@@ -45,28 +50,44 @@ public abstract class AbstractProperty<T> implements Property<T>, Serializable {
 	
 	@Override
 	public boolean addChangeListener(PropertyChangeListener<? super T> l) {
+		final boolean f;
+		final T current;
 		synchronized ( sync ) {
-			boolean f = listeners.add(l);
-			if ( f ) {
-				l.changed(get());
-			}
-			return f;
+			f = listeners.add(l);
+			current = this.present;
 		}
+		/* 回调在锁外：监听器里再 get/set 同一属性不会与本锁互相等待 */
+		if ( f ) {
+			notifyOne(l, current);
+		}
+		return f;
 	}
 	
 	@Override
 	public boolean removeChangeListener(PropertyChangeListener<? super T> l) {
-		synchronized ( sync ) {
-			return listeners.remove(l);
-		}
+		return listeners.remove(l);
 	}
 	
 	protected void notifyChanged() {
+		final T current;
 		synchronized ( sync ) {
-			listeners.forEach(l -> {
-				l.changed(get());
-			});
+			current = this.present;
 			sync.notifyAll();
+		}
+		dispatch(current);
+	}
+	
+	/** 逐个派发；单个监听器抛异常不能中断状态迁移链。 */
+	private void dispatch(T value) {
+		listeners.forEach(l -> notifyOne(l, value));
+	}
+	
+	private static <T> void notifyOne(PropertyChangeListener<? super T> listener, T value) {
+		try {
+			listener.changed(value);
+		}
+		catch ( RuntimeException ignore ) {
+			/* 监听器自己的错误由它负责；这里保住属性状态机 */
 		}
 	}
 	

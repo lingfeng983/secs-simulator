@@ -1,6 +1,7 @@
 package com.shimizukenta.secs;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Objects;
@@ -40,13 +41,17 @@ public abstract class AbstractCollectionProperty<T>
 	
 	@Override
 	public boolean addChangeListener(PropertyChangeListener<? super Collection<T>> listener) {
+		boolean f;
+		Collection<T> current;
 		synchronized ( sync ) {
-			boolean f = listeners.add(listener);
-			if ( f ) {
-				listener.changed(get());
-			}
-			return f;
+			f = listeners.add(listener);
+			current = new ArrayList<>(this.vv);
 		}
+		/* 回调在锁外：监听器里再读属性/改属性不会和这里的锁互相等 */
+		if ( f ) {
+			notifyOne(listener, current);
+		}
+		return f;
 	}
 
 	@Override
@@ -55,11 +60,21 @@ public abstract class AbstractCollectionProperty<T>
 	}
 	
 	protected void notifyChanged() {
+		Collection<T> snapshot;
 		synchronized ( sync ) {
-			listeners.forEach(l -> {
-				l.changed(get());
-			});
+			snapshot = new ArrayList<>(this.vv);
 			sync.notifyAll();
+		}
+		listeners.forEach(l -> notifyOne(l, snapshot));
+	}
+	
+	/** 单个监听器的回调；异常只影响它自己，不能中断状态迁移链。 */
+	private static <T> void notifyOne(PropertyChangeListener<? super Collection<T>> listener, Collection<T> value) {
+		try {
+			listener.changed(value);
+		}
+		catch ( RuntimeException ignore ) {
+			/* 监听器自己的错误由它负责；这里保住属性状态机 */
 		}
 	}
 	
@@ -146,66 +161,74 @@ public abstract class AbstractCollectionProperty<T>
 	
 	@Override
 	public boolean add(T v) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.add(v);
-			notifyChanged(f);
-			return f;
+			f = vv.add(v);
 		}
+		notifyChanged(f);
+		return f;
 	}
 
 	@Override
 	public boolean remove(Object o) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.remove(o);
-			notifyChanged(f);
-			return f;
+			f = vv.remove(o);
 		}
+		notifyChanged(f);
+		return f;
 	}
 
 	@Override
 	public boolean addAll(Collection<? extends T> c) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.addAll(c);
-			notifyChanged(f);
-			return f;
+			f = vv.addAll(c);
 		}
+		notifyChanged(f);
+		return f;
 	}
 
 	@Override
 	public boolean removeAll(Collection<?> c) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.removeAll(c);
-			notifyChanged(f);
-			return f;
+			f = vv.removeAll(c);
 		}
+		notifyChanged(f);
+		return f;
 	}
 
 	@Override
 	public boolean retainAll(Collection<?> c) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.retainAll(c);
-			notifyChanged(f);
-			return f;
+			f = vv.retainAll(c);
 		}
+		notifyChanged(f);
+		return f;
 	}
 	
 	@Override
 	public void clear() {
+		boolean changed;
 		synchronized ( sync ) {
-			if ( ! isEmpty() ) {
-				vv.clear();
-				notifyChanged();
-			}
+			changed = ! vv.isEmpty();
+			vv.clear();
+		}
+		if ( changed ) {
+			notifyChanged();
 		}
 	}
 	
 	@Override
 	public boolean removeIf(Predicate<? super T> filter) {
+		boolean f;
 		synchronized ( sync ) {
-			boolean f = vv.removeIf(filter);
-			notifyChanged(f);
-			return f;
+			f = vv.removeIf(filter);
 		}
+		notifyChanged(f);
+		return f;
 	}
 	
 	

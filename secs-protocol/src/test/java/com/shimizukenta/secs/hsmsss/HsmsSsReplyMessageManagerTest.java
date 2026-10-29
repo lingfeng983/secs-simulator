@@ -31,6 +31,11 @@ class HsmsSsReplyMessageManagerTest {
         return functionMessage(1, 2, systemBytes);
     }
 
+    /** S1F1：真正的 primary（odd function），它的应答是 S1F2。 */
+    private static HsmsSsMessage primaryMessage(int systemBytes) {
+        return functionMessage(1, 1, systemBytes);
+    }
+
     private static HsmsSsMessage functionMessage(int stream, int function, int systemBytes) {
         return new HsmsSsMessage(new byte[] {
                 0, 1, (byte) stream, (byte) function, 0, 0,
@@ -64,6 +69,23 @@ class HsmsSsReplyMessageManagerTest {
     }
 
     @Test
+    @DisplayName("control frame reply (SELECT.rsp) with matching system-bytes is delivered")
+    void controlReplyIsDelivered() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage selectReq = new HsmsSsMessage(new byte[] {
+                (byte) 0xFF, (byte) 0xFF, 0, 0, 0, 1, 0, 0, 0, 1
+        });
+        mgr.entry(selectReq);
+
+        HsmsSsMessage selectRsp = new HsmsSsMessage(new byte[] {
+                (byte) 0xFF, (byte) 0xFF, 0, 0, 0, 2, 0, 0, 0, 1
+        });
+        assertTrue(mgr.put(selectRsp).isEmpty(), "control reply must be routed by system-bytes");
+        assertTrue(mgr.reply(selectReq, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
+    @Test
     @DisplayName("control frames are not routed into reply matching")
     void controlFrameIsNotTreatedAsReply() {
         HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
@@ -75,12 +97,35 @@ class HsmsSsReplyMessageManagerTest {
         assertTrue(mgr.put(selectReq).isPresent());
     }
 
+    /**
+     * 同 SystemBytes 的两条事务：先结束的那条不能把后一条的 Pack 删掉。
+     *
+     * <p>SystemBytes 只有 16 位，回绕后 key 必然重合；exit 按 key 直删会让另一条
+     * 在途事务失去等待对象，只能干等一个 T3。</p>
+     */
+    @Test
+    @DisplayName("exit only removes the pack registered by that very primary")
+    void exitDoesNotRemoveAnotherTransactionsPack() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage first = primaryMessage(5);
+        HsmsSsMessage second = primaryMessage(5);
+
+        mgr.entry(first);
+        mgr.entry(second);
+        mgr.exit(first);
+
+        assertTrue(mgr.put(dataMessage(5)).isEmpty(),
+                "第二条事务的应答仍必须被消费：exit(first) 不得删掉它的 Pack");
+        assertTrue(mgr.reply(second, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
     @Test
     @DisplayName("reply is delivered to the waiting transaction")
     void replyIsDeliveredToMatchingTransaction() throws InterruptedException {
         HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
 
-        HsmsSsMessage primary = dataMessage(1);
+        HsmsSsMessage primary = primaryMessage(1);
         mgr.entry(primary);
 
         assertTrue(mgr.put(dataMessage(1)).isEmpty(), "reply must be consumed");
@@ -95,7 +140,7 @@ class HsmsSsReplyMessageManagerTest {
     void lateReplyAfterExitIsNotDelivered() {
         HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
 
-        HsmsSsMessage primary = dataMessage(1);
+        HsmsSsMessage primary = primaryMessage(1);
         mgr.entry(primary);
         mgr.exit(primary);
 
@@ -127,7 +172,7 @@ class HsmsSsReplyMessageManagerTest {
     void replyTimesOut() throws InterruptedException {
         HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
 
-        HsmsSsMessage primary = dataMessage(1);
+        HsmsSsMessage primary = primaryMessage(1);
         mgr.entry(primary);
 
         Optional<HsmsSsMessage> r = mgr.reply(primary, 100L, TimeUnit.MILLISECONDS);

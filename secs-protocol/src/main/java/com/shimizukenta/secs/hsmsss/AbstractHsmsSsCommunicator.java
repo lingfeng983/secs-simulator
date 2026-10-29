@@ -11,6 +11,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -30,6 +31,7 @@ import com.shimizukenta.secs.secs2.Secs2BytesPack;
 import com.shimizukenta.secs.secs2.Secs2BytesPackBuilder;
 import com.shimizukenta.secs.secs2.Secs2BytesParser;
 import com.shimizukenta.secs.secs2.Secs2Exception;
+import com.shimizukenta.secs.secs2.Secs2ValueOutOfRangeException;
 
 /**
  * This abstract class is implementation of HSMS-SS (SEMI-E37.1).
@@ -111,14 +113,42 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		}
 	}
 	
+	/**
+	 * 注销选中的连接。
+	 *
+	 * <p><b>必须比对引用</b>：被动端每条 TCP 连接结束时都会调用这里，
+	 * 若不加判断，任意第二条连接（端口扫描、主机重连重叠、空闲探测）结束
+	 * 都会把<b>另一条</b>已 SELECTED 的链路注销掉，表现为"假掉线"：
+	 * 本端 {@code send()} 抛 NotConnected，主机侧却仍以为链路是 SELECTED。
+	 * </p>
+	 *
+	 * @param c 正在结束的连接
+	 * @return 确实注销了这条连接返回 {@code true}；它不是当前选中连接时返回 {@code false}
+	 */
 	protected boolean removeSelectedConnection(AbstractInnerConnection c) {
+		return removeSelectedConnection(c, HsmsSsCommunicateState.NOT_CONNECTED);
+	}
+	
+	/**
+	 * 注销选中的连接，并在<b>同一临界区</b>内把状态迁移到目标值。
+	 *
+	 * <p>只把 {@code selectedConnection} 置空、通知留在锁外的话，存在这个交错：
+	 * A 移除自己并返回 → 线程被抢占 → B 登记成功并发出 SELECTED → A 回来发
+	 * NOT_CONNECTED，最终 {@code selectedConnection == B} 但状态是 NOT_CONNECTED、
+	 * {@code communicatable()} 为 false，直到 B 断开都不会自愈。</p>
+	 *
+	 * @param c 正在结束的连接
+	 * @param targetState 注销成功后要迁移到的状态
+	 * @return 确实注销了这条连接返回 {@code true}
+	 */
+	protected boolean removeSelectedConnection(AbstractInnerConnection c, HsmsSsCommunicateState targetState) {
 		synchronized ( this.syncSelectedConnection ) {
-			if ( this.selectedConnection == null ) {
+			if ( this.selectedConnection == null || this.selectedConnection != c ) {
 				return false;
-			} else {
-				this.selectedConnection = null;
-				return true;
 			}
+			this.selectedConnection = null;
+			notifyHsmsSsCommunicateStateChange(targetState);
+			return true;
 		}
 	}
 	
@@ -313,6 +343,20 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 	
 	@Override
 	public HsmsSsMessage createDeselectResponse(HsmsSsMessage primary) {
+		return createDeselectResponse(primary, (byte)0);
+	}
+	
+	/**
+	 * 构造 Deselect.rsp，并指定第 4 字节的状态码。
+	 *
+	 * <p>E37 定义：0 = 通信已结束（Deselect 成功）；1 = 通信未建立（尚未 Select 或已 Deselect）。
+	 * 未选中时收到 Deselect.req 必须回 1，而不是沉默或回 0。</p>
+	 *
+	 * @param primary 收到的 Deselect.req
+	 * @param status 状态码（0 成功 / 1 未建立）
+	 * @return 应答
+	 */
+	protected HsmsSsMessage createDeselectResponse(HsmsSsMessage primary, byte status) {
 		
 		HsmsSsMessageType mt = HsmsSsMessageType.DESELECT_RSP;
 		byte[] pri = primary.header10Bytes();
@@ -321,7 +365,7 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 				pri[0],
 				pri[1],
 				(byte)0,
-				(byte)0,
+				status,
 				mt.pType(),
 				mt.sType(),
 				pri[6],
@@ -415,7 +459,10 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 			this.linktestResetted = false;
 		}
 		
-		private final BlockingQueue<HsmsSsMessage> recvMsgQueue = new LinkedBlockingQueue<>();
+		/** 单连接待分派队列的上限：满时丢最旧，绝不阻塞读线程（否则会把应答也一起卡住）。 */
+	private static final int RECV_QUEUE_CAPACITY = 1024;
+	
+	private final BlockingQueue<HsmsSsMessage> recvMsgQueue = new LinkedBlockingQueue<>(RECV_QUEUE_CAPACITY);
 		
 		protected HsmsSsMessage takeReceiveMessage() throws InterruptedException {
 			return this.recvMsgQueue.take();
@@ -587,21 +634,37 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 			catch ( Secs2BuildException | HsmsSsDetectTerminateException e ) {
 				throw new HsmsSsSendMessageException(msg, e);
 			}
+			catch ( Secs2ValueOutOfRangeException e ) {
+				/* 值域校验抛的是非受检异常（bytes() 的签名不声明受检异常），
+				   而 send() 只承诺 SecsSendMessageException。这里统一包一层，
+				   避免“编码失败”以 RuntimeException 穿透调用方。 */
+				throw new HsmsSsSendMessageException(msg, e);
+			}
 		}
 		
 		private void innerSend(ByteBuffer buffer)
 				throws ExecutionException, HsmsSsDetectTerminateException, InterruptedException {
+			
+			/* 写超时：对端停止读取（TCP 零窗口）时 channel.write 的 future 永远不完成，
+			   发送线程会被永久占住。用 T6（控制事务超时，默认 5 秒）作为单次写上限，
+			   超时按终止异常断链——这比"永远不返回"更接近现场期望。 */
+			final long writeTimeoutMs = Math.max(1000L,
+					(long)(AbstractHsmsSsCommunicator.this.hsmsSsConfig().timeout().t6().floatValue() * 1000.0F));
 			
 			while ( buffer.hasRemaining() ) {
 				
 				final Future<Integer> f = this.channel.write(buffer);
 				
 				try {
-					int w = f.get().intValue();
+					int w = f.get(writeTimeoutMs, TimeUnit.MILLISECONDS).intValue();
 					
 					if ( w <= 0 ) {
 						throw new HsmsSsDetectTerminateException();
 					}
+				}
+				catch ( TimeoutException e ) {
+					f.cancel(true);
+					throw new HsmsSsDetectTerminateException("write timeout: " + writeTimeoutMs + " ms");
 				}
 				catch ( InterruptedException e ) {
 					f.cancel(true);
@@ -649,10 +712,11 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 				if ( len < 0L ) {
 					
 					/* Short frame: the declared length is less than the 10-bytes header.
-					 * Keep scanning for the next frame instead of breaking the connection,
-					 * and log it because a well-formed peer never sends such a frame. */
-					notifyLog(new Secs2Exception("short frame: length=" + (len + 10L)));
-					continue;
+					 * The 10-bytes header has already been consumed, so the stream position
+					 * is lost: continuing would reinterpret the next frame's bytes as a
+					 * length and never re-synchronize. Terminate like the too-long case. */
+					throw new HsmsSsDetectTerminateException(
+							"short frame: length=" + (len + 10L));
 				}
 				
 				if ( len > hsmsSsConfig().maxMessageBytes().longValue() ) {
@@ -699,7 +763,12 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 						
 						HsmsSsMessage r = replyMgr.put(msg).orElse(null);
 						if ( r != null ) {
-							this.recvMsgQueue.put(r);
+							/* 有界 + 丢最旧：无界队列在对端刷报文而消费端变慢时会吃光堆；
+							   用 put 阻塞读线程又会把 W 位的应答一起卡死（自锁）。 */
+							if ( ! this.recvMsgQueue.offer(r) ) {
+								this.recvMsgQueue.poll();
+								this.recvMsgQueue.offer(r);
+							}
 						}
 					}
 					catch ( Secs2Exception e ) {

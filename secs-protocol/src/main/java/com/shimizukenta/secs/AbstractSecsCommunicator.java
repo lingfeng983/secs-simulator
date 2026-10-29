@@ -36,16 +36,40 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return execServ;
 	}
 	
-	protected static Runnable createLoopTask(InterruptableRunnable task) {
+	/**
+	 * 把循环任务包成"不会死"的 Runnable。
+	 *
+	 * <p>原实现只捕 {@code InterruptedException}：任一监听器抛 RuntimeException
+	 * 就会终结这条分发线程。线程一死，队列只进不出——报文不再分派、堆一路涨到
+	 * OOM，而界面上看不到任何异常。这里记录后继续，并睡一下避免持续性故障
+	 * 变成忙等自旋。
+	 * </p>
+	 *
+	 * @param task 单次任务
+	 * @return 循环任务
+	 */
+	protected Runnable createLoopTask(InterruptableRunnable task) {
 		return new Runnable() {
 			@Override
 			public void run() {
-				try {
-					for ( ;; ) {
+				for ( ;; ) {
+					try {
 						task.run();
 					}
-				}
-				catch ( InterruptedException ignore ) {
+					catch ( InterruptedException e ) {
+						Thread.currentThread().interrupt();
+						return;
+					}
+					catch ( RuntimeException e ) {
+						notifyLog(e);
+						try {
+							Thread.sleep(50L);
+						}
+						catch ( InterruptedException ie ) {
+							Thread.currentThread().interrupt();
+							return;
+						}
+					}
 				}
 			}
 		};
@@ -213,17 +237,47 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return msgRecvListeners.remove(Objects.requireNonNull(l));
 	}
 	
-	private final BlockingQueue<SecsMessage> msgRecvQueue = new LinkedBlockingQueue<>();
+	/**
+	 * 报文队列上限。
+	 *
+	 * <p>无界队列在下游变慢或分发线程异常时只会把堆吃光（单条 8 MB 上限挡不住
+	 * 累积）。超限时丢最旧的一条：宁可少几条历史，也不能让设备 OOM。
+	 * W 位请求被丢时用户会看到 T3 超时，这是过载下应有的降级。
+	 * </p>
+	 */
+	private static final int MSG_QUEUE_CAPACITY = 8192;
+
+	/** 日志队列上限：日志比报文更可丢。 */
+	private static final int LOG_QUEUE_CAPACITY = 4096;
+
+	/** 入队；满了丢最旧再来一次。 */
+	private static <T> boolean offerDroppingOldest(BlockingQueue<T> queue, T value) {
+		if ( queue.offer(value) ) {
+			return true;
+		}
+		queue.poll();
+		return queue.offer(value);
+	}
+
+	private final BlockingQueue<SecsMessage> msgRecvQueue = new LinkedBlockingQueue<>(MSG_QUEUE_CAPACITY);
 	
 	private void executeMsgRecvQueueTask() {
 		executeLoopTask(() -> {
 			SecsMessage msg = msgRecvQueue.take();
-			msgRecvListeners.forEach(l -> {l.received(msg);});
+			msgRecvListeners.forEach(l -> {
+				/* 单个监听器的异常不能连累其它监听器与后续报文 */
+				try {
+					l.received(msg);
+				}
+				catch ( RuntimeException e ) {
+					notifyLog(e);
+				}
+			});
 		});
 	}
 	
 	protected final boolean offerMsgRecvQueue(SecsMessage msg) {
-		return msgRecvQueue.offer(msg);
+		return offerDroppingOldest(msgRecvQueue, msg);
 	}
 	
 	protected void notifyReceiveMessage(SecsMessage msg) {
@@ -244,7 +298,7 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return logListeners.remove(Objects.requireNonNull(l));
 	}
 	
-	private final BlockingQueue<SecsLog> logQueue = new LinkedBlockingQueue<>();
+	private final BlockingQueue<SecsLog> logQueue = new LinkedBlockingQueue<>(LOG_QUEUE_CAPACITY);
 	
 	private void executeLogQueueTask() {
 		
@@ -253,9 +307,7 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 			try {
 				for ( ;; ) {
 					final SecsLog log = logQueue.take();
-					logListeners.forEach(l -> {
-						l.received(log);
-					});
+					dispatchLog(log);
 				}
 			}
 			catch ( InterruptedException ignore ) {
@@ -268,9 +320,7 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 					if ( log == null ) {
 						break;
 					}
-					logListeners.forEach(l -> {
-						l.received(log);
-					});
+					dispatchLog(log);
 				}
 			}
 			catch ( InterruptedException ignore ) {
@@ -278,8 +328,20 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		});
 	}
 	
+	/** 逐条投递日志；单个监听器抛异常不能被当成"没写日志"而写入日志队列（自我递归）。 */
+	private void dispatchLog(SecsLog log) {
+		logListeners.forEach(l -> {
+			try {
+				l.received(log);
+			}
+			catch ( RuntimeException ignore ) {
+				/* 记录日志的监听器自己出错时没有更安全的去处，忽略以保住分发线程 */
+			}
+		});
+	}
+	
 	protected final boolean offerLogQueue(AbstractSecsLog log) {
-		return logQueue.offer(log);
+		return offerDroppingOldest(logQueue, log);
 	}
 	
 	protected void notifyLog(AbstractSecsLog log) {
@@ -327,17 +389,24 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return trySendMsgPassThroughListeners.remove(Objects.requireNonNull(l));
 	}
 	
-	private BlockingQueue<SecsMessage> trySendMsgPassThroughQueue = new LinkedBlockingQueue<>();
+	private final BlockingQueue<SecsMessage> trySendMsgPassThroughQueue = new LinkedBlockingQueue<>(MSG_QUEUE_CAPACITY);
 	
 	private void executeTrySendMsgPassThroughQueueTask() {
 		executeLoopTask(() -> {
 			SecsMessage msg = trySendMsgPassThroughQueue.take();
-			trySendMsgPassThroughListeners.forEach(l -> {l.passThrough(msg);});
+			trySendMsgPassThroughListeners.forEach(l -> {
+				try {
+					l.passThrough(msg);
+				}
+				catch ( RuntimeException e ) {
+					notifyLog(e);
+				}
+			});
 		});
 	}
 	
 	protected final boolean offerTrySendMsgPassThroughQueue(SecsMessage msg) {
-		return trySendMsgPassThroughQueue.offer(msg);
+		return offerDroppingOldest(trySendMsgPassThroughQueue, msg);
 	}
 	
 	protected void notifyTrySendMessagePassThrough(SecsMessage msg) {
@@ -358,17 +427,24 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return sendedMsgPassThroughListeners.remove(Objects.requireNonNull(l));
 	}
 	
-	private final BlockingQueue<SecsMessage> sendedMsgPassThroughQueue = new LinkedBlockingQueue<>();
+	private final BlockingQueue<SecsMessage> sendedMsgPassThroughQueue = new LinkedBlockingQueue<>(MSG_QUEUE_CAPACITY);
 	
 	private void executeSendedMsgPassThroughQueueTask() {
 		executeLoopTask(() -> {
 			SecsMessage msg = sendedMsgPassThroughQueue.take();
-			sendedMsgPassThroughListeners.forEach(l -> {l.passThrough(msg);});
+			sendedMsgPassThroughListeners.forEach(l -> {
+				try {
+					l.passThrough(msg);
+				}
+				catch ( RuntimeException e ) {
+					notifyLog(e);
+				}
+			});
 		});
 	}
 	
 	protected final boolean offerSendedMsgPassThroughQueue(SecsMessage msg) {
-		return sendedMsgPassThroughQueue.offer(msg);
+		return offerDroppingOldest(sendedMsgPassThroughQueue, msg);
 	}
 	
 	protected void notifySendedMessagePassThrough(SecsMessage msg) {
@@ -389,17 +465,24 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		return recvMsgPassThroughListeners.remove(Objects.requireNonNull(l));
 	}
 	
-	private final BlockingQueue<SecsMessage> recvMsgPassThroughQueue = new LinkedBlockingQueue<>();
+	private final BlockingQueue<SecsMessage> recvMsgPassThroughQueue = new LinkedBlockingQueue<>(MSG_QUEUE_CAPACITY);
 	
 	private void executeRecvMsgPassThroughQueueTask() {
 		executeLoopTask(() -> {
 			SecsMessage msg = recvMsgPassThroughQueue.take();
-			recvMsgPassThroughListeners.forEach(l -> {l.passThrough(msg);});
+			recvMsgPassThroughListeners.forEach(l -> {
+				try {
+					l.passThrough(msg);
+				}
+				catch ( RuntimeException e ) {
+					notifyLog(e);
+				}
+			});
 		});
 	}
 	
 	protected final boolean offerRecvMsgPassThroughQueue(SecsMessage msg) {
-		return recvMsgPassThroughQueue.offer(msg);
+		return offerDroppingOldest(recvMsgPassThroughQueue, msg);
 	}
 	
 	protected void notifyReceiveMessagePassThrough(SecsMessage msg) {

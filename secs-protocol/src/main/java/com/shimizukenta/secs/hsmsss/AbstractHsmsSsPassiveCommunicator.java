@@ -45,7 +45,19 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 		
 		super.open();
 		
-		passiveOpen();
+		try {
+			passiveOpen();
+		}
+		catch ( IOException e ) {
+			/* super.open() 已经置 opened 并起了 5 条分发线程：绑定失败必须自己回滚。
+			   否则调用方拿到异常，却留下一个“半个打开”的通信器（线程与 channel 泄漏）。 */
+			try {
+				close();
+			}
+			catch ( IOException giveup ) {
+			}
+			throw e;
+		}
 	}
 	
 	@Override
@@ -209,94 +221,110 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 		protected void mainTask() throws InterruptedException {
 			
 			try {
-				
-				{
-					final Collection<Callable<Boolean>> tasks = Arrays.asList(
-							() -> {
-								try {
-									return connectTask();
-								}
-								catch ( InterruptedException ignore ) {
-								}
-								
-								return Boolean.FALSE;
-							}
-							);
+				for ( ;; ) {
 					
-					try {
-						boolean f = executeInvokeAny(
-								tasks,
-								hsmsSsConfig().timeout().t7()
-								).booleanValue();
-						
-						if ( f ) {
-							
-							/* SELECTED */
-							notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.SELECTED);
-							
-						} else {
-							
-							return;
-						}
-					}
-					catch ( TimeoutException e ) {
-						notifyLog(new HsmsSsTimeoutT7Exception(e));
+					if ( ! awaitSelect() ) {
 						return;
 					}
-					catch ( ExecutionException e ) {
-						
-						Throwable t = e.getCause();
-						
-						if ( t instanceof RuntimeException ) {
-							throw (RuntimeException)t;
-						}
-						
-						notifyLog(t);
+					
+					notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.SELECTED);
+					
+					if ( ! runSelectedTasks() ) {
 						return;
 					}
-				}
-				
-				{
-					final Collection<Callable<Void>> tasks = Arrays.asList(
-							() -> {
-								try {
-									selectedTask();
-								}
-								catch ( InterruptedException ignore ) {
-								}
-								catch ( SecsException e ) {
-									notifyLog(e);
-								}
-								return null;
-							},
-							() -> {
-								try {
-									linktesting();
-								}
-								catch ( InterruptedException ignore ) {
-								}
-								return null;
-							}
-							);
-					
-					try {
-						executeInvokeAny(tasks);
-					}
-					catch ( ExecutionException e ) {
-						
-						Throwable t = e.getCause();
-						
-						if ( t instanceof RuntimeException ) {
-							throw (RuntimeException)t;
-						}
-						
-						notifyLog(t);
-					}
+					/* Deselect：已回 Deselect.rsp 并降为 NOT_SELECTED，TCP 保持不动，
+					   回到等 SELECT——主机经常在 Deselect 后立刻重新 Select。 */
 				}
 			}
 			finally {
-				notifyHsmsSsCommunicateStateChange(HsmsSsCommunicateState.NOT_CONNECTED);
+				/* 状态由"当前选中连接"派生：只有选中连接自己结束时才降级。
+				   第二条 TCP（扫描/重连重叠/空闲探测）结束不能影响已选中的链路。
+				   降级与通知在 removeSelectedConnection 里原子完成。 */
 				removeSelectedConnection(this);
+			}
+		}
+		
+		/** 等到本连接被 SELECT（T7）。返回 {@code false} 表示连接应当关闭。 */
+		private boolean awaitSelect() throws InterruptedException {
+			
+			final Collection<Callable<Boolean>> tasks = Arrays.asList(
+					() -> {
+						try {
+							return connectTask();
+						}
+						catch ( InterruptedException ignore ) {
+						}
+						
+						return Boolean.FALSE;
+					}
+					);
+			
+			try {
+				return executeInvokeAny(
+						tasks,
+						hsmsSsConfig().timeout().t7()
+						).booleanValue();
+			}
+			catch ( TimeoutException e ) {
+				notifyLog(new HsmsSsTimeoutT7Exception(e));
+				return false;
+			}
+			catch ( ExecutionException e ) {
+				
+				Throwable t = e.getCause();
+				
+				if ( t instanceof RuntimeException ) {
+					throw (RuntimeException)t;
+				}
+				
+				notifyLog(t);
+				return false;
+			}
+		}
+		
+		/**
+		 * SELECTED 态的服务循环。
+		 *
+		 * @return {@code true} 表示收到 Deselect（连接保持、回到等 SELECT）；
+		 *         {@code false} 表示连接应当关闭（Separate / 出错）
+		 */
+		private boolean runSelectedTasks() throws InterruptedException {
+			
+			final Collection<Callable<Boolean>> tasks = Arrays.asList(
+					() -> {
+						try {
+							return selectedTask();
+						}
+						catch ( InterruptedException ignore ) {
+						}
+						catch ( SecsException e ) {
+							notifyLog(e);
+						}
+						return Boolean.FALSE;
+					},
+					() -> {
+						try {
+							linktesting();
+						}
+						catch ( InterruptedException ignore ) {
+						}
+						return Boolean.FALSE;
+					}
+					);
+			
+			try {
+				return executeInvokeAny(tasks).booleanValue();
+			}
+			catch ( ExecutionException e ) {
+				
+				Throwable t = e.getCause();
+				
+				if ( t instanceof RuntimeException ) {
+					throw (RuntimeException)t;
+				}
+				
+				notifyLog(t);
+				return false;
 			}
 		}
 		
@@ -347,7 +375,12 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
 					break;
 				}
-				case DESELECT_REQ:
+				case DESELECT_REQ: {
+					
+					/* 未选中时收到 Deselect.req：按 E37 回 status=1（通信未建立），连接保持 */
+					send(createDeselectResponse(msg, (byte)1));
+					break;
+				}
 				default: {
 					
 					if ( HsmsSsMessageType.supportSType(msg) ) {
@@ -366,7 +399,13 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 			}
 		}
 		
-		protected void selectedTask() throws InterruptedException, SecsException {
+		/**
+		 * SELECTED 态的收报文循环。
+		 *
+		 * @return {@code true} 表示收到 Deselect（回 NOT_SELECTED，连接保持）；
+		 *         {@code false} 表示连接应当关闭（Separate）
+		 */
+		protected boolean selectedTask() throws InterruptedException, SecsException {
 			
 			for ( ;; ) {
 				
@@ -390,8 +429,17 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 				}
 				case SEPARATE_REQ: {
 					
-					return;
+					return false;
 					/* break; */
+				}
+				case DESELECT_REQ: {
+					
+					/* E37 7.4：SELECTED 态收到 Deselect.req 必须回 Deselect.rsp(status=0)，
+					   并迁移到 NOT_SELECTED。以前这里落到 default 只做 SType 检查、什么也不发，
+					   对端等到 T6 超时判通信失败，而本端仍认为自己 SELECTED。 */
+					send(createDeselectResponse(msg));
+					removeSelectedConnection(this, HsmsSsCommunicateState.NOT_SELECTED);
+					return true;
 				}
 				case SELECT_RSP:
 				case DESELECT_RSP:
@@ -401,7 +449,6 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
 					break;
 				}
-				case DESELECT_REQ:
 				default: {
 					
 					if ( HsmsSsMessageType.supportSType(msg) ) {
