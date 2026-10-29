@@ -22,10 +22,10 @@ class SmlParserTest {
         assertTrue(message.wbit());
         assertEquals(Secs2Item.UNDEFINED, message.body().secs2Item(), "header-only 报文使用空原始数据");
 
-        SmlParser.Message withoutW = SmlParser.parse("S2F17");
-        assertFalse(withoutW.wbit());
-        assertEquals(2, withoutW.stream());
-        assertEquals(17, withoutW.function());
+        SmlParser.Message withoutW = SmlParser.parse("S1F2");
+        assertFalse(withoutW.wbit(), "secondary 不带 W");
+        assertEquals(1, withoutW.stream());
+        assertEquals(2, withoutW.function());
 
         assertEquals(1, SmlParser.parse("\uFEFFS1F1 W.").stream(), "应容忍 UTF-8 BOM");
     }
@@ -65,6 +65,30 @@ class SmlParserTest {
         assertEquals(10002L, body.get(1).get(1).getLong(0));
     }
 
+    /**
+     * 整数越界必须在解析期拒绝。
+     *
+     * <p>只查负数时，{@code <U1 300>} 会一路走到协议层编码才抛值域异常：用户看到的是
+     * 500（发送失败），而不是"U1 只能是 0..255"。手动发送是现场最常用的排查入口，
+     * 报错必须指向输入。</p>
+     */
+    @Test
+    void rejectsOutOfRangeIntegers() throws Exception {
+        SmlParseException unsigned = assertThrows(SmlParseException.class,
+                () -> SmlParser.parse("S1F3 W <U1 300>."));
+        assertTrue(unsigned.getMessage().contains("0..255"), unsigned.getMessage());
+
+        SmlParseException signed = assertThrows(SmlParseException.class,
+                () -> SmlParser.parse("S1F3 W <I1 -200>."));
+        assertTrue(signed.getMessage().contains("-128..127"), signed.getMessage());
+
+        assertThrows(SmlParseException.class, () -> SmlParser.parse("S1F3 W <U2 -1>."));
+        assertThrows(SmlParseException.class, () -> SmlParser.parse("S1F3 W <U8 18446744073709551616>."));
+
+        /* 边界值本身必须仍然可解析 */
+        assertTrue(SmlParser.parse("S1F3 W <U1 255>.").body().size() == 1);
+    }
+
     @Test
     void parsesAllSupportedScalarTypes() throws Exception {
         SmlParser.Message message = SmlParser.parse("""
@@ -102,6 +126,61 @@ class SmlParserTest {
         SmlParser.Message message = SmlParser.parse("S1F2\n<A \"a\\\"b\\n\">.");
 
         assertEquals("a\"b\n", message.body().getAscii());
+    }
+
+    @Test
+    void primaryDefaultsToWbitAndSecondaryRejectsIt() throws Exception {
+        assertTrue(SmlParser.parse("S1F17").wbit(), "primary 默认要求回复");
+        assertTrue(SmlParser.parse("S2F37").wbit(), "primary 默认要求回复");
+        assertFalse(SmlParser.parse("S6F12").wbit(), "secondary 默认不带 W");
+        assertThrows(SmlParseException.class, () -> SmlParser.parse("S1F2 W."));
+    }
+
+    @Test
+    void parsesHostPresetMessages() throws Exception {
+        /* 与前端主机模拟的预设逐字对应：多一个 > 或少一层都会在这里炸 */
+        SmlParser.Message report = SmlParser.parse("""
+                S2F33 W
+                <L
+                  <U4 0>
+                  <L
+                    <L
+                      <U4 3001>
+                      <L
+                        <U4 1001>
+                        <U4 1004>
+                      >
+                    >
+                  >
+                >.
+                """);
+        assertEquals(2, report.body().size());
+        assertEquals(3001L, report.body().get(1).get(0).get(0).getLong(0));
+
+        SmlParser.Message link = SmlParser.parse("""
+                S2F35 W
+                <L
+                  <L
+                    <U4 2001>
+                    <L
+                      <U4 3001>
+                    >
+                  >
+                >.
+                """);
+        assertEquals(1, link.body().size());
+        assertEquals(2001L, link.body().get(0).get(0).getLong(0));
+
+        SmlParser.Message disable = SmlParser.parse("""
+                S2F37 W
+                <L
+                  <BOOLEAN 0x00>
+                  <L>
+                >.
+                """);
+        assertEquals(2, disable.body().size());
+        assertFalse(disable.body().get(0).getBoolean(0));
+        assertEquals(0, disable.body().get(1).size());
     }
 
     @Test

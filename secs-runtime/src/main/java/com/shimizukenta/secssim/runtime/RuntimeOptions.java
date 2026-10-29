@@ -16,7 +16,6 @@ import java.util.Set;
  * @param mode        运行形态
  * @param bindHost    绑定地址
  * @param httpPort    HTTP 端口，0 表示由系统分配
- * @param token       访问令牌，空串表示自动生成
  * @param hsmsPort    SECS 端口（探针或演示会话）
  * @param deviceId    SECS device-id
  * @param demoSession 是否开一个演示会话（两腔体，应答 S1F3）
@@ -25,27 +24,27 @@ import java.util.Set;
  * @param workDir     工作目录（配置、日志、模板）
  * @param tlsKeystore PKCS#12 keystore，{@code null} 表示明文 HTTP
  * @param tlsPassword keystore 密码
- * @param authUsers   多账号文件（带角色），{@code null} 表示只用单 {@code --token}
  * @param help           是否只打印帮助
  * @param logLevel       日志级别（error/info/debug）
  * @param messagesRecent 报文日志内存保留条数（HTTP 历史回看窗口）
  * @param auditRecent    审计日志内存保留条数
  */
-public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
+public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                              int hsmsPort, int deviceId, boolean demoSession,
                              Path configFile, Path webRoot, Path workDir,
-                             Path tlsKeystore, String tlsPassword, Path authUsers, boolean help,
+                             Path tlsKeystore, String tlsPassword, boolean help,
                              com.shimizukenta.secssim.app.log.Log.Level logLevel,
                              int messagesRecent, int auditRecent) {
 
     /** 便捷构造：日志级别用默认 INFO,保留条数用默认值（测试与既有调用点）。 */
-    public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, String token,
+    public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                           int hsmsPort, int deviceId, boolean demoSession,
                           Path configFile, Path webRoot, Path workDir,
-                          Path tlsKeystore, String tlsPassword, Path authUsers, boolean help) {
-        this(mode, bindHost, httpPort, token, hsmsPort, deviceId, demoSession,
-                configFile, webRoot, workDir, tlsKeystore, tlsPassword, authUsers, help,
-                com.shimizukenta.secssim.app.log.Log.Level.INFO, DEFAULT_MESSAGES_RECENT, DEFAULT_AUDIT_RECENT);
+                          Path tlsKeystore, String tlsPassword, boolean help) {
+        this(mode, bindHost, httpPort, hsmsPort, deviceId, demoSession,
+                configFile, webRoot, workDir, tlsKeystore, tlsPassword, help,
+                com.shimizukenta.secssim.app.log.Log.Level.INFO, DEFAULT_MESSAGES_RECENT,
+                DEFAULT_AUDIT_RECENT);
     }
 
 
@@ -60,7 +59,6 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
      * @param mode        形态
      * @param bindHost    绑定地址
      * @param httpPort    HTTP 端口
-     * @param token       令牌
      * @param hsmsPort    SECS 端口
      * @param deviceId    device-id
      * @param demoSession 是否演示会话
@@ -69,13 +67,11 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
      * @param workDir     工作目录
      * @param tlsKeystore PKCS#12 keystore
      * @param tlsPassword keystore 密码
-     * @param authUsers   多账号文件（带角色）
      * @param help        帮助标记
      */
     public RuntimeOptions {
         Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(bindHost, "bindHost");
-        Objects.requireNonNull(token, "token");
         Objects.requireNonNull(workDir, "workDir");
         if (httpPort < 0 || httpPort > 65535) {
             throw new IllegalArgumentException("http port out of range: " + httpPort);
@@ -126,9 +122,9 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
             }
         }
 
-        Set<String> known = Set.of("mode", "bind", "port", "token", "hsms-port",
+        Set<String> known = Set.of("mode", "bind", "port", "hsms-port",
                 "device-id", "demo-session", "config", "web-root", "work-dir",
-                "tls-keystore", "tls-password", "auth-users", "help", "log-level",
+                "tls-keystore", "tls-password", "help", "log-level",
                 "messages-recent", "audit-recent");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
@@ -140,9 +136,9 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
 
         return new RuntimeOptions(
                 mode,
-                values.getOrDefault("bind", mode.loopbackOnly() ? "127.0.0.1" : "0.0.0.0"),
+                /* 默认一律只绑回环：对外开放必须是显式选择 */
+                values.getOrDefault("bind", "127.0.0.1"),
                 intValue(values, "port", 0),
-                values.getOrDefault("token", ""),
                 intValue(values, "hsms-port", 5000),
                 intValue(values, "device-id", 10),
                 Boolean.parseBoolean(values.getOrDefault("demo-session", "false")),
@@ -151,7 +147,6 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                 Path.of(values.getOrDefault("work-dir", defaultWorkDir())),
                 values.containsKey("tls-keystore") ? Path.of(values.get("tls-keystore")) : null,
                 values.getOrDefault("tls-password", ""),
-                values.containsKey("auth-users") ? Path.of(values.get("auth-users")) : null,
                 Boolean.parseBoolean(values.getOrDefault("help", "false")),
                 com.shimizukenta.secssim.app.log.Log.Level.parse(
                         values.getOrDefault("log-level", "INFO")),
@@ -170,9 +165,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
 
                   --log-level <error|info|debug>     日志级别，默认 info（debug 输出报文级细节）
                   --mode <integrated|server|probe>  运行形态，默认 integrated
-                  --bind <host>                     绑定地址，默认 127.0.0.1（server 为 0.0.0.0）
+                  --bind <host>                     绑定地址，默认 127.0.0.1（对外必须显式指定）
                   --port <n>                        HTTP 端口，默认 0（系统分配）
-                  --token <s>                       访问令牌，留空自动生成
                   --hsms-port <n>                   SECS 端口，默认 5000
                   --device-id <n>                   SECS device-id，默认 10
                   --demo-session                    开一个两腔体演示会话（应答 S1F1 / S1F3）
@@ -181,18 +175,16 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort, St
                   --work-dir <path>                 工作目录
                   --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
                   --tls-password <s>                keystore 密码（默认空）
-                  --auth-users <path>               多账号文件（带角色）；提供时取代 --token
                   --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
                   --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
                   --help                            打印本帮助
 
-                鉴权：默认单 --token（等价于 admin）。--auth-users 的 JSON 形如
-                  {"users":[{"name":"guest","role":"viewer","secret":"..."},
-                            {"name":"line1","role":"operator","secret":"..."}]}
-                角色 viewer 只读 / operator 可触发 CEID 与报警 / admin 额外可停机。
-                server 模式必须显式给 --token 或 --auth-users。
+                访问：内部工具，不做鉴权——浏览器/脚本直连地址即可，没有令牌或账号。
+                默认只绑回环；跨机访问需显式 --bind，对外部署建议同时配 TLS。
 
-                启动后会向 stdout 打印一行 READY，供桌面壳与测试脚本握手。
+                启动后：stdout 打印一行 READY 供桌面壳握手；同时把 http/端口写进
+                <work-dir>/ready.txt（权限 600），供部署脚本读取。
+
                 """;
     }
 

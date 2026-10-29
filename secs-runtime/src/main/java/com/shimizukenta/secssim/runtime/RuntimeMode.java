@@ -3,12 +3,12 @@ package com.shimizukenta.secssim.runtime;
 /**
  * 运行形态。
  *
- * <p>三种形态共用<b>同一套</b>内核、API 与前端，差别只有绑定地址、鉴权策略与配置目录：
+ * <p>三种形态共用<b>同一套</b>内核、API 与前端，差别只有绑定地址与配置目录：
  * </p>
  * <ul>
- *   <li>{@link #INTEGRATED}：桌面一体化。随壳启动，只绑回环，一次性 token，单用户。</li>
+ *   <li>{@link #INTEGRATED}：桌面一体化。随壳启动，只绑回环，单用户。</li>
  *   <li>{@link #SERVER}：Linux 服务端。对外绑定；提供 {@code --tls-keystore} 时走 HTTPS，
- *        否则仍是明文 HTTP。账号/角色鉴权尚未实现，目前只有单 Bearer token。</li>
+ *        否则仍是明文 HTTP。内部工具不做鉴权，直连访问。</li>
  *   <li>{@link #PROBE}：能力探针。在目标机器上验证 SECS 端口与异步 I/O 是否可用。</li>
  * </ul>
  */

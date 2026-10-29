@@ -61,16 +61,27 @@ public final class SessionLauncher {
     private final ConcurrentMap<String, SessionSource> sources = new ConcurrentHashMap<>();
 
     /**
+     * 创建/重载/关闭的串行锁。
+     *
+     * <p>{@code find → 端口检查 → open → register} 必须是原子的：
+     * 两个并发创建会同时通过端口检查，在 Windows 上真的能重复绑定，
+     * 然后后注册的那个把先注册的挤掉。锁是全局的，创建是低频操作，
+     * 换来的是不会有半初始化的会话漏在注册表外。</p>
+     */
+    private final java.util.concurrent.locks.ReentrantLock lifecycleLock =
+            new java.util.concurrent.locks.ReentrantLock();
+
+    /**
      * 配置来源文件 + 部署期覆盖 + 结构指纹；重载时三者都要原样带上。
      *
      * @param file        配置文件
      * @param overrides   部署期覆盖
      * @param fingerprint session+equipment 的规范 JSON 指纹；null 表示算不了（老来源或解析失败）
      */
-    private record SessionSource(Path file, SessionOverrides overrides, String fingerprint) {
+    private record SessionSource(Path file, SessionOverrides overrides, String fingerprint, Prepared lastGood) {
 
-        SessionSource withFingerprint(String fp) {
-            return new SessionSource(this.file, this.overrides, fp);
+        SessionSource withLastGood(Prepared prepared, String fp) {
+            return new SessionSource(this.file, this.overrides, fp, prepared);
         }
     }
 
@@ -136,11 +147,16 @@ public final class SessionLauncher {
      * @return 会话存在并已关闭返回 {@code true}
      */
     public boolean close(String id) {
-        if (this.sessions.remove(id)) {
-            this.sources.remove(id);
-            return true;
+        this.lifecycleLock.lock();
+        try {
+            if (this.sessions.remove(id)) {
+                this.sources.remove(id);
+                return true;
+            }
+            return false;
+        } finally {
+            this.lifecycleLock.unlock();
         }
-        return false;
     }
 
     /**
@@ -156,42 +172,111 @@ public final class SessionLauncher {
      * @throws IOException     端口绑定失败
      */
     public boolean reload(String id) throws ConfigException, IOException {
-        SessionSource source = this.sources.get(id);
-        if (source == null) {
-            return false;
-        }
+        this.lifecycleLock.lock();
+        try {
+            SessionSource source = this.sources.get(id);
+            if (source == null) {
+                return false;
+            }
 
-        /* 先构造新的：编译不过时旧会话还好端端地跑着。
-           部署覆盖与来源文件一起带上——否则重载第 2 台会抢第 1 台的端口。 */
-        Prepared prepared = prepare(source.file(), this.defaultHsmsPort, source.overrides());
-        String fingerprint = structureFingerprint(source.file());
-        SessionRuntime current = this.sessions.find(id).orElse(null);
+            /* 先构造新的：编译不过时旧会话还好端端地跑着。
+               部署覆盖与来源文件一起带上——否则重载第 2 台会抢第 1 台的端口。 */
+            Prepared prepared = prepare(source.file(), this.defaultHsmsPort, source.overrides());
+            String fingerprint = structureFingerprint(source.file());
+            SessionRuntime current = this.sessions.find(id).orElse(null);
 
-        /* 热生效路径：连接标识（session 段）没变——设备模型、编排、模板、
-           限流、W 位的任何变化都原地替换，主机连接保持不断。 */
-        if (current instanceof HsmsSessionRuntime running
-                && fingerprint != null && fingerprint.equals(source.fingerprint())) {
-            running.applyHot(prepared.schedule, prepared.maxPerSec,
-                    prepared.s6f11Wbit, prepared.s6f1Wbit,
-                    prepared.model, prepared.values);
-            this.sources.put(id, source.withFingerprint(fingerprint));
-            Log.info("会话 " + id + " 已热生效（设备模型/编排/模板原地替换，主机连接未断）");
+            /* 热生效路径：连接标识（session 段）没变——设备模型、编排、模板、
+               限流、W 位的任何变化都原地替换，主机连接保持不断。 */
+            if (current instanceof HsmsSessionRuntime running
+                    && fingerprint != null && fingerprint.equals(source.fingerprint())) {
+                running.applyHot(prepared.schedule, prepared.maxPerSec,
+                        prepared.s6f11Wbit, prepared.s6f1Wbit,
+                        prepared.model, prepared.values);
+                this.sources.put(id, source.withLastGood(prepared, fingerprint));
+                Log.info("会话 " + id + " 已热生效（设备模型/编排/模板原地替换，主机连接未断）");
+                return true;
+            }
+
+            /* 重建前先确认端口没被别的会话占着：失败时旧会话还在跑，
+               而不是"先把它关了再发现新端口绑不上"。 */
+            requirePortFree(id, prepared.spec());
+
+            /* 同端口/同目标的重建不能"先开新再关旧"：旧监听 socket 还占着这个端口，
+               Linux 上 bind 必失败（还叠加首次绑定失败静默的旧问题），Windows 上会出现两个监听器。
+               先关旧再开新；开不起来时用上一次成功的快照把旧会话拉回来。 */
+            if (current != null && sameEndpoint(current, prepared.spec())) {
+                return rebuildInPlace(id, source, prepared, fingerprint);
+            }
+
+            /* 目标变了（端口/绑定地址）：先 open 新会话再动旧的——新会话绑的是另一个端口，
+               失败时旧会话原样跑着。 */
+            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.file());
+            try {
+                this.close(id);
+                this.sessions.register(opened);
+            } catch (RuntimeException e) {
+                opened.close();
+                Log.error("重载会话 " + id + " 失败（新会话已关闭）: " + source.file(), e);
+                throw e;
+            }
+            this.sources.put(id, source.withLastGood(prepared, fingerprint));
+            Log.info("会话 " + id + " 已重建（连接标识变化，主机需重连）");
             return true;
+        } finally {
+            this.lifecycleLock.unlock();
         }
+    }
 
+    /**
+     * 同端口/同目标的重建：先关旧，再开新；失败时用上一次成功的快照恢复旧会话。
+     *
+     * @param id          会话标识
+     * @param source      配置来源（含 lastGood 快照）
+     * @param prepared    按新配置组装好的会话
+     * @param fingerprint 新配置的结构指纹
+     * @return 恒为 {@code true}（失败会抛异常）
+     * @throws IOException 新会话起不来（旧会话已尝试恢复）
+     */
+    private boolean rebuildInPlace(String id, SessionSource source, Prepared prepared, String fingerprint)
+            throws IOException {
+        final Prepared previous = source.lastGood();
         this.close(id);
 
         try {
             HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.file());
             this.sessions.register(opened);
-            this.sources.put(id, new SessionSource(source.file(), source.overrides(), fingerprint));
-            Log.info("会话 " + id + " 已重建（结构或连接标识变化，主机需重连）");
+            this.sources.put(id, source.withLastGood(prepared, fingerprint));
+            Log.info("会话 " + id + " 已重建（同端口：先关旧再开新）");
             return true;
-        } catch (IOException | RuntimeException e) {
-            Log.error("重载会话 " + id + " 失败（配置已编译通过，但端口绑定失败）: " + source.file(), e);
-            /* 旧会话已经关掉且没能换上来：如实报错，不要假装还在跑 */
-            throw e;
+        } catch (IOException | RuntimeException failure) {
+            restore(id, source, previous, failure);
+            throw failure;
         }
+    }
+
+    /** 重建失败后的补偿：用旧快照再起一个会话，尽量不让设备凭空消失。 */
+    private void restore(String id, SessionSource source, Prepared previous, Exception failure) {
+        if (previous == null) {
+            Log.error("重载失败，且没有可恢复的旧快照: " + id, failure);
+            return;
+        }
+        try {
+            HsmsSessionRuntime restored = previous.open(this.bus, this.noticeBus, source.file());
+            this.sessions.register(restored);
+            this.sources.put(id, source);
+            Log.warn("重载失败，已用旧配置恢复会话: " + id);
+        } catch (IOException | RuntimeException rollback) {
+            failure.addSuppressed(rollback);
+            Log.error("重载失败，旧会话也无法恢复: " + id, rollback);
+        }
+    }
+
+    /** 两个会话规格是否指向同一监听目标（端口 + 绑定地址）。 */
+    private static boolean sameEndpoint(SessionRuntime current, SessionSpec next) {
+        com.shimizukenta.secssim.app.session.HsmsConnectionTarget target = current.hostTarget();
+        return target != null
+                && target.port() == next.port()
+                && java.util.Objects.equals(target.bindHost(), next.bindHost());
     }
 
     /**
@@ -211,13 +296,31 @@ public final class SessionLauncher {
         }
 
         SessionSpec spec = new SessionSpec(id, true, "127.0.0.1", hsmsPort, deviceId, DEMO_SEED, demo);
-        HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
-        this.bus(runtime);
-        runtime.enableSchedule(new EventSchedule(List.of(
-                new EventPlan("demo-process-start", 2001, new Trigger.Periodic(5_000L, 200L)))), 20);
-        runtime.open();
-        this.sessions.register(runtime);
-        return id;
+        this.lifecycleLock.lock();
+        try {
+            /* 先判标识冲突：否则同一端口的既有会话会让端口预检先命中，
+               把「标识重复」报成「端口被占」，用户会去改一个没问题的端口。
+               （startFromFile 一直有这一步，演示会话漏了。） */
+            if (this.sessions.find(id).isPresent()) {
+                throw new IllegalArgumentException("session already registered: " + id);
+            }
+            requirePortFree(id, spec);
+            HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
+            this.bus(runtime);
+            runtime.enableSchedule(new EventSchedule(List.of(
+                    new EventPlan("demo-process-start", 2001, new Trigger.Periodic(5_000L, 200L)))), 20);
+            runtime.open();
+            try {
+                this.sessions.register(runtime);
+            } catch (RuntimeException e) {
+                /* 注册失败（重复 id / 管理器已关闭）时已经 open 的会话必须关掉 */
+                runtime.close();
+                throw e;
+            }
+            return id;
+        } finally {
+            this.lifecycleLock.unlock();
+        }
     }
 
     /**
@@ -245,12 +348,30 @@ public final class SessionLauncher {
      */
     public HsmsSessionRuntime startFromFile(Path file, int defaultPort, SessionOverrides overrides)
             throws ConfigException, IOException {
-        HsmsSessionRuntime runtime = prepare(file, defaultPort, overrides).open(this.bus, this.noticeBus, file);
-        this.sessions.register(runtime);
-        /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
-           而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
-        this.sources.put(runtime.id(), new SessionSource(file, overrides, structureFingerprint(file)));
-        return runtime;
+        Prepared prepared = prepare(file, defaultPort, overrides);
+        this.lifecycleLock.lock();
+        try {
+            /* 先把"会话 id 已存在"判掉：否则同一端口的既有会话会让端口检查先命中，
+               把"标识冲突"报成"端口被占"，用户会去改一个没问题的端口。 */
+            if (this.sessions.find(prepared.spec().id()).isPresent()) {
+                throw new IllegalArgumentException("session already registered: " + prepared.spec().id());
+            }
+            requirePortFree(prepared.spec().id(), prepared.spec());
+            HsmsSessionRuntime runtime = prepared.open(this.bus, this.noticeBus, file);
+            try {
+                this.sessions.register(runtime);
+            } catch (RuntimeException e) {
+                /* 已经 open 的会话在注册失败时必须 close：否则端口与线程都泄漏 */
+                runtime.close();
+                throw e;
+            }
+            /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
+               而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
+            this.sources.put(runtime.id(), new SessionSource(file, overrides, structureFingerprint(file), prepared));
+            return runtime;
+        } finally {
+            this.lifecycleLock.unlock();
+        }
     }
 
     /** 读配置、编译、组装好但还没 open。 */
@@ -299,6 +420,32 @@ public final class SessionLauncher {
     }
 
     /**
+     * 被动会话的端口不能和已有会话重复。
+     *
+     * <p>HSMS 的监听 socket 在 Windows 上可以重复绑定（SO_REUSEADDR），
+     * 后建的会话会"看起来启动成功"，但主机连到哪个会话是不确定的。
+     * 在启动路径上先挡掉，比现场排查"报文怎么跑到另一台设备去了"便宜得多。</p>
+     *
+     * @param selfId 正在启动/重建的会话 id（重载时旧实例还在注册表里）
+     * @param spec   目标规格
+     * @throws IOException 端口已被其它会话占用
+     */
+    private void requirePortFree(String selfId, SessionSpec spec) throws IOException {
+        if (!spec.passive()) {
+            return;
+        }
+        for (SessionRuntime other : this.sessions.list()) {
+            if (other.id().equals(selfId)) {
+                continue;
+            }
+            com.shimizukenta.secssim.app.session.HsmsConnectionTarget target = other.hostTarget();
+            if (target != null && target.port() == spec.port()) {
+                throw new IOException("端口 " + spec.port() + " 已被会话 " + other.id() + " 占用");
+            }
+        }
+    }
+
+    /**
      * 挂上状态通知总线（schema v6）。
      *
      * @param bus 通知总线
@@ -340,6 +487,11 @@ public final class SessionLauncher {
             this.maxPerSec = maxPerSec;
             this.s6f11Wbit = s6f11Wbit;
             this.s6f1Wbit = s6f1Wbit;
+        }
+
+        /** 目标规格（端口冲突检查要在 open 之前做）。 */
+        SessionSpec spec() {
+            return this.spec;
         }
 
         HsmsSessionRuntime open(EventBus bus) throws IOException {

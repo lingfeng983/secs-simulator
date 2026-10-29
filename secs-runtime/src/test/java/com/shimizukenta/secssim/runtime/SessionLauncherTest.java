@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -92,6 +93,71 @@ class SessionLauncherTest {
         this.launcher.create("demo");
 
         assertThrows(IllegalArgumentException.class, () -> this.launcher.create("demo"));
+    }
+
+    /**
+     * 两个被动会话不能抢同一个端口。
+     *
+     * <p>Windows 上监听 socket 带 SO_REUSEADDR，后建的会话会"看起来启动成功"，
+     * 但主机连到哪一个是不确定的。必须在启动路径上拒绝。</p>
+     */
+    @Test
+    void rejectsSecondSessionOnSamePort() throws Exception {
+        int port = freePort();
+        write("a.json", configWithPort("a", "A", port));
+        write("b.json", configWithPort("b", "B", port));
+        this.launcher.create("a.json");
+
+        IOException error = assertThrows(IOException.class, () -> this.launcher.create("b.json"));
+        assertTrue(error.getMessage().contains("占用"), error.getMessage());
+        assertFalse(this.sessions.find("b").isPresent(), "端口冲突时不能留下半个会话");
+        assertTrue(this.sessions.find("a").isPresent(), "先建的会话要原样跑着");
+    }
+
+    /**
+     * 端口被<b>外部进程</b>占用时，创建会话必须失败。
+     *
+     * <p>进程内的端口冲突由 requirePortFree 挡住；外部占用看不见。Windows 的
+     * SO_REUSEADDR 还允许重复绑定——没有"预检 + 首次 bind 失败即失败"这两道，
+     * 会话会显示 OPEN，端口上却没有监听。</p>
+     */
+    @Test
+    void createFailsWhenPortIsHeldByAnotherProcess() throws Exception {
+        int port = freePort();
+        try (ServerSocket occupied = new ServerSocket()) {
+            occupied.setReuseAddress(false);
+            occupied.bind(new InetSocketAddress("127.0.0.1", port));
+
+            write("ext.json", configWithPort("ext", "EXTERNAL", port));
+
+            IOException error = assertThrows(IOException.class, () -> this.launcher.create("ext.json"));
+            assertTrue(error.getMessage().contains("不可绑定"), error.getMessage());
+            assertFalse(this.sessions.find("ext").isPresent(), "创建失败不能留下半个会话");
+        }
+    }
+
+    /**
+     * 同端口重建：改 deviceId（session 段变化）但端口不变。
+     *
+     * <p>「先开新再关旧」在这条路径上是不成立的：旧监听 socket 还占着端口。
+     * 修复后应当「先关旧再开新」，且新会话真的在监听。</p>
+     */
+    @Test
+    void reloadSamePortRebuildsAndKeepsListening() throws Exception {
+        int port = freePort();
+        write("same.json", configWithPort("same", "V1", port));
+        this.launcher.create("same.json");
+
+        write("same.json", configWithPort("same", "V2", port)
+                .replace("\"deviceId\": 61", "\"deviceId\": 62"));
+
+        assertTrue(this.launcher.reload("same"), "同端口重建必须成功");
+        assertEquals(SessionState.OPEN, this.sessions.find("same").orElseThrow().state());
+
+        try (java.net.Socket probe = new java.net.Socket()) {
+            probe.connect(new java.net.InetSocketAddress("127.0.0.1", port), 2_000);
+            assertTrue(probe.isConnected(), "重建后端口上必须有监听");
+        }
     }
 
     @Test

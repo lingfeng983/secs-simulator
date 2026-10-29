@@ -46,6 +46,17 @@ public final class ConfigStore {
     /** 配置文件名后缀。 */
     private static final String CONFIG_SUFFIX = ".json";
 
+    /**
+     * 进程内的「读-改-写」串行锁。
+     *
+     * <p>同一份配置有两条写入路径：界面保存（{@link #save}）与主机 S2F15 常量落盘
+     * （{@link #writeConstants}，由协议线程直接调用）。两者都是「读原文 → 改一段 →
+     * 原子替换」，不加锁就会互相覆盖：用户刚存的其他段落被 S2F15 写回旧版本，
+     * 或者反过来。跨进程的外部修改由 mtime 乐观检查兜底。</p>
+     */
+    private static final java.util.concurrent.locks.ReentrantLock FILE_LOCK =
+            new java.util.concurrent.locks.ReentrantLock();
+
     private final Path workDir;
 
     /**
@@ -55,6 +66,11 @@ public final class ConfigStore {
      */
     public ConfigStore(Path workDir) {
         this.workDir = workDir;
+    }
+
+    /** 配置目录。 */
+    public Path workDir() {
+        return this.workDir;
     }
 
     /**
@@ -102,9 +118,50 @@ public final class ConfigStore {
             sb.append("{\"name\":\"").append(escape(entry.name()))
                     .append("\",\"sizeBytes\":").append(entry.sizeBytes())
                     .append(",\"modifiedMs\":").append(entry.modifiedMs())
-                    .append('}');
+                    .append(",\"template\":\"").append(escape(entry.template()))
+                    .append("\"}");
         }
         return sb.append(']').toString();
+    }
+
+    /**
+     * 一次读取配置正文与修改时间（编辑器保存用的并发基准）。
+     *
+     * <p>分两次取会出现「旧正文 + 新 mtime」：保存时被判为"没人改过"，
+     * 于是绕过 If-Match 覆盖别人的修改。这里在锁内读，并用前后 mtime 比对重试，
+     * 同时挡住进程内的写（save / S2F15）与进程外的编辑。</p>
+     *
+     * @param name 文件名
+     * @return 快照；文件不存在或读失败返回 {@code null}
+     */
+    public com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot readSnapshot(String name) {
+        Path file;
+        try {
+            file = this.workDir.resolve(requireFileName(name, "$.name"));
+        } catch (ConfigException e) {
+            return null;
+        }
+
+        FILE_LOCK.lock();
+        try {
+            for (int attempt = 0; attempt < 3; attempt++) {
+                long before = Files.getLastModifiedTime(file).toMillis();
+                String text = Files.readString(file, StandardCharsets.UTF_8);
+                long after = Files.getLastModifiedTime(file).toMillis();
+                if (before == after) {
+                    return new com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot(text, after);
+                }
+            }
+            Log.warn("配置在读期间连续变化，返回最新一次内容: " + file.getFileName());
+            return new com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot(
+                    Files.readString(file, StandardCharsets.UTF_8),
+                    Files.getLastModifiedTime(file).toMillis());
+        } catch (IOException e) {
+            Log.error("读取配置失败: " + file.getFileName(), e);
+            return null;
+        } finally {
+            FILE_LOCK.unlock();
+        }
     }
 
     /**
@@ -134,12 +191,24 @@ public final class ConfigStore {
     private Entry describe(String name) {
         Path file = this.workDir.resolve(name);
         if (!Files.isRegularFile(file)) {
-            return new Entry(name, 0L, 0L);
+            return new Entry(name, 0L, 0L, "");
+        }
+        String template = "";
+        try {
+            JsonHub root = JsonHub.fromJson(Files.readString(file, StandardCharsets.UTF_8));
+            if (root != null && root.isObject()) {
+                JsonHub marker = root.get("template");
+                if (marker != null) {
+                    template = marker.optionalString().orElse("");
+                }
+            }
+        } catch (RuntimeException | IOException e) {
+            /* 坏配置仍要出现在列表里，只是没有模板归属 */
         }
         try {
-            return new Entry(name, Files.size(file), Files.getLastModifiedTime(file).toMillis());
+            return new Entry(name, Files.size(file), Files.getLastModifiedTime(file).toMillis(), template);
         } catch (IOException e) {
-            return new Entry(name, 0L, 0L);
+            return new Entry(name, 0L, 0L, template);
         }
     }
 
@@ -150,7 +219,7 @@ public final class ConfigStore {
      * @param sizeBytes  字节数
      * @param modifiedMs 最后修改时间（epoch 毫秒）
      */
-    public record Entry(String name, long sizeBytes, long modifiedMs) {
+    public record Entry(String name, long sizeBytes, long modifiedMs, String template) {
     }
 
     /**
@@ -252,21 +321,88 @@ public final class ConfigStore {
             return ConfigResult.invalid(List.of(
                     "未知模板: " + templateId + "（可用: " + DeviceTemplates.ids() + "）"));
         }
-        List<String> problems = validate(text);
-        if (!problems.isEmpty()) {
-            /* 骨架自己都过不了校验，说明代码有问题，宁可报错也不写坏文件 */
-            Log.error("配置骨架生成失败: " + file.getFileName(), null);
-            return ConfigResult.failed(String.join("; ", problems));
-        }
+        return this.createFromTemplateText(name, text, templateId);
+    }
 
+    /**
+     * 用任意模板文本新建配置：先补顶层 {@code template} 标记，再校验、落盘。
+     *
+     * @param name       设备文件名
+     * @param text       模板配置原文
+     * @param templateId 模板 id（写进配置供侧栏分组）
+     * @return 结果
+     */
+    public ConfigResult createFromText(String name, String text, String templateId) {
+        Path file;
         try {
-            writeAtomically(file, text);
+            file = this.workDir.resolve(requireFileName(name, "$.name"));
+        } catch (ConfigException e) {
+            return ConfigResult.notFound(e.getMessage());
+        }
+        if (Files.exists(file)) {
+            return ConfigResult.conflict("已经有同名的配置了: " + file.getFileName());
+        }
+        String marked = TemplateStore.withTemplate(text, templateId);
+        List<String> problems = validate(marked);
+        if (!problems.isEmpty()) {
+            Log.error("配置骨架生成失败: " + file.getFileName(), null);
+            return ConfigResult.invalid(problems);
+        }
+        try {
+            writeAtomically(file, marked);
             Log.info("已新建配置: " + file.getFileName());
             return ConfigResult.ok();
         } catch (IOException e) {
             Log.error("新建配置失败: " + file.getFileName(), e);
             return ConfigResult.failed("写盘失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 用自定义模板新建设备：把 session.id / equipment.name 改成文件名主名，保证设备名与文件名一致。
+     */
+    public ConfigResult createFromTemplateText(String name, String text, String templateId) {
+        String base = name.trim();
+        if (base.toLowerCase(java.util.Locale.ROOT).endsWith(CONFIG_SUFFIX)) {
+            base = base.substring(0, base.length() - CONFIG_SUFFIX.length());
+        }
+        try {
+            JsonHub root = JsonHub.fromJson(text);
+            if (root.isObject()) {
+                JsonHubBuilder b = JsonHub.getBuilder();
+                List<JsonObjectPair> pairs = new ArrayList<>();
+                for (JsonString key : root.keySet()) {
+                    String field = key.unescaped();
+                    if ("session".equals(field) && root.get(field).isObject()) {
+                        JsonHub session = root.get(field);
+                        List<JsonObjectPair> sessionPairs = new ArrayList<>();
+                        for (JsonString sessionKey : session.keySet()) {
+                            String nameKey = sessionKey.unescaped();
+                            sessionPairs.add("id".equals(nameKey)
+                                    ? b.pair("id", base)
+                                    : b.pair(nameKey, session.get(nameKey)));
+                        }
+                        pairs.add(b.pair("session", b.object(sessionPairs)));
+                    } else if ("equipment".equals(field) && root.get(field).isObject()) {
+                        JsonHub equipment = root.get(field);
+                        List<JsonObjectPair> equipmentPairs = new ArrayList<>();
+                        for (JsonString equipmentKey : equipment.keySet()) {
+                            String nameKey = equipmentKey.unescaped();
+                            equipmentPairs.add("name".equals(nameKey)
+                                    ? b.pair("name", base)
+                                    : b.pair(nameKey, equipment.get(nameKey)));
+                        }
+                        pairs.add(b.pair("equipment", b.object(equipmentPairs)));
+                    } else {
+                        pairs.add(b.pair(field, root.get(field)));
+                    }
+                }
+                text = b.object(pairs).toJson();
+            }
+        } catch (RuntimeException e) {
+            /* 原样交给校验报错 */
+        }
+        return this.createFromText(name, text, templateId);
     }
 
     /**
@@ -312,20 +448,23 @@ public final class ConfigStore {
             return ConfigResult.invalid(problems);
         }
 
-        if (expectedModifiedMs != null) {
-            Long current = this.modifiedMs(name);
-            if (current != null && !current.equals(expectedModifiedMs)) {
-                return ConfigResult.conflict("配置在编辑期间被其他操作修改过，请重新载入后再保存");
-            }
-        }
-
+        FILE_LOCK.lock();
         try {
+            if (expectedModifiedMs != null) {
+                Long current = this.modifiedMs(name);
+                if (current != null && !current.equals(expectedModifiedMs)) {
+                    return ConfigResult.conflict("配置在编辑期间被其他操作修改过，请重新载入后再保存");
+                }
+            }
+
             writeAtomically(file, text);
             Log.info("配置已保存: " + file.getFileName());
             return ConfigResult.ok();
         } catch (IOException e) {
             Log.error("配置保存失败: " + file.getFileName(), e);
             return ConfigResult.failed("写盘失败：" + e.getMessage());
+        } finally {
+            FILE_LOCK.unlock();
         }
     }
 
@@ -345,6 +484,29 @@ public final class ConfigStore {
      * @throws IOException 读不了、解析不了或写不了
      */
     public static void writeConstants(Path file, Map<Integer, EquipmentConstantDef> constants) throws IOException {
+        FILE_LOCK.lock();
+        try {
+            writeConstantsLocked(file, constants);
+        } finally {
+            FILE_LOCK.unlock();
+        }
+    }
+
+    /**
+     * 常量落盘的实际执行体（调用方已持有 {@link #FILE_LOCK}）。
+     *
+     * <p>除了进程内互斥，这里还用 mtime 做一次乐观检查：读原文前后修改时间不一致，
+     * 说明有别的东西（另一个进程、手工编辑）动过它，此时<b>不覆盖</b>并报错，
+     * 让主机侧按 S2F16=2（不落盘）处理。</p>
+     */
+    private static void writeConstantsLocked(Path file, Map<Integer, EquipmentConstantDef> constants) throws IOException {
+        final long modifiedBefore;
+        try {
+            modifiedBefore = Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException e) {
+            throw new IOException("读不了配置 " + file.getFileName() + ": " + e.getMessage(), e);
+        }
+
         String text;
         try {
             text = Files.readString(file, StandardCharsets.UTF_8);
@@ -391,6 +553,10 @@ public final class ConfigStore {
         for (JsonString key : root.keySet()) {
             String name = key.unescaped();
             rootPairs.add(b.pair(name, "equipment".equals(name) ? newEquipment : root.get(name)));
+        }
+
+        if (Files.getLastModifiedTime(file).toMillis() != modifiedBefore) {
+            throw new IOException("配置文件在写入期间被其他操作修改，已放弃覆盖: " + file.getFileName());
         }
 
         writeAtomically(file, b.object(rootPairs).prettyPrint());

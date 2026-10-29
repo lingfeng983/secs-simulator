@@ -3,10 +3,17 @@ package com.shimizukenta.secssim.runtime.session;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.Trigger;
+import com.shimizukenta.secssim.app.session.HostReportTable;
+import com.shimizukenta.secssim.core.compile.ResolvedCeid;
+import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
+import com.shimizukenta.secssim.core.compile.ResolvedReport;
+import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.jsonhub.JsonObjectPair;
@@ -48,13 +55,18 @@ final class SessionJsonViews {
     }
 
     /**
-     * 事件编排列表（含每条计划的启用状态与触发规则;v6 起带效果数组）。
+     * 事件编排列表（含每条计划的启用状态、触发规则与归属;v6 起带效果数组）。
+     *
+     * <p>归属不单独存储，而是按计划引用的 CEID 反查：计划属于哪个单元，
+     * 取决于它上报的那个事件属于哪个单元——两处分开存必然漂移。</p>
      *
      * @param plans         编排表里的全部计划
      * @param disabledPlans 运行时禁用的计划 id 集合
+     * @param ceidOwner     CEID → 归属单元名（查不到时返回空串）
      * @return JSON 文本
      */
-    static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans) {
+    static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
+                             java.util.function.IntFunction<String> ceidOwner) {
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> events = new ArrayList<>();
 
@@ -62,6 +74,8 @@ final class SessionJsonViews {
             List<JsonObjectPair> pairs = new ArrayList<>();
             pairs.add(b.pair("id", plan.id()));
             pairs.add(b.pair("ceid", plan.ceid()));
+            String owner = ceidOwner == null ? "" : ceidOwner.apply(plan.ceid());
+            pairs.add(b.pair("owner", owner == null ? "" : owner));
             pairs.add(b.pair("enabled", !disabledPlans.contains(plan.id())));
             triggerJson(plan.trigger(), pairs, b);
             if (!plan.effects().isEmpty()) {
@@ -113,4 +127,91 @@ final class SessionJsonViews {
             pairs.add(b.pair("delayMs", after.delayMs()));
         }
     }
+    /**
+     * SVID / RPTID / CEID 目录，<b>反映实际发出去的那一份</b>，不只是本地配置。
+     *
+     * <p>取的是 {@link HostReportTable} 叠加之后的<b>有效</b>定义：主机用
+     * S2F33/S2F35 下发过的条目以主机为准（ADR-0006），没碰过的仍是本地配置。
+     * </p>
+     *
+     * <p>只列本地配置是不够的：主机完全新建一个本地没有的 RPTID 时，它一样会被发出去。
+     * 漏掉这种条目，现场就只能对着报文猜设备"哪来的这个报告"。
+     * </p>
+     *
+     * <p>按 ID 升序：这是给人看的清单，稳定顺序才能让界面上两次刷新之间的
+     * 差异一眼看出是配置变了，而不是"顺序抖了"。
+     * </p>
+     *
+     * @param model          本地设备模型
+     * @param hostReports    主机侧下发的有效定义
+     * @param isPinned       某个 SVID 是否被「设定」
+     * @return JSON 文本
+     */
+    static String catalogJson(ResolvedEquipment model,
+                              HostReportTable hostReports,
+                              java.util.function.IntPredicate isPinned) {
+        JsonHubBuilder b = JsonHub.getBuilder();
+
+        /* 本地配置 + 主机新建的条目，键是绝对 ID */
+        Map<Integer, ResolvedReport> reports = new TreeMap<>(model.reports());
+        Map<Integer, ResolvedCeid> ceids = new TreeMap<>(model.ceids());
+
+        List<Integer> hostCeids = new ArrayList<>(hostReports.definedCeids());
+        for (int ceidId : hostCeids) {
+            ceids.computeIfAbsent(ceidId, id -> new ResolvedCeid(id, "", "", List.of()));
+        }
+        List<Integer> hostRptids = new ArrayList<>(hostReports.definedRptids());
+        for (int rptid : hostRptids) {
+            reports.computeIfAbsent(rptid, id -> new ResolvedReport(id, "", "", List.of()));
+        }
+
+        List<JsonHub> reportItems = new ArrayList<>();
+        for (ResolvedReport report : reports.values()) {
+            /* 主机定义过就以主机为准，否则回落到本地配置 */
+            List<Integer> effective = hostReports.svidsOf(report.id()).orElse(report.svidIds());
+            reportItems.add(b.object(
+                    b.pair("rptid", report.id()),
+                    b.pair("owner", report.owner()),
+                    b.pair("slot", report.slot()),
+                    b.pair("svids", b.array(numbers(b, effective))),
+                    b.pair("source", hostReports.svidsOf(report.id()).isPresent() ? "host" : "local")));
+        }
+
+        List<JsonHub> ceidItems = new ArrayList<>();
+        for (ResolvedCeid ceid : ceids.values()) {
+            List<Integer> effective = hostReports.reportsFor(ceid.id()).orElse(ceid.reportIds());
+            ceidItems.add(b.object(
+                    b.pair("ceid", ceid.id()),
+                    b.pair("owner", ceid.owner()),
+                    b.pair("slot", ceid.slot()),
+                    b.pair("reports", b.array(numbers(b, effective))),
+                    b.pair("source", hostReports.reportsFor(ceid.id()).isPresent() ? "host" : "local"),
+                    b.pair("enabled", hostReports.isEnabled(ceid.id()))));
+        }
+
+        List<JsonHub> svids = new ArrayList<>();
+        model.svids().values().stream()
+                .sorted(Comparator.comparingInt(ResolvedSvid::id))
+                .forEach(svid -> svids.add(b.object(
+                        b.pair("svid", svid.id()),
+                        b.pair("owner", svid.owner()),
+                        b.pair("slot", svid.slot()),
+                        b.pair("type", svid.type().name()),
+                        b.pair("unit", svid.unitSymbol()),
+                        b.pair("pinned", isPinned.test(svid.id())))));
+
+        return b.object(
+                b.pair("ceids", b.array(ceidItems)),
+                b.pair("reports", b.array(reportItems)),
+                b.pair("svids", b.array(svids)),
+                b.pair("hostReports", hostReports.reportCount()),
+                b.pair("hostLinks", hostReports.linkCount()),
+                b.pair("hostAllDisabled", hostReports.isAllDisabled())).toJson();
+    }
+
+    /** 整数列表转 JSON 数组。 */
+    private static List<JsonHub> numbers(JsonHubBuilder b, List<Integer> values) {
+        return values.stream().map(b::number).map(n -> (JsonHub) n).toList();
+    }
+
 }

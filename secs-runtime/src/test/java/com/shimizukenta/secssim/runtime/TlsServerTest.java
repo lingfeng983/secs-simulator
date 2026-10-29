@@ -24,6 +24,7 @@ import javax.net.ssl.X509TrustManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 
@@ -54,7 +55,7 @@ class TlsServerTest {
 
         SSLContext serverTls = TlsSupport.load(keystore, "changeit");
         HttpApiServer server = HttpApiServer.start(
-                new InetSocketAddress("127.0.0.1", 0), "token", new StubContext(), null, null, serverTls);
+                new InetSocketAddress("127.0.0.1", 0), AccessControl.open(), new StubContext(), null, null, serverTls);
 
         try {
             HttpClient client = HttpClient.newBuilder()

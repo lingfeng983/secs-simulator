@@ -55,10 +55,32 @@ public final class HostSimulator {
     /** 采集周期下限：再快会挤占设备的 W 位 ACK 队列。 */
     public static final long MIN_INTERVAL_MS = 200L;
 
+    /** 主机模拟器建立通信的上限：对端不可达时不把 HTTP 请求永远挂着。 */
+    static final long CONNECT_TIMEOUT_MS = 6_000L;
+
     /** 每 SVID 保留的采样点数（3600 = 1 小时 @1Hz）。 */
     static final int MAX_SAMPLES_PER_SVID = 3600;
 
+    /**
+     * 采集 SVID 数量上限。
+     *
+     * <p>每一个 SVID 都是一条独立曲线；不设上限时一次 S1F3 能塞几百个，
+     * 应答与 JSON 都会线性膨胀。</p>
+     */
+    static final int MAX_COLLECTOR_SVIDS = 256;
+
+    /**
+     * 单条曲线一次最多返回的点数。
+     *
+     * <p>内存里保留 {@link #MAX_SAMPLES_PER_SVID} 点给降采样用，
+     * 但 HTTP 响应最多给这么多；超过时等间隔抽稀并标 {@code truncated:true}。</p>
+     */
+    static final int MAX_JSON_POINTS_PER_SVID = 720;
+
+    /** 宿主会话 id(本机模式连的是它;远程模式只是借用它的模型)。 */
     private final String sessionId;
+    /** 主机实例 id:同一台设备可以开多个主机,各自有独立 id。 */
+    private final String hostId;
     private final HsmsConnectionTarget target;
     /** 本机模式才有:用于 S1F4 按声明类型解码与采集 SVID 存在性校验。 */
     private final ResolvedEquipment localModel;
@@ -78,10 +100,21 @@ public final class HostSimulator {
     private final Map<Integer, Deque<double[]>> collectorData = new ConcurrentHashMap<>();
     private volatile ScheduledExecutorService collectorExecutor;
 
-    private HostSimulator(String sessionId, HsmsConnectionTarget target, ResolvedEquipment localModel) {
+    private HostSimulator(String hostId, String sessionId, HsmsConnectionTarget target,
+                          ResolvedEquipment localModel) {
+        this.hostId = hostId;
         this.sessionId = sessionId;
         this.target = target;
         this.localModel = localModel;
+    }
+
+    /**
+     * 主机实例 id。
+     *
+     * @return 实例 id
+     */
+    public String hostId() {
+        return this.hostId;
     }
 
     /**
@@ -93,7 +126,21 @@ public final class HostSimulator {
      * @throws IllegalStateException 已有主机占用设备
      */
     public static HostSimulator open(SessionRuntime runtime) throws IOException {
-        return open(runtime, null);
+        return doOpen(runtime.id(), runtime, null);
+    }
+
+    /**
+     * 打开一个主机实例（指定实例 id）。
+     *
+     * @param hostId   主机实例 id（同一台设备可开多个）
+     * @param runtime  宿主会话
+     * @param override 远程目标；{@code null} 连本机
+     * @return 模拟器
+     * @throws IOException 连接失败
+     */
+    public static HostSimulator open(String hostId, SessionRuntime runtime, HsmsConnectionTarget override)
+            throws IOException {
+        return doOpen(hostId, runtime, override);
     }
 
     /**
@@ -104,7 +151,7 @@ public final class HostSimulator {
      * @return 模拟器
      * @throws IOException 连接失败
      */
-    public static HostSimulator open(SessionRuntime runtime, HsmsConnectionTarget override) throws IOException {
+    private static HostSimulator doOpen(String hostId, SessionRuntime runtime, HsmsConnectionTarget override) throws IOException {
         boolean remote = override != null;
         HsmsConnectionTarget target = remote ? override : runtime.hostTarget();
         if (target == null) {
@@ -112,7 +159,7 @@ public final class HostSimulator {
         }
 
         ResolvedEquipment model = remote ? null : localModelOf(runtime);
-        HostSimulator sim = new HostSimulator(runtime.id(), target, model);
+        HostSimulator sim = new HostSimulator(hostId, runtime.id(), target, model);
         sim.connect();
         sim.open.set(true);
         Log.info("主机模拟器已" + (remote ? "远程" : "") + "连接会话 " + runtime.id()
@@ -134,13 +181,35 @@ public final class HostSimulator {
         SecsCommunicator comm = HsmsSsCommunicator.open(config);
         comm.addSecsMessageReceiveListener(this::onPrimary);
         this.communicator = comm;
+        /* 连接与 SELECT 是异步的：不等通信建立就发会撞 NotConnected。
+           但 openAndWaitUntilCommunicating() 内部是无限等待，对端不可达时会
+           一直挂着——HTTP 请求永远不返回、界面一直"连接中…"。
+           放到独立线程里等，超时就关掉连接如实报错。 */
+        java.util.concurrent.atomic.AtomicReference<Exception> failure =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread opener = new Thread(() -> {
+            try {
+                comm.openAndWaitUntilCommunicating();
+            } catch (Exception e) {
+                failure.set(e);
+            }
+        }, "hostsim-connect-" + this.hostId);
+        opener.setDaemon(true);
+        opener.start();
         try {
-            /* 连接与 SELECT 是异步的：不等通信建立就发会撞 NotConnected */
-            comm.openAndWaitUntilCommunicating();
+            opener.join(CONNECT_TIMEOUT_MS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             comm.close();
             throw new IOException("主机模拟器等待通信建立被中断", e);
+        }
+        if (opener.isAlive()) {
+            comm.close();
+            throw new IOException("主机模拟器连接超时（" + CONNECT_TIMEOUT_MS + " ms 内未建立通信）");
+        }
+        if (failure.get() != null) {
+            comm.close();
+            throw new IOException("主机模拟器连接失败: " + failure.get().getMessage(), failure.get());
         }
     }
 
@@ -171,6 +240,19 @@ public final class HostSimulator {
         int stream = message.getStream();
         int function = message.getFunction();
         try {
+            /* 设备主动发来的 W 位报文要应答，否则设备要等到 T3 超时：
+               S1F1 → S1F2（在线数据）、S5F1 → S5F2（报警确认）、
+               S6F11 → S6F12 / S6F1 → S6F2（事件与 Trace 确认）。 */
+            if (message.wbit() && stream == 1 && function == 1) {
+                this.communicator.send(message, 1, 2, false,
+                        Secs2.getBuilder().list(
+                                Secs2.getBuilder().ascii("SECS-SIM"),
+                                Secs2.getBuilder().ascii("2.0")));
+            } else if (message.wbit() && stream == 5 && function == 1) {
+                /* E5：S5F2 的 ACKC5 是 1 字节 B，0 = 已接受。 */
+                this.communicator.send(message, 5, 2, false,
+                        Secs2.getBuilder().binary(new byte[] {0x00}));
+            }
             if (message.wbit() && stream == 6 && (function == 11 || function == 1)) {
                 this.communicator.send(message, 6, function == 11 ? 12 : 2, false,
                         Secs2.getBuilder().binary(new byte[] {0x00}));
@@ -239,6 +321,10 @@ public final class HostSimulator {
             svids = List.copyOf(svids);
             if (svids.isEmpty()) {
                 throw new IllegalArgumentException("采集 SVID 列表不能为空");
+            }
+            if (svids.size() > MAX_COLLECTOR_SVIDS) {
+                throw new IllegalArgumentException("采集 SVID 最多 " + MAX_COLLECTOR_SVIDS
+                        + " 个，当前 " + svids.size() + " 个");
             }
         }
     }
@@ -451,6 +537,7 @@ public final class HostSimulator {
 
         List<JsonHub> svids = new ArrayList<>();
         List<JsonHub> series = new ArrayList<>();
+        boolean truncated = false;
         for (CollectorSvid svid : config.svids()) {
             svids.add(b.object(
                     b.pair("id", svid.id()),
@@ -462,9 +549,23 @@ public final class HostSimulator {
             List<JsonHub> vs = new ArrayList<>();
             if (queue != null) {
                 synchronized (queue) {
+                    int size = queue.size();
+                    /* 超过返回点数就等间隔抽稀：保留首尾附近的可读性，不把 3600 点全塞进 JSON */
+                    int stride = size <= MAX_JSON_POINTS_PER_SVID
+                            ? 1
+                            : (int) Math.ceil((double) size / MAX_JSON_POINTS_PER_SVID);
+                    if (stride > 1) {
+                        truncated = true;
+                    }
+                    int index = 0;
                     for (double[] point : queue) {
-                        ts.add(b.number((long) point[0]));
-                        vs.add(b.number(point[1]));
+                        /* 末点尽量保留，但不能因此多出第 721 个点 */
+                        if (index % stride == 0
+                                || (index == size - 1 && ts.size() < MAX_JSON_POINTS_PER_SVID)) {
+                            ts.add(b.number((long) point[0]));
+                            vs.add(b.number(point[1]));
+                        }
+                        index++;
                     }
                 }
             }
@@ -499,6 +600,7 @@ public final class HostSimulator {
                 b.pair("samples", this.collectorSamples.get()),
                 b.pair("decodeErrors", this.collectorDecodeErrors.get()),
                 b.pair("lastRttMs", this.collectorLastRttMs),
+                b.pair("truncated", truncated),
                 b.pair("staleSvids", b.array(stale)),
                 b.pair("series", b.array(series)))
                 .toJson();
@@ -628,6 +730,8 @@ public final class HostSimulator {
     public String stateJson() {
         JsonHubBuilder b = JsonHub.getBuilder();
         return b.object(
+                b.pair("id", this.hostId),
+                b.pair("session", this.sessionId),
                 b.pair("open", this.isOpen()),
                 b.pair("target", this.target.bindHost() + ":" + this.target.port()),
                 b.pair("port", this.target.port()),

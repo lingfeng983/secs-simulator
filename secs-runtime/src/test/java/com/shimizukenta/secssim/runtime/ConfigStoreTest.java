@@ -2,6 +2,7 @@ package com.shimizukenta.secssim.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,6 +65,26 @@ class ConfigStoreTest {
         assertTrue(json.contains("\"name\":\"line1.json\""), json);
         assertTrue(json.contains("\"sizeBytes\":"), json);
         assertTrue(json.contains("\"modifiedMs\":"), json);
+    }
+
+    /**
+     * 正文与修改时间必须来自同一次读取。
+     *
+     * <p>分两次取会出现「旧正文 + 新 mtime」：编辑器带着这个 mtime 保存时，
+     * If-Match 判定一致，反而绕过并发保护覆盖别人的修改。</p>
+     */
+    @Test
+    void readSnapshotReturnsTextAndModifiedTimeTogether() throws Exception {
+        write("line1.json", config("line1"));
+
+        com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot typed = this.store.readSnapshot("line1.json");
+        assertTrue(typed != null, "存在的配置必须有快照");
+        assertEquals(config("line1"), typed.text());
+        assertEquals(Long.valueOf(Files.getLastModifiedTime(this.workDir.resolve("line1.json")).toMillis()),
+                typed.modifiedMs());
+
+        assertNull(this.store.readSnapshot("missing.json"), "不存在时返回 null");
+        assertNull(this.store.readSnapshot("../evil.json"), "非法名字不读文件");
     }
 
     /**

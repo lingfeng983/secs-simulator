@@ -39,6 +39,19 @@ public final class EventSimulator {
     public record SimFire(long atMs, String planId, int ceid) {
     }
 
+    /**
+     * 一次模拟的完整结果。
+     *
+     * <p>关键点：{@code values} 是**叠加了本次模拟的事件效果**的值来源，
+     * 而不是基线。用它算曲线，事件引起的跳变才会出现在图上——
+     * 这正是"把事件编排串起来的变化曲线"。</p>
+     *
+     * @param fires  触发列表（时间升序）
+     * @param values 基线 + 事件效果层的值来源
+     */
+    public record SimResult(List<SimFire> fires, ValueSource values) {
+    }
+
     private EventSimulator() {
     }
 
@@ -55,9 +68,28 @@ public final class EventSimulator {
      */
     public static List<SimFire> simulate(EventSchedule schedule, ValueSource base, long seed,
                                          long fromMs, long toMs, int maxEvents) {
+        return simulateWithEffects(schedule, base, seed, fromMs, toMs, maxEvents).fires();
+    }
+
+    /**
+     * 模拟区间内的全部触发，并返回叠加了效果层的值来源。
+     *
+     * <p>曲线要用 {@link SimResult#values()} 算：事件引起的值变化（set/pulse/shift）
+     * 才会体现在图上；用基线算出来的只是"没有事件"的曲线。</p>
+     *
+     * @param schedule  编排表
+     * @param base      基线值来源（不带效果层）
+     * @param seed      数据种子（抖动与运行时同源）
+     * @param fromMs    起始（模拟时钟）
+     * @param toMs      结束
+     * @param maxEvents 事件上限
+     * @return 触发列表 + 叠加效果后的值来源
+     */
+    public static SimResult simulateWithEffects(EventSchedule schedule, ValueSource base, long seed,
+                                                 long fromMs, long toMs, int maxEvents) {
         List<SimFire> fires = new ArrayList<>();
         if (schedule.plans().isEmpty() || toMs <= fromMs) {
-            return fires;
+            return new SimResult(fires, base);
         }
 
         EventEffectStore store = new EventEffectStore();
@@ -136,7 +168,7 @@ public final class EventSimulator {
         }
 
         fires.sort(Comparator.comparingLong(SimFire::atMs).thenComparing(SimFire::planId));
-        return fires;
+        return new SimResult(List.copyOf(fires), values);
     }
 
     private static void applyEffects(EventPlan plan, EventEffectStore store, long atMs) {

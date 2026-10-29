@@ -164,8 +164,8 @@ public final class DeviceTemplates {
                   },
                   "events": {
                     "maxPerSec": 20,
-                    "s6f11Wbit": false,
-                    "s6f1Wbit": false,
+                    "s6f11Wbit": true,
+                    "s6f1Wbit": true,
                     "plans": [
                       { "id": "etch-start", "ceid": 2001,
                         "trigger": { "type": "periodic", "periodMs": 8000, "jitterMs": 300 } },
@@ -259,8 +259,8 @@ public final class DeviceTemplates {
                   },
                   "events": {
                     "maxPerSec": 20,
-                    "s6f11Wbit": false,
-                    "s6f1Wbit": false,
+                    "s6f11Wbit": true,
+                    "s6f1Wbit": true,
                     "plans": [
                       { "id": "dep-start", "ceid": 2001,
                         "trigger": { "type": "periodic", "periodMs": 15000, "jitterMs": 500 } },
@@ -376,8 +376,8 @@ public final class DeviceTemplates {
                   },
                   "events": {
                     "maxPerSec": 20,
-                    "s6f11Wbit": false,
-                    "s6f1Wbit": false,
+                    "s6f11Wbit": true,
+                    "s6f1Wbit": true,
                     "plans": [
                       { "id": "t1-start", "ceid": 2001,
                         "trigger": { "type": "periodic", "periodMs": 10000, "jitterMs": 500 } },

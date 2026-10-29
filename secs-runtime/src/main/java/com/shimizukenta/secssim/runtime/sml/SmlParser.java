@@ -87,10 +87,15 @@ public final class SmlParser {
             int function = number("功能号");
 
             skipSpaces();
-            boolean wbit = false;
+            /* 系统默认：primary（奇数 function）带 W 等回复，secondary（偶数）永远不带。
+               显式写 W 仍可覆盖（secondary 写 W 会报错）。 */
+            boolean wbit = function % 2 == 1;
             if (peekIgnoreCase('W')) {
                 pos++;
                 wbit = true;
+                if (function % 2 == 0) {
+                    throw error("secondary 报文（偶数 function）不能带 W 位");
+                }
                 skipSpaces();
             }
             if (peek() == '.') {
@@ -253,20 +258,55 @@ public final class SmlParser {
         private List<BigInteger> integerValues(String type) throws SmlParseException {
             List<String> tokens = scalarTokens();
             List<BigInteger> values = new ArrayList<>(tokens.size());
+            final int bits = signedBits(type);
+            final BigInteger min = BigInteger.ONE.shiftLeft(bits - 1).negate();
+            final BigInteger max = BigInteger.ONE.shiftLeft(bits - 1).subtract(BigInteger.ONE);
             for (String token : tokens) {
-                values.add(parseInteger(token, type));
+                BigInteger value = parseInteger(token, type);
+                if (value.compareTo(min) < 0 || value.compareTo(max) > 0) {
+                    throw error(type + " 超出值域 " + min + ".." + max + ": " + token);
+                }
+                values.add(value);
             }
             return values;
         }
 
+        /**
+         * 无符号整型：负数与上界都在<b>解析期</b>拒绝。
+         *
+         * <p>只查负数的话，{@code <U1 300>} 会一路走到协议层编码时才抛
+         * {@code Secs2ValueOutOfRangeException}——用户看到的是 500，而不是"U1 只能是 0..255"。</p>
+         */
         private List<BigInteger> unsignedValues(String type) throws SmlParseException {
-            List<BigInteger> values = integerValues(type);
-            for (BigInteger value : values) {
-                if (value.signum() < 0) {
-                    throw error(type + " 不能为负数");
+            List<String> tokens = scalarTokens();
+            List<BigInteger> values = new ArrayList<>(tokens.size());
+            final BigInteger max = BigInteger.ONE.shiftLeft(unsignedBits(type)).subtract(BigInteger.ONE);
+            for (String token : tokens) {
+                BigInteger value = parseInteger(token, type);
+                if (value.signum() < 0 || value.compareTo(max) > 0) {
+                    throw error(type + " 超出值域 0.." + max + ": " + token);
                 }
+                values.add(value);
             }
             return values;
+        }
+
+        private static int signedBits(String type) {
+            return switch (type) {
+                case "I1" -> 8;
+                case "I2" -> 16;
+                case "I4" -> 32;
+                default -> 64;
+            };
+        }
+
+        private static int unsignedBits(String type) {
+            return switch (type) {
+                case "U1" -> 8;
+                case "U2" -> 16;
+                case "U4" -> 32;
+                default -> 64;
+            };
         }
 
         private List<Float> floatValues() throws SmlParseException {
