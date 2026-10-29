@@ -16,14 +16,15 @@ import java.util.OptionalLong;
  * </p>
  * <p>
  * Number-String is parsed as follows.<br />
- * A value without {@code '.'} is parsed as a signed 64-bit
- * {@code long}; a value out of the {@code long} range is rejected.<br />
- * A value with {@code '.'} is parsed as an IEEE-754 binary64
- * {@code double}; exponent-notation is accepted only together with
- * {@code '.'} (e.g. {@code "1.5e3"}), so {@code "1e5"} without
- * {@code '.'} is rejected.<br />
- * Integers routed through {@code double} keep at most 53 bits of
- * significand precision.<br />
+ * Only the RFC 8259 number grammar is accepted
+ * ({@code -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?});
+ * {@code +1}, {@code 007}, {@code .5} and {@code 1.} are rejected.<br />
+ * A value without {@code '.'}, {@code 'e'} or {@code 'E'} is parsed as a
+ * signed 64-bit {@code long}; out of range is rejected.<br />
+ * Anything with a fraction or exponent is parsed as IEEE-754 binary64
+ * {@code double}.<br />
+ * Serialization emits the canonical {@code Long/Double.toString} form,
+ * so {@code toJson()} always produces valid JSON.<br />
  * Non-finite values ({@code NaN}, {@code Infinity}) are not
  * representable in JSON and are rejected.<br />
  * </p>
@@ -38,23 +39,40 @@ public class NumberJsonHub extends AbstractJsonHub {
 	private final Number num;
 	private final String str;
 	
+	/**
+	 * RFC 8259 的 JSON number 文法。
+	 *
+	 * <p>{@code Long/Double.valueOf} 会接受 {@code +1}、{@code 007}、{@code .5}、{@code 1.}——
+	 * 这些都不是合法 JSON。解析时放过、序列化时原样吐出，等于让"本进程能读、
+	 * 浏览器/第三方工具读不了"的文件从配置编辑器流出去。</p>
+	 */
+	private static final java.util.regex.Pattern JSON_NUMBER =
+			java.util.regex.Pattern.compile("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?");
+	
 	protected NumberJsonHub(CharSequence cs) {
 		super();
 		
-		this.str = Objects.requireNonNull(cs).toString();
+		final String raw = Objects.requireNonNull(cs).toString();
+		if ( ! JSON_NUMBER.matcher(raw).matches() ) {
+			throw new JsonHubNumberFormatException("invalid JSON number: " + raw);
+		}
 		
+		final Number parsed;
 		try {
-			if ( this.str.contains(".") ) {
-				this.num = Double.valueOf(this.str);
+			if ( raw.indexOf('.') >= 0 || raw.indexOf('e') >= 0 || raw.indexOf('E') >= 0 ) {
+				parsed = Double.valueOf(raw);
 			} else {
-				this.num = Long.valueOf(this.str);
+				parsed = Long.valueOf(raw);
 			}
 		}
 		catch ( NumberFormatException e ) {
 			throw new JsonHubNumberFormatException(e.getMessage());
 		}
 		
-		validateFinite(this.num);
+		validateFinite(parsed);
+		this.num = parsed;
+		/* 输出规范化文本，而不是原字面量：保证 toJson() 的产物一定是合法 JSON。 */
+		this.str = parsed.toString();
 	}
 	
 	protected NumberJsonHub(Number num) {

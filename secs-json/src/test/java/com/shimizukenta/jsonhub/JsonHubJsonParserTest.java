@@ -281,9 +281,10 @@ class JsonHubJsonParserTest {
 		}
 
 		@Test
-		@DisplayName("exponent without dot is rejected")
-		void exponentWithoutDotRejected() {
-			assertThrows(JsonHubParseException.class, () -> parser.parse("1e5"));
+		@DisplayName("exponent without dot is valid JSON and parsed as double")
+		void exponentWithoutDotAccepted() {
+			assertEquals(100000.0, parser.parse("1e5").doubleValue(), 1e-9);
+			assertEquals("100000.0", parser.parse("1e5").toJson());
 		}
 
 		@Test
@@ -296,7 +297,8 @@ class JsonHubJsonParserTest {
 		@DisplayName("exponent with dot is accepted as double")
 		void exponentWithDotAccepted() {
 			assertEquals(1500.0, parser.parse("1.5e3").doubleValue(), 1e-9);
-			assertEquals("1.5e3", parser.parse("1.5e3").toJson());
+			/* 输出规范化：1.5e3 与 1500.0 是同一个数，toJson 只保证合法 */
+			assertEquals("1500.0", parser.parse("1.5e3").toJson());
 		}
 	}
 

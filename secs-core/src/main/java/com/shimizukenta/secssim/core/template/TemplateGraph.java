@@ -297,7 +297,9 @@ public final class TemplateGraph {
                 Set<String> deps = new LinkedHashSet<>();
 
                 for (String ref : instance.template().inputRefs()) {
-                    int dot = ref.indexOf('.');
+                    /* 用最后一个点分隔：实例名本身允许带点（如 cell.1），
+                       取第一个点会把实例名截断成另一个存在的实例，静默绑错。 */
+                    int dot = ref.lastIndexOf('.');
                     if (dot <= 0 || dot == ref.length() - 1) {
                         throw new GraphException("BAD_REFERENCE",
                                 "实例 " + instance.id() + " 的输入引用格式非法: " + ref

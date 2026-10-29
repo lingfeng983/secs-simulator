@@ -932,7 +932,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     @Override
     public String overviewJson() {
-        return this.metrics.overviewJson();
+        return this.metrics.overviewJson(false);
+    }
+
+    @Override
+    public String overviewJson(boolean hostSim) {
+        return this.metrics.overviewJson(hostSim);
     }
 
     @Override

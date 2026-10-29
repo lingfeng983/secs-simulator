@@ -156,9 +156,30 @@ public final class EquipmentCompiler {
                             + UnitSpec.UNIT_ID_SLOT + " 槽位"));
         }
 
-        int svidBase = policy.svidBaseFor(position);
-        int reportBase = policy.reportBaseFor(position);
-        int ceidBase = policy.ceidBaseFor(position);
+        final int svidBase;
+        final int reportBase;
+        final int ceidBase;
+        try {
+            svidBase = policy.svidBaseFor(position);
+            reportBase = policy.reportBaseFor(position);
+            ceidBase = policy.ceidBaseFor(position);
+        } catch (IllegalArgumentException e) {
+            /* 号段越界是配置错误，必须变成 Issue 而不是裸异常：
+               编辑器要拿字段级提示，`compile()` 的契约是"一次报全"。 */
+            this.issues.add(Issue.error("ID_OUT_OF_RANGE",
+                    "单元 " + unit.name() + " 的 ID 段越界: " + e.getMessage()));
+            return;
+        }
+
+        /* 绝对值仍以 int 承载（模型内部用 int 键）：base + 最大偏移必须落在 int 范围内，
+           否则会溢出成负 ID，报文里被当作 U4 发成 2147483648 之类的不存在编号。 */
+        if ((long) svidBase + unit.maxSvidOffset() > Integer.MAX_VALUE
+                || (long) reportBase + unit.maxReportOffset() > Integer.MAX_VALUE
+                || (long) ceidBase + unit.maxCeidOffset() > Integer.MAX_VALUE) {
+            this.issues.add(Issue.error("ID_OUT_OF_RANGE",
+                    "单元 " + unit.name() + " 的 ID 超过 2147483647（当前实现以 int 承载 SVID/RPTID/CEID）"));
+            return;
+        }
 
         this.reserveDuplicateOffsets(unit.name(), "SVID", unit.svids().stream().map(SvidDef::offset).toList());
 

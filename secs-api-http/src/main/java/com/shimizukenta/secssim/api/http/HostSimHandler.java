@@ -139,11 +139,12 @@ final class HostSimHandler extends HttpSupport {
             return;
         }
 
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-
+        /* 角色门槛放进各分支：以前放在这里会把 "GET .../collector"（只读轮询）
+           也要求成 OPERATOR，恢复只读账号后前端会被静默 403。 */
         if ("POST".equals(method) && parts.length == 2 && "send".equals(parts[1])) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
             /* 与会话级 /message 同义：SML 上限用 64 KiB，而不是默认的 4 KiB */
             String body = readBody(ex, MAX_SML_BYTES);
             if (body == null || body.trim().isEmpty()) {
@@ -169,6 +170,9 @@ final class HostSimHandler extends HttpSupport {
 
         if (parts.length >= 2 && "collector".equals(parts[1])) {
             if ("GET".equals(method) && parts.length == 2) {
+                if (!requireRole(ex, ApiRole.VIEWER)) {
+                    return;
+                }
                 String body = this.context.hostSimCollectorJsonById(hostId);
                 if (body == null) {
                     respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-host\"}");
@@ -178,6 +182,9 @@ final class HostSimHandler extends HttpSupport {
                 return;
             }
             if ("POST".equals(method) && parts.length == 2) {
+                if (!requireRole(ex, ApiRole.OPERATOR)) {
+                    return;
+                }
                 /* 与会话级 /host-sim/collector 同义：配置正文上限 256 KiB */
                 String body = readBody(ex, MAX_CONFIG_BYTES);
                 if (body == null || body.trim().isEmpty()) {
@@ -190,6 +197,9 @@ final class HostSimHandler extends HttpSupport {
                 return;
             }
             if ("POST".equals(method) && parts.length == 3 && ("start".equals(parts[2]) || "stop".equals(parts[2]))) {
+                if (!requireRole(ex, ApiRole.OPERATOR)) {
+                    return;
+                }
                 String result = this.context.hostSimCollectorCommandById(hostId, "start".equals(parts[2]));
                 audit(ex, "host-sim-collector-" + parts[2], hostId, "ok=" + result.contains("\"ok\":true"));
                 respond(ex, result.contains("\"ok\":true") ? 200 : 409, result);

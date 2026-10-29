@@ -122,6 +122,18 @@ public interface SessionRuntime {
     }
 
     /**
+     * 单会话 overview 片段，附带「本机主机模拟器是否占用」。
+     *
+     * <p>默认实现忽略该标记，兼容只实现 {@link #overviewJson()} 的运行时/测试桩。</p>
+     *
+     * @param hostSim 本机主机模拟器是否正连着
+     * @return JSON 对象文本；不支持时返回 {@code null}
+     */
+    default String overviewJson(boolean hostSim) {
+        return overviewJson();
+    }
+
+    /**
      * 运行时启用/禁用一个编排计划。
      *
      * @param planId  计划标识

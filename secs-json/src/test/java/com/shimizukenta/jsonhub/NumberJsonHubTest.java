@@ -42,12 +42,12 @@ class NumberJsonHubTest {
 		}
 
 		@Test
-		@DisplayName("exponent notation is accepted only together with a dot")
-		void exponentNeedsDot() {
+		@DisplayName("exponent notation is valid JSON with or without a dot")
+		void exponentNotation() {
 			assertEquals(1500.0, builder.number("1.5e3").doubleValue(), 1e-9);
 			assertEquals(0.0015, builder.number("1.5e-3").doubleValue(), 1e-15);
-			assertThrows(JsonHubNumberFormatException.class, () -> builder.number("1e5"));
-			assertThrows(JsonHubNumberFormatException.class, () -> builder.number("1E5"));
+			assertEquals(100000.0, builder.number("1e5").doubleValue(), 1e-9);
+			assertEquals(100000.0, builder.number("1E5").doubleValue(), 1e-9);
 		}
 
 		@Test
@@ -73,12 +73,18 @@ class NumberJsonHubTest {
 		}
 
 		@Test
-		@DisplayName("toJson preserves the original literal text")
-		void toJsonPreservesLiteral() {
-			assertEquals("007", builder.number("007").toJson());
-			assertEquals("1.50", builder.number("1.50").toJson());
-			assertEquals("1.5e3", builder.number("1.5e3").toJson());
+		@DisplayName("non-standard JSON numbers are rejected, output is canonical")
+		void nonStandardLiteralsAreRejectedAndOutputIsCanonical() {
+			/* 这些 Long/Double.valueOf 都能解析，但不是合法 JSON */
+			assertThrows(JsonHubNumberFormatException.class, () -> builder.number("007"));
+			assertThrows(JsonHubNumberFormatException.class, () -> builder.number("+1"));
+			assertThrows(JsonHubNumberFormatException.class, () -> builder.number(".5"));
+			assertThrows(JsonHubNumberFormatException.class, () -> builder.number("1."));
+
+			assertEquals("1.5", builder.number("1.50").toJson());
+			assertEquals("1500.0", builder.number("1.5e3").toJson());
 			assertEquals("-0.0", builder.number("-0.0").toJson());
+			assertEquals("7", builder.number("7").toJson());
 		}
 	}
 
@@ -174,7 +180,8 @@ class NumberJsonHubTest {
 			/* 9007199254740993 = 2^53 + 1 is not representable as double */
 			assertEquals(9007199254740993L, builder.number("9007199254740993").longValue());
 			assertEquals(9007199254740992L, builder.number("9007199254740993.0").longValue());
-			assertEquals("9007199254740993.0", builder.number("9007199254740993.0").toJson());
+			assertEquals("9.007199254740992E15", builder.number("9007199254740993.0").toJson(),
+					"规范化输出使用 Double.toString，仍是合法 JSON");
 		}
 	}
 }

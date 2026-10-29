@@ -76,6 +76,27 @@ class EquipmentCompilerTest {
         assertEquals(List.of(1190, 1101), eq.reports().get(3101).svidIds());
     }
 
+    /**
+     * 号段溢出必须变成 Issue，而不是负数 ID。
+     *
+     * <p>以前只校验了 base + (position-1)*stride，没有校验 +槽位偏移：
+     * svidBase 接近 Integer.MAX_VALUE 时能编译通过，模型里出现负 ID，
+     * 报文按 U4 发出去就是 2147483648 之类的编号。</p>
+     */
+    @Test
+    void idSegmentOverflowIsReportedAsIssue() {
+        IdSpacePolicy policy = new IdSpacePolicy(
+                Integer.MAX_VALUE - 10, 2000, 3000, 100, 100, 100,
+                List.of(new IdRange(1, 999)), List.of(new IdRange(1, 999)), List.of(new IdRange(1, 999)));
+        EquipmentSpec spec = new EquipmentSpec("E", 1, List.of(chamber("CH1", 1)),
+                List.of(), List.of(), policy);
+
+        CompilationResult result = EquipmentCompiler.compile(spec);
+
+        assertFalse(result.ok(), "号段溢出必须编译失败");
+        assertTrue(codes(result).contains("ID_OUT_OF_RANGE"), result.issues().toString());
+    }
+
     @Test
     void duplicateUnitIdIsRejected() {
         EquipmentSpec spec = new EquipmentSpec("E", 1,

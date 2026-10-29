@@ -171,6 +171,19 @@ final class SessionMetrics {
      * @return JSON 对象文本(不带外层花括号也不带逗号——由调用方拼数组)
      */
     String overviewJson() {
+        return overviewJson(false);
+    }
+
+    /**
+     * 单会话片段，并把「本机主机模拟器是否占用」一并写进去。
+     *
+     * <p>以前调用方拿字符串 `substring(0, len-1)` 拼这个字段：片段一旦不是
+     * 以 `}` 结尾就是 500，契约完全靠约定。现在由这里直接产出。</p>
+     *
+     * @param hostSim 本机主机模拟器是否正连着
+     * @return JSON 对象文本
+     */
+    String overviewJson(boolean hostSim) {
         long now = System.currentTimeMillis();
         JsonHubBuilder b = JsonHub.getBuilder();
 
@@ -191,7 +204,8 @@ final class SessionMetrics {
                 b.pair("msgsPerMin", this.msgsPerMin.getAsLong()),
                 b.pair("s6f11PerMin", this.eventsPerMin.getAsLong()),
                 b.pair("lastEventAt", this.lastEventAt.getAsLong()),
-                b.pair("uptimeMs", now - this.openedAt.getAsLong()))
+                b.pair("uptimeMs", now - this.openedAt.getAsLong()),
+                b.pair("hostSim", hostSim))
                 .toJson();
     }
 }

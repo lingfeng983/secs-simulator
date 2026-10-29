@@ -808,20 +808,18 @@ public String overviewJson() {
     com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
     java.util.List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
     for (SessionRuntime session : this.sessions.list()) {
-        String fragment = session.overviewJson();
-        if (fragment == null) {
-            continue;
-        }
-        /* 注入 hostSim 占用标记:效果层不知道 hostSims 的存在,在这里拼。
-           hostSims 按实例 id 存,这里必须经 hostsBySession 反查该会话的实例。 */
+        /* hostSims 按实例 id 存,这里必须经 hostsBySession 反查该会话的实例。
+           标记作为参数传进去,不再对 JSON 文本做 substring 手术。 */
         java.util.List<String> hostIds = this.hostsBySession.get(session.id());
         boolean hostSim = hostIds != null && hostIds.stream().anyMatch(id -> {
             com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(id);
             return sim != null && sim.isOpen();
         });
-        String patched = fragment.substring(0, fragment.length() - 1)
-                + ",\"hostSim\":" + hostSim + "}";
-        items.add(com.shimizukenta.jsonhub.JsonHub.fromJson(patched));
+        String fragment = session.overviewJson(hostSim);
+        if (fragment == null) {
+            continue;
+        }
+        items.add(com.shimizukenta.jsonhub.JsonHub.fromJson(fragment));
     }
     return b.object(b.pair("sessions", b.array(items))).toJson();
 }
