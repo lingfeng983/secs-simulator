@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Spliterator;
@@ -40,12 +41,37 @@ public class ObjectJsonHub extends AbstractJsonHub {
 	private String toJsonCache;
 	private String toJsonExcludedNullValueInObjectCache;
 	
+	/** 名 → 首个匹配值的索引；重复键保持 first-wins 语义。 */
+	private transient volatile Map<String, JsonHub> index;
+	
 	protected ObjectJsonHub(Collection<? extends JsonObjectPair> v) {
 		super();
 		
 		this.v = new ArrayList<>(Objects.requireNonNull(v));
 		this.toJsonCache = null;
 		this.toJsonExcludedNullValueInObjectCache = null;
+		this.index = null;
+	}
+	
+	/**
+	 * 惰性建一次名字索引。
+	 *
+	 * <p>{@code get}/{@code containsKey} 以前每次全表扫描并重新 unescape 键名：
+	 * 解析一份几百字段的配置就是 O(n²)。索引只在第一次查找时建，线程安全靠
+	 * volatile 发布不可变 Map（重复构建无害，先到先得）。</p>
+	 */
+	private Map<String, JsonHub> index() {
+		Map<String, JsonHub> local = this.index;
+		if ( local != null ) {
+			return local;
+		}
+		Map<String, JsonHub> built = new java.util.HashMap<>();
+		for ( JsonObjectPair pair : v ) {
+			built.putIfAbsent(pair.name().unescaped(), pair.value());
+		}
+		local = Map.copyOf(built);
+		this.index = local;
+		return local;
 	}
 	
 	@Override
@@ -97,10 +123,7 @@ public class ObjectJsonHub extends AbstractJsonHub {
 	
 	@Override
 	public boolean containsKey(CharSequence name) {
-		String s = name.toString();
-		return v.stream()
-				.map(x -> x.name().unescaped())
-				.anyMatch(x ->  x.equals(s));
+		return index().containsKey(name.toString());
 	}
 	
 	@Override
@@ -148,12 +171,8 @@ public class ObjectJsonHub extends AbstractJsonHub {
 	
 	@Override
 	public JsonHub getOrDefault(CharSequence name, JsonHub defaultValue) {
-		String s = name.toString();
-		return v.stream()
-				.filter(x -> x.name().unescaped().equals(s))
-				.findFirst()
-				.map(x -> x.value())
-				.orElse(defaultValue);
+		JsonHub found = index().get(name.toString());
+		return found == null ? defaultValue : found;
 	}
 	
 	@Override

@@ -704,11 +704,16 @@ export async function request(
   }
 }
 
-/** 采集器结果:{ok,error?}。错误文案要原样带给用户,不能只留状态码。 */
+/**
+ * 采集器结果：{@code {ok,error?,message?}}。
+ *
+ * <p>后端的 {@code error} 是稳定代码（invalid-collector-config 等），
+ * {@code message} 才是给人看的原因——提示优先取 message。</p>
+ */
 function parseCollectorResult(text: string): { ok: boolean; error?: string } {
   try {
-    const body = JSON.parse(text) as { ok?: boolean; error?: string };
-    return { ok: body.ok === true, error: body.error };
+    const body = JSON.parse(text) as { ok?: boolean; error?: string; message?: string };
+    return { ok: body.ok === true, error: body.message ?? body.error };
   } catch {
     return { ok: false, error: text.slice(0, 200) };
   }
@@ -1315,24 +1320,23 @@ export function createClient(): ApiClient {
       };
     },
     async setCollector(sessionId, config) {
-      /* 先判 ok 再解析:网关 502 的 HTML 错误页不能当 JSON 解析 */
-      const body = await json<{ ok?: boolean; error?: string }>(
-        await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json; charset=utf-8' },
-          body: JSON.stringify(config),
-        }),
-      );
-      return body.ok === true ? null : body.error ?? '下发被后端拒绝';
+      /* 先读 text 再按内容判：json() 会对 400 先抛，
+         后端给人看的 message 就丢了（用户只剩 "400 {...}"）。 */
+      const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(config),
+      });
+      const parsed = parseCollectorResult(await response.text());
+      return parsed.ok ? null : (parsed.error ?? '下发被后端拒绝');
     },
     async collectorCommand(sessionId, start) {
-      const body = await json<{ ok?: boolean; error?: string }>(
-        await request(
-          apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
-          { method: 'POST' },
-        ),
+      const response = await request(
+        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
+        { method: 'POST' },
       );
-      return body.ok === true ? null : body.error ?? '采集器命令被后端拒绝';
+      const parsed = parseCollectorResult(await response.text());
+      return parsed.ok ? null : (parsed.error ?? '采集器命令被后端拒绝');
     },
     async closeHostSim(sessionId) {
       return command(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }));

@@ -700,4 +700,57 @@ class HsmsSsIntegrationTest {
         }
     }
 
+
+    @Test
+    @DisplayName("undecodable body of a W primary is answered with S9F7 (Illegal Data)")
+    void illegalDataIsAnsweredWithS9F7() throws Exception {
+        int port = freePort();
+
+        HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
+        config.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        openPassive(config);
+
+        try ( Socket client = new Socket("127.0.0.1", port) ) {
+            client.setTcpNoDelay(true);
+
+            write(client, frame(10, controlHead((byte)0, (byte)1, 4001)));
+            byte[] selectRsp = readFrame(client, 3000);
+            assertEquals(2, selectRsp[5] & 0xFF, "SELECT.rsp expected");
+
+            /* S1F3 W，但 body 是坏的：一个声明 2 字节的 F4 项（F4 必须是 4 的倍数）。
+               以前这种帧只进日志队列，主机既收不到数据也收不到否定应答，只能等 T3。 */
+            byte[] head = new byte[] {
+                    0, 0, 1, (byte)0x83, 0, 0,
+                    (byte)(4002 >> 24), (byte)(4002 >> 16), (byte)(4002 >> 8), (byte)4002
+            };
+            byte[] badBody = new byte[] { 0x2E, 1, 2 };   /* F4, len=2, then two bytes */
+            byte[] msg = new byte[14 + badBody.length];
+            byte[] framed = frame(10 + badBody.length, head);
+            System.arraycopy(framed, 0, msg, 0, 14);
+            System.arraycopy(badBody, 0, msg, 14, badBody.length);
+            write(client, msg);
+
+            client.setSoTimeout(8000);
+            java.io.DataInputStream in = new java.io.DataInputStream(client.getInputStream());
+            int len = in.readInt();
+            byte[] rspHead = new byte[10];
+            in.readFully(rspHead);
+            byte[] rspBody = new byte[Math.max(0, len - 10)];
+            if (rspBody.length > 0) {
+                in.readFully(rspBody);
+            }
+
+            assertEquals(9, rspHead[2] & 0xFF, "S9 expected");
+            assertEquals(7, rspHead[3] & 0xFF, "S9F7 (Illegal Data) expected");
+            /* E5：S9F7 的 body 是一个 B 项（格式码 2，扩展长度字节 10），
+               携带被拒报文的 10 字节头（IDN），主机据此把否定应答关联到原事务。 */
+            assertEquals(12, rspBody.length, "B item: 2-byte header + 10 data bytes");
+            assertEquals(0x20, rspBody[0] & 0xF0, "B format item (code 2) expected");
+            assertEquals(10, rspBody[1] & 0xFF, "extended length byte = 10 expected");
+            for (int i = 0; i < 10; i++) {
+                assertEquals(head[i], rspBody[rspBody.length - 10 + i], "echoed header byte " + i);
+            }
+        }
+    }
+
 }

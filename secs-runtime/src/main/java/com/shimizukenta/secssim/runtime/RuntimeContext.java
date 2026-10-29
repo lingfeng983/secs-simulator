@@ -693,24 +693,26 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
-    public String setHostSimCollectorById(String hostId, String requestJson) {
+    public com.shimizukenta.secssim.api.http.CollectorResult setHostSimCollectorById(String hostId, String requestJson) {
         com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
-            return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+            return new com.shimizukenta.secssim.api.http.CollectorResult(
+                    com.shimizukenta.secssim.api.http.CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
         }
         try {
             sim.setCollectorConfig(requestJson);
-            return "{\"ok\":true}";
+            return com.shimizukenta.secssim.api.http.CollectorResult.ok();
         } catch (IllegalArgumentException e) {
-            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+            return com.shimizukenta.secssim.api.http.CollectorResult.invalid(e.getMessage());
         }
     }
 
     @Override
-    public String hostSimCollectorCommandById(String hostId, boolean start) {
+    public com.shimizukenta.secssim.api.http.CollectorResult hostSimCollectorCommandById(String hostId, boolean start) {
         com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
-            return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+            return new com.shimizukenta.secssim.api.http.CollectorResult(
+                    com.shimizukenta.secssim.api.http.CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
         }
         try {
             if (start) {
@@ -718,9 +720,12 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
             } else {
                 sim.collectorStopManual();
             }
-            return "{\"ok\":true}";
-        } catch (IllegalStateException | IllegalArgumentException e) {
-            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+            return com.shimizukenta.secssim.api.http.CollectorResult.ok();
+        } catch (IllegalStateException e) {
+            /* 「没有配置」是状态冲突（409），不是请求非法：界面据此提示先下发配置 */
+            return com.shimizukenta.secssim.api.http.CollectorResult.notConfigured(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return com.shimizukenta.secssim.api.http.CollectorResult.invalid(e.getMessage());
         }
     }
 
@@ -759,38 +764,41 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 }
 
-@Override
-public String setHostSimCollector(String sessionId, String requestJson) {
-    com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-    if (sim == null || this.sessions.find(sessionId).isEmpty()) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
-    }
-    try {
-        sim.setCollectorConfig(requestJson);
-        return "{\"ok\":true}";
-    } catch (IllegalArgumentException e) {
-        return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
-    }
-}
-
-@Override
-public String hostSimCollectorCommand(String sessionId, boolean start) {
-    com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-    if (sim == null || this.sessions.find(sessionId).isEmpty()) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
-    }
-    try {
-        if (start) {
-            sim.collectorStartManual();
-        } else {
-            sim.collectorStopManual();
+    @Override
+    public com.shimizukenta.secssim.api.http.CollectorResult setHostSimCollector(String sessionId, String requestJson) {
+        com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
+        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
+            return new com.shimizukenta.secssim.api.http.CollectorResult(
+                    com.shimizukenta.secssim.api.http.CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
         }
-        return "{\"ok\":true}";
-    } catch (IllegalStateException | IllegalArgumentException e) {
-        return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        try {
+            sim.setCollectorConfig(requestJson);
+            return com.shimizukenta.secssim.api.http.CollectorResult.ok();
+        } catch (IllegalArgumentException e) {
+            return com.shimizukenta.secssim.api.http.CollectorResult.invalid(e.getMessage());
+        }
     }
-}
 
+    @Override
+    public com.shimizukenta.secssim.api.http.CollectorResult hostSimCollectorCommand(String sessionId, boolean start) {
+        com.shimizukenta.secssim.runtime.session.HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
+        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
+            return new com.shimizukenta.secssim.api.http.CollectorResult(
+                    com.shimizukenta.secssim.api.http.CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
+        }
+        try {
+            if (start) {
+                sim.collectorStartManual();
+            } else {
+                sim.collectorStopManual();
+            }
+            return com.shimizukenta.secssim.api.http.CollectorResult.ok();
+        } catch (IllegalStateException e) {
+            return com.shimizukenta.secssim.api.http.CollectorResult.notConfigured(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return com.shimizukenta.secssim.api.http.CollectorResult.invalid(e.getMessage());
+        }
+    }
 @Override
 public String hostSimCollectorJson(String sessionId) {
     if (this.sessions.find(sessionId).isEmpty()) {

@@ -673,6 +673,36 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 			}
 		}
 		
+		/**
+		 * 对「头合法但 body 解不开」的 primary 回 S9F7（Illegal Data，E5）。
+	 *
+	 * <p>只对<b>奇数 function、非 S9、且本连接是当前选中连接</b>时回应：
+	 * secondary 不该被应答；S9 互答会死循环；非选中连接的 send 会跑到别的链路上。</p>
+	 *
+	 * @param header10 已完整读到的 10 字节头
+	 */
+	private void replyIllegalData(byte[] header10) {
+		final HsmsSsMessage broken = createHsmsSsMessage(header10, Secs2.empty());
+		final int stream = broken.getStream();
+		final int function = broken.getFunction();
+		if ( stream <= 0 || stream == 9 ) {
+			return;
+		}
+		if ( (function % 2) == 0 ) {
+			return;
+		}
+		if ( getSelectedConnection() != this ) {
+			return;
+		}
+		try {
+			gem().s9f7(broken);
+		}
+		catch ( Exception e ) {
+			notifyLog(e);
+		}
+	}
+		
+		
 		protected void reading() throws InterruptedException {
 			
 			final ByteBuffer lenBf = ByteBuffer.allocate(8);
@@ -773,6 +803,11 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 					}
 					catch ( Secs2Exception e ) {
 						notifyLog(e);
+
+					/* E5：Stream/Function 可识别但数据无法解析 → S9F7（Illegal Data）。
+					   只记日志的话这条报文既不进队列也没有否定应答，主机只能等 T3 超时，
+					   无法区分"设备坏了"与"自己发的数据有问题"。 */
+					replyIllegalData(headbs);
 					}
 				}
 			}

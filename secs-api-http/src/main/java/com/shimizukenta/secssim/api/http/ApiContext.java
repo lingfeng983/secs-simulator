@@ -516,10 +516,10 @@ public interface ApiContext {
      *
      * @param hostId     实例 id
      * @param requestJson 采集器配置 JSON
-     * @return 结果 JSON
+     * @return 结构化结果（HTTP 层据此定状态码，不再猜 JSON 文本）
      */
-    default String setHostSimCollectorById(String hostId, String requestJson) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    default CollectorResult setHostSimCollectorById(String hostId, String requestJson) {
+        return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
     }
 
     /**
@@ -527,10 +527,10 @@ public interface ApiContext {
      *
      * @param hostId 实例 id
      * @param start  启动/停止
-     * @return 结果 JSON
+     * @return 结构化结果
      */
-    default String hostSimCollectorCommandById(String hostId, boolean start) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    default CollectorResult hostSimCollectorCommandById(String hostId, boolean start) {
+        return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
     }
 
     /**
@@ -548,10 +548,10 @@ public interface ApiContext {
      *
      * @param sessionId   会话标识
      * @param requestJson {@code {"startCeid":..,"stopCeid":..,"intervalMs":..,"svids":[{"id":..}]}}
-     * @return {@code {"ok":true}} 或 {@code {"ok":false,"error":"..."}}
+     * @return 结构化结果
      */
-    default String setHostSimCollector(String sessionId, String requestJson) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    default CollectorResult setHostSimCollector(String sessionId, String requestJson) {
+        return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
     }
 
     /**
@@ -559,10 +559,10 @@ public interface ApiContext {
      *
      * @param sessionId 会话标识
      * @param start     {@code true} 启动 / {@code false} 停止
-     * @return {@code {"ok":true}} 或错误
+     * @return 结构化结果
      */
-    default String hostSimCollectorCommand(String sessionId, boolean start) {
-        return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+    default CollectorResult hostSimCollectorCommand(String sessionId, boolean start) {
+        return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
     }
 
     /**

@@ -69,6 +69,16 @@ public final class ParameterLayers {
         return new ParameterLayers(Map.copyOf(copy));
     }
 
+    /** 枚举数组每次 values() 都会克隆一份；resolve 在每个求值点被调用，缓存成常量。 */
+    private static final Layer[] LAYERS_BY_PRIORITY;
+    static {
+        Layer[] all = Layer.values();
+        LAYERS_BY_PRIORITY = new Layer[all.length];
+        for (int i = 0; i < all.length; i++) {
+            LAYERS_BY_PRIORITY[i] = all[all.length - 1 - i];
+        }
+    }
+
     /**
      * 解析参数：从最高层往下找，第一个命中的生效。
      *
@@ -76,9 +86,9 @@ public final class ParameterLayers {
      * @return 值
      */
     public OptionalDouble resolve(String name) {
-        Layer[] layersByPriority = Layer.values();
+        Layer[] layersByPriority = LAYERS_BY_PRIORITY;
 
-        for (int i = layersByPriority.length - 1; i >= 0; i--) {
+        for (int i = 0; i < layersByPriority.length; i++) {
             Map<String, Double> values = this.layers.get(layersByPriority[i]);
             if (values != null && values.containsKey(name)) {
                 return OptionalDouble.of(values.get(name));

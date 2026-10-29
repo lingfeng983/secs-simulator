@@ -191,18 +191,16 @@ final class HostSimHandler extends HttpSupport {
                     respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
                     return;
                 }
-                String result = this.context.setHostSimCollectorById(hostId, body);
-                audit(ex, "host-sim-collector-config", hostId, "ok=" + result.contains("\"ok\":true"));
-                respond(ex, result.contains("\"ok\":true") ? 200 : 400, result);
+                CollectorResult result = this.context.setHostSimCollectorById(hostId, body);
+                respondCollector(ex, result, "host-sim-collector-config", hostId);
                 return;
             }
             if ("POST".equals(method) && parts.length == 3 && ("start".equals(parts[2]) || "stop".equals(parts[2]))) {
                 if (!requireRole(ex, ApiRole.OPERATOR)) {
                     return;
                 }
-                String result = this.context.hostSimCollectorCommandById(hostId, "start".equals(parts[2]));
-                audit(ex, "host-sim-collector-" + parts[2], hostId, "ok=" + result.contains("\"ok\":true"));
-                respond(ex, result.contains("\"ok\":true") ? 200 : 409, result);
+                CollectorResult result = this.context.hostSimCollectorCommandById(hostId, "start".equals(parts[2]));
+                respondCollector(ex, result, "host-sim-collector-" + parts[2], hostId);
                 return;
             }
         }

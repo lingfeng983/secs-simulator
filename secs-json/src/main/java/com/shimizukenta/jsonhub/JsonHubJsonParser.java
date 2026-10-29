@@ -100,26 +100,45 @@ public class JsonHubJsonParser {
 	 * @throws IOException
 	 */
 	public AbstractJsonHub parse(Reader reader) throws IOException {
+		return parse(reader, MAX_PARSE_CHARS);
+	}
+	
+	/** 流式入口的字符上限：无上限时一个超大流就能把堆吃光（逐字符读还慢一个数量级）。 */
+	public static final long MAX_PARSE_CHARS = 64L * 1024L * 1024L;
+	
+	/**
+	 * 从 Reader 解析，带字符上限。
+	 *
+	 * @param reader 输入
+	 * @param maxChars 允许的最大字符数，超出即抛
+	 * @return 解析结果
+	 * @throws IOException 读失败
+	 */
+	public AbstractJsonHub parse(Reader reader, long maxChars) throws IOException {
 		
 		Objects.requireNonNull(reader, "parse: nonNull Reader required");
 		
-		try (
-				CharArrayWriter writer = new CharArrayWriter();
-				) {
+		CharArrayWriter writer = new CharArrayWriter();
+		char[] buffer = new char[8192];
+		long total = 0L;
+		for ( ;; ) {
 			
-			for ( ;; ) {
-				
-				int r = reader.read();
-				
-				if ( r < 0 ) {
-					break;
-				}
-				
-				writer.write(r);
+			int r = reader.read(buffer);
+			
+			if ( r < 0 ) {
+				break;
 			}
 			
-			return parse(writer.toString());
+			total += r;
+			if ( total > maxChars ) {
+				throw new JsonHubParseException(
+						"input exceeds " + maxChars + " characters");
+			}
+			
+			writer.write(buffer, 0, r);
 		}
+		
+		return parse(writer.toString());
 	}
 	
 	

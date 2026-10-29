@@ -25,7 +25,9 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -220,6 +222,10 @@ public final class HostSimulator {
      */
     public void reconnect() throws IOException {
         SecsCommunicator old = this.communicator;
+        this.open.set(false);
+        this.communicator = null;
+        /* 先摘掉引用再关旧连接：失败时 isOpen() 必须为 false，
+           否则"断了自动重连一次"的分支永远不再触发（RuntimeContext 靠它判重试）。 */
         if (old != null) {
             try {
                 old.close();
@@ -368,8 +374,20 @@ public final class HostSimulator {
             }
         }
 
-        this.collectorStop("配置更新");
-        this.collectorConfig = config;
+        /* 「停旧采集 + 换配置」必须是一个整体：collectorStart 由链路线程在 S6F11
+           里触发，两步之间被唤醒会用<b>旧</b>参数启动，之后不再重读。 */
+        synchronized ( this ) {
+            this.collectorStop("配置更新");
+            this.collectorConfig = config;
+
+            /* 换配置后，不在新列表里的 SVID 队列没有消费者也没有出口：
+               反复改采集配置会让内存只增不减 */
+            Set<Integer> keep = new HashSet<>();
+            for (CollectorSvid svid : config.svids()) {
+                keep.add(svid.id());
+            }
+            this.collectorData.keySet().retainAll(keep);
+        }
     }
 
     /** 手动启动采集（正常流程由 startCeid 的 S6F11 触发）。 */
@@ -672,16 +690,21 @@ public final class HostSimulator {
      */
     public void close() {
         this.collectorStop("主机模拟关闭");
-        if (this.open.compareAndSet(true, false)) {
-            SecsCommunicator comm = this.communicator;
-            if (comm != null) {
-                try {
-                    comm.close();
-                } catch (IOException e) {
-                    Log.warn("主机模拟器关闭失败（会话 " + this.sessionId + "）: " + e);
-                }
+        /* 无条件释放连接：发送失败路径会先把 open 置 false，
+           以前 close 用 CAS(true,false) 包住真正的 comm.close()，
+           那条路径下 communicator 既不关也不置 null——线程与 socket 泄漏，
+           而实例已经移出注册表，之后没有人能再关它。 */
+        boolean wasOpen = this.open.getAndSet(false);
+        SecsCommunicator comm = this.communicator;
+        this.communicator = null;
+        if (comm != null) {
+            try {
+                comm.close();
+            } catch (IOException e) {
+                Log.warn("主机模拟器关闭失败（会话 " + this.sessionId + "）: " + e);
             }
-            this.communicator = null;
+        }
+        if (wasOpen) {
             Log.info("主机模拟器已断开会话 " + this.sessionId);
         }
     }

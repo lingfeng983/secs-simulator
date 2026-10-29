@@ -828,7 +828,8 @@ paths:
             schema: { $ref: '#/components/schemas/CollectorConfig' }
       responses:
         '200': { description: 已下发 }
-        '400': { description: 配置非法（ok=false，原因在 error），或主机模拟未开启（host-sim-not-open） }
+        '400': { description: 配置非法（error=invalid-collector-config，人话原因在 message） }
+        '404': { description: 主机模拟未开启（host-sim-not-open） }
     get:
       tags: [control]
       summary: 采集器状态与数据（v6）
@@ -856,7 +857,8 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: 已启动 }
-        '409': { description: 未配置或未连接（ok=false，原因在 error） }
+        '404': { description: 主机模拟未开启（host-sim-not-open） }
+        '409': { description: 还没有采集配置（collector-not-configured，原因在 message） }
   /api/v1/sessions/{id}/host-sim/collector/stop:
     post:
       tags: [control]
@@ -868,7 +870,8 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: 已停止 }
-        '409': { description: 未配置或未连接（ok=false，原因在 error） }
+        '404': { description: 主机模拟未开启（host-sim-not-open） }
+        '409': { description: 还没有采集配置（collector-not-configured，原因在 message） }
   /api/v1/host-sims:
     get:
       tags: [host-sims]
@@ -976,7 +979,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
         '400':
-          description: 配置非法（ok=false，原因在 error），或实例不存在/未连接（host-sim-not-open）
+          description: 配置非法（error=invalid-collector-config，人话原因在 message）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostSimCommandResult' }
+        '404':
+          description: 实例不存在（host-sim-not-open）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
@@ -992,8 +1000,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
+        '404':
+          description: 实例不存在（host-sim-not-open）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostSimCommandResult' }
         '409':
-          description: 未配置或未连接（ok=false，原因在 error）
+          description: 还没有采集配置（collector-not-configured，原因在 message）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
@@ -1009,8 +1022,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
+        '404':
+          description: 实例不存在（host-sim-not-open）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostSimCommandResult' }
         '409':
-          description: 未配置或未连接（ok=false，原因在 error）
+          description: 还没有采集配置（collector-not-configured，原因在 message）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
@@ -1758,7 +1776,8 @@ components:
       required: [ok]
       properties:
         ok: { type: boolean }
-        error: { type: string, description: 失败原因（ok=false 时给出） }
+        error: { type: string, description: 稳定的错误代码（ok=false 时给出，如 invalid-collector-config / host-sim-not-open） }
+        message: { type: string, description: 给人看的原因；界面优先显示它 }
     ConfigTemplateEntry:
       type: object
       description: 内置设备模板目录里的一项

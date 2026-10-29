@@ -218,13 +218,22 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   const activeSessionRef = useRef(activeSession);
   activeSessionRef.current = activeSession;
 
+  /* 轮询序号：请求可能叠 4 期（8s 超时 × 2s 节奏），过期响应既不能覆盖
+     新快照，也不能把旧的失败写回 backendError（新一次已成功）。 */
+  const sessionsSeqRef = useRef(createRequestSeq());
+  const overviewSeqRef = useRef(createRequestSeq());
+
   /* ---------- 读取 ---------- */
 
   const refreshSessions = useCallback(async () => {
     if (client === null) {
       return;
     }
+    const token = sessionsSeqRef.current.begin();
     const [healthResult, sessionsResult] = await Promise.allSettled([client.health(), client.sessions()]);
+    if (!sessionsSeqRef.current.isCurrent(token)) {
+      return;
+    }
     if (healthResult.status === 'fulfilled') {
       setHealth(healthResult.value);
       setBackendError('');
@@ -511,6 +520,9 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         if (changed) {
           setLogLevelState(level);
           notifierRef.current.info(`日志级别已切换为 ${level}`);
+        } else {
+          /* 后端 400 unknown-level 时以前静默：用户以为切了，其实没切 */
+          notifierRef.current.error('切换日志级别失败', `未知级别：${level}（可选 error/info/debug）`);
         }
         return changed;
       } catch (error) {
@@ -526,12 +538,19 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     if (client === null) {
       return;
     }
+    const token = overviewSeqRef.current.begin();
     try {
-      setOverview(await client.overview());
+      const rows = await client.overview();
+      if (!overviewSeqRef.current.isCurrent(token)) {
+        return;
+      }
+      setOverview(rows);
     } catch (error) {
       /* 这里不占全局 backendError（health 轮询会把它清掉），但要留痕迹：
          老后端缺端点或瞬时失败时，保留上一份读数比清空更有用 */
-      console.warn('[overview] 拉取失败，保留上一份数据', error);
+      if (overviewSeqRef.current.isCurrent(token)) {
+        console.warn('[overview] 拉取失败，保留上一份数据', error);
+      }
     }
   }, [client]);
 

@@ -650,19 +650,29 @@ public interface JsonHub extends Iterable<JsonHub> {
 	 */
 	public static JsonHub fromBytes(InputStream strm) throws IOException {
 		
+		/* 有上限 + 批量读：无上限时"接一个网络流"就是 OOM，
+		   逐字节 read() 每字节一次虚调用也慢一个数量级。 */
 		try (
 				ByteArrayOutputStream os = new ByteArrayOutputStream();
 				){
 			
+			byte[] buffer = new byte[8192];
+			long total = 0L;
 			for ( ;; ) {
 				
-				int r = strm.read();
+				int r = strm.read(buffer);
 				
 				if ( r < 0 ) {
 					break;
 				}
 				
-				os.write(r);
+				total += r;
+				if ( total > JsonHubJsonParser.MAX_PARSE_CHARS ) {
+					throw new JsonHubParseException(
+							"input exceeds " + JsonHubJsonParser.MAX_PARSE_CHARS + " bytes");
+				}
+				
+				os.write(buffer, 0, r);
 			}
 			
 			return fromBytes(os.toByteArray());

@@ -529,16 +529,14 @@ final class SessionHandler extends HttpSupport {
                     respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
                     return;
                 }
-                String result = this.context.setHostSimCollector(parts[0], body);
-                audit(ex, "host-sim-collector-config", parts[0], "ok=" + result.contains("\"ok\":true"));
-                respond(ex, result.contains("\"ok\":true") ? 200 : 400, result);
+                CollectorResult result = this.context.setHostSimCollector(parts[0], body);
+                respondCollector(ex, result, "host-sim-collector-config", parts[0]);
                 return;
             }
             if (parts.length == 4 && "collector".equals(parts[2])
                     && ("start".equals(parts[3]) || "stop".equals(parts[3]))) {
-                String result = this.context.hostSimCollectorCommand(parts[0], "start".equals(parts[3]));
-                audit(ex, "host-sim-collector-" + parts[3], parts[0], "ok=" + result.contains("\"ok\":true"));
-                respond(ex, result.contains("\"ok\":true") ? 200 : 409, result);
+                CollectorResult result = this.context.hostSimCollectorCommand(parts[0], "start".equals(parts[3]));
+                respondCollector(ex, result, "host-sim-collector-" + parts[3], parts[0]);
                 return;
             }
         }

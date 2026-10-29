@@ -106,6 +106,48 @@ abstract class HttpSupport {
                 action, target, detail);
     }
 
+    /* ===== 采集器命令的统一出口 ===== */
+
+    /**
+     * 把结构化的 {@link CollectorResult} 映射成状态码 + 响应体，并记审计。
+     *
+     * <p>以前这里靠 {@code result.contains("\"ok\":true")} 猜成败：配置错误消息里
+     * 一旦带上这个子串（或任何回显内容含它），失败会被报成 200。状态码必须由枚举决定。</p>
+     *
+     * @param ex     交换
+     * @param result 结构化结果
+     * @param action 审计动作名
+     * @param target 审计对象
+     * @throws IOException 写响应失败
+     */
+    protected void respondCollector(HttpExchange ex, CollectorResult result,
+                                    String action, String target) throws IOException {
+        String body;
+        int status;
+        switch (result.outcome()) {
+            case OK -> {
+                status = 200;
+                body = "{\"ok\":true}";
+            }
+            case UNKNOWN_HOST -> {
+                status = 404;
+                body = "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+            }
+            case NOT_CONFIGURED -> {
+                status = 409;
+                body = "{\"ok\":false,\"error\":\"collector-not-configured\",\"message\":"
+                        + json(result.message()) + "}";
+            }
+            default -> {
+                status = 400;
+                body = "{\"ok\":false,\"error\":\"invalid-collector-config\",\"message\":"
+                        + json(result.message()) + "}";
+            }
+        }
+        audit(ex, action, target, "outcome=" + result.outcome());
+        respond(ex, status, body);
+    }
+
     /* ===== JSON 取值的空安全 ===== */
 
     /**
