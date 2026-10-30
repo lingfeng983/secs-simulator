@@ -542,6 +542,7 @@ scripts\package-linux.ps1
 - [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
 - [全量代码评审 2026-10-20（协议符合性专项）](docs/code-review-2026-10-20.md)
 - [全量代码评审 2026-10-29（五模块复核 + 整改路线）](docs/audit-2026-10-29.md)
+- [实机全量测试 2026-10-30（原生 exe + 真实主机 + 浏览器）](docs/host-e2e-2026-10-30.md)
 - [SECS/GEM 标准参考资料](docs/reference/README.md)（E4/E5/E30/E37 中文整理 + 项目对照）
 - [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
 - [配置格式 Schema v5](docs/schema-v5.md)（v4 仍兼容）
