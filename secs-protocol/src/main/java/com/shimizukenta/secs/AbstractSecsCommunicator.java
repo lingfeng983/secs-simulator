@@ -16,7 +16,6 @@ import java.util.concurrent.TimeoutException;
 
 import com.shimizukenta.secs.gem.Gem;
 import com.shimizukenta.secs.secs2.Secs2;
-import com.shimizukenta.secs.sml.SmlMessage;
 
 /**
  * This abstract class is implementation of SECS-communicate.
@@ -205,22 +204,6 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 			, InterruptedException {
 		
 		return send(primary, strm, func, wbit, Secs2.empty());
-	}
-	
-	@Override
-	public Optional<SecsMessage> send(SmlMessage sml)
-			throws SecsSendMessageException, SecsWaitReplyMessageException, SecsException
-			, InterruptedException {
-		
-		return send(sml.getStream(), sml.getFunction(), sml.wbit(), sml.secs2());
-	}
-	
-	@Override
-	public Optional<SecsMessage> send(SecsMessage primary, SmlMessage sml)
-			throws SecsSendMessageException, SecsWaitReplyMessageException, SecsException
-			, InterruptedException {
-		
-		return send(primary, sml.getStream(), sml.getFunction(), sml.wbit(), sml.secs2());
 	}
 	
 	

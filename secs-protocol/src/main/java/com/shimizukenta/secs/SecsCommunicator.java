@@ -10,7 +10,6 @@ import com.shimizukenta.secs.secs1ontcpip.Secs1OnTcpIpCommunicator;
 import com.shimizukenta.secs.secs1ontcpip.Secs1OnTcpIpCommunicatorConfig;
 import com.shimizukenta.secs.gem.Gem;
 import com.shimizukenta.secs.secs2.Secs2;
-import com.shimizukenta.secs.sml.SmlMessage;
 
 /**
  * This interface is implementation of SECS-Communicating, open/close communicating, receive/send SECS-Message.<br />
@@ -36,14 +35,10 @@ import com.shimizukenta.secs.sml.SmlMessage;
  * {@link #send(int, int, boolean, Secs2)}<br />
  * To send Primary-(Header-only)-Message and receive Reply-Message,
  * {@link #send(int, int, boolean)}<br />
- * To send Primary-Message by SML and receive Reply-Message,
- * {@link #send(SmlMessage)}<br />
  * To send Reply-Message,
  * {@link #send(SecsMessage, int, int, boolean, Secs2)}<br />
  * To send Reply-(Header-only)-Message,
  * {@link #send(SecsMessage, int, int, boolean)}<br />
- * To send Reply-Message by SML,
- * {@link #send(SecsMessage, SmlMessage)}<br />
  * </p>
  * <p>
  * To get communicate-state-changed,
@@ -208,49 +203,6 @@ public interface SecsCommunicator extends Closeable {
 	 * @throws InterruptedException
 	 */
 	public Optional<SecsMessage> send(SecsMessage primary, int strm, int func, boolean wbit, Secs2 secs2)
-			throws SecsSendMessageException
-			, SecsWaitReplyMessageException
-			, SecsException
-			, InterruptedException;
-	
-	/**
-	 * Send Primary-Message by SML and receive Reply-Message<br />
-	 * 
-	 * <p>
-	 * Blocking-method.<br />
-	 * Wait until sended Primay-Message and received Reply-Message if exist.<br />
-	 * </p>
-	 * 
-	 * @param sml
-	 * @return Reply-Message if exist
-	 * @throws SecsSendMessageException if send failed
-	 * @throws SecsWaitReplyMessageException if receive message failed, e.g. Timeout-T3
-	 * @throws SecsException
-	 * @throws InterruptedException
-	 */
-	public Optional<SecsMessage> send(SmlMessage sml)
-			throws SecsSendMessageException
-			, SecsWaitReplyMessageException
-			, SecsException
-			, InterruptedException;
-	
-	/**
-	 * Send Reply-Message by SML.
-	 * 
-	 * <p>
-	 * Blocking-method.<br />
-	 * Wait until sended.<br />
-	 * </p>
-	 * 
-	 * @param primary Primary-Message.
-	 * @param sml
-	 * @return {@code Optional.empty()}
-	 * @throws SecsSendMessageException if send failed
-	 * @throws SecsWaitReplyMessageException if receive message failed, e.g. Timeout-T3
-	 * @throws SecsException
-	 * @throws InterruptedException
-	 */
-	public Optional<SecsMessage> send(SecsMessage primary, SmlMessage sml)
 			throws SecsSendMessageException
 			, SecsWaitReplyMessageException
 			, SecsException

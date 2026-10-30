@@ -44,15 +44,21 @@ mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 fro
 
 `-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
 `NativeRuntimeIT`（API、SSE ticket、HSMS S1F1、S1F3、优雅停机）。
-本地质量门禁不覆盖原生链路，需要时手动跑。
+日常门禁不覆盖原生链路；CI 里由夜间任务 `native-nightly.yml` 构建（非阻断），
+发版前仍以本地 `-Pnative verify` 为准。
 
 ### 本地质量门禁
 
-仓库没有 CI，提交前跑这一条：
+提交前跑这一条：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/check-all.ps1
 ```
+
+CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑同一组检查：后端测试在
+Linux 与 Windows 两个平台矩阵上跑（端口/SO_REUSEADDR 语义不同，单平台绿不算数），
+前端跑 `tsc` + Vitest + Playwright，另有 openapi 重复键与 `.ps1` BOM 契约检查。
+本地脚本更适合提交前自查（带 `-SkipBackend` / `-SkipE2E` 选项）。
 
 依次执行 `mvn -B test` → 前端依赖（缺 `node_modules` 时才 `npm ci`）→ `npx tsc --noEmit`
 → `npm test` → `npx playwright test`，任一步失败即以该步退出码结束。
@@ -505,7 +511,11 @@ scripts\package-linux.ps1
    例外只有一种：**对照 E4/E5/E37.1 原文确认为实现缺陷**（不是风格问题），
    且必须在提交信息里写清条文依据。已发生的例外：
    [应答匹配只接受 secondary](docs/code-review-2026-10-20.md)（E37.1 的应答判定要求
-   "同 SystemBytes + 对应 secondary"）。
+   "同 SystemBytes + 对应 secondary"）；
+   [S9F7 非法数据应答](docs/audit-2026-10-29.md)（E5：Stream/Function 可识别
+   但数据无法解析时设备必须回 S9F7，不再静默丢帧；见该文档 §12.7）；
+   [协议层 SML 入口摘除](docs/adr/0014-protocol-sml-retired.md)（公共 API 收窄：删除
+   零调用方的 `send(SmlMessage)` 入口，不动报文编解码逻辑）。
 2. **禁止 `--enable-preview`**。预览特性会把 class 文件绑死到具体 JDK，且与 native-image 不兼容。
 3. **曲线是时间的纯函数**：不允许在曲线内部累加状态（见 [ADR 0003](docs/adr/0003-pure-curves.md)）。
 4. **模板图是纯函数图**：`Template.evaluate` 不得有副作用；一个 SVID 只能有一个生产者（见 [ADR 0004](docs/adr/0004-template-dag.md)）。
@@ -523,6 +533,9 @@ scripts\package-linux.ps1
 - [ADR 0010 · 手动发送 SML 只实现受控子集](docs/adr/0010-manual-sml.md)
 - [ADR 0011 · 事件编排的运行时启用/禁用](docs/adr/0011-event-runtime-control.md)
 - [ADR 0012 · 审计日志与业务日志分离](docs/adr/0012-audit-log.md)
+- [ADR 0013 · HTTP 请求处理改用虚拟线程](docs/adr/0013-http-virtual-threads.md)
+- [ADR 0014 · 协议层 SML 实现下线](docs/adr/0014-protocol-sml-retired.md)
+- [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
 - [OpenAPI 3.0 契约](docs/openapi.yaml)
 - [二进制曲线预览格式](docs/preview-binary.md)
 - [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)

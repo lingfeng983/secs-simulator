@@ -65,12 +65,22 @@ public final class HttpApiServer {
     private static final int SLOW_QUEUE = Math.max(SLOW_THREADS, Integer.getInteger("secssim.http.slowQueue", 16));
 
     /**
-     * 普通请求线程数。
+     * 是否用虚拟线程处理 HTTP 请求。
      *
-     * <p>并非所有处理器都是短任务：手动 SML 带 W 会同步等 T3（默认 45 秒）、
-     * host-sim 建连最长 6 秒、配置草稿要编译、报文历史要序列化 5000 条。
-     * 4 个线程时，4 个这样的请求就能让 health/轮询/SSE 取票全部排队，
-     * 界面表现为"后端挂了"。默认提到 8，可用 {@code -Dsecssim.http.threads} 调整。</p>
+     * <p>JDK 的 HttpServer 是<b>每连接一个任务</b>：连接在 keep-alive 空闲期仍然占着
+     * 执行线程。浏览器一个域名就是 6 条连接，几条连接一开，固定线程池就全被"空转"占住——
+     * 这比慢请求更隐蔽。虚拟线程在等 socket 时卸载载体线程，正好对路；
+            false;
+     */
+    private static final boolean VIRTUAL_THREADS =
+            !"false".equalsIgnoreCase(System.getProperty("secssim.http.virtual"));
+
+    /**
+     * 平台线程回退模式下的请求线程数（虚拟线程模式下不生效）。
+     *
+     * <p>以前固定 8 个：手动 SML 带 W 会同步等 T3、host-sim 建连最长 6 秒、
+     * 配置草稿要编译、报文历史要序列化 5000 条，4 个线程时几个这样的请求
+     * 就能让 health/轮询/SSE 取票全部排队。这里保留这个旋钮只为可选回退。</p>
      */
     private static final int REQUEST_THREADS = Math.max(4, Integer.getInteger("secssim.http.threads", 8));
 
@@ -173,14 +183,19 @@ public final class HttpApiServer {
         this.allowedHosts = allowedHostNames(server.getAddress());
 
         java.util.concurrent.atomic.AtomicInteger slowSeq = new java.util.concurrent.atomic.AtomicInteger();
+        /* 慢路由保留"并发上限 + 排队上限"：挡的是 CPU/内存型重活（编译草稿、压测、
+           等 T3），不是线程饥饿；超过上限仍回 503。线程本身用虚拟线程，
+           阻塞在 T3 上不占载体。 */
         this.slowExecutor = new java.util.concurrent.ThreadPoolExecutor(
                 SLOW_THREADS, SLOW_THREADS, 30L, TimeUnit.SECONDS,
                 new java.util.concurrent.ArrayBlockingQueue<>(SLOW_QUEUE),
-                runnable -> {
-                    Thread thread = new Thread(runnable, "http-slow-" + slowSeq.incrementAndGet());
-                    thread.setDaemon(true);
-                    return thread;
-                });
+                VIRTUAL_THREADS
+                        ? Thread.ofVirtual().name("http-slow-", 1).factory()
+                        : runnable -> {
+                            Thread thread = new Thread(runnable, "http-slow-" + slowSeq.incrementAndGet());
+                            thread.setDaemon(true);
+                            return thread;
+                        });
         this.slowExecutor.allowCoreThreadTimeOut(true);
         this.context = context;
         this.access = access;
@@ -188,13 +203,17 @@ public final class HttpApiServer {
         this.webRoot = webRoot;
 
         AtomicInteger sseSeq = new AtomicInteger();
-        /* 0 核心线程 + 同步队列 = 来一个连接开一根线程，空闲 60 秒回收；上限之外的连接直接 503 */
+        /* 0 核心线程 + 同步队列 = 来一个连接开一根线程，空闲 60 秒回收；上限之外的连接直接 503。
+           每条流大部分时间都在等下一帧，虚拟线程版不占载体线程。 */
         ExecutorService ssePool = new ThreadPoolExecutor(0, SSE_THREADS_MAX, 60L, TimeUnit.SECONDS,
-                new SynchronousQueue<>(), runnable -> {
-                    Thread thread = new Thread(runnable, "sse-" + sseSeq.incrementAndGet());
-                    thread.setDaemon(true);
-                    return thread;
-                });
+                new SynchronousQueue<>(),
+                VIRTUAL_THREADS
+                        ? Thread.ofVirtual().name("sse-", 1).factory()
+                        : runnable -> {
+                            Thread thread = new Thread(runnable, "sse-" + sseSeq.incrementAndGet());
+                            thread.setDaemon(true);
+                            return thread;
+                        });
         ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "sse-watchdog");
             thread.setDaemon(true);
@@ -299,11 +318,15 @@ public final class HttpApiServer {
         }
 
         AtomicInteger reqSeq = new AtomicInteger();
-        ExecutorService pool = Executors.newFixedThreadPool(REQUEST_THREADS, runnable -> {
-            Thread thread = new Thread(runnable, "http-" + reqSeq.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        });
+        /* 每连接一个任务：虚拟线程模式下线程数不再受 keep-alive 空闲连接影响 */
+        ExecutorService pool = VIRTUAL_THREADS
+                ? Executors.newThreadPerTaskExecutor(
+                        Thread.ofVirtual().name("http-", 1).factory())
+                : Executors.newFixedThreadPool(REQUEST_THREADS, runnable -> {
+                    Thread thread = new Thread(runnable, "http-" + reqSeq.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                });
 
         HttpApiServer api = new HttpApiServer(http, pool, context, access, audit,
                 normalizeRoot(webRoot),

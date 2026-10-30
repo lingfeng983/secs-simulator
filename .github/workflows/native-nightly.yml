@@ -1,0 +1,48 @@
+# 原生镜像夜间构建：`-Pnative verify` 构建成功后用 failsafe 跑 NativeRuntimeIT
+# （API、SSE 票据、HSMS S1F1/S1F3、优雅停机）。
+#
+# 为什么单独一条：镜像构建本身要十分钟上下，且 Windows 上的 native-image 依赖
+# runner 自带的 MSVC 工具链。放在每次 push 的路径上只会拖慢反馈；作为夜间探针，
+# 失败不阻断主 CI（`continue-on-error`），具体修复仍以本地 `-Pnative verify`
+# 为准。前端产物必须先构建：NativeRuntimeIT 的静态托管用例要求 frontend/dist。
+name: Native nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 02:00 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: 原生镜像 + NativeRuntimeIT
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 构建前端产物
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: mvn -Pnative verify
+        run: mvn -B -ntp -Pnative verify -pl secs-cli -am
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: secs-sim-windows
+          path: secs-cli/target/secs-sim.exe
+          if-no-files-found: warn
