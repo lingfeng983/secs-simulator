@@ -89,7 +89,7 @@
 2. **安装器**：jpackage MSI 或原生 exe 自解压。
 3. **JVM 模式兜底包**：jlink + jpackage，应对原生镜像跑不起来的机器。
 4. **自动更新**：检查版本 + 下载替换（Tauri updater 或自研）。
-5. **检查清单固化**（已完成）：`scripts/check-bom.ps1` —— 含非 ASCII 的 `.ps1` 必须带 UTF-8 BOM，CI 每次 push 执行；顺带修复 `scripts/accept-M0.ps1` 历史缺 BOM。另：`@vitejs/plugin-react` 锁定 4.3.4（4.7.0 依赖含 `workspace:*` 协议，npm 无法解析），提交 `frontend/package-lock.json` 支撑 CI 的 `npm ci`。
+5. **检查清单固化**（已完成）：`scripts/check-bom.ps1` —— 含非 ASCII 的 `.ps1` 必须带 UTF-8 BOM，CI 每次 push 执行。另：`@vitejs/plugin-react` 锁定 4.3.4（4.7.0 依赖含 `workspace:*` 协议，npm 无法解析），提交 `frontend/package-lock.json` 支撑 CI 的 `npm ci`。
 6. **CI**（已完成）：`.github/workflows/build.yml` —— backend（GraalVM JDK 25 `mvn verify`）+ frontend（`npm ci` / `tsc --noEmit` / `vite build`）+ ps1-bom；native 镜像构建与启动冒烟仅在每周定时与手动触发时跑（windows-latest + MSVC）。
 
 ### D. 下轮评审补课

@@ -65,12 +65,6 @@ Linux 与 Windows 两个平台矩阵上跑（端口/SO_REUSEADDR 语义不同，
 需要 JDK 25（`JAVA_HOME` 指向 JDK 25，推荐 GraalVM 25）；Playwright 浏览器先装一次：
 `npx playwright install chromium`。`-SkipBackend` / `-SkipE2E` 可按需跳过。
 
-里程碑验收脚本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/accept-M1.ps1
-```
-
 ## 运行
 
 同一个可执行文件，三种形态：
@@ -503,7 +497,7 @@ scripts\package-linux.ps1
 | 报警 ALTX | 仅 US-ASCII | 入口即拒（400），不会出现"接口成功但主机收不到" |
 | 未建立通信时的主动上报 | 不发 | S6F11/S6F1 只在 ONLINE 之后发送；手动"上报"按钮是操作员显式动作，不受此限 |
 | Spooling（S2F43–F48） | 未实现 | 不补发；断线期间的事件不缓存 |
-| 单会话 Trace | 1 条、每条 ≤10 SVID | 多条需按 TRID 分别点播，容量上限见配置校验 |
+| 单会话 Trace | 默认 1 条、每条 ≤10 SVID | 可在 `session.trace` 配置段调大（`maxTraces` / `maxSvidCount`），改后走重建重载；多条需按 TRID 分别点播 |
 
 ## 四条铁律
 

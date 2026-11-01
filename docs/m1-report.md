@@ -34,7 +34,6 @@
 | 架构规则 | 6 条，实际检查 312 个类 |
 | 原生镜像 | `secs-sim.exe` **12.7 MB**，增量重建 26 s |
 | 原生端到端 | `NativeRuntimeIT`：握手 → health → 鉴权 401 → SSE 首帧 → S1F1/S1F2 → 停机退出 0，**0.6 s** |
-| 验收脚本 | `scripts/accept-M1.ps1` 退出码 0 |
 
 ## 踩到的三个坑（都已修）
 

@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.HsmsTimeouts;
+import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
 import com.shimizukenta.secssim.core.curve.Rng;
@@ -384,6 +385,52 @@ class SessionConfigJsonTest {
                 new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers()),
                 EventSchedule.empty(), 20);
         assertFalse(SessionConfigJson.toJson(noTimeouts).contains("\"timeouts\""));
+    }
+
+    @Test
+    void traceSectionIsOptional() {
+        SessionConfig parsed = SessionConfigJson.parse("""
+                {"schemaVersion": 5,
+                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
+                 "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
+                 "events": {"plans": []}}
+                """);
+
+        assertEquals(TraceLimits.DEFAULTS, parsed.spec().traceLimits());
+    }
+
+    @Test
+    void rejectsNonPositiveTraceLimit() {
+        com.shimizukenta.secssim.app.config.ConfigException error =
+                assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
+                        () -> SessionConfigJson.parse("""
+                                {"schemaVersion": 5,
+                                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                                             "trace": {"maxTraces": 0}},
+                                 "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
+                                 "events": {"plans": []}}
+                                """));
+        assertTrue(error.getMessage().contains("必须 ≥ 1"), error.getMessage());
+    }
+
+    @Test
+    void traceLimitsSurviveRoundTrip() {
+        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers(),
+                HsmsTimeouts.DEFAULTS, new TraceLimits(4, 32));
+        SessionConfig config = new SessionConfig(spec, EventSchedule.empty(), 20);
+
+        String json = SessionConfigJson.toJson(config);
+        assertTrue(json.contains("\"trace\""), "显式写过的容量必须能往返: " + json);
+
+        SessionConfig parsed = SessionConfigJson.parse(json);
+        assertEquals(4, parsed.spec().traceLimits().maxTraces());
+        assertEquals(32, parsed.spec().traceLimits().maxSvidCount());
+
+        /* 没有 trace 的配置不应凭空多出一个空对象 */
+        SessionConfig noTrace = new SessionConfig(
+                new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers()),
+                EventSchedule.empty(), 20);
+        assertFalse(SessionConfigJson.toJson(noTrace).contains("\"trace\""));
     }
 
     @Test

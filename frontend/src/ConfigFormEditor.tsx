@@ -281,6 +281,9 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
 
       <h3 className="session-subhead">HSMS 超时（秒，留空用协议默认）</h3>
       <TimeoutFields session={session} set={set} />
+
+      <h3 className="session-subhead">Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）</h3>
+      <TraceFields session={session} set={set} />
     </div>
   );
 }
@@ -340,6 +343,48 @@ function editTimeout(
     return;
   }
   set('timeouts', { ...timeouts, [key]: value });
+}
+
+/** Trace 容量限制（可选）：写进 session.trace；清空删除键，用内置默认。 */
+function TraceFields({ session, set }: { session: JsonObject; set: (key: string, value: unknown) => void }): JSX.Element {
+  const trace = isJsonObject(session.trace) ? session.trace : {};
+  const fields: ReadonlyArray<{ key: string; label: string; help: string }> = [
+    { key: 'maxTraces', label: '同时 Trace 条数', help: '同一时刻允许多少条 S2F23 周期采样；真机通常是 1。' },
+    { key: 'maxSvidCount', label: '单条 SVID 上限', help: '一条 Trace 最多携带多少个状态变量；真机通常是 10。' },
+  ];
+
+  const commit = (key: string, value: number | undefined) => {
+    editTraceLimit(set, trace, key, value);
+  };
+
+  return (
+    <div className="session-fields">
+      {fields.map((field) => (
+        <SessionField key={field.key} label={field.label} help={field.help}>
+          <NumberField
+            value={numberField(trace, field.key)}
+            integer
+            onCommit={(next) => commit(field.key, next)}
+          />
+        </SessionField>
+      ))}
+    </div>
+  );
+}
+
+function editTraceLimit(
+  set: (key: string, value: unknown) => void,
+  trace: JsonObject,
+  key: string,
+  value: number | undefined,
+): void {
+  if (value === undefined) {
+    const remaining = { ...trace };
+    delete remaining[key];
+    set('trace', Object.keys(remaining).length === 0 ? undefined : remaining);
+    return;
+  }
+  set('trace', { ...trace, [key]: value });
 }
 
 /* ---------- 设备 ---------- */

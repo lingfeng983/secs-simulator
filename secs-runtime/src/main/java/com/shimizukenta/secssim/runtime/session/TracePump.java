@@ -88,6 +88,27 @@ final class TracePump {
         this.clock = clock;
     }
 
+    /** 容量限制（条数）。 */
+    private int maxTraces = TraceManager.MAX_TRACES;
+
+    /** 容量限制（单条 SVID 数）。 */
+    private int maxSvidCount = TraceManager.MAX_SVIDS;
+
+    /**
+     * 设置容量限制（下次 reset 生效；当前管理器立即生效）。
+     *
+     * @param maxTraces    同时允许的 Trace 条数（≥1）
+     * @param maxSvidCount 单条 Trace 允许的 SVID 数（≥1）
+     */
+    void traceLimits(int maxTraces, int maxSvidCount) {
+        if (maxTraces < 1 || maxSvidCount < 1) {
+            throw new IllegalArgumentException("trace limits must be >= 1");
+        }
+        this.maxTraces = maxTraces;
+        this.maxSvidCount = maxSvidCount;
+        this.traces.setLimits(maxTraces, maxSvidCount);
+    }
+
     void replyer(ProtocolReply replyer) {
         this.replier = replyer;
     }
@@ -139,7 +160,9 @@ final class TracePump {
     void reset(com.shimizukenta.secssim.core.compile.ResolvedEquipment model,
                com.shimizukenta.secssim.core.value.ValueSource values) {
         this.traces.stopAll();
-        this.traces = new TraceManager(model, values, java.time.Instant.now());
+        /* 容量限制跟随会话配置：热重载换模型时原样带到新管理器 */
+        this.traces = new TraceManager(model, values, java.time.Instant.now(),
+                this.maxTraces, this.maxSvidCount);
     }
 
     /** 以主机期望的 stream/function 回话。 */

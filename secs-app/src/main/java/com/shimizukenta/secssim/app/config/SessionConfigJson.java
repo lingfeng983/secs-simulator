@@ -19,6 +19,7 @@ import com.shimizukenta.jsonhub.JsonObjectPair;
 import com.shimizukenta.jsonhub.JsonString;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.HsmsTimeouts;
+import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.DirectSource;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
@@ -96,7 +97,9 @@ public final class SessionConfigJson {
         TemplateConfig templates = TemplateConfigJson.parse(root);
 
         HsmsTimeouts timeouts = parseTimeouts(session, sessionPath);
-        SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment, timeouts);
+        TraceLimits traceLimits = parseTraceLimits(session, sessionPath);
+        SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment, timeouts,
+                traceLimits);
         return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, templates);
     }
 
@@ -131,6 +134,40 @@ public final class SessionConfigJson {
                 .map(value -> {
                     if (value <= 0) {
                         throw new ConfigException(path + "." + key, "必须大于 0（秒）");
+                    }
+                    return value;
+                })
+                .orElse(null);
+    }
+
+    /**
+     * 读 session.trace 段（可选）：Trace（S2F23）容量限制。
+     *
+     * <p>形如 {@code "trace": {"maxTraces": 4, "maxSvidCount": 32}}；没写的键用
+     * 内置默认（同时 1 条、每条 ≤10 个 SVID，与多数真机一致）。</p>
+     */
+    private static TraceLimits parseTraceLimits(JsonHub session, String path) {
+        if (!session.containsKey("trace")) {
+            return TraceLimits.DEFAULTS;
+        }
+        JsonHub trace = JsonAccess.object(session, "trace", path + ".trace");
+        Integer maxTraces = optionalPositiveInt(trace, "maxTraces", path + ".trace");
+        Integer maxSvidCount = optionalPositiveInt(trace, "maxSvidCount", path + ".trace");
+        try {
+            return new TraceLimits(maxTraces, maxSvidCount);
+        } catch (IllegalArgumentException e) {
+            throw new ConfigException(path + ".trace", e.getMessage());
+        }
+    }
+
+    private static Integer optionalPositiveInt(JsonHub trace, String key, String path) {
+        return JsonAccess.optionalInt(trace, key, path + "." + key)
+                .stream()
+                .boxed()
+                .findFirst()
+                .map(value -> {
+                    if (value < 1) {
+                        throw new ConfigException(path + "." + key, "必须 ≥ 1");
                     }
                     return value;
                 })
@@ -206,6 +243,7 @@ public final class SessionConfigJson {
         pairs.add(b.pair("deviceId", spec.deviceId()));
         pairs.add(b.pair("seed", spec.seed()));
         addTimeouts(pairs, spec.timeouts(), b);
+        addTraceLimits(pairs, spec.traceLimits(), b);
         return b.object(pairs);
     }
 
@@ -238,6 +276,29 @@ public final class SessionConfigJson {
         }
         if (!values.isEmpty()) {
             pairs.add(b.pair("timeouts", b.object(values)));
+        }
+    }
+
+    /**
+     * 把 Trace 容量限制写回 session 段。
+     *
+     * <p>只写显式给过的键：没写的键在文件里保持"没有"，语义上等于内置默认。
+     * 与 timeouts 一样必须参与往返——否则 S2F15 写一次常量，容量配置就丢了。</p>
+     */
+    private static void addTraceLimits(List<JsonObjectPair> pairs, TraceLimits traceLimits, JsonHubBuilder b) {
+        if (traceLimits == null) {
+            return;
+        }
+
+        List<JsonObjectPair> values = new ArrayList<>();
+        if (traceLimits.maxTraces() != null) {
+            values.add(b.pair("maxTraces", traceLimits.maxTraces()));
+        }
+        if (traceLimits.maxSvidCount() != null) {
+            values.add(b.pair("maxSvidCount", traceLimits.maxSvidCount()));
+        }
+        if (!values.isEmpty()) {
+            pairs.add(b.pair("trace", b.object(values)));
         }
     }
 

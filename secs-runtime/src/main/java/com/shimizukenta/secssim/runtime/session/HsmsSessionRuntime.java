@@ -27,6 +27,8 @@ import com.shimizukenta.secssim.app.session.HostReportTable;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
+import com.shimizukenta.secssim.app.session.TraceLimits;
+import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.EngineClock;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
@@ -77,6 +79,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final long openedAtMs = System.currentTimeMillis();
     private final EngineClock clock;
     private final HostReportTable hostReports = new HostReportTable();
+
+    /** Trace（S2F23）容量限制，来自 session.trace 配置段。 */
+    private final TraceLimits traceLimits;
     /** S6F11 组装器：随设备模型热替换。 */
     private volatile S6F11Assembler assembler;
 
@@ -209,9 +214,27 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @param values 值来源；传 {@code null} 表示用默认曲线
      */
     public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock, ValueSource values) {
+        this(spec, model, clock, values, spec.traceLimits());
+    }
+
+    /**
+     * 创建会话（全参数）。
+     *
+     * @param spec        会话参数
+     * @param model       已解析的设备模型
+     * @param clock       仿真时钟
+     * @param values      值来源；传 {@code null} 表示用默认曲线
+     * @param traceLimits Trace 容量限制（{@code null} 用默认）
+     */
+    public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock,
+                              ValueSource values,
+                              TraceLimits traceLimits) {
         this.spec = spec;
         this.model = model;
         this.clock = clock;
+        this.traceLimits = traceLimits == null
+                ? TraceLimits.DEFAULTS
+                : traceLimits;
 
         Map<Integer, EquipmentConstantDef> init = new LinkedHashMap<>();
         for (EquipmentConstantDef def : spec.equipment().constants()) {
@@ -274,8 +297,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.catalog = new RuntimeCatalog(() -> this.model, this.hostReports);
         this.catalog.onModelChanged(this::refreshModelViews);
         this.catalog.store(this.store);
-        this.tracePump = new TracePump(new TraceManager(model, this.values, Instant.now()), this.traceAckSender,
-                () -> this.clock.nowMs());
+        this.tracePump = new TracePump(new TraceManager(model, this.values, Instant.now(),
+                this.traceLimits.maxTracesOrDefault(), this.traceLimits.maxSvidCountOrDefault()),
+                this.traceAckSender, () -> this.clock.nowMs());
         this.tracePump.sessionId(spec.id());
         this.tracePump.errorSink(this::recordError);
         this.tracePump.canSend(this::canSendUnsolicited);
@@ -622,6 +646,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private void refreshModelViews(ResolvedEquipment next) {
         this.model = next;
         this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports);
+        /* 容量限制跟随会话配置，热重载时不变 */
+        this.tracePump.traceLimits(this.traceLimits.maxTracesOrDefault(),
+                this.traceLimits.maxSvidCountOrDefault());
         this.tracePump.reset(this.model, this.values);
     }
 

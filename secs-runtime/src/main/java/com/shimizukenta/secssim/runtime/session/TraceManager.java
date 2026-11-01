@@ -41,9 +41,12 @@ public final class TraceManager {
     public static final int TIAACK_REPGSZ_INVALID = 5;
 
     /** 同时允许的 Trace 条数（多数真机是 1）。 */
-    public static final int MAX_TRACES = 1;
+    public static final int MAX_TRACES = com.shimizukenta.secssim.app.session.TraceLimits.DEFAULT_MAX_TRACES;
     /** 单条 Trace 允许的 SVID 数。 */
-    public static final int MAX_SVIDS = 10;
+    public static final int MAX_SVIDS = com.shimizukenta.secssim.app.session.TraceLimits.DEFAULT_MAX_SVIDS;
+
+    private volatile int maxTraces;
+    private volatile int maxSvids;
 
     private static final DateTimeFormatter STIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMddHHmmssSS", java.util.Locale.ROOT);
@@ -69,17 +72,39 @@ public final class TraceManager {
     private final Map<Integer, ActiveTrace> traces = new LinkedHashMap<>();
 
     /**
-     * 创建管理器。
+     * 创建管理器（默认容量：同时 1 条、每条 ≤10 个 SVID）。
      *
      * @param model     已解析设备模型
      * @param values    值来源
      * @param wallStart 墙钟锚点（仿真 t=0 对应的真实时刻）
      */
     public TraceManager(ResolvedEquipment model, ValueSource values, Instant wallStart) {
+        this(model, values, wallStart, MAX_TRACES, MAX_SVIDS);
+    }
+
+    /**
+     * 创建管理器。
+     *
+     * @param model     已解析设备模型
+     * @param values    值来源
+     * @param wallStart 墙钟锚点（仿真 t=0 对应的真实时刻）
+     * @param maxTraces 同时允许的 Trace 条数（≥1）
+     * @param maxSvids  单条 Trace 允许的 SVID 数（≥1）
+     */
+    public TraceManager(ResolvedEquipment model, ValueSource values, Instant wallStart,
+                        int maxTraces, int maxSvids) {
+        if (maxTraces < 1) {
+            throw new IllegalArgumentException("maxTraces must be >= 1 but was " + maxTraces);
+        }
+        if (maxSvids < 1) {
+            throw new IllegalArgumentException("maxSvids must be >= 1 but was " + maxSvids);
+        }
         this.model = model;
         this.values = values;
         this.wallStart = wallStart;
         this.zone = ZoneId.systemDefault();
+        this.maxTraces = maxTraces;
+        this.maxSvids = maxSvids;
     }
 
     /**
@@ -96,6 +121,20 @@ public final class TraceManager {
      */
     public synchronized void stopAll() {
         this.traces.clear();
+    }
+
+    /**
+     * 调整容量限制（热重载后生效，不需要重建管理器）。
+     *
+     * @param maxTraces 同时允许的 Trace 条数（≥1）
+     * @param maxSvids  单条 Trace 允许的 SVID 数（≥1）
+     */
+    public synchronized void setLimits(int maxTraces, int maxSvids) {
+        if (maxTraces < 1 || maxSvids < 1) {
+            throw new IllegalArgumentException("trace limits must be >= 1");
+        }
+        this.maxTraces = maxTraces;
+        this.maxSvids = maxSvids;
     }
 
     /**
@@ -121,7 +160,7 @@ public final class TraceManager {
         if (dsperMs < 1_000L) {
             return TIAACK_INVALID_PERIOD;
         }
-        if (svids.size() > MAX_SVIDS) {
+        if (svids.size() > this.maxSvids) {
             return TIAACK_SVID_EXCEEDED;
         }
         for (int svid : svids) {
@@ -129,7 +168,7 @@ public final class TraceManager {
                 return TIAACK_SVID_UNKNOWN;
             }
         }
-        if (!this.traces.containsKey(trid) && this.traces.size() >= MAX_TRACES) {
+        if (!this.traces.containsKey(trid) && this.traces.size() >= this.maxTraces) {
             return TIAACK_TRACES_DENIED;
         }
 
