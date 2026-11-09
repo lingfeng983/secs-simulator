@@ -85,8 +85,8 @@ final class EventScheduler {
     /** 是否允许主动上报。 */
     private final java.util.function.BooleanSupplier canSend;
 
-    /** 真正发一条 CEID。 */
-    private final java.util.function.Consumer<Integer> emit;
+    /** 真正发一条 CEID（带计划身份，效果只施加该计划）。 */
+    private final java.util.function.BiConsumer<Integer, String> emit;
 
     /** 出错回调。 */
     private java.util.function.Consumer<Exception> errorSink;
@@ -129,7 +129,7 @@ final class EventScheduler {
                    java.util.function.LongSupplier clock,
                    java.util.function.Supplier<ValueSource> values,
                    java.util.function.BooleanSupplier canSend,
-                   java.util.function.Consumer<Integer> emit) {
+                   java.util.function.BiConsumer<Integer, String> emit) {
         this.eventRng = eventRng;
         this.clock = clock;
         this.values = values;
@@ -468,7 +468,7 @@ final class EventScheduler {
         }
 
         try {
-            this.emit.accept(ceid);
+            this.emit.accept(ceid, planId);
             this.recordFire(planId, atMs);
         } catch (Exception e) {
             recordError(e);

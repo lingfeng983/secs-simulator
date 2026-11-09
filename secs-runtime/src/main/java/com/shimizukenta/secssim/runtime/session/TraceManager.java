@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 
 import com.shimizukenta.secs.secs2.Secs2;
+import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.trace.TracePlan;
@@ -44,6 +45,18 @@ public final class TraceManager {
     public static final int MAX_TRACES = com.shimizukenta.secssim.app.session.TraceLimits.DEFAULT_MAX_TRACES;
     /** 单条 Trace 允许的 SVID 数。 */
     public static final int MAX_SVIDS = com.shimizukenta.secssim.app.session.TraceLimits.DEFAULT_MAX_SVIDS;
+
+    /** 单条 Trace 的样本总数上限：防止 S2F23 用极大 totsmp 长期占用采样与内存。 */
+    public static final int MAX_TOTAL_SAMPLES = 1_000_000;
+
+    /**
+     * 单次 poll 允许补齐的样本数上限。
+     *
+     * <p>正常心跳每次最多补一个样本；只有笔记本休眠或墙钟大幅跳变后，
+     * 一次 poll 才会面对成千上万的积压。超过上限就快进到当前时刻，
+     * 而不是在持锁状态下构造海量帧并向主机突发。</p>
+     */
+    private static final int MAX_CATCH_UP_SAMPLES = 10_000;
 
     private volatile int maxTraces;
     private volatile int maxSvids;
@@ -157,6 +170,10 @@ public final class TraceManager {
         if (totsmp < 0 || repgsz < 1 || repgsz > totsmp) {
             return TIAACK_REPGSZ_INVALID;
         }
+        if (totsmp > MAX_TOTAL_SAMPLES) {
+            /* 过大的 totsmp 会让一次 poll 构造巨量帧；拒绝而不是让采样线程长时间持锁 */
+            return TIAACK_INVALID_PERIOD;
+        }
         if (dsperMs < 1_000L) {
             return TIAACK_INVALID_PERIOD;
         }
@@ -198,9 +215,30 @@ public final class TraceManager {
             ActiveTrace trace = entry.getValue();
             TraceSpec spec = trace.spec;
 
+            int catchUp = 0;
             while (trace.nextSample <= spec.totsmp()) {
                 long at = TracePlan.sampleTimeMs(trace.t0Ms, spec.dsperMs(), trace.nextSample);
                 if (at > nowMs) {
+                    break;
+                }
+                if (++catchUp > MAX_CATCH_UP_SAMPLES) {
+                    /* 积压过多（休眠/时钟跳变）：快进到当前时刻，丢弃过期样本，
+                       避免一次 poll 构造海量帧并长时间持锁。 */
+                    long elapsed = Math.max(0L, nowMs - trace.t0Ms);
+                    long next = elapsed / spec.dsperMs() + 1L;
+                    /* 进入快进时样本 nextSample-1 已到期，所以 next >= nextSample，
+                       不需要再取 max */
+                    long skipTo = Math.min((long) spec.totsmp() + 1L, next);
+                    if (!trace.pending.isEmpty() && skipTo > spec.totsmp()) {
+                        /* 快进直接越过末尾：pending 里是已补算、但不满组的末尾样本。
+                           正常结束路径会补发这一帧（finishedSpec），这里也必须发，
+                           否则主机永远等不到末条 S6F1；中途快进仍整体丢弃。 */
+                        frames.add(this.buildFrame(spec, trace));
+                    }
+                    trace.pending.clear();
+                    trace.nextSample = (int) skipTo;
+                    Log.warn("Trace " + spec.trid() + " 积压超过 " + MAX_CATCH_UP_SAMPLES
+                            + " 个样本，快进到 " + trace.nextSample);
                     break;
                 }
 

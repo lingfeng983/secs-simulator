@@ -297,19 +297,45 @@ public abstract class AbstractHsmsSsActiveCommunicator extends AbstractHsmsSsCom
 				}
 				case SELECT_RSP:
 				case DESELECT_RSP:
-				case LINKTEST_RSP:
-				case REJECT_REQ:
-				default: {
+				case LINKTEST_RSP: {
 					
-					/* ignore */
+					/* 非应答期收到应答类控制帧（迟到的应答，本端从未发起这个事务）：
+					   E37 要求回 Reject.req(TRANSACTION_NOT_OPEN)，不改变选中状态。
+					   以前这里缺 break 会落穿到 DESELECT_REQ，把已选中的连接拆掉。 */
+					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
+					break;
+				}
+				case REJECT_REQ: {
+					
+					/* Reject.req 是请求类消息（SType=7，没有 .rsp），而且是终点消息：
+					   再回一条 Reject 会因 SystemBytes 原样回带而对端互回，形成无限回环。
+					   所以这里只吸收，不作答、不改变选中状态。 */
+					break;
 				}
 				case DESELECT_REQ: {
 					
 					/* E37 7.4：收到 Deselect.req 必须应答并离开 SELECTED。
-					   主动端随后会关闭连接并按 T5 重连，所以这里只降状态、不拆链路。 */
+					   主动端直接结束本连接、按 T5 重连并重新 Select——
+					   被动端在这一步保留 TCP（差异是有意的，见对应实现）。 */
 					send(createDeselectResponse(msg));
 					removeSelectedConnection(this, HsmsSsCommunicateState.NOT_SELECTED);
 					return;
+				}
+				default: {
+					
+					/* 未支持的 SType/PType：按 E37 回 Reject.req（与被动端一致），
+					   不能静默忽略，否则对端只能等到 T6 超时。 */
+					if ( HsmsSsMessageType.supportSType(msg) ) {
+						
+						if ( ! HsmsSsMessageType.supportPType(msg) ) {
+							send(createRejectRequest(msg, HsmsSsMessageRejectReason.NOT_SUPPORT_TYPE_P));
+						}
+						
+					} else {
+						
+						send(createRejectRequest(msg, HsmsSsMessageRejectReason.NOT_SUPPORT_TYPE_S));
+					}
+					break;
 				}
 				}
 			}

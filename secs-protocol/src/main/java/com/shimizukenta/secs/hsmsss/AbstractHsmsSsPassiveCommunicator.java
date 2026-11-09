@@ -369,10 +369,16 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 				}
 				case SELECT_RSP:
 				case DESELECT_RSP:
-				case LINKTEST_RSP:
+				case LINKTEST_RSP: {
+					
+					/* 非应答期收到应答类控制帧：E37 要求回 Reject.req(TRANSACTION_NOT_OPEN) */
+					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
+					break;
+				}
 				case REJECT_REQ: {
 					
-					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
+					/* Reject.req 是请求类消息（SType=7，无 .rsp）且为终点消息：
+					   再回 Reject 会因 SystemBytes 回带而对端互回，所以只吸收不作答 */
 					break;
 				}
 				case DESELECT_REQ: {
@@ -443,10 +449,16 @@ public abstract class AbstractHsmsSsPassiveCommunicator extends AbstractHsmsSsCo
 				}
 				case SELECT_RSP:
 				case DESELECT_RSP:
-				case LINKTEST_RSP:
+				case LINKTEST_RSP: {
+					
+					/* 非应答期收到应答类控制帧：E37 要求回 Reject.req(TRANSACTION_NOT_OPEN) */
+					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
+					break;
+				}
 				case REJECT_REQ: {
 					
-					send(createRejectRequest(msg, HsmsSsMessageRejectReason.TRANSACTION_NOT_OPEN));
+					/* Reject.req 是请求类消息（SType=7，无 .rsp）且为终点消息：
+					   再回 Reject 会因 SystemBytes 回带而对端互回，所以只吸收不作答 */
 					break;
 				}
 				default: {

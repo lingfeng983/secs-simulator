@@ -145,6 +145,12 @@ class HsmsSsIntegrationTest {
         };
     }
 
+    /** 帧头 index 6..9 的 system-bytes。 */
+    private static int systemBytes(byte[] head) {
+        return ((head[6] & 0xFF) << 24) | ((head[7] & 0xFF) << 16)
+                | ((head[8] & 0xFF) << 8) | (head[9] & 0xFF);
+    }
+
     private static void write(Socket socket, byte[]... chunks) throws IOException {
         /* single write: a stall between chunks could exceed the passive
          * side's T8 and terminate the connection under load */
@@ -749,6 +755,110 @@ class HsmsSsIntegrationTest {
             assertEquals(10, rspBody[1] & 0xFF, "extended length byte = 10 expected");
             for (int i = 0; i < 10; i++) {
                 assertEquals(head[i], rspBody[rspBody.length - 10 + i], "echoed header byte " + i);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("an unsolicited control response on a selected active link is rejected, not treated as Deselect")
+    void unsolicitedResponseOnActiveLinkIsRejected() throws Exception {
+        /* 端口用 ServerSocket(0) 现取：freePort() 到 bind 之间开个口子，CI 并行时会被抢 */
+        try ( ServerSocket peer = new ServerSocket(0) ) {
+            int port = peer.getLocalPort();
+
+            /* 用 raw socket 扮被动端，才能精确构造“选中之后收到一个无人应答的应答帧”。 */
+            HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
+            config.protocol(HsmsSsProtocol.ACTIVE);
+            config.socketAddress(new InetSocketAddress("127.0.0.1", port));
+            /* 关掉心跳，否则主动端自己发出的 LINKTEST.req 会吞掉这个应答 */
+            config.notLinktest();
+            config.timeout().t3(10F);
+            config.timeout().t5(1F);
+            config.timeout().t6(5F);
+            config.timeout().t8(30F);
+
+            HsmsSsCommunicator active = HsmsSsCommunicator.newInstance(config);
+            communicators.add(active);
+            active.addSecsLogListener(logs::add);
+            active.open();
+
+            try ( Socket socket = peer.accept() ) {
+                socket.setTcpNoDelay(true);
+
+                byte[] selectReq = readFrame(socket, 10000);
+                assertEquals(1, selectReq[5] & 0xFF, "SELECT.req expected");
+
+                /* Select.rsp(0) -> active 进入 SELECTED */
+                write(socket, frame(10, controlHead((byte)0, (byte)2, systemBytes(selectReq))));
+
+                /* 非应答期收到 Linktest.rsp：E37 要求回 Reject.req(TRANSACTION_NOT_OPEN)，
+                   且不得改变选中状态。修复前这里缺 break，会落穿到 DESELECT_REQ，
+                   回一条 Deselect.rsp 并把已经选中的连接拆掉。 */
+                write(socket, frame(10, controlHead((byte)0, (byte)6, 0x7FFFFFFF)));
+
+                byte[] rsp = readFrame(socket, 10000);
+                assertEquals(7, rsp[5] & 0xFF, "REJECT.req expected (got DESELECT.rsp?)");
+                assertEquals(3, rsp[3] & 0xFF, "TRANSACTION_NOT_OPEN expected");
+                assertEquals(6, rsp[2] & 0xFF, "Reject must echo the rejected frame's SType");
+                assertEquals(0x7FFFFFFF, systemBytes(rsp),
+                        "Reject must reuse the rejected frame's system bytes");
+            }
+            finally {
+                active.close();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a Reject.req on a selected active link is absorbed without answering")
+    void receivedRejectIsNotAnswered() throws Exception {
+        try ( ServerSocket peer = new ServerSocket(0) ) {
+            int port = peer.getLocalPort();
+
+            HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
+            config.protocol(HsmsSsProtocol.ACTIVE);
+            config.socketAddress(new InetSocketAddress("127.0.0.1", port));
+            config.notLinktest();
+            config.timeout().t3(10F);
+            config.timeout().t5(1F);
+            config.timeout().t6(5F);
+            config.timeout().t8(30F);
+
+            HsmsSsCommunicator active = HsmsSsCommunicator.newInstance(config);
+            communicators.add(active);
+            active.addSecsLogListener(logs::add);
+            active.open();
+
+            try ( Socket socket = peer.accept() ) {
+                socket.setTcpNoDelay(true);
+
+                byte[] selectReq = readFrame(socket, 10000);
+                assertEquals(1, selectReq[5] & 0xFF, "SELECT.req expected");
+                write(socket, frame(10, controlHead((byte)0, (byte)2, systemBytes(selectReq))));
+
+                /* 对端主动发 Reject.req(reason=3)：Reject 是终点消息。若本端再回一条 Reject，
+                   SystemBytes 原样回带会让双方无速率限制地互回（同库主动端↔被动端就能触发）。 */
+                write(socket, frame(10, new byte[] {
+                        0, 0, 5, 3, 0, 7,
+                        (byte)0x7F, (byte)0xFF, (byte)0xFF, (byte)0xFE
+                }));
+
+                try {
+                    byte[] echo = readFrame(socket, 500);
+                    fail("收到 Reject.req 后不得再发任何帧，实际收到 SType=" + (echo[5] & 0xFF));
+                }
+                catch ( SocketTimeoutException expected ) {
+                    /* 500ms 内没有任何回落：正确 */
+                }
+
+                /* 拒绝不得改变选中状态：Linktest 必须照常应答 */
+                write(socket, frame(10, controlHead((byte)0, (byte)5, 0x01020304)));
+                byte[] linktestRsp = readFrame(socket, 5000);
+                assertEquals(6, linktestRsp[5] & 0xFF, "LINKTEST.rsp expected");
+                assertEquals(0x01020304, systemBytes(linktestRsp));
+            }
+            finally {
+                active.close();
             }
         }
     }

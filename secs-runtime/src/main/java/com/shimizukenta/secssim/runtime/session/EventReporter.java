@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -10,6 +11,9 @@ import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.app.log.Log;
+import com.shimizukenta.jsonhub.JsonHub;
+import com.shimizukenta.jsonhub.JsonHubBuilder;
+import com.shimizukenta.jsonhub.JsonObjectPair;
 import com.shimizukenta.secs.SecsCommunicator;
 import com.shimizukenta.secs.secs2.Secs2;
 
@@ -39,11 +43,14 @@ final class EventReporter {
     /** 效果记录：计划里的值变化在这里落地。 */
     private final com.shimizukenta.secssim.runtime.session.EventEffectStore effects;
 
-    /** 编排表。 */
+    /**
+     * 编排表。
+     *
+     * <p>必须是<b>实时</b>表（{@code EventScheduler::previewSchedule}）：运行时增删改计划
+     * 只改调度器内部那份，拿装载时的快照会出现“刚加的计划效果不施加、已删的计划还在改值”。
+     * 预览表已排除被禁用的计划，所以这里不再单独过滤。</p>
+     */
     private final java.util.function.Supplier<EventSchedule> schedule;
-
-    /** 被禁用的计划 id。 */
-    private final java.util.function.Supplier<java.util.Set<String>> disabledPlans;
 
     /** 该 CEID 是否被主机侧禁用（S2F37）。 */
     private final java.util.function.IntPredicate ceidEnabled;
@@ -80,7 +87,6 @@ final class EventReporter {
                   java.util.function.Supplier<ExecutorService> ackSender,
                   com.shimizukenta.secssim.runtime.session.EventEffectStore effects,
                   java.util.function.Supplier<EventSchedule> schedule,
-                  java.util.function.Supplier<java.util.Set<String>> disabledPlans,
                   java.util.function.IntPredicate ceidEnabled,
                   Runnable recordSkipped,
                   Runnable recordFire,
@@ -94,7 +100,6 @@ final class EventReporter {
         this.ackSender = ackSender;
         this.effects = effects;
         this.schedule = schedule;
-        this.disabledPlans = disabledPlans;
         this.ceidEnabled = ceidEnabled;
         this.recordSkipped = recordSkipped;
         this.recordFire = recordFire;
@@ -118,10 +123,11 @@ final class EventReporter {
     /**
      * 上报一次采集事件（S6F11）。
      *
-     * @param ceid 采集事件号
+     * @param ceid   采集事件号
+     * @param planId 触发它的计划 id；手动触发传入 {@code null}
      * @throws IOException 会话未打开或发送失败
      */
-    void emit(int ceid) throws IOException {
+    void emit(int ceid, String planId) throws IOException {
         SecsCommunicator comm = this.communicator.get();
         if (comm == null) {
             throw new IOException("session not open: " + this.sessionId);
@@ -133,8 +139,8 @@ final class EventReporter {
             return;
         }
 
-        this.applyPlanEffects(ceid);
-        this.publishS6f11Notice(ceid);
+        this.applyPlanEffects(ceid, planId);
+        this.publishS6f11Notice(ceid, planId);
 
         Secs2 body;
         try {
@@ -179,37 +185,54 @@ final class EventReporter {
     }
 
     /**
-     * 发布 s6f11 通知（载荷含首个匹配且启用的计划 id,手动触发可能为 null）。
+     * 发布 s6f11 通知（载荷带触发它的计划 id；手动触发时为 null）。
+     *
+     * <p>不能用 {@code findFirst()} 猜：同一 CEID 可能对应多条计划，
+     * 猜出来的 id 会让界面高亮错误的计划。</p>
      */
-    private void publishS6f11Notice(int ceid) {
-        java.util.Set<String> disabled = this.disabledPlans.get();
-        String planId = this.schedule.get().plans().stream()
-                .filter(plan -> plan.ceid() == ceid && !disabled.contains(plan.id()))
-                .map(EventPlan::id)
-                .findFirst()
-                .orElse(null);
-        String payload = "{\"ceid\":" + ceid
-                + (planId == null ? "" : ",\"planId\":\"" + planId + "\"")
-                + "}";
-        this.notice.accept(com.shimizukenta.secssim.app.event.NoticeEvent.S6F11, payload);
+    private void publishS6f11Notice(int ceid, String planId) {
+        /* planId 来自运行时编辑（不限于字母数字）：裸拼会把引号/反斜杠/换行带进帧，
+           轻则非法 JSON，重则提前终止 SSE 帧。统一交给 JSON 写出器转义。 */
+        JsonHubBuilder b = JsonHub.getBuilder();
+        List<JsonObjectPair> pairs = new ArrayList<>(2);
+        pairs.add(b.pair("ceid", ceid));
+        if (planId != null) {
+            pairs.add(b.pair("planId", planId));
+        }
+        this.notice.accept(com.shimizukenta.secssim.app.event.NoticeEvent.S6F11, b.object(pairs).toJson());
     }
 
     /**
-     * 施加某 CEID 对应计划的值效果（schema v6）。
+     * 施加计划的值效果（schema v6）。
      *
      * <p>emit 是全部触发路径（定时/条件/链式/手动）的公共入口，
-     * 效果也只在这里施加一次:手动触发同样生效。计划被禁用时效果不施加。</p>
+     * 效果也只在这里施加一次:手动触发同样生效。计划被禁用时效果不施加
+     * （编排表来自 {@code previewSchedule}，已排除禁用项）。</p>
+     *
+     * <p>计划身份已知时只施加该计划的效果——同一 CEID 下允许多条计划
+     * （周期 + 条件、多台单元），按 CEID 取并集会把另一条计划的效果也带进来。
+     * 手动触发（{@code planId == null}）没有计划上下文，保持该 CEID 全部
+     * 启用计划取并集。</p>
      */
-    private void applyPlanEffects(int ceid) {
+    private void applyPlanEffects(int ceid, String planId) {
         long now = this.clock.getAsLong();
-        java.util.Set<String> disabled = this.disabledPlans.get();
+        boolean matched = false;
         for (EventPlan plan : this.schedule.get().plans()) {
-            if (plan.ceid() != ceid || disabled.contains(plan.id())) {
+            if (plan.ceid() != ceid) {
                 continue;
             }
+            if (planId != null && !plan.id().equals(planId)) {
+                continue;
+            }
+            matched = true;
             for (EventEffect effect : plan.effects()) {
                 this.effects.apply(effect.svid(), effect, now);
             }
+        }
+        if (planId != null && !matched) {
+            /* 触发方与效果源看到的不是同一张编排表：不报出来就是“事件发了、值不动” */
+            Log.warn("会话 " + this.sessionId + " 触发计划 " + planId
+                    + "（CEID " + ceid + "）时编排表中没有它，效果未施加");
         }
     }
 }

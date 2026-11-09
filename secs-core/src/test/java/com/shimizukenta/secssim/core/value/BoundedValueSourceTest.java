@@ -60,6 +60,40 @@ class BoundedValueSourceTest {
     }
 
     @Test
+    void u8AndI8ClampToLongRange() {
+        /* 值管线是 double、编码端是 long：(double) Long.MAX_VALUE 已经等于 2^63，
+           直接用它当上界会让钳制后的值仍然无法编码；上界必须是它的前一个可表示值。 */
+        double u8Max = Math.nextDown((double) Long.MAX_VALUE);
+        double over = 1.0E20;
+
+        ValueSource raw = new ValueSource() {
+            @Override
+            public OptionalDouble valueAt(int svid, long tMs) {
+                return OptionalDouble.of(svid == 1 || svid == 3 ? over : -over);
+            }
+
+            @Override
+            public java.util.Set<Integer> svids() {
+                return java.util.Set.of(1, 2, 3, 4);
+            }
+        };
+        Map<Integer, ResolvedSvid> svids = Map.of(
+                1, new ResolvedSvid(1, "CH1", "U8_OVER", ValueType.U8, ""),
+                2, new ResolvedSvid(2, "CH1", "U8_UNDER", ValueType.U8, ""),
+                3, new ResolvedSvid(3, "CH1", "I8_OVER", ValueType.I8, ""),
+                4, new ResolvedSvid(4, "CH1", "I8_UNDER", ValueType.I8, ""));
+
+        BoundedValueSource bounded = new BoundedValueSource(raw, svids);
+
+        assertEquals(u8Max, bounded.valueAt(1, 0L).orElseThrow(), 1e-9, "U8 上界必须是 Long 范围");
+        assertEquals(0.0, bounded.valueAt(2, 0L).orElseThrow(), 1e-9, "U8 下界是 0");
+        assertEquals(u8Max, bounded.valueAt(3, 0L).orElseThrow(), 1e-9, "I8 上界必须是 Long 范围");
+        assertEquals((double) Long.MIN_VALUE, bounded.valueAt(4, 0L).orElseThrow(), 1e-9,
+                "I8 下界是 Long.MIN_VALUE");
+        assertEquals(4L, bounded.clampedCount());
+    }
+
+    @Test
     void passesThroughUnknownAndNonNumeric() {
         ValueSource raw = new ValueSource() {
             @Override

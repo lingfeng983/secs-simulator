@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -138,5 +139,18 @@ class EventEffectTest {
         List<EventSimulator.SimFire> fires = EventSimulator.simulate(
                 schedule, BASE, 42L, 0L, 1_000_000L, 50);
         assertEquals(50, fires.size(), "事件上限必须生效");
+    }
+
+    @Test
+    void simulatorRejectsOversizedWindow() {
+        /* maxEvents 只限制触发次数：条件恒假的计划可以让 while 循环一直推进，
+           所以窗口本身必须有 tick 预算（100ms/步 x 100 万步）。 */
+        EventSchedule schedule = new EventSchedule(List.of(
+                new EventPlan("p", 2001, new Trigger.Periodic(1_000L, 0L))));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                EventSimulator.simulate(schedule, BASE, 42L, 0L, 100_000_100L,
+                        EventSimulator.DEFAULT_MAX_EVENTS));
+        assertTrue(ex.getMessage().contains("preview window"), ex.getMessage());
     }
 }

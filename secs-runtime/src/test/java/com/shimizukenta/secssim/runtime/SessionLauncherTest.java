@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -259,6 +260,50 @@ class SessionLauncherTest {
         assertThrows(ConfigException.class, () -> this.launcher.reload("line1"));
         assertTrue(this.sessions.find("line1").isPresent(), "配置坏了旧会话必须还在");
         assertEquals(SessionState.OPEN, this.sessions.find("line1").orElseThrow().state());
+    }
+
+    /**
+     * 部署期覆盖：端口/deviceId 只作用于运行中的会话，不写回配置文件。
+     *
+     * <p>Bootstrap 的 {@code --demo-session} 靠这条路径给两台演示设备错开端口；
+     * 一旦覆盖变成改写文件，第二次启动就会把模板里的端口固定住。</p>
+     */
+    @Test
+    void overridesChangePortWithoutRewritingFile() throws Exception {
+        int filePort = freePort();
+        int overridePort = freePort();
+        while (overridePort == filePort) {
+            /* 两次 freePort 偶尔拿到同一个号：“覆盖生效”的前提就没了 */
+            overridePort = freePort();
+        }
+        assertNotEquals(filePort, overridePort);
+        write("ov.json", configWithPort("ov", "OV", filePort));
+        Path file = this.workDir.resolve("ov.json");
+        String before = Files.readString(file, StandardCharsets.UTF_8);
+
+        var session = this.launcher.startFromFile(file, filePort,
+                new SessionOverrides(null, null, overridePort, 62));
+        try {
+            assertEquals(SessionState.OPEN, session.state());
+
+            /* 监听可能晚于 start 返回一拍：用 deadline 轮询，而不是只看第一次 connect */
+            long deadline = System.currentTimeMillis() + 5_000L;
+            boolean listening = false;
+            while (!listening && System.currentTimeMillis() < deadline) {
+                try (java.net.Socket probe = new java.net.Socket()) {
+                    probe.connect(new InetSocketAddress("127.0.0.1", overridePort), 1_000);
+                    listening = true;
+                } catch (IOException retry) {
+                    Thread.sleep(20L);
+                }
+            }
+            assertTrue(listening, "覆盖端口 " + overridePort + " 上必须有监听");
+
+            assertEquals(before, Files.readString(file, StandardCharsets.UTF_8),
+                    "覆盖不能写回配置文件");
+        } finally {
+            session.close();
+        }
     }
 
     private void assertConfigError(String name) {

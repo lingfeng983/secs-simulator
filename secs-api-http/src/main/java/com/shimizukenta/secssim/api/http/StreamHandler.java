@@ -209,14 +209,20 @@ final class StreamHandler extends HttpSupport {
             return;
         }
 
-        /* payload 是 JSON 对象文本,拆掉外层花括号与 sessionId/at 合并成一帧 */
+        /* payload 是 JSON 文本：只有合法对象才拆外层花括号与 sessionId/at 合并；
+           非对象（数组/字符串/数字等）整体放进 payload 字段，避免 substring 产出非法帧。 */
         String payload = event.payload() == null ? "" : event.payload().trim();
         String merged;
-        if (payload.length() <= 2) {
+        /* 只有“没有载荷”与空对象两种可以丢掉 payload：`[]` 是合法数组，
+           按长度 ≤2 判空会把它当空对象，前端就永远看不到这个通知的内容 */
+        if (payload.isEmpty() || payload.equals("{}")) {
             merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis() + "}";
-        } else {
+        } else if (payload.startsWith("{") && payload.endsWith("}")) {
             merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis()
                     + "," + payload.substring(1);
+        } else {
+            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis()
+                    + ",\"payload\":" + payload + "}";
         }
 
         String frame = "event: " + event.type() + "\ndata: " + merged + "\n\n";

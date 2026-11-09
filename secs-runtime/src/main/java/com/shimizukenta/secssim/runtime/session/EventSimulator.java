@@ -35,6 +35,15 @@ public final class EventSimulator {
     /** 默认单次模拟的事件上限：保护编辑器不被高频计划拖死。 */
     public static final int DEFAULT_MAX_EVENTS = 1000;
 
+    /**
+     * 单次模拟允许推进的最大 tick 数：窗口上限的第二道防线。
+     *
+     * <p>{@code maxEvents} 只限制"触发次数"，条件恒假的计划不会让 fires() 增长，
+     * 无法阻止 while 循环无限推进。100 万 tick（约 27.8 小时）已远超任何
+     * 合理预览窗口，超出即拒绝计算而不是空转 CPU。</p>
+     */
+    private static final long MAX_TICKS = 1_000_000L;
+
     /** 一条模拟出的触发。 */
     public record SimFire(long atMs, String planId, int ceid) {
     }
@@ -90,6 +99,10 @@ public final class EventSimulator {
         List<SimFire> fires = new ArrayList<>();
         if (schedule.plans().isEmpty() || toMs <= fromMs) {
             return new SimResult(fires, base);
+        }
+        long ticks = (toMs - fromMs) / TICK_MS;
+        if (ticks < 0 || ticks > MAX_TICKS) {
+            throw new IllegalArgumentException("preview window too large: " + ticks + " ticks");
         }
 
         EventEffectStore store = new EventEffectStore();

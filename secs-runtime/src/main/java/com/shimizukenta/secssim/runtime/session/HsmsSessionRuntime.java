@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -160,8 +158,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     private volatile SecsCommunicator communicator;
     private volatile String lastError;
-    private volatile EventSchedule schedule = EventSchedule.empty();
-    private final Set<String> disabledPlans = ConcurrentHashMap.newKeySet();
     private volatile boolean s6f11Wbit;
     private volatile boolean s6f1Wbit;
     /** 单线程串行等 S6F12：W 位发送会阻塞到 T3，不能占用 100ms 事件心跳。 */
@@ -282,9 +278,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 () -> this.clock.nowMs(),
                 () -> this.values,
                 this::canSendUnsolicited,
-                ceid -> {
+                (ceid, planId) -> {
                     try {
-                        this.emitCeid(ceid);
+                        this.emitCeid(ceid, planId);
                     } catch (IOException e) {
                         this.recordError(e);
                     }
@@ -383,8 +379,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 () -> this.communicator,
                 () -> this.ackSender,
                 this.effects,
-                () -> this.schedule,
-                () -> this.disabledPlans,
+                /* 实时表：含运行时增删改，且已排除禁用计划 */
+                this.scheduler::previewSchedule,
                 ceid -> this.hostReports.isEnabled(ceid),
                 this.scheduler::recordSkipped,
                 () -> {
@@ -537,7 +533,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     /** 事件编排：装载编排表并设限流；具体触发规则见 {@link EventScheduler}。 */
     public void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
-        this.schedule = schedule;
         this.scheduler.enableSchedule(schedule, maxEventsPerSec);
     }
 
@@ -722,7 +717,13 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @throws IOException 会话未打开或发送失败
      */
     public void emitCeid(int ceid) throws IOException {
-        this.eventReporter.emit(ceid);
+        /* 手动触发没有计划上下文：效果取该 CEID 全部启用计划的并集 */
+        this.eventReporter.emit(ceid, null);
+    }
+
+    /** 调度器触发：带计划身份，效果只施加该计划。 */
+    void emitCeid(int ceid, String planId) throws IOException {
+        this.eventReporter.emit(ceid, planId);
     }
 
     /**

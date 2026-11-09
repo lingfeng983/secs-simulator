@@ -105,6 +105,12 @@ final class PreviewHandler extends HttpSupport {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-range\"}");
             return null;
         }
+        /* windowMs < 0 捕获 to-from 溢出：from 为极小负数、to 为极大正数时差值会绕回负值 */
+        long windowMs = to - from;
+        if (windowMs < 0 || windowMs > MAX_PREVIEW_WINDOW_MS) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"range-too-large\"}");
+            return null;
+        }
         if (count < PREVIEW_BUCKETS_MIN || count > PREVIEW_BUCKETS_MAX) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-buckets\"}");
             return null;

@@ -49,6 +49,14 @@ class SmlRendererTest {
     }
 
     @Test
+    void escapesQuotesAndBackslashesInAscii() {
+        /* SML 用双引号包 ASCII，反斜杠是转义符：不转义时 "a\"b" 这种内容
+           渲染出来的 SML 无法再被解析回去。 */
+        assertEquals("<A \"a\\\"b\\\\c\">", SmlRenderer.render(B.ascii("a\"b\\c")));
+        assertTrue(SmlRenderer.render(B.ascii("C:\\temp")).contains("C:\\\\temp"));
+    }
+
+    @Test
     void rendersNullAndNeverThrows() {
         assertEquals("<>", SmlRenderer.render(null));
         assertTrue(SmlRenderer.render(B.list(B.ascii("温度"))).contains("温度"));

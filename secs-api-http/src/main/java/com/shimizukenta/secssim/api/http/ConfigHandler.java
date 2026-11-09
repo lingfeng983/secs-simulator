@@ -66,6 +66,14 @@ final class ConfigHandler extends HttpSupport {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-range\"}");
             return;
         }
+        /* 草稿预览同样会跑 EventSimulator：窗口上限必须与实时预览一致，
+           否则超大窗口会被下层异常吞成 422 config-invalid，把 CPU 预算问题误报成配置错误。
+           windowMs < 0 捕获 to-from 溢出。 */
+        long windowMs = toMs - fromMs;
+        if (windowMs < 0 || windowMs > MAX_PREVIEW_WINDOW_MS) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"range-too-large\"}");
+            return;
+        }
         if (buckets < 1 || buckets > 500) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-buckets\"}");
             return;

@@ -20,6 +20,11 @@ import com.shimizukenta.secssim.core.domain.ValueType;
  *
  * <p>越界必须发生在<b>取值处</b>：这里按 {@link ValueType} 的宽度收紧，NaN/Inf 也在此归一，
  * 下游的编码器就永远不会看到非法值。被钳制的次数可通过 {@link #clampedCount()} 观察。</p>
+ *
+ * <p><b>精度上限</b>：值管线全程是 {@code double}，超过 2^53 的整数已无法精确表示；
+ * 编码端是 {@code long}。所以 U8/I8 的上界取 {@code Long} 范围而不是完整 U8 值域，
+ * 并用 {@link Math#nextDown(double)} 避开 {@code (double) Long.MAX_VALUE} 舍入到 2^63
+ * 后仍超出 {@code long} 的问题。</p>
  */
 public final class BoundedValueSource implements ValueSource {
 
@@ -110,11 +115,11 @@ public final class BoundedValueSource implements ValueSource {
                 case U1 -> new Bounds(0.0, 255.0);
                 case U2 -> new Bounds(0.0, 65_535.0);
                 case U4 -> new Bounds(0.0, 4_294_967_295.0);
-                case U8 -> new Bounds(0.0, 18_446_744_073_709_551_615.0);
+                case U8 -> new Bounds(0.0, Math.nextDown((double) Long.MAX_VALUE));
                 case I1 -> new Bounds(-128.0, 127.0);
                 case I2 -> new Bounds(-32_768.0, 32_767.0);
                 case I4 -> new Bounds(-2_147_483_648.0, 2_147_483_647.0);
-                case I8 -> new Bounds(-9_223_372_036_854_775_808.0, 9_223_372_036_854_775_807.0);
+                case I8 -> new Bounds((double) Long.MIN_VALUE, Math.nextDown((double) Long.MAX_VALUE));
                 case F4, F8 -> new Bounds(-Double.MAX_VALUE, Double.MAX_VALUE);
                 case ASCII, BOOLEAN, BINARY -> null;
             };

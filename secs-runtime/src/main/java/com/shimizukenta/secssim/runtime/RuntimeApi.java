@@ -448,9 +448,21 @@ final class RuntimeApi {
             } finally {
                 java.nio.file.Files.deleteIfExists(temp);
             }
-        } catch (Exception e) {
+        } catch (IllegalArgumentException e) {
+            /* 参数类问题（分桶数、时间窗等）：界面按"草稿非法"展示（HTTP 422） */
+            Log.error("配置草稿预览参数无效: " + e.getMessage(), e);
+            return null;
+        } catch (com.shimizukenta.secssim.app.config.ConfigException
+                | com.shimizukenta.secssim.core.template.GraphException
+                | com.shimizukenta.secssim.core.template.ExpressionException e) {
+            /* 草稿的语法/字段/模板表达式错误都属于用户输入，继续映射为 null（422）。
+               模板参数引用只在求值期才暴露（图构建期不校验 p.*），必须一起接住，
+               否则用户写错一个参数会看到 500 而不是"配置非法" */
             Log.error("配置草稿预览失败: " + e.getMessage(), e);
             return null;
+        } catch (java.io.IOException e) {
+            /* 临时文件读写失败是环境问题：上抛成 500，不再伪装成"草稿非法" */
+            throw new IllegalStateException("配置草稿预览失败", e);
         }
     }
 

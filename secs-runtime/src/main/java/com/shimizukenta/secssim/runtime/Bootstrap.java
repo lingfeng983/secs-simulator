@@ -125,7 +125,11 @@ public final class Bootstrap {
          */
         SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
         launcher.noticeBus(notices);
-        seedDefaultConfigs(options.workDir(), options.hsmsPort(), options.deviceId());
+        /* 内置模板开箱即用；demo 模式推迟到端口/deviceId 校验之后播种
+           （见 startDemoSession），越界时不在 workDir 里留下用不上的模板 */
+        if (!options.demoSession()) {
+            seedDefaultConfigs(options.workDir());
+        }
 
         /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
         ConfigStore configStore = new ConfigStore(options.workDir());
@@ -301,12 +305,30 @@ public final class Bootstrap {
 
     private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher)
             throws IOException {
-        /* v6:--demo-session 开两台内置演示设备(播种是幂等的,这里再调一次无害),
-           分别演示"事件驱动值变化"(etch)与"主机拉取采集"(cvd) */
-        seedDefaultConfigs(options.workDir(), options.hsmsPort(), options.deviceId());
-        for (String name : DEFAULT_CONFIGS) {
+        int basePort = options.hsmsPort();
+        int baseDeviceId = options.deviceId();
+        int lastPort = basePort + DEFAULT_CONFIGS.length - 1;
+        int lastDeviceId = baseDeviceId + DEFAULT_CONFIGS.length - 1;
+        /* 两台演示会话的端口/deviceId 都要错开；越界时配置编译会失败并留下坏文件，
+           这里提前拒绝，避免"演示启动永久失败、只能手工删文件" */
+        if (basePort < 1 || lastPort > 65_535 || baseDeviceId < 0 || lastDeviceId > 32_767) {
+            Log.error("演示会话参数越界: port " + basePort + ".." + lastPort
+                    + "（1..65535）, deviceId " + baseDeviceId + ".." + lastDeviceId + "（0..32767）");
+            return 3;
+        }
+
+        /* v6:--demo-session 开两台内置演示设备（run() 已为 demo 模式跳过播种，
+           这里才是唯一播种点）；分散演示"事件驱动值变化"(etch)与"主机拉取采集"(cvd)。
+           播种必须在校验之后：越界时不能往 workDir 里落下两份用不了的模板 */
+        seedDefaultConfigs(options.workDir());
+
+        for (int i = 0; i < DEFAULT_CONFIGS.length; i++) {
+            String name = DEFAULT_CONFIGS[i];
             try {
-                launcher.startFromFile(options.workDir().resolve(name), options.hsmsPort());
+                /* 端口/deviceId 由启动参数覆盖（不写回文件）：每次启动都生效，
+                   不再依赖"只在首次播种时改写模板文本" */
+                launcher.startFromFile(options.workDir().resolve(name), basePort,
+                        new SessionOverrides(null, null, basePort + i, baseDeviceId + i));
             } catch (com.shimizukenta.secssim.app.config.ConfigException e) {
                 Log.error("内置演示配置编译失败: " + name, e);
                 return 3;
@@ -322,12 +344,12 @@ public final class Bootstrap {
      * 播种内置默认设备配置（schema v6 的需求:开箱即有两台可用设备）。
      *
      * <p>幂等不覆盖:workDir 里已有同名文件（含用户改过的）一律不动,
-     * 删除文件重启即恢复默认。端口/deviceId 按启动参数覆写——
-     * 两台 passive 会话必须端口错开,deviceId 错开才能并排出现在工作台。</p>
+     * 删除文件重启即恢复默认。模板原样写入；端口/deviceId 由启动参数
+     * 通过 {@link SessionOverrides} 覆盖，不在这里改写文本——
+     * 改文本依赖精确格式，模板一美化就静默失效。</p>
      */
-    private static void seedDefaultConfigs(java.nio.file.Path workDir, int hsmsPort, int deviceId) {
-        for (int i = 0; i < DEFAULT_CONFIGS.length; i++) {
-            String name = DEFAULT_CONFIGS[i];
+    private static void seedDefaultConfigs(java.nio.file.Path workDir) {
+        for (String name : DEFAULT_CONFIGS) {
             java.nio.file.Path target = workDir.resolve(name);
             if (java.nio.file.Files.exists(target)) {
                 continue;
@@ -344,14 +366,9 @@ public final class Bootstrap {
                 continue;
             }
 
-            text = text.replace("\"port\": 5000", "\"port\": " + hsmsPort)
-                    .replace("\"port\": 5001", "\"port\": " + (hsmsPort + 1))
-                    .replace("\"deviceId\": 10", "\"deviceId\": " + deviceId)
-                    .replace("\"deviceId\": 11", "\"deviceId\": " + (deviceId + 1));
-
             try {
                 java.nio.file.Files.writeString(target, text, java.nio.charset.StandardCharsets.UTF_8);
-                Log.info("已播种默认设备配置: " + name + "（port=" + (hsmsPort + i) + "）");
+                Log.info("已播种默认设备配置: " + name);
             } catch (IOException e) {
                 Log.error("播种默认配置失败: " + name, e);
             }

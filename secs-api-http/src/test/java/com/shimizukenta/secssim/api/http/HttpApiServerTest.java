@@ -150,6 +150,12 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String configPreviewJson(String text, long fromMs, long toMs, int buckets) {
+                return "{\"from\":" + fromMs + ",\"to\":" + toMs
+                        + ",\"buckets\":" + buckets + ",\"series\":[]}";
+            }
+
+            @Override
             public String messagesJson(int limit, String sessionId, String direction) {
                 if (!HttpApiServerTest.this.messagesAvailable) {
                     return null;
@@ -454,6 +460,46 @@ class HttpApiServerTest {
     void previewRejectsInvertedRange() throws Exception {
         assertEquals(400, get("/api/v1/preview?session=s1&from=5000&to=5000", null).statusCode());
         assertEquals(400, get("/api/v1/preview?session=s1&from=9000&to=1000", null).statusCode());
+    }
+
+    @Test
+    void previewRejectsOversizedWindow() throws Exception {
+        /* 一天 86_400_000ms 是上限；再多就拒绝，而不是让 EventSimulator 空转。 */
+        HttpResponse<String> ok = get(
+                "/api/v1/preview?session=s1&from=0&to=86400000", null);
+        assertEquals(200, ok.statusCode(), ok.body());
+
+        HttpResponse<String> tooLarge = get(
+                "/api/v1/preview?session=s1&from=0&to=86400001", null);
+        assertEquals(400, tooLarge.statusCode(), tooLarge.body());
+        assertTrue(tooLarge.body().contains("range-too-large"), tooLarge.body());
+
+        /* to-from 溢出也要落在同一条分支（差值绕回负数） */
+        HttpResponse<String> overflow = get(
+                "/api/v1/preview?session=s1&from=-9223372036854775808&to=9223372036854775807", null);
+        assertEquals(400, overflow.statusCode(), overflow.body());
+        assertTrue(overflow.body().contains("bad-range") || overflow.body().contains("range-too-large"),
+                overflow.body());
+
+        /* 二进制预览走同一套参数校验 */
+        assertEquals(400, getBytes("/api/v1/preview.bin?session=s1&to=86400001", null).statusCode());
+    }
+
+    @Test
+    void configPreviewRejectsOversizedWindow() throws Exception {
+        /* 草稿预览同样会跑 EventSimulator：超 24h 必须在参数层回 400，
+           而不是让下层异常被吞成 422 config-invalid（把 CPU 预算问题报成配置错误） */
+        HttpResponse<String> ok = post("/api/v1/config-preview?from=0&to=86400000", null);
+        assertEquals(200, ok.statusCode(), ok.body());
+
+        HttpResponse<String> tooLarge = post("/api/v1/config-preview?from=0&to=86400001", null);
+        assertEquals(400, tooLarge.statusCode(), tooLarge.body());
+        assertTrue(tooLarge.body().contains("range-too-large"), tooLarge.body());
+
+        /* to-from 溢出同样落在拒绝分支 */
+        HttpResponse<String> overflow = post(
+                "/api/v1/config-preview?from=-9223372036854775808&to=9223372036854775807", null);
+        assertEquals(400, overflow.statusCode(), overflow.body());
     }
 
     @Test

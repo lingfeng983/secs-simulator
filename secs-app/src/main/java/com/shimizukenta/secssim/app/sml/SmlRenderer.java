@@ -49,7 +49,7 @@ public final class SmlRenderer {
 
         if (item == Secs2Item.ASCII) {
             try {
-                return "<A \"" + value.getAscii() + "\">";
+                return "<A \"" + escapeAscii(value.getAscii()) + "\">";
             } catch (Secs2Exception e) {
                 return "<A ?>";
             }
@@ -60,6 +60,16 @@ public final class SmlRenderer {
             sb.append(' ').append(scalar(item, value, i));
         }
         return sb.append('>').toString();
+    }
+
+    /**
+     * 转义 ASCII 文本里的反斜杠与引号。
+     *
+     * <p>不转义会让渲染结果无法被 {@code SmlParser} 还原：含引号/反斜杠的报文
+     * 经面板回填再发送时要么被改写、要么直接解析失败。</p>
+     */
+    private static String escapeAscii(String raw) {
+        return raw.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static Secs2 read(Secs2 value, int index) {

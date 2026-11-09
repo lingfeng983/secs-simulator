@@ -1,5 +1,6 @@
 package com.shimizukenta.secssim.api.http;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
@@ -19,6 +20,8 @@ import org.junit.jupiter.api.Test;
 
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.MessageEvent;
+import com.shimizukenta.secssim.app.event.NoticeBus;
+import com.shimizukenta.secssim.app.event.NoticeEvent;
 
 /**
  * SSE 报文推送：总线上发布的事件必须以 {@code event: message} 帧到达订阅者。
@@ -61,6 +64,87 @@ class SseMessageTest {
         }
     }
 
+    @Test
+    void nonObjectNoticePayloadStaysValidJson() throws Exception {
+        /* payload 不一定是 JSON 对象（数组/字符串/数字）；过去一律丢掉首字符再拼接，
+           "[1,2]" 会变成 {...,"at":456,1,2]} 这种非法帧，前端 SSE 解析直接断流。 */
+        EventBus bus = new EventBus();
+        NoticeBus notices = new NoticeBus();
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
+                new StubContext(), null, bus);
+        server.subscribeNotices(notices);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
+            HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            Future<String> reader = pool.submit(() -> readUntil(stream, "event: alarm"));
+
+            for (int i = 0; i < 30 && !reader.isDone(); i++) {
+                notices.publish(new NoticeEvent("s1", NoticeEvent.ALARM, "[1,2]", 456L));
+                Thread.sleep(100L);
+            }
+
+            String text = reader.get(5L, TimeUnit.SECONDS);
+
+            assertTrue(text.contains("event: alarm"), "没有收到报警帧: " + text);
+            assertTrue(text.contains("\"payload\":[1,2]"), "非对象载荷必须放进 payload 字段: " + text);
+            assertTrue(text.contains("\"sessionId\":\"s1\""), text);
+            assertTrue(text.contains("\"at\":456"), text);
+        } finally {
+            pool.shutdownNow();
+            server.close();
+        }
+    }
+
+    @Test
+    void emptyArrayNoticePayloadIsNotSwallowed() throws Exception {
+        /* "[]" 只有两个字符：按长度 ≤2 判空会把它当“没有载荷”整个丢掉，
+           前端就永远看不到这个通知的内容。只有空串与 {} 才该丢。 */
+        EventBus bus = new EventBus();
+        NoticeBus notices = new NoticeBus();
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
+                new StubContext(), null, bus);
+        server.subscribeNotices(notices);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
+            HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            Future<String> reader = pool.submit(() -> readUntil(stream, "event: session"));
+
+            for (int i = 0; i < 30 && !reader.isDone(); i++) {
+                notices.publish(new NoticeEvent("s1", NoticeEvent.SESSION, "[]", 789L));
+                Thread.sleep(100L);
+            }
+
+            String text = reader.get(5L, TimeUnit.SECONDS);
+
+            assertTrue(text.contains("\"payload\":[]"), "空数组是合法载荷，不能丢: " + text);
+            assertTrue(text.contains("\"at\":789"), text);
+
+            /* 子串对不代表整帧合法：拼接残留（如多余的逗号）也会让前端 JSON.parse 静默失败 */
+            int at = text.indexOf("event: session");
+            String data = text.substring(text.indexOf("data: ", at) + "data: ".length(),
+                    text.indexOf("\n\n", at));
+            assertDoesNotThrow(() -> com.shimizukenta.jsonhub.JsonHub.fromJson(data),
+                    "通知帧必须是合法 JSON: " + data);
+        } finally {
+            pool.shutdownNow();
+            server.close();
+        }
+    }
+
     private static String ticket(String base) throws Exception {
         HttpResponse<String> response = HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create(base + "/api/v1/ticket"))
@@ -78,6 +162,16 @@ class SseMessageTest {
     }
 
     private static String readUntilMessage(HttpResponse<InputStream> stream) throws Exception {
+        return readUntil(stream, "event: message");
+    }
+
+    /**
+     * 读到指定事件头<b>且该帧已结束</b>才返回。
+     *
+     * <p>只看 marker 会在 {@code event:} 行到、{@code data:} 行还没到时返回，
+     * 断言偶发失败；空行才是 SSE 帧边界。</p>
+     */
+    private static String readUntil(HttpResponse<InputStream> stream, String marker) throws Exception {
         StringBuilder text = new StringBuilder();
         byte[] buffer = new byte[256];
 
@@ -85,7 +179,8 @@ class SseMessageTest {
             int read;
             while ((read = body.read(buffer)) > 0) {
                 text.append(new String(buffer, 0, read, StandardCharsets.UTF_8));
-                if (text.indexOf("event: message") >= 0) {
+                int at = text.indexOf(marker);
+                if (at >= 0 && text.indexOf("\n\n", at) >= 0) {
                     return text.toString();
                 }
             }
