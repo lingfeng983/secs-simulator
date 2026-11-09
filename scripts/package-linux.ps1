@@ -34,7 +34,8 @@ if (-not $SkipJars) {
     if ($LASTEXITCODE -ne 0) { throw 'maven package failed' }
 }
 
-$modules = 'secs-runtime','secs-api-http','secs-app','secs-core','secs-protocol','secs-json'
+# secs-cli 提供进程入口 CliMain，必须进包；classpath 顺序见 start-server.sh
+$modules = 'secs-cli','secs-runtime','secs-api-http','secs-app','secs-core','secs-protocol','secs-json'
 foreach ($module in $modules) {
     if (-not (Test-Path (Join-Path $root "$module/target/$module-$version.jar"))) {
         throw "缺少 $module-$version.jar（先构建，或去掉 -SkipJars）"
