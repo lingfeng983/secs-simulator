@@ -110,7 +110,16 @@
           <configuration>
             <release>${maven.compiler.release}</release>
             <encoding>UTF-8</encoding>
-            <compilerArgs><arg>-Xlint:none</arg></compilerArgs>
+            <!--
+              零告警门禁：所有模块一律 -Xlint:all + -Werror。
+              过去只有部分模块自带这段配置，"这个子 POM 忘了写"就等于没有门禁。
+              -missing-explicit-ctor 关掉：record/隐式构造器会刷屏，且与语义无关。
+              冻结模块（secs-protocol）在自己的 POM 里覆盖为"只告警不阻断"，见该模块注释。
+            -->
+            <compilerArgs>
+              <arg>-Xlint:all,-missing-explicit-ctor</arg>
+              <arg>-Werror</arg>
+            </compilerArgs>
           </configuration>
         </plugin>
         <plugin>

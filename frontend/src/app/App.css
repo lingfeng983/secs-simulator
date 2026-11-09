@@ -1,0 +1,20 @@
+/*
+ * SECS Simulator 前端样式入口。
+ *
+ * 设计语言:Precision Console —— 石墨机箱 + 浅色仪表盘 + 信号青主色。
+ * 分层:
+ *   tokens.css     设计令牌(颜色/尺寸/字体,深浅两套)
+ *   base.css       重置、排版、工具类
+ *   controls.css   按钮/输入/徽标/提示条/浮层/命令面板
+ *   layout.css     外壳、侧栏、顶栏、页面头、设备子导航
+ *   panels.css     面板、指标卡、表格、图表、编辑器、结构化表单
+ *   responsive.css 断点
+ *
+ * 组件里不写死颜色和间距,只用令牌——换主题只是换一层变量。
+ */
+@import '../styles/tokens.css';
+@import '../styles/base.css';
+@import '../styles/controls.css';
+@import '../styles/layout.css';
+@import '../styles/panels.css';
+@import '../styles/responsive.css';

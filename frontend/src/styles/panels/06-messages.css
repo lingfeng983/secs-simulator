@@ -1,0 +1,24 @@
+/* ===== 报文列表：可拖拽放大的报文区 =====
+ * 由 panels.css 按主题拆出（原行 2159-2178）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/* ===== 报文列表：可上下左右拖拽放大 ===== */
+.message-feed {
+  height: 460px;
+  min-height: 280px;
+  min-width: 320px;
+  max-width: 100%;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  overflow: auto;
+  resize: both;
+}
+
+.message-feed .message-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}

@@ -20,4 +20,22 @@
       <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId></dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!--
+            冻结模块（源自 secs4java8，229 个类保持原样）：只观察告警，不用 -Werror 阻断。
+            需要改本模块时，先按父 POM 的零告警门禁自查后再改这里。
+          -->
+          <compilerArgs>
+            <arg>-Xlint:all,-missing-explicit-ctor</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>

@@ -34,7 +34,7 @@ final class SvidReader {
     private final java.util.function.Supplier<SecsCommunicator> communicator;
 
     /** 主机侧报文处理（取 S1F3 请求的 SVID）。 */
-    private final HostSideMessages hostSide;
+    private final HostCommandHandler hostSide;
 
     /** 当前时钟（毫秒）。 */
     private final java.util.function.LongSupplier clock;
@@ -42,7 +42,7 @@ final class SvidReader {
     SvidReader(java.util.function.Supplier<ResolvedEquipment> model,
                java.util.function.Supplier<ValueSource> values,
                java.util.function.Supplier<SecsCommunicator> communicator,
-               HostSideMessages hostSide,
+               HostCommandHandler hostSide,
                java.util.function.LongSupplier clock) {
         this.model = model;
         this.values = values;

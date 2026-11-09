@@ -1,0 +1,532 @@
+/* ===== 面板外框、工具条、统计条、指标卡、表格 =====
+ * 由 panels.css 按主题拆出（原行 1-528）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/*
+ * 面板、指标、表格、图表、编辑器、结构化表单。
+ * 这一层只关心"一块内容怎么排",不再关心页面。
+ */
+
+/* ===== 面板 ===== */
+.panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  min-width: 0;
+}
+
+.panel + .panel {
+  margin-top: var(--gap);
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  padding: 14px var(--panel-pad) 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.panel-title-wrap {
+  min-width: 0;
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  letter-spacing: -0.008em;
+}
+
+.panel-title .panel-index {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 600 10.5px/1 var(--font-mono);
+}
+
+.panel-desc {
+  margin-top: 0.22rem;
+  color: var(--muted);
+  font-size: 11.8px;
+  line-height: 1.6;
+  max-width: 90ch;
+}
+
+/*
+ * 面板操作条：一个主按钮 + 若干"安静按钮"。
+ *
+ * <p>之前每个面板各自给按钮加描边/主色，头部长短不一、按钮高低不齐，
+ * 一进设备页就是一排突兀的方块。这里统一成：透明底、悬停才出现底色，
+ * 主操作固定在最右（primary），危险操作独立色相。</p>
+ */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.panel-actions button {
+  --btn-bg: transparent;
+  --btn-fg: var(--muted);
+  --btn-line: transparent;
+
+  height: 30px;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.panel-actions button:hover:not(:disabled) {
+  --btn-bg: var(--surface-2);
+  --btn-fg: var(--ink);
+  --btn-line: transparent;
+}
+
+.panel-actions button.primary {
+  --btn-bg: var(--accent);
+  --btn-fg: var(--accent-ink);
+  --btn-line: transparent;
+  font-weight: 600;
+}
+
+.panel-actions button.primary:hover:not(:disabled) {
+  --btn-bg: var(--accent-bright);
+  --btn-fg: var(--accent-ink);
+}
+
+.panel-actions button.danger {
+  --btn-bg: transparent;
+  --btn-fg: var(--danger);
+  --btn-line: transparent;
+}
+
+.panel-actions button.danger:hover:not(:disabled) {
+  --btn-bg: var(--danger-soft);
+  --btn-fg: var(--danger);
+}
+
+/* 分组分隔线：把"读/校验"与"写/导出"这类不同后果的动作分开 */
+.panel-actions .action-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line);
+}
+
+.panel-actions .state-pill {
+  margin-right: 2px;
+}
+
+/* 工具条里的下拉/输入与按钮同高，避免一行里三种高度 */
+.panel-actions select,
+.panel-actions input:not([type='checkbox']):not([type='radio']) {
+  height: 30px;
+  min-height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.panel-actions label.field {
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* 编辑器上方的"快速填入"：预设是填内容，不是面板动作 */
+.editor-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.editor-tools-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.editor-tools .chip {
+  min-height: 26px;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.panel-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-2);
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--panel-pad);
+}
+
+.panel-body > * + * {
+  margin-top: 0.85rem;
+}
+
+.panel-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.1rem;
+  padding: 0.5rem var(--panel-pad);
+  border-top: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.panel-footnote span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.panel-footnote .tone-ok { color: var(--ok); font-weight: 600; }
+.panel-footnote .tone-warn { color: var(--warn); font-weight: 600; }
+.panel-footnote .tone-danger { color: var(--danger); font-weight: 600; }
+
+/* 面板内的统计条:一行等宽小格,像仪表刻度 */
+.panel-stats > .stat-card,
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 10px var(--panel-pad);
+  border: none;
+  border-right: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+.stat-card:last-child {
+  border-right: none;
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stat-value {
+  color: var(--ink);
+  font: 600 1.05rem/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-hint {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-card.tone-ok .stat-value { color: var(--ok); }
+.stat-card.tone-warn .stat-value { color: var(--warn); }
+.stat-card.tone-danger .stat-value { color: var(--danger); }
+
+/* ===== 指标卡 ===== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.kpi-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-width: 0;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 130%);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--line-strong);
+  transition: background var(--med);
+}
+
+.kpi-card::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-soft) 30%, transparent);
+}
+
+.kpi-card:hover::before {
+  background: var(--accent);
+}
+
+.kpi-card.tone-ok::before { background: var(--ok); }
+.kpi-card.tone-warn::before { background: var(--warn); }
+.kpi-card.tone-danger::before { background: var(--danger); }
+.kpi-card.tone-info::before { background: var(--info); }
+
+.kpi-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.kpi-value {
+  color: var(--ink);
+  font: 600 1.5rem/1.15 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.kpi-value .unit {
+  margin-left: 0.15rem;
+  color: var(--faint);
+  font-size: 0.62em;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.kpi-value.danger,
+.kpi-value.tone-danger { color: var(--danger); }
+.kpi-value.tone-ok { color: var(--ok); }
+.kpi-value.tone-warn { color: var(--warn); }
+
+.kpi-hint {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== 表格 ===== */
+.table-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.table-toolbar .spacer {
+  flex: 1 1 auto;
+}
+
+.table-search {
+  width: 15rem;
+  max-width: 100%;
+}
+
+.table-toolbar .table-count {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  color: var(--faint);
+  font: 11.5px/1.4 var(--font-mono);
+  white-space: nowrap;
+}
+
+.table-scroll {
+  overflow: auto;
+  max-height: 62vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  scrollbar-gutter: stable;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+.data-table th,
+.data-table td {
+  padding: var(--row-pad) 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.data-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.data-table thead th {
+  position: relative;
+  height: 34px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.data-table tbody tr {
+  transition: background var(--fast);
+}
+
+.data-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+/* 行内第一个格子留一点缩进,和表头对齐 */
+.data-table tbody td:first-child {
+  color: var(--fg);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table td.body {
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-table th.sortable {
+  cursor: pointer;
+}
+
+.data-table th.sortable:hover {
+  color: var(--accent);
+}
+
+.data-table th.sorted {
+  color: var(--accent);
+}
+
+.sort-mark {
+  margin-left: 0.15rem;
+  font-size: 8px;
+  opacity: 0.55;
+}
+
+.data-table th.sorted .sort-mark {
+  opacity: 1;
+}
+
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 3;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.col-resize:hover {
+  background: var(--accent-line);
+}
+
+.align-right {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.align-center {
+  text-align: center !important;
+}
+
+.table-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.table-pager span {
+  font-family: var(--font-mono);
+}
+
+.table-caption {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* 数字列统一等宽,方便竖着比 */
+.data-table td.align-right,
+.data-table th.align-right {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+

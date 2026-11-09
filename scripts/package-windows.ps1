@@ -1,4 +1,4 @@
-﻿# Windows 安装程序打包：Tauri（NSIS）。
+# Windows 安装程序打包：Tauri（NSIS）。
 #
 # 产出一个完整的安装程序，装好后两种用法二选一：
 #   1.「本机运行」：启动打包进去的 secs-sim.exe（原生镜像，无需 JVM），界面连本机；
@@ -86,7 +86,8 @@ if ($installer.Name -notlike "*_${version}_*-setup.exe") {
     throw "安装包文件名里没有版本 ${version}: $($installer.Name)（检查 tauri.conf.json 的 version）"
 }
 
-$packageDir = Join-Path $root 'package'
+# 产物统一收到 build/installer（build/ 已在 .gitignore 中）
+$packageDir = Join-Path $root 'build/installer'
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 $dest = Join-Path $packageDir $installer.Name
 Copy-Item $installer.FullName $dest -Force

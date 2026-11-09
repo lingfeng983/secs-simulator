@@ -1,7 +1,28 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { ApiClient, SessionBulkParams, SessionBulkResult } from '../api';
 import type { Notifier } from './useToasts';
-import { lifecycleMessage } from './useBackend';
+
+/**
+ * 会话生命周期操作的状态码文案。
+ *
+ * <p>服务端已经在日志里记了原因，这里只负责把状态码说成人话：
+ * 400 分成"配置有问题"和"名字不合法"两种可能，光一个 400 谁也看不出该改哪。</p>
+ */
+function lifecycleMessage(status: number, what: string): string {
+  switch (status) {
+    case 200:
+    case 201:
+      return `${what}成功`;
+    case 400:
+      return `${what}失败（配置不合法/读不到，或端口被占；详见服务端日志）`;
+    case 404:
+      return `${what}失败：会话不存在`;
+    case 409:
+      return `${what}失败：标识已被占用，或该会话没有配置来源`;
+    default:
+      return `${what} -> HTTP ${status}`;
+  }
+}
 
 /**
  * 会话域写操作：创建 / 批量 / 重载 / 关闭 / 上报。
@@ -195,14 +216,17 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
     [client],
   );
 
-  return {
-    createSession,
-    bulkCreateSessions,
-    batchTrigger,
-    batchReload,
-    batchClose,
-    closeSession,
-    reloadSession,
-    trigger,
-  };
+  return useMemo(
+    () => ({
+      createSession,
+      bulkCreateSessions,
+      batchTrigger,
+      batchReload,
+      batchClose,
+      closeSession,
+      reloadSession,
+      trigger,
+    }),
+    [createSession, bulkCreateSessions, batchTrigger, batchReload, batchClose, closeSession, reloadSession, trigger],
+  );
 }

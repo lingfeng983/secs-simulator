@@ -89,7 +89,8 @@ test('connection and structure pages host the structured config editors', async 
   /* 不再折叠：直接看到属性名和含义 */
   await expect(connection.getByText('会话 id', { exact: true })).toBeVisible();
   await expect(connection.getByText(/唯一标识/)).toBeVisible();
-  await expect(connection.locator('.session-field')).toHaveCount(11);
+  /* 6 个连接字段 + 5 个 HSMS 超时 + 2 个 Trace 容量 */
+  await expect(connection.locator('.session-field')).toHaveCount(13);
 
   await page.getByRole('tab', { name: '结构', exact: true }).click();
   const structure = page.locator('#panel-structure');

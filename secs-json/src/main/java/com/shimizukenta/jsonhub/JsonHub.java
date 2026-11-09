@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Reader;
+import java.io.Serializable;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -66,7 +67,7 @@ import java.util.stream.Stream;
  * @author kenta-shimizu
  *
  */
-public interface JsonHub extends Iterable<JsonHub> {
+public interface JsonHub extends Iterable<JsonHub>, Serializable {
 	
 	/**
 	 * Returns iterator if type is OBJECT or ARRAY.

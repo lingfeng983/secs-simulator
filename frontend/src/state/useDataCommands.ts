@@ -1,6 +1,6 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { ApiClient, Health, PreviewData } from '../api';
-import { previewWindow } from '../lib/previewWindow';
+import { previewWindow } from '../shared/lib/previewWindow';
 import type { Notifier } from './useToasts';
 
 /** 预览曲线默认桶数。 */
@@ -50,5 +50,5 @@ export function useDataCommands({ client, notifier, setHealth }: DataCommandsDep
     [client, setHealth],
   );
 
-  return { previewAll };
+  return useMemo(() => ({ previewAll }), [previewAll]);
 }

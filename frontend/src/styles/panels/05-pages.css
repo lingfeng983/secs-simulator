@@ -1,0 +1,283 @@
+/* ===== 连接页、结构页、主机预设、SVID 多选、设备子页、点选清单 =====
+ * 由 panels.css 按主题拆出（原行 1880-2158）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/* ===== 连接页：属性 + 含义 + 控件 ===== */
+.session-form .session-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.session-form .session-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 260px);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  /* 基础 .field 是 nowrap（一行表单语义），这里必须放开：
+     说明文字不换行会把窄屏整行撑出视口 */
+  white-space: normal;
+}
+
+.session-field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  /* 说明里有较长的中文/英文 token：允许断行，否则窄屏会把整行撑出视口 */
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  /* 窄屏：说明在上、控件在下，控件不再被 150px 最小宽度顶出去 */
+  .session-form .session-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+}
+
+.session-field-name {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.session-field-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.session-field > input,
+.session-field > select,
+.session-field .check-inline {
+  width: 100%;
+}
+
+.session-subhead {
+  margin: 1rem 0 0.5rem;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 面板说明按 \n 显式换行，而不是宽度不够才折 */
+.panel-desc {
+  white-space: pre-line;
+}
+
+/* ===== 结构页页签 + 模板说明 ===== */
+.structure-tabs {
+  margin: 0 0 0.85rem;
+}
+
+.template-guide {
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11.8px;
+  line-height: 1.7;
+}
+
+.template-guide h3 {
+  margin: 0.75rem 0 0.3rem;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.template-guide h3:first-child {
+  margin-top: 0;
+}
+
+.template-guide ul,
+.template-guide ol {
+  margin: 0.2rem 0 0.4rem 1.15rem;
+  padding: 0;
+}
+
+.template-guide li {
+  margin: 0.15rem 0;
+}
+
+.template-guide b {
+  color: var(--fg);
+}
+/* ===== 主机预设说明 ===== */
+.preset-guide {
+  margin: 0.5rem 0;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.preset-guide > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11.8px;
+}
+
+.preset-guide > summary:hover {
+  color: var(--fg);
+}
+
+.preset-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0.6rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.preset-guide-grid h4 {
+  margin: 0 0 0.25rem;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.preset-guide-grid dl {
+  margin: 0;
+}
+
+.preset-guide-item {
+  margin: 0 0 0.4rem;
+}
+
+.preset-guide-item dt {
+  color: var(--fg);
+  font-size: 11.8px;
+}
+
+.preset-guide-item dd {
+  margin: 0.05rem 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.preset-guide-item dd .hint-inline {
+  margin-left: 0.4rem;
+}
+/* ===== SVID 多选：S6F1 / S1F3 共用，紧凑左对齐 ===== */
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.55rem 0;
+}
+
+.svid-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 0.18rem 0.6rem;
+  justify-items: start;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.svid-check-grid .svid-check {
+  width: 100%;
+  min-width: 0;
+  gap: 0.3rem;
+}
+
+.svid-check-grid .svid-check.disabled {
+  opacity: 0.45;
+}
+
+.svid-check-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ===== 设备子页：页签下方的一条命令栏 =====
+   页签已经说明"这是哪一页"，面板标题不再重复；左侧留一句说明，
+   右侧是统一的操作条。整体做成一条浅色命令栏，和内容区分开，
+   按钮不再"浮"在页面顶端。 */
+.tab-page .panel-title {
+  display: none;
+}
+
+.tab-page .panel-title-wrap {
+  display: block;
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.tab-page .panel-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 48px;
+  padding: 8px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-soft);
+  /* 命令栏是面板的第一块：给上圆角，别把卡片圆角盖成直角 */
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+}
+
+.tab-page .panel-desc {
+  margin: 0;
+  max-width: 78ch;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.tab-page .panel-actions {
+  margin-left: auto;
+}
+
+.tab-page .panel-body {
+  padding-top: 14px;
+}
+
+@media (max-width: 860px) {
+  .tab-page .panel-head {
+    align-items: flex-start;
+  }
+
+  .tab-page .panel-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* ===== 关联数据用点选清单 ===== */
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.18rem 0.6rem;
+  justify-items: start;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+/* ===== 模板快速绑定 ===== */
+.template-quick {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.template-quick .template-head {
+  margin-bottom: 0.3rem;
+}
+

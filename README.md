@@ -14,10 +14,10 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 | `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |
 | `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |
 | `secs-core` | 领域模型、ID 规划、曲线、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |
-| `secs-app` | 应用服务：会话、配置、日志 | core + json |
+| `secs-app` | 应用服务：会话、配置、日志、SML 文本层（`app.sml`） | core + json + protocol |
 | `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |
 | `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |
-| `secs-cli` | 端到端测试宿主 | runtime |
+| `secs-cli` | 进程入口 `CliMain` 与端到端测试宿主 | runtime |
 
 依赖方向由 `ArchitectureTest` 强制，越界即构建失败。
 
@@ -30,7 +30,8 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 |---|---|
 | `secs-protocol` | `Gem` 按能力域拆成 `GemCommunication` / `GemClock` / `GemRemoteCommand` / `GemEventReport` / `GemError` / `GemTerminal` 六个子接口，`AbstractGem` 组合它们，共享状态在 `GemSupport` |
 | `secs-api-http` | `HttpApiServer` 只留路由表与生命周期，按资源域拆成 `SessionHandler` / `ConfigHandler` / `PreviewHandler` / `HostSimHandler` / `OpsHandler` / `StreamHandler`，公共部分在 `HttpSupport`，路径常量在 `ApiPaths` |
-| `secs-runtime` | `HsmsSessionRuntime` 拆出事件上报（`EventReporter` / `EventScheduler`）、主机侧报文（`HostSideMessages`）、报文分发（`PrimaryDispatcher`）、采样（`TracePump`）、报警（`AlarmReporter`）、终端消息（`TerminalInbox`）、预览（`PreviewBuilder`）、热生效（`HotReloader`）等协作者；`Main` 的 HTTP 上下文拆到 `RuntimeContext` |
+| `secs-app` | SML 解析与渲染独立成 `app.sml` 包（只做 `Secs2 ↔ 文本`，不含会话状态） |
+| `secs-runtime` | `HsmsSessionRuntime` 拆出事件上报（`EventReporter` / `EventScheduler`）、设备侧 S2 命令处理（`session/HostCommandHandler`）、报文分发（`PrimaryDispatcher`）、采样（`TracePump`）、报警（`AlarmReporter`）、终端消息（`TerminalInbox`）、预览（`PreviewBuilder`）、热生效（`HotReloader`）等协作者；装配由 `RuntimeContext` 门面 + `RuntimeApi`（API 落地）、`HostSimRegistry`（主机实例簿记）、`BurstRunner`（服务端压测）三个 package-private 协作者组成，入口是 `secs-cli` 的 `CliMain` |
 
 ## 构建
 
@@ -76,7 +77,7 @@ secs-sim --mode=integrated
 # 带一个两腔体演示会话：主机可以连上来问 S1F3
 secs-sim --mode=integrated --demo-session --hsms-port 5000
 
-# 从配置文件装载设备（格式见 docs/schema-v5.md）
+# 从配置文件装载设备（格式见 docs/guides/schema-v5.md）
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
 # 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
@@ -265,7 +266,7 @@ curl -o preview.bin \
 
 - SCSP v1，小端；48 字节固定头 + 每条序列的 `svid` 与 `min/max/avg` 双精度数组。
 - 头部含 `svidTotal` / `seriesCount`，可判断是否截断。
-- 完整布局与 Python 读取示例见 [二进制预览格式](docs/preview-binary.md)。
+- 完整布局与 Python 读取示例见 [二进制预览格式](docs/guides/preview-binary.md)。
 - 界面「曲线预览」里的「下载二进制」按钮使用同一格式。
 
 ### 手动发送 SML
@@ -273,7 +274,7 @@ curl -o preview.bin \
 设备侧可以手动发一条任意 SML 报文，不用等事件计划或主机请求：
 
 ```bash
-curl -X POST --data-binary @templates/sml/equip/s5f1-example.sml \
+curl -X POST --data-binary @docs/examples/sml/equip/s5f1-example.sml \
      http://127.0.0.1:PORT/api/v1/sessions/line1/message
 ```
 
@@ -355,7 +356,7 @@ scripts\build-frontend.ps1                 # 产出 frontend/dist
 secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打开
 ```
 
-开发时用 `pnpm --dir frontend dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
+开发时用 `npm --prefix frontend run dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
 前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；`scripts/check-all.ps1` 会跑）。
 浏览器 E2E 用 Playwright：
 
@@ -366,7 +367,8 @@ npm run test:e2e
 ```
 
 - **Mock E2E**：Vite preview + Playwright 路由拦截 API，不启动 Java；
-  14 条用例覆盖页面能力与焦点管理 / 密度 / 侧栏折叠等交互契约。
+  36 条用例覆盖页面能力与焦点管理 / 密度 / 侧栏折叠等交互契约
+  （另有 37 条截图回归默认跳过，见下文）。
 - **真实后端 E2E**：先启动 `secs-sim --demo-session`，再指向它：
 
 ```powershell
@@ -451,18 +453,28 @@ npm --prefix frontend run test:e2e:real
 运行时的增删改不写回配置，重载会话后按配置恢复；配置层的修改在「连接」「结构」或「配置」页保存，
 相关会话自动重载。
 
-前端源码按职责分层：`src/state/`（轮询、SSE、偏好、通知）、`src/panels/`（面板）、
-`src/ui/`（通用控件）、`src/charts/`（图表）、`src/lib/`（纯函数，可单测）。
+前端源码按职责分层：
 
-样式同样分层，收敛在 `src/styles/`（入口 `src/App.css` 只做 @import）：
+| 目录 | 内容 |
+|---|---|
+| `src/app/` | 入口 `main.tsx` / `App.tsx` / `App.css`、`router.ts`、`layout/`（侧栏、顶栏、导航） |
+| `src/api/` | HTTP 契约与客户端：`types` `base` `sessions` `configs` `messages` `hostsim` + `index`；`src/api.ts` 只做转发 |
+| `src/features/` | `pages/` `panels/`（含 hostsim）`charts/` `editors/`（模板与结构化表单） |
+| `src/shared/` | `ui/`（通用控件）、`lib/`（纯函数，可单测） |
+| `src/state/` | 轮询、SSE、偏好、通知、各域 hook（`useBackend` 只做装配） |
+| `src/styles/` | `tokens / base / controls / layout / panels / responsive` |
+
+样式同样分层，收敛在 `src/styles/`（入口 `src/app/App.css` 只做 @import）：
 `tokens.css` 是唯一的调色板与尺度来源（深浅两套令牌），`base / controls / layout / panels / responsive`
-各管一层。组件里不写死颜色和间距——换主题只是换一层变量，canvas 曲线也从令牌取色。
+各管一层，`panels.css` 再按主题转发到 `panels/*.css`。组件里不写死颜色和间距——
+换主题只是换一层变量，canvas 曲线也从令牌取色。
+决策与约束见 [ADR 0016](docs/adr/0016-layout-and-layer-consolidation.md)。
 
 截图回归：`SHOTS=1 npx playwright test e2e/shots.spec.ts` 会把浅色/深色/窄屏各页写进
 `frontend/shots/redesign/`，用来比对视觉改动（默认跳过，不参与断言）。
 
 界面的完整使用说明（启动登录、每个面板的操作、常见问题）见
-**[用户手册](docs/user-guide.md)**。
+**[用户手册](docs/guides/user-guide.md)**。
 
 ## 打包
 
@@ -476,10 +488,10 @@ scripts\package-windows.ps1
 scripts\package-linux.ps1
 ```
 
-- **Windows 安装程序** `package/SECS Simulator_<版本>_x64-setup.exe`：打开直接进界面
+- **Windows 安装程序** `build/installer/SECS Simulator_<版本>_x64-setup.exe`：打开直接进界面
   （前端内嵌在壳里），默认启动内置的 `secs-sim.exe`（原生镜像，无需 JVM）连本机；
   右上角「连接」可随时切到远程服务端（本机后端自动停止），留空切回本机，选择会记住。
-- **Linux 服务端** `package/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
+- **Linux 服务端** `build/installer/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
   Linux 机器，`./start-server.sh` 以 server 模式对外并托管 web，被 Windows 端远程操作。
 - 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）+ Node；安装程序另需 Rust
   工具链（`tauri build` 用）。`-SkipNative` / `-SkipJars` / `-SkipFrontend` 可复用已有产物。
@@ -504,9 +516,9 @@ scripts\package-linux.ps1
 1. **`secs-protocol` 只依赖 JDK**，任何新代码都不得反向依赖它，也不得修改它。
    例外只有一种：**对照 E4/E5/E37.1 原文确认为实现缺陷**（不是风格问题），
    且必须在提交信息里写清条文依据。已发生的例外：
-   [应答匹配只接受 secondary](docs/code-review-2026-10-20.md)（E37.1 的应答判定要求
+   [应答匹配只接受 secondary](docs/reports/code-review-2026-10-20.md)（E37.1 的应答判定要求
    "同 SystemBytes + 对应 secondary"）；
-   [S9F7 非法数据应答](docs/audit-2026-10-29.md)（E5：Stream/Function 可识别
+   [S9F7 非法数据应答](docs/reports/audit-2026-10-29.md)（E5：Stream/Function 可识别
    但数据无法解析时设备必须回 S9F7，不再静默丢帧；见该文档 §12.7）；
    [协议层 SML 入口摘除](docs/adr/0014-protocol-sml-retired.md)（公共 API 收窄：删除
    零调用方的 `send(SmlMessage)` 入口，不动报文编解码逻辑）。
@@ -515,6 +527,8 @@ scripts\package-linux.ps1
 4. **模板图是纯函数图**：`Template.evaluate` 不得有副作用；一个 SVID 只能有一个生产者（见 [ADR 0004](docs/adr/0004-template-dag.md)）。
 
 ## 文档
+
+完整目录与分区见 [docs/README.md](docs/README.md)（guides / adr / reports / examples / reference）。
 
 - [ADR 0001 · 地基决策](docs/adr/0001-foundation.md)
 - [ADR 0002 · 领域模型与 ID 空间](docs/adr/0002-domain-and-idspace.md)
@@ -530,15 +544,17 @@ scripts\package-linux.ps1
 - [ADR 0013 · HTTP 请求处理改用虚拟线程](docs/adr/0013-http-virtual-threads.md)
 - [ADR 0014 · 协议层 SML 实现下线](docs/adr/0014-protocol-sml-retired.md)
 - [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
+- [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
+- [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
 - [OpenAPI 3.0 契约](docs/openapi.yaml)
-- [二进制曲线预览格式](docs/preview-binary.md)
-- [M0](docs/m0-report.md) · [M1](docs/m1-report.md) · [M2](docs/m2-report.md) · [M3](docs/m3-report.md) · [M4](docs/m4-report.md) · [M4-b](docs/m4b-report.md) · [M5](docs/m5-report.md) · [M6](docs/m6-report.md) · [M7](docs/m7-report.md) · [M6-b](docs/m6b-report.md) · [M6-c](docs/m6c-report.md) · [M8-a](docs/m8a-report.md) · [M8-b](docs/m8b-report.md) · [M8-c](docs/m8c-report.md) · [M8-d](docs/m8d-report.md) · [M8-e](docs/m8e-report.md) · [M9](docs/m9-report.md) · [M9-b / M9-c](docs/m9b-report.md)
-- [全量代码评审 2026-10-17](docs/code-review-2026-10-17.md)
-- [全量代码评审 2026-10-20（协议符合性专项）](docs/code-review-2026-10-20.md)
-- [全量代码评审 2026-10-29（五模块复核 + 整改路线）](docs/audit-2026-10-29.md)
-- [实机全量测试 2026-10-30（原生 exe + 真实主机 + 浏览器）](docs/host-e2e-2026-10-30.md)
+- [二进制曲线预览格式](docs/guides/preview-binary.md)
+- [M0](docs/reports/m0-report.md) · [M1](docs/reports/m1-report.md) · [M2](docs/reports/m2-report.md) · [M3](docs/reports/m3-report.md) · [M4](docs/reports/m4-report.md) · [M4-b](docs/reports/m4b-report.md) · [M5](docs/reports/m5-report.md) · [M6](docs/reports/m6-report.md) · [M7](docs/reports/m7-report.md) · [M6-b](docs/reports/m6b-report.md) · [M6-c](docs/reports/m6c-report.md) · [M8-a](docs/reports/m8a-report.md) · [M8-b](docs/reports/m8b-report.md) · [M8-c](docs/reports/m8c-report.md) · [M8-d](docs/reports/m8d-report.md) · [M8-e](docs/reports/m8e-report.md) · [M9](docs/reports/m9-report.md) · [M9-b / M9-c](docs/reports/m9b-report.md)
+- [全量代码评审 2026-10-17](docs/reports/code-review-2026-10-17.md)
+- [全量代码评审 2026-10-20（协议符合性专项）](docs/reports/code-review-2026-10-20.md)
+- [全量代码评审 2026-10-29（五模块复核 + 整改路线）](docs/reports/audit-2026-10-29.md)
+- [实机全量测试 2026-10-30（原生 exe + 真实主机 + 浏览器）](docs/reports/host-e2e-2026-10-30.md)
 - [SECS/GEM 标准参考资料](docs/reference/README.md)（E4/E5/E30/E37 中文整理 + 项目对照）
-- [未完成清单 2026-10-17](docs/unfinished-2026-10-17.md)
-- [配置格式 Schema v5](docs/schema-v5.md)（v4 仍兼容）
-- [配置格式 Schema v4](docs/schema-v4.md)
-- [SVID 值变化机制与规则](docs/svid-value-model.md)（默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界）
+- [未完成清单 2026-10-17](docs/reports/unfinished-2026-10-17.md)
+- [配置格式 Schema v5](docs/guides/schema-v5.md)（v4 仍兼容）
+- [配置格式 Schema v4](docs/guides/schema-v4.md)
+- [SVID 值变化机制与规则](docs/guides/svid-value-model.md)（默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界）

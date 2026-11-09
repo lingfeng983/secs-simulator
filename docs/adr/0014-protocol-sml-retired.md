@@ -11,7 +11,7 @@
 
 1. `com.shimizukenta.secs.sml`（上游库自带）：只支持部分格式、不支持
    Unicode/JIS8、列表长度语义与本产品不同；
-2. `secssim.runtime.sml`（本产品）：支持 `SxFy [W] <...>.`、行间距、
+2. `secssim.app.sml`（本产品；原 `secssim.runtime.sml`，后续下沉到应用层）：支持 `SxFy [W] <...>.`、行间距、
    单元号注入约定，是手动发送与界面渲染真正在用的那套。
 
 协议层的两个入口 `send(SmlMessage)` / `send(SecsMessage, SmlMessage)`

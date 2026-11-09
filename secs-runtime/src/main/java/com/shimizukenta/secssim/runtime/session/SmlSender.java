@@ -9,9 +9,9 @@ import com.shimizukenta.secs.SecsCommunicator;
 import com.shimizukenta.secs.SecsException;
 import com.shimizukenta.secs.SecsMessage;
 import com.shimizukenta.secs.SecsWaitReplyMessageException;
-import com.shimizukenta.secssim.runtime.sml.SmlParseException;
-import com.shimizukenta.secssim.runtime.sml.SmlParser;
-import com.shimizukenta.secssim.runtime.sml.SmlRenderer;
+import com.shimizukenta.secssim.app.sml.SmlParseException;
+import com.shimizukenta.secssim.app.sml.SmlParser;
+import com.shimizukenta.secssim.app.sml.SmlRenderer;
 
 /**
  * 手动发送 SML 报文。

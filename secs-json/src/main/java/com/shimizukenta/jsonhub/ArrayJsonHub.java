@@ -26,6 +26,11 @@ public class ArrayJsonHub extends AbstractJsonHub {
 	
 	private static final long serialVersionUID = -2012262422136607091L;
 	
+	/**
+	 * 元素容器。运行时实际是 ArrayList（可序列化）；字段声明为 List 接口，
+	 * javac 只能看到接口类型，故在此抑制 serial 告警。
+	 */
+	@SuppressWarnings("serial")
 	private final List<JsonHub> v;
 	private String toJsonCache;
 	private String toJsonExcludedNullValueInObjectCache;

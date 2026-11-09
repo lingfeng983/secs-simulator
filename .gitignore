@@ -4,7 +4,9 @@ target/
 *.jar
 *.war
 
-# ---- packaging ----
+# ---- 安装包与运行产物（统一收到 build/：installer / run / native）----
+/build/
+# 历史产物目录，保留忽略以防旧脚本残留
 package/
 
 # ---- native / runtime images ----
@@ -63,4 +65,5 @@ gui/src-tauri/target/
 
 # ---- 第三方工具本地状态 ----
 .freebuff/
-test-run/
+# 旧版实机脚本的临时工作目录；现已改用 build/run 与系统临时目录
+/test-run/

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { ApiClient, ConfigProblems, ConfigSaveResult, ConfigTemplateEntry, ConfigTextSnapshot } from '../api';
 import type { Notifier } from './useToasts';
 
@@ -117,5 +117,8 @@ export function useConfigCommands({
     }
   }, [client]);
 
-  return { createConfig, readConfig, validateConfig, saveConfig, configTemplates };
+  return useMemo(
+    () => ({ createConfig, readConfig, validateConfig, saveConfig, configTemplates }),
+    [createConfig, readConfig, validateConfig, saveConfig, configTemplates],
+  );
 }

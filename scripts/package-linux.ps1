@@ -1,4 +1,4 @@
-﻿# Linux 服务端打包：模块 jar + 前端 + 启动脚本 -> zip（目标机需 JDK 25+）。
+# Linux 服务端打包：模块 jar + 前端 + 启动脚本 -> zip（目标机需 JDK 25+）。
 #
 # 与 Windows 安装程序（package-windows.ps1）的关系：
 # 本包部署在设备所在的 Linux 机器上，./start-server.sh 以 server 模式对外，
@@ -41,8 +41,10 @@ foreach ($module in $modules) {
     }
 }
 
-# ---- 3. 组装 ----
-$stage = Join-Path $root "package/secs-sim-server-$version-linux"
+# ---- 3. 组装（产物统一收到 build/installer）----
+$packageDir = Join-Path $root 'build/installer'
+New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+$stage = Join-Path $packageDir "secs-sim-server-$version-linux"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'web') | Out-Null
 
@@ -53,7 +55,7 @@ foreach ($module in $modules) {
 Copy-Item "$web/*" (Join-Path $stage 'web') -Recurse
 Copy-Item (Join-Path $root 'packaging/start-server.sh') $stage
 Copy-Item (Join-Path $root 'packaging/README-linux.txt') (Join-Path $stage 'README.txt')
-Copy-Item (Join-Path $root 'docs/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
+Copy-Item (Join-Path $root 'docs/guides/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
 Set-Content -Path (Join-Path $stage 'VERSION') -Value $version -Encoding ASCII
 (Get-Content (Join-Path $stage 'README.txt') -Raw -Encoding UTF8).Replace('<版本>', $version) |
     Set-Content (Join-Path $stage 'README.txt') -Encoding UTF8 -NoNewline
@@ -63,7 +65,7 @@ $shCheck = & bash -n (Join-Path $stage 'start-server.sh') 2>&1
 if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
 Write-Host 'start-server.sh syntax check OK'
 
-$zip = Join-Path $root "package/secs-sim-server-$version-linux.zip"
+$zip = Join-Path $packageDir "secs-sim-server-$version-linux.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $stage -DestinationPath $zip
 

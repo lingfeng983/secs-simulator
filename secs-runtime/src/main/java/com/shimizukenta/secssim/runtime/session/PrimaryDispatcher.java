@@ -44,7 +44,7 @@ final class PrimaryDispatcher {
     private final java.util.function.Supplier<SecsCommunicator> communicator;
 
     /** 设备侧报文处理。 */
-    private final HostSideMessages hostSide;
+    private final HostCommandHandler hostSide;
 
     /** Trace（周期采样）。 */
     private final TracePump tracePump;
@@ -74,7 +74,7 @@ final class PrimaryDispatcher {
     private final String sessionId;
 
     PrimaryDispatcher(java.util.function.Supplier<SecsCommunicator> communicator,
-                     HostSideMessages hostSide,
+                     HostCommandHandler hostSide,
                      TracePump tracePump,
                      TerminalInbox terminalInbox,
                      java.util.function.Supplier<com.shimizukenta.secssim.app.session.EquipmentControlState> controlState,

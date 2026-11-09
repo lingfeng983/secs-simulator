@@ -25,24 +25,16 @@
         <groupId>com.shimizukenta</groupId>
         <artifactId>secs-json</artifactId>
       </dependency>
+      <!-- SML 文本层（app.sml）：解析/渲染就是 Secs2 ↔ 文本，没有会话状态，
+           所以放在应用层而不是 runtime。协议层是叶子库，app → protocol 不引入循环。 -->
+      <dependency>
+        <groupId>com.shimizukenta</groupId>
+        <artifactId>secs-protocol</artifactId>
+      </dependency>
       <dependency>
         <groupId>org.junit.jupiter</groupId>
         <artifactId>junit-jupiter</artifactId>
       </dependency>
   </dependencies>
 
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <configuration>
-          <compilerArgs>
-            <arg>-Xlint:all,-missing-explicit-ctor</arg>
-            <arg>-Werror</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
 </project>

@@ -65,7 +65,7 @@ final class SessionNotifier {
 
         String body;
         try {
-            body = com.shimizukenta.secssim.runtime.sml.SmlRenderer.render(message.secs2());
+            body = com.shimizukenta.secssim.app.sml.SmlRenderer.render(message.secs2());
         } catch (RuntimeException e) {
             body = "<不可渲染>";
         }

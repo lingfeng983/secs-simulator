@@ -13,8 +13,8 @@ import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.runtime.hostsim.HostSimulator;
 import com.shimizukenta.secssim.runtime.session.DemoEquipment;
-import com.shimizukenta.secssim.runtime.session.HostSimulator;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
 /**

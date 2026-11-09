@@ -1,8 +1,9 @@
 /**
- * 命令行入口。
+ * 命令行入口与端到端测试宿主。
  *
- * <p>M1 起真正的入口在 {@code secs-runtime}（{@link com.shimizukenta.secssim.runtime.Main}），
- * 本模块只保留命令行包装与端到端测试宿主；打包职责在 M9 迁往 {@code secs-dist}。
+ * <p>本模块提供真正的 JVM 入口 {@link com.shimizukenta.secssim.cli.CliMain}
+ * （{@code main} + {@code System.exit}），装配逻辑在 {@code secs-runtime}；
+ * 同时承载跨模块的端到端测试（会话训练、TLS 服务端、原生镜像烟测）。
  * </p>
  */
 package com.shimizukenta.secssim.cli;

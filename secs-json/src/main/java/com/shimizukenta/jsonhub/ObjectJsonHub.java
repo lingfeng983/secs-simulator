@@ -37,6 +37,11 @@ public class ObjectJsonHub extends AbstractJsonHub {
 	
 	private static final long serialVersionUID = 6707336078321312442L;
 	
+	/**
+	 * 元素容器。运行时实际是 ArrayList（可序列化）；字段声明为 Collection 接口，
+	 * javac 只能看到接口类型，故在此抑制 serial 告警。
+	 */
+	@SuppressWarnings("serial")
 	private final Collection<JsonObjectPair> v;
 	private String toJsonCache;
 	private String toJsonExcludedNullValueInObjectCache;

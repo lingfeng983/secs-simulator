@@ -40,16 +40,6 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <configuration>
-          <compilerArgs>
-            <arg>-Xlint:all,-missing-explicit-ctor</arg>
-            <arg>-Werror</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <systemPropertyVariables>
@@ -72,7 +62,7 @@
             <version>1.1.14</version>
             <configuration>
               <imageName>secs-sim</imageName>
-              <mainClass>com.shimizukenta.secssim.runtime.Main</mainClass>
+              <mainClass>com.shimizukenta.secssim.cli.CliMain</mainClass>
               <buildArgs>
                 <buildArg>-H:+ReportExceptionStackTraces</buildArg>
                 <buildArg>-Dfile.encoding=UTF-8</buildArg>

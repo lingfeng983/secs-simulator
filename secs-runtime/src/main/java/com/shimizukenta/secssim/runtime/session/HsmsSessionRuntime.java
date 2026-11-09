@@ -97,7 +97,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final Map<Integer, EquipmentConstantDef> constants;
 
     /** 主机侧报文（S2 家族）的协议翻译协作者。 */
-    private final HostSideMessages hostSide;
+    private final HostCommandHandler hostSide;
 
     /** Trace（周期采样）的采集与上报协作者。 */
     private final TracePump tracePump;
@@ -244,7 +244,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.control = new ControlStateHolder(next -> this.publishNotice(
                 com.shimizukenta.secssim.app.event.NoticeEvent.SESSION,
                 "{\"controlState\":\"" + next.name() + "\"}"));
-        this.hostSide = new HostSideMessages(this.constants, this.hostReports);
+        this.hostSide = new HostCommandHandler(this.constants, this.hostReports);
         this.hostSide.errorSink(this::recordError);
         this.hostSide.sessionId(spec.id());
         this.hostSide.modelSupplier(() -> this.model);

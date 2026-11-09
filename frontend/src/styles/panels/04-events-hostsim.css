@@ -1,0 +1,350 @@
+/* ===== 事件驱动曲线、主机模拟、报文监视、事件效果、弹框、图表工具条 =====
+ * 由 panels.css 按主题拆出（原行 1534-1879）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/* ===== 事件驱动曲线 ===== */
+.event-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.event-preview-row {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.event-preview-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.event-preview-label .mono {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.event-preview-row .spark {
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 14rem);
+}
+
+.event-preview-row .spark-readout {
+  grid-column: 2;
+}
+
+/* 事件图例:一排"什么时候发了什么" */
+.event-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 11.5px;
+}
+
+.event-legend-title {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.event-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--fg);
+}
+
+/* 事件颜色块：和曲线上竖线/三角同色 */
+.event-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.event-tick {
+  display: inline-block;
+  width: 2px;
+  height: 10px;
+  background: var(--warn);
+  border-radius: 1px;
+}
+
+@media (max-width: 960px) {
+  .event-preview-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .event-preview-row .spark {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .event-preview-row .spark-readout {
+    grid-column: 1;
+  }
+}
+
+/* 配置编辑器的工具条:视图切换在左,附加视图开关在右 */
+.config-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.config-toolbar .spacer {
+  flex: 1 1 auto;
+}
+
+button.active:not(.segment):not(.segmented > button) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ===== 主机模拟:实例选择条 ===== */
+.host-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem var(--field-gap);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.host-picker .spacer {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 680px) {
+  .host-picker {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .host-picker .spacer {
+    display: none;
+  }
+}
+
+/* ===== 报文收发监视（设备页·消息 / 主机模拟·收发记录） ===== */
+.message-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.message-filters .filter-chip {
+  border: 1px solid var(--line);
+  padding: 0.12rem 0.55rem;
+}
+
+.message-filters .filter-chip[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.message-filters .filter-chip.off {
+  opacity: 0.42;
+  text-decoration: line-through;
+}
+
+.message-filters .chip-count {
+  margin-left: 0.3rem;
+  opacity: 0.75;
+  font-size: 10px;
+}
+
+.message-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-height: 300px;
+  overflow: auto;
+}
+
+.message-row {
+  display: grid;
+  grid-template-columns: 78px 96px 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.22rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  /* 长列表只渲染视口附近的几十行：报文面板默认保留 2000 行，
+     全量布局在 trace/压测时每秒重排多次，很容易把主线程占满。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
+}
+
+.message-row:last-child {
+  border-bottom: 0;
+}
+
+.message-time {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.message-dir {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.message-dir.in {
+  color: var(--info);
+}
+
+.message-dir.out {
+  color: var(--ok);
+}
+
+.message-head {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.message-body {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  .message-row {
+    grid-template-columns: 64px 84px 70px minmax(0, 1fr);
+    gap: 0.3rem;
+  }
+}
+/* ===== 事件编排：效果表 ===== */
+.effects-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.effects-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.effects-table th {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.effects-table td {
+  padding: 0.35rem 0.5rem;
+  border-top: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+
+.effects-table td .hint-inline {
+  display: block;
+  font-size: 10px;
+}
+
+.effects-table .input-mini {
+  width: 7rem;
+  min-height: 28px;
+  padding: 0.15rem 0.4rem;
+}
+
+/* ===== 字段较少的弹框：一栏一行 ===== */
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.form-stack .field {
+  width: 100%;
+}
+
+/* ===== 审计：细节列换行而不是撑破表格 ===== */
+.data-table td.audit-detail-cell {
+  white-space: normal;
+  min-width: 280px;
+}
+/* ===== 主机模拟：多选发送目标 ===== */
+.host-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.host-multi-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.host-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+}
+/* ===== 图表工具条（缩放/图例开关） ===== */
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.25rem 0.1rem 0.35rem;
+}
+
+.chart-toolbar .spacer {
+  flex: 1 1 auto;
+}
+
+.chart-toolbar button {
+  min-height: 26px;
+  padding: 0.1rem 0.55rem;
+}
+/* S1F3 采集图：一屏一张大图，带坐标轴与缩放 */
+.collector-chart-large {
+  grid-column: 1 / -1;
+}
+
+.collector-chart-large .variable-chart {
+  margin-top: 0.2rem;
+}

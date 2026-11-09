@@ -1,0 +1,456 @@
+/* ===== 图表、编辑器/结果/日志、差异视图、子表网格、单变量曲线 =====
+ * 由 panels.css 按主题拆出（原行 529-980）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/* ===== 图表 ===== */
+.sparks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.spark-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.spark {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) minmax(10rem, 15rem);
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.spark-id {
+  color: var(--fg);
+  font: 500 12px/1.4 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spark-owner {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.spark canvas {
+  width: 100%;
+  max-width: 100%;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, var(--surface-inset), var(--surface));
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.spark-readout {
+  color: var(--muted);
+  font: 11px/1.45 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.collector-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0.65rem;
+}
+
+.collector-chart,
+.uplot-block,
+.multi-axis-block {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.collector-chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 12px;
+}
+
+.collector-chart-head .mono {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.collector-chart .spark {
+  grid-template-columns: 1fr;
+  gap: 0.15rem;
+}
+
+.collector-chart .spark-readout {
+  font-size: 10.5px;
+}
+
+.uplots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.uplot-title {
+  margin-bottom: 0.3rem;
+  color: var(--muted);
+  font: 11.5px/1.4 var(--font-mono);
+}
+
+.uplot-host,
+.multi-axis-host {
+  width: 100%;
+}
+
+.uplot-host .u-legend {
+  font-size: 11px;
+}
+
+.preview-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.ceid {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  color: var(--muted);
+}
+
+/* ===== 编辑器 / 结果 / 日志 ===== */
+.config-editor,
+.sml-editor {
+  width: 100%;
+  min-height: 24rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  color: var(--fg);
+  font: 12px/1.7 var(--font-mono);
+  resize: vertical;
+}
+
+.sml-editor {
+  min-height: 9rem;
+}
+
+.sml-result {
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  color: var(--fg);
+  font: 11.5px/1.65 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sml-result.error-result {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.log {
+  height: 24rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  font: 11.5px/1.65 var(--font-mono);
+  white-space: pre-wrap;
+}
+
+/* SML 语法高亮 */
+.sml-k-head { color: var(--accent); font-weight: 600; }
+.sml-k-format { color: var(--info); }
+.sml-k-number { color: var(--ok); }
+.sml-k-string { color: var(--warn); }
+.sml-k-punct { color: var(--faint); }
+
+.burst-result {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font: 12px/1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== 差异视图 ===== */
+.config-diff {
+  max-height: 34rem;
+  overflow: auto;
+  padding: 0.4rem 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  font: 11.5px/1.75 var(--font-mono);
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.2rem 1rem minmax(0, 1fr);
+  gap: 0.4rem;
+  padding-right: 0.7rem;
+  white-space: pre;
+}
+
+.diff-gutter {
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+}
+
+.diff-mark {
+  text-align: center;
+  user-select: none;
+}
+
+.diff-text {
+  overflow-x: auto;
+}
+
+.diff-added {
+  background: var(--ok-soft);
+}
+
+.diff-added .diff-mark { color: var(--ok); font-weight: 700; }
+
+.diff-removed {
+  background: var(--danger-soft);
+}
+
+.diff-removed .diff-mark { color: var(--danger); font-weight: 700; }
+
+.diff-skip {
+  padding: 0.15rem 0.7rem;
+  border-top: 1px dashed var(--line);
+  border-bottom: 1px dashed var(--line);
+  color: var(--faint);
+  user-select: none;
+}
+
+.audit-detail {
+  display: inline-block;
+  max-width: 30rem;
+  white-space: normal;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ===== 子表网格 =====
+   配置编辑器里的 SVID / 报告 / CEID 是"一张表"，不是"一串标签"。
+   用 grid 让同列的控件左边缘对齐：列宽由整组行共享，
+   字段再多也不会各自换行、各占一段，右侧更不会留大片空白。 */
+/* 列宽按"可用宽度等分"，最后一列是删除按钮。
+   不同列数的表共用同一套规则，只改 --grid-cols。 */
+.form-grid-row {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 3), minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 0.5rem;
+  margin: 0.3rem 0;
+}
+
+/* 3 列：offset / 名称 / 引用 */
+.form-grid-row--3 { --grid-cols: 3; }
+
+/* 5 列：id / 名称 / 类型 / 数值 / 数值 */
+.form-grid-row--5 { --grid-cols: 5; }
+
+/* 7 列：offset / 槽位名 / 类型 / 单位 / 小数位 / min / max */
+.form-grid-row--7 { --grid-cols: 7; }
+
+/* 8 列：上面 7 列 + 值来源（值来源自己是一组控件，给宽一点） */
+.form-grid-row--8 {
+  --grid-cols: 7;
+  grid-template-columns:
+    repeat(7, minmax(0, 1fr)) minmax(11rem, 1.5fr) auto;
+}
+
+/* 值来源格：不再缩进成子块，直接占一格 */
+.form-grid-cell {
+  min-width: 0;
+  align-self: center;
+}
+
+.form-grid-cell .svid-source {
+  margin: 0;
+  padding: 0;
+  border-left: none;
+}
+
+.form-grid-cell .svid-source-bar {
+  gap: 0.35rem;
+}
+
+/* 值来源格里放不下"名称 + 下拉 + 按钮"三件套，
+   改成纵向：名称一行、控件一行。 */
+.form-grid-cell .svid-source-bar {
+  flex-wrap: wrap;
+  gap: 0.25rem 0.35rem;
+}
+
+.form-grid-cell .svid-source-label {
+  flex: 1 1 100%;
+  max-width: none;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.form-grid-cell .svid-source-kind {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.form-grid-cell .svid-source-bar > button {
+  flex: 0 0 auto;
+}
+
+/* 表头行：只说列名，行内不再重复 */
+.form-grid-head {
+  align-items: center;
+  margin-bottom: 0.15rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.form-grid-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窄屏放不下 7 列时,退成 2 行网格,不再挤成一团 */
+@media (max-width: 1400px) {
+  .form-grid-row--7 { --grid-cols: 4; }
+  .form-grid-row--8 { --grid-cols: 4; }
+}
+
+/* 网格单元：描述在上、控件在下，与表头一一对应 */
+.form-grid-row .field-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+/* 单元里的字段名只留给读屏器：表头已经写了列名，
+   两处都显示会让每一格都像一张小卡片，密密麻麻反而看不清列。 */
+/* 选择器要压过 controls.css 里的 ".form-row .field > :first-child:not(...)"，
+   那条规则的特异性更高，会把隐藏标签重新显示出来。 */
+.form-grid-row .field.field-cell > .field-cell-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.form-grid-row .field-cell > input,
+.form-grid-row .field-cell > select {
+  width: 100%;
+  min-width: 0;
+}
+
+.form-grid-del {
+  justify-self: end;
+  align-self: end;
+}
+
+
+/* ===== 单变量曲线图(带坐标轴) ===== */
+.variable-chart {
+  width: 100%;
+}
+
+.variable-chart canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+
+.variable-chart-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-top: 0.3rem;
+  font-size: 11px;
+}
+
+.variable-chart-readout {
+  margin-left: auto;
+  color: var(--fg-strong);
+}
+
+
+/* 事件清单：图上标不下时,这里按时刻列全 */
+.variable-chart-events {
+  margin-top: 0.4rem;
+  font-size: 11.5px;
+}
+
+.variable-chart-events > summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0.15rem 0;
+}
+
+.variable-chart-events ol {
+  margin: 0.35rem 0 0;
+  padding-left: 1.4rem;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.variable-chart-events li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.1rem 0;
+  color: var(--fg);
+}
+
+

@@ -194,7 +194,7 @@ S2F37 空 CEID 列表 = 作用于全部事件。删除后设备是否回落到�
 | P0-3 | `onPrimary` 入口丢弃偶数 function 的到达报文（E5：S9Fx 只对 primary） |
 
 P1-3（S2F41/F42）与 P1-4（S2F13–F16）均已实现，详见
-[全量评审 2026-10-20](../../code-review-2026-10-20.md) §四。
+[全量评审 2026-10-20../../reports/code-review-2026-10-20.md) §四。
 
 ---
 
@@ -401,5 +401,5 @@ S6F2     <B ACKC6>
 | [E30 GEM 标准整理版](../standards/03-E30-GEM-中文整理.md) | 状态模型、能力、合规要求的标准原文整理 |
 | [E5 项目对照](E5-SECS-II-项目对照.md) | 报文结构与数据项编码的实现对照 |
 | [E5 标准整理版](../standards/02-E5-SECS-II-中文整理.md) | 消息逐条定义（第 8 章含 S6F11 等 GEM 核心消息） |
-| [全量评审 2026-10-20](../../code-review-2026-10-20.md) | P0/P1 问题与修复顺序 |
-| `docs/openapi.yaml`、`docs/schema-v5.md` | 项目接口与配置规格 |
+| [全量评审 2026-10-20../../reports/code-review-2026-10-20.md) | P0/P1 问题与修复顺序 |
+| `docs/openapi.yaml`、`docs/guides/schema-v5.md` | 项目接口与配置规格 |

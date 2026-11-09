@@ -105,7 +105,7 @@ class NativeRuntimeIT {
         int hsmsPort = freePort();
         Path workDir = Files.createTempDirectory("secs-sim-demo-");
 
-        /* 前端产物：先在 frontend/ 里 pnpm run build；没构建就跳过这条用例 */
+        /* 前端产物：先在 frontend/ 里 npm run build；没构建就跳过这条用例 */
         Path webRoot = Path.of("..", "frontend", "dist").toAbsolutePath().normalize();
         assumeTrue(Files.isDirectory(webRoot), "skip: frontend not built: " + webRoot);
 

@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：M12
-- 影响范围：`secs-runtime` 的 `SmlParser` / `HsmsSessionRuntime.sendSml`，`secs-api-http` 的 `POST /api/v1/sessions/{id}/message`，前端「手动发送」面板
+- 影响范围：`secs-app` 的 `SmlParser` / `secs-runtime` 的 `HsmsSessionRuntime.sendSml`，`secs-api-http` 的 `POST /api/v1/sessions/{id}/message`，前端「手动发送」面板
 
 ## 问题
 
@@ -64,7 +64,7 @@ viewer 只能看历史和结果，不能发。
 
 - 手动发送覆盖了绝大多数现场调试报文；遇到不支持的语法会明确报错。
 - 没有"从文件选择模板"的功能：前端只给 S1F1 / S5F1 两个示例，
-  其他报文从 `templates/sml/` 复制或手写。
+  其他报文从 `docs/examples/sml/` 复制或手写。
 - W 位发送是同步等待 T3 的；一个 HTTP 请求可能占住线程数十秒。
   当前请求线程池为 4，现场不要同时点很多条 W 位报文。
 - 解析器没有复用协议层的 SML 类型；`SmlRenderer` 与 `SmlParser` 的语法集合需要人工保持同步。

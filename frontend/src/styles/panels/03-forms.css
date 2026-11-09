@@ -1,0 +1,557 @@
+/* ===== 结构化表单、模板字段、采集卡、面板内分块 =====
+ * 由 panels.css 按主题拆出（原行 981-1533）；
+ * 规则内容未改动，汇总顺序见 ../panels.css。
+ */
+/* ===== 结构化表单(配置/模板/值来源) ===== */
+.cfg-editor {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.cfg-editor h3 {
+  font-size: 0.92rem;
+}
+
+.cfg-editor h4 {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.88rem;
+}
+
+.cfg-section {
+  margin-top: 1rem;
+}
+
+.cfg-section > .form-row + .form-row {
+  margin-top: 0.55rem;
+}
+
+.template-editor {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.template-head h3,
+.template-head h4 {
+  font-size: 0.92rem;
+}
+
+.template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.template-card {
+  margin-top: 0.55rem;
+  padding: 0.7rem 0.8rem 0.75rem;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color var(--fast);
+}
+
+.template-card:hover {
+  border-left-color: var(--accent-line);
+}
+
+/* 模板卡片头部:字段一律"描述在左、控件在右",整块换行而不是控件掉下来 */
+.template-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+}
+
+.template-card-head label,
+.template-fields label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.template-card-head input,
+.template-card-head select,
+.template-fields input,
+.template-fields select,
+.template-binding-row input,
+.template-binding-row select,
+.template-output-row input,
+.template-output-row select {
+  width: 8rem;
+  font-size: 11.5px;
+  padding: 0.2rem 0.4rem;
+}
+
+/* 模板字段:与表单行同一套——描述在左、控件在右,整块换行 */
+/* 模板字段:与表单行同一套规则 */
+.template-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem var(--field-gap);
+  margin-top: 0.6rem;
+}
+
+.template-fields > label > :first-child:not(input):not(select):not(textarea) {
+  flex: 0 0 var(--field-label-w);
+  width: var(--field-label-w);
+  max-width: var(--field-label-w);
+  text-align: right;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+.template-fields > label {
+  flex: 0 0 auto;
+}
+
+.template-fields > label > input,
+.template-fields > label > select {
+  width: 8rem;
+}
+
+.template-fields input,
+.template-fields select {
+  width: 100%;
+}
+
+.template-checkbox {
+  flex-direction: row !important;
+  align-self: center;
+}
+
+.template-badge {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.template-label {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.template-subtable {
+  flex-basis: 100%;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+}
+
+.template-subhead,
+.template-subrow {
+  display: grid;
+  grid-template-columns: 8rem 8rem 4rem;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.2rem 0;
+}
+
+.template-subhead {
+  color: var(--faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.template-subhead button {
+  grid-column: 3;
+}
+
+.template-subrow input,
+.template-subrow select {
+  width: 100%;
+  font-size: 11.5px;
+  padding: 0.2rem 0.4rem;
+}
+
+.template-outputs,
+.template-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.template-output-row,
+.template-binding-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+/* 绑定行:输出名在左、控件在右 */
+.template-binding-row {
+  flex-wrap: nowrap;
+}
+
+.template-output-row input:first-child {
+  width: 8rem;
+}
+
+.template-output-row .template-input-wide {
+  width: min(34rem, 62vw);
+}
+
+.template-binding-row select {
+  min-width: 8rem;
+}
+
+/* 值来源：每个 SVID 一条，收在左侧竖线内。
+   一行里是「名称 | 类型 | 按钮」，名称列固定宽度——
+   多条 SVID 的下拉框和按钮自然对齐，不再是各自长短不一的散块。 */
+.svid-source {
+  margin: 0.3rem 0 0.45rem 0.55rem;
+  padding: 0.3rem 0 0.4rem 0.8rem;
+  border-left: 1px solid var(--line-strong);
+}
+
+.svid-source-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.svid-source-label {
+  flex: 0 0 13rem;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.svid-source-kind {
+  flex: 0 0 11rem;
+  width: 11rem;
+}
+
+.svid-source-detail {
+  align-items: flex-end;
+  margin-top: 0.4rem;
+}
+
+.svid-source textarea,
+textarea.invalid {
+  width: 100%;
+  min-height: 3.5rem;
+}
+
+.svid-source textarea.invalid,
+textarea.invalid {
+  border-color: var(--danger);
+}
+
+.svid-preview {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.effects-editor .template-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 值来源/常量等处的一行说明 */
+.detail-list {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.3rem 0.8rem;
+  margin: 0 0 0.75rem;
+  font-size: 12px;
+}
+
+.detail-list dt {
+  color: var(--muted);
+}
+
+.detail-list dd {
+  margin: 0;
+}
+
+/* 采集卡 / 主机模拟 */
+.collector-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.hostsim-target {
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.data-table td.sml-cell {
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 实时事件列表 */
+.live-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.live-event-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.35rem 0.7rem;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.live-event-list li:last-child {
+  border-bottom: none;
+}
+
+.live-event-list li .mono {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+/* 面板脚注贴住底边:它属于面板"外框",不是正文的一部分 */
+.panel-body > .panel-footnote {
+  margin: 0.85rem calc(-1 * var(--panel-pad)) calc(-1 * var(--panel-pad));
+  padding: 0.5rem var(--panel-pad);
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+}
+
+/* ID 列左对齐更易扫读;只有真正的度量值右对齐 */
+.data-table td.align-left,
+.data-table th.align-left {
+  text-align: left;
+}
+
+/* ===== 面板内分块:① ② ③ 这种"页内小节" ===== */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.block + .block {
+  margin-top: 0.35rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.block > .section-head {
+  margin-bottom: 0;
+}
+
+/* 序号标题:圈起来的数字,小节一眼分得开 */
+.block > .section-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.93rem;
+}
+
+/* 编辑框下面那一行:左说明右动作 */
+.editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.editor-foot .hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 可展开的次要表单 */
+.inline-create {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.inline-create > summary {
+  padding: 0.5rem 0.8rem;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.inline-create > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inline-create > summary::before {
+  content: '+';
+  display: inline-block;
+  width: 1rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.inline-create[open] > summary::before {
+  content: '−';
+}
+
+.inline-create > summary:hover {
+  color: var(--ink);
+}
+
+.inline-create > .toolbar,
+.inline-create > .form-row {
+  padding: 0 0.8rem 0.7rem;
+}
+
+/* 表格:在面板里不再自带一圈边框,避免"框套框" */
+.panel-body .table-scroll {
+  border-color: var(--line);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+/* 分块里的按钮不该被拉满整行:动作贴着它的对象 */
+.block > button,
+.block > .toolbar > button {
+  align-self: flex-start;
+  width: auto;
+}
+
+/* 页面级(不在面板里)的小节:同样要有"一块内容"的边界 */
+.panel-stack > .panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: var(--panel-pad);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+/* 页面里的一条说明:比纯 hint 更醒目,但不抢主内容 */
+.inline-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* 外层标题已经声明了 SVID 时,曲线只留画布 + 读数 */
+.spark.spark-no-id {
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 15rem);
+}
+
+.spark.spark-no-id .spark-readout {
+  grid-column: 2;
+}
+
+@media (max-width: 1280px) {
+  .spark.spark-no-id {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spark.spark-no-id .spark-readout {
+    grid-column: 1;
+  }
+}
+
+/* 宽屏时 KPI 不该被拉成一整块空地:数字靠右,标签靠左 */
+.kpi-card .kpi-value {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 批量工具条:常驻表格下方,勾选后整块点亮 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  transition: border-color var(--fast), background var(--fast);
+}
+
+.batch-bar[data-active='true'] {
+  border-style: solid;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.batch-bar .table-count {
+  min-width: 4.5rem;
+}
+
+.batch-bar .sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 0.15rem;
+  background: var(--line-strong);
+}
+
+/* 批量工具条在窄屏折行时保持可读:计数与 CEID 各自成组,按钮靠右 */
+@media (max-width: 680px) {
+  .batch-bar {
+    gap: 0.4rem;
+  }
+
+  .batch-bar .field {
+    flex: 1 1 8rem;
+  }
+
+  .batch-bar .spacer {
+    display: none;
+  }
+
+  .batch-bar button {
+    flex: 1 1 auto;
+  }
+}
+
