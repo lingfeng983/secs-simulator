@@ -546,6 +546,7 @@ scripts\package-linux.ps1
 - [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
+- [2.0.1 发布说明](docs/reports/release-notes-2.0.1.md)
 - [2.0.0 发布说明](docs/reports/release-notes-2.0.0.md)
 - [OpenAPI 3.0 契约](docs/openapi.yaml)
 - [二进制曲线预览格式](docs/guides/preview-binary.md)
