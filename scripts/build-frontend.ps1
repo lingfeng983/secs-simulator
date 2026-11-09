@@ -1,4 +1,4 @@
-# 构建 React 前端（npm + vite）。默认用 PATH 里的 node/npm；DSH 环境可用 DSH_NODE / DSH_NPM 覆盖。
+﻿# 构建 React 前端（npm + vite）。默认用 PATH 里的 node/npm；DSH 环境可用 DSH_NODE / DSH_NPM 覆盖。
 #
 # 仓库只保留一套依赖树：package-lock.json。CI（.github/workflows/ci.yml）与
 # scripts/check-all.ps1 同样走 npm，这里保持一致，不再混用 pnpm。

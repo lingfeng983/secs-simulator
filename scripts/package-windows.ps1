@@ -1,4 +1,4 @@
-# Windows 安装程序打包：Tauri（NSIS）。
+﻿# Windows 安装程序打包：Tauri（NSIS）。
 #
 # 产出一个完整的安装程序，装好后两种用法二选一：
 #   1.「本机运行」：启动打包进去的 secs-sim.exe（原生镜像，无需 JVM），界面连本机；

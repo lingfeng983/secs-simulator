@@ -1,4 +1,4 @@
-# Linux 服务端打包：模块 jar + 前端 + 启动脚本 -> zip（目标机需 JDK 25+）。
+﻿# Linux 服务端打包：模块 jar + 前端 + 启动脚本 -> zip（目标机需 JDK 25+）。
 #
 # 与 Windows 安装程序（package-windows.ps1）的关系：
 # 本包部署在设备所在的 Linux 机器上，./start-server.sh 以 server 模式对外，

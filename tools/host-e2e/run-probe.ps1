@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Continue'
 # 本脚本位于 tools/host-e2e/，仓库根在上两级
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $work = Join-Path $env:TEMP ('secs-probe-' + [guid]::NewGuid().ToString('N').Substring(0,6))
