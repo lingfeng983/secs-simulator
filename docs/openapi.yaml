@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: SECS Simulator HTTP API
-  version: 2.0.0-SNAPSHOT
+  version: 2.0.0
   description: |
     SECS/GEM 模拟器的 REST + SSE 接口。
 
