@@ -44,6 +44,7 @@
 - [全量代码评审 2026-10-20（协议符合性专项）](reports/code-review-2026-10-20.md)
 - [实机全量测试 2026-10-30](reports/host-e2e-2026-10-30.md)
 - [结构收敛验收报告 2026-11-09](reports/refactor-2026-11-09.md) — 三阶段目录/分层治理的验收数字，决策见 [ADR 0016](adr/0016-layout-and-layer-consolidation.md)
+- [2.0.0 发布说明](reports/release-notes-2.0.0.md) — 面向使用者的下载、安装、能力与升级说明
 
 **待办清单**
 

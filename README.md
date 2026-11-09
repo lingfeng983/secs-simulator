@@ -546,6 +546,7 @@ scripts\package-linux.ps1
 - [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
+- [2.0.0 发布说明](docs/reports/release-notes-2.0.0.md)
 - [OpenAPI 3.0 契约](docs/openapi.yaml)
 - [二进制曲线预览格式](docs/guides/preview-binary.md)
 - [M0](docs/reports/m0-report.md) · [M1](docs/reports/m1-report.md) · [M2](docs/reports/m2-report.md) · [M3](docs/reports/m3-report.md) · [M4](docs/reports/m4-report.md) · [M4-b](docs/reports/m4b-report.md) · [M5](docs/reports/m5-report.md) · [M6](docs/reports/m6-report.md) · [M7](docs/reports/m7-report.md) · [M6-b](docs/reports/m6b-report.md) · [M6-c](docs/reports/m6c-report.md) · [M8-a](docs/reports/m8a-report.md) · [M8-b](docs/reports/m8b-report.md) · [M8-c](docs/reports/m8c-report.md) · [M8-d](docs/reports/m8d-report.md) · [M8-e](docs/reports/m8e-report.md) · [M9](docs/reports/m9-report.md) · [M9-b / M9-c](docs/reports/m9b-report.md)
