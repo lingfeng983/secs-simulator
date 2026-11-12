@@ -6,7 +6,9 @@
  * 但老界面仍用后者，故都保留。</p>
  */
 
-import type { ApiClient, CollectorConfigInput, CollectorState, HostSimInstance, SentMessageResult } from './types';
+import type {
+  ApiClient, BurstResult, BurstStatus, CollectorConfigInput, CollectorState, HostSimInstance, SentMessageResult,
+} from './types';
 import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, parseCollectorResult, readJson, request } from './base';
 
 type HostSimApi = Pick<
@@ -19,6 +21,8 @@ type HostSimApi = Pick<
   | 'hostInstanceCollector'
   | 'setHostInstanceCollector'
   | 'hostInstanceCollectorCommand'
+  | 'hostInstanceBurst'
+  | 'hostInstanceBurstStatus'
   | 'openHostSim'
   | 'closeHostSim'
   | 'sendHostSml'
@@ -121,6 +125,28 @@ export const hostSimApi: HostSimApi = {
       throw new Error(parsed.error ?? text.slice(0, 200));
     }
     return parsed;
+  },
+  async hostInstanceBurst(hostId, payload) {
+    /* 压测在服务端后台执行：这里的响应只是"受理"，最终统计由 hostInstanceBurstStatus 轮询取回 */
+    const response = await request(
+      apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/burst`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(payload),
+      },
+      LONG_REQUEST_TIMEOUT_MS,
+    );
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${response.status} ${text.slice(0, 200)}`);
+    }
+    return JSON.parse(text) as BurstResult;
+  },
+  async hostInstanceBurstStatus(hostId) {
+    return readJson<BurstStatus>(
+      await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/burst`)),
+    );
   },
   async openHostSim(sessionId, target) {
     return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {

@@ -41,6 +41,9 @@ final class BurstRunner {
 
     private final SessionManager sessions;
 
+    /** 主机实例注册表：主机级压测按实例 id 找模拟器发报文。 */
+    private final HostSimRegistry hosts;
+
     /**
      * 压测执行器：线程数固定、队列有界——队列满时直接拒绝（回 burst-busy），
      * 而不是让请求排队等到统计已经失去意义。
@@ -50,8 +53,12 @@ final class BurstRunner {
     /** 会话 → 最近一次压测结果/运行状态（GET /sessions/{id}/burst 用）。 */
     private final ConcurrentMap<String, BurstState> states = new ConcurrentHashMap<>();
 
-    BurstRunner(SessionManager sessions) {
+    /** 主机实例 → 最近一次压测结果/运行状态（GET /host-sims/{id}/burst 用）。 */
+    private final ConcurrentMap<String, BurstState> hostStates = new ConcurrentHashMap<>();
+
+    BurstRunner(SessionManager sessions, HostSimRegistry hosts) {
         this.sessions = sessions;
+        this.hosts = hosts;
 
         AtomicInteger seq = new AtomicInteger();
         this.executor = new ThreadPoolExecutor(
@@ -215,6 +222,137 @@ final class BurstRunner {
         if (state != null) {
             state.cancelRequested = true;
         }
+    }
+
+    /**
+     * 主机实例的报文压测（{@code kind=message} 且目标是一台主机实例）。
+     *
+     * <p>与会话级压测共用执行器与预算：主机模拟页的"压测发送"就是"以主机角色
+     * 连发 N 条 SML"，长耗时同样不能挂在 HTTP 线程上。远程主机的对端不在本进程，
+     * 只能走这条路。</p>
+     *
+     * @param hostId      主机实例 id
+     * @param requestJson {@code {"kind":"message","sml":"...","count":100,"intervalMs":0}}
+     *                    ；带 {@code "status":true} 时只回状态
+     * @return 受理/状态 JSON；实例不存在返回 {@code null}（HTTP 404）
+     */
+    String burstHost(String hostId, String requestJson) {
+        HostSimRegistry.HostHandle handle = this.hosts.handle(hostId);
+        if (handle == null) {
+            return null;
+        }
+
+        com.shimizukenta.jsonhub.JsonHub request;
+        try {
+            request = com.shimizukenta.jsonhub.JsonHub.fromJson(requestJson);
+        } catch (RuntimeException e) {
+            return "{\"ok\":false,\"error\":\"bad-request\"}";
+        }
+        if (!request.isObject()) {
+            return "{\"ok\":false,\"error\":\"bad-request\"}";
+        }
+
+        com.shimizukenta.jsonhub.JsonHub status = request.get("status");
+        if (status != null && status.optionalBoolean().orElse(false)) {
+            BurstState state = this.hostStates.get(hostId);
+            return state == null ? "{\"ok\":true,\"running\":false,\"accepted\":false}" : state.statusJson();
+        }
+
+        String kind = burstString(request, "kind", "message");
+        if (!"message".equals(kind)) {
+            /* 主机实例只发报文：CEID/报警是设备侧能力，主机没有对应语义 */
+            return "{\"ok\":false,\"error\":\"unsupported-kind\"}";
+        }
+        String sml = burstString(request, "sml", "");
+        if (sml.isBlank()) {
+            return "{\"ok\":false,\"error\":\"missing-sml\"}";
+        }
+        int count = burstInt(request, "count", 1);
+        long intervalMs = burstLong(request, "intervalMs", 0L);
+        if (count < 1 || count > 5000) {
+            return "{\"ok\":false,\"error\":\"count-out-of-range\"}";
+        }
+        if (intervalMs < 0 || intervalMs > 60_000L) {
+            return "{\"ok\":false,\"error\":\"interval-out-of-range\"}";
+        }
+        /* 发送前先把 SML 解析一遍：错误要在请求线程里返回 400，
+           后台任务再报错调用方已经拿到 202 了。 */
+        try {
+            com.shimizukenta.secssim.app.sml.SmlParser.parse(sml);
+        } catch (com.shimizukenta.secssim.app.sml.SmlParseException e) {
+            return "{\"ok\":false,\"error\":\"bad-sml\",\"message\":\"" + jsonEscape(e.getMessage()) + "\"}";
+        }
+
+        BurstState state = this.hostStates.computeIfAbsent(hostId, key -> new BurstState());
+        synchronized (state) {
+            if (state.running) {
+                return "{\"ok\":false,\"error\":\"burst-running\"}";
+            }
+            state.startedAt = System.currentTimeMillis();
+            state.count = count;
+            state.running = true;
+        }
+
+        final String burstSml = sml;
+        try {
+            this.executor.execute(() -> {
+                long startedAt = System.currentTimeMillis();
+                try {
+                    BurstStats stats = runBurst(count, intervalMs, handle.open(),
+                            () -> state.cancelRequested, index -> handle.send(burstSml));
+                    state.finish(burstResultJson(stats, count, System.currentTimeMillis() - startedAt));
+                } catch (RuntimeException e) {
+                    Log.error("主机压测执行异常（实例 " + hostId + "）", e);
+                    state.finish("{\"ok\":false,\"error\":\"burst-failed\",\"sent\":0,\"failed\":0"
+                            + ",\"durationMs\":" + (System.currentTimeMillis() - startedAt)
+                            + ",\"latencyP50\":0,\"latencyP95\":0,\"latencyMax\":0}");
+                } finally {
+                    state.running = false;
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            state.running = false;
+            return "{\"ok\":false,\"error\":\"burst-busy\"}";
+        }
+
+        return "{\"ok\":true,\"accepted\":true,\"running\":true"
+                + ",\"count\":" + count
+                + ",\"sent\":0,\"failed\":0,\"skipped\":0,\"aborted\":false"
+                + ",\"durationMs\":0,\"latencyP50\":0,\"latencyP95\":0,\"latencyMax\":0}";
+    }
+
+    /** 主机实例被关时取消它的压测（实例已不存在，状态留着只会让 map 增长）。 */
+    void cancelHost(String hostId) {
+        BurstState state = this.hostStates.remove(hostId);
+        if (state != null) {
+            state.cancelRequested = true;
+        }
+    }
+
+    /** 最小 JSON 字符串转义（错误信息要带回 HTTP 响应）。 */
+    private static String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (ch < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        sb.append(ch);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     /** 停机：取消全部在跑的压测并关闭执行器。 */

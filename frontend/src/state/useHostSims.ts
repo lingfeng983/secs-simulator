@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ApiClient, CollectorConfigInput, CollectorState, HostSimInstance } from '../api';
+import type { ApiClient, BurstResult, CollectorConfigInput, CollectorState, HostSimInstance } from '../api';
 
 /**
  * 主机模拟的状态层（多主机）。
@@ -33,6 +33,8 @@ export interface HostSimCommands {
   close: (hostId: string) => Promise<boolean>;
   /** 以主机角色发 SML。 */
   send: (hostId: string, sml: string) => Promise<string | null>;
+  /** 以主机角色压测发送同一条 SML（服务端后台连发，返回统计）。 */
+  burst: (hostId: string, sml: string, count: number, intervalMs: number) => Promise<BurstResult>;
   /** 下发采集器配置。 */
   saveCollector: (hostId: string, config: CollectorConfigInput) => Promise<string | null>;
   /** 手动启停采集器。 */
@@ -140,6 +142,50 @@ export function useHostSims(client: ApiClient | null): HostSimCommands {
     [client],
   );
 
+  /**
+   * 主机级压测：服务端后台连发同一条 SML。
+   *
+   * <p>服务端同样只回 202 受理，这里轮询状态直到 {@code running=false}，
+   * 否则界面会把"受理"当成结果，显示"成功 0 / 失败 0"。</p>
+   */
+  const burst = useCallback(
+    async (hostId: string, sml: string, count: number, intervalMs: number): Promise<BurstResult> => {
+      if (client === null) {
+        throw new Error('后端未就绪');
+      }
+      try {
+        await client.hostInstanceBurst(hostId, { kind: 'message', sml, count, intervalMs });
+      } catch (error) {
+        /* 409 = 该主机已有一轮压测在跑：接着轮询那一轮，而不是报错 */
+        if ((error as { status?: number }).status !== 409) {
+          throw error;
+        }
+      }
+      const deadline = Date.now() + Math.min(6 * 60_000, 60_000 + count * intervalMs);
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const status = await client.hostInstanceBurstStatus(hostId);
+        if (status.running !== true) {
+          if (status.ok === false && status.error !== undefined) {
+            throw new Error(status.error);
+          }
+          return {
+            sent: status.sent ?? 0,
+            failed: status.failed ?? 0,
+            durationMs: status.durationMs ?? 0,
+            latencyP50: status.latencyP50 ?? 0,
+            latencyP95: status.latencyP95 ?? 0,
+            latencyMax: status.latencyMax ?? 0,
+          };
+        }
+        if (Date.now() > deadline) {
+          throw new Error('压测仍未结束（服务端可能仍在执行，可稍后重试或查看服务端日志）');
+        }
+      }
+    },
+    [client],
+  );
+
   const saveCollector = useCallback(
     async (hostId: string, config: CollectorConfigInput): Promise<string | null> => {
       if (client === null) {
@@ -187,6 +233,7 @@ export function useHostSims(client: ApiClient | null): HostSimCommands {
     create,
     close,
     send,
+    burst,
     saveCollector,
     collectorCommand,
     refresh,

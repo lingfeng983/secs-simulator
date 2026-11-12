@@ -596,6 +596,21 @@ public interface ApiContext {
     }
 
     /**
+     * 主机实例级压测：以某台主机的身份连发同一条 SML。
+     *
+     * <p>与 {@link #burst(String, String)} 共用执行器与预算，但目标是主机实例而不是
+     * 设备会话——远程主机（对端不在本进程）只有这一条路能压测。</p>
+     *
+     * @param hostId      主机实例 id
+     * @param requestJson {@code {"kind":"message","sml":"...","count":100,"intervalMs":0}}；
+     *                    带 {@code "status":true} 时只回状态
+     * @return 受理/状态 JSON；实例不存在返回 {@code null}（HTTP 404）
+     */
+    default String burstHost(String hostId, String requestJson) {
+        return null;
+    }
+
+    /**
      * 关闭会话的主机模拟器连接。
      *
      * @param sessionId 会话标识

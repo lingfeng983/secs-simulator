@@ -1,0 +1,2183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SECS Simulator 3.0 · 界面设计面板</title>
+<style>
+:root{
+  --bg:#f5f7fb; --surface:#ffffff; --surface-2:#fafbfe; --surface-3:#f0f2f8;
+  --line:#e2e6f0; --line-strong:#cfd6e6;
+  --text:#1d2433; --text-2:#4a556c; --muted:#78839a;
+  --config:#4457c7; --config-soft:#eef0ff; --config-line:#c9d0f7;
+  --runtime:#0f8a6a; --runtime-soft:#e9f7f2; --runtime-line:#bfe6d8;
+  --host:#8a5a2b; --host-soft:#fbf2e8; --host-line:#ecd6ba;
+  --danger:#c8443b; --danger-soft:#fdeeed; --warn:#b7791f; --warn-soft:#fdf4e4;
+  --shadow:0 1px 2px rgba(24,36,64,.04),0 8px 24px rgba(24,36,64,.05);
+  --radius:10px; --mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-size:13px;line-height:1.55}
+button{font:inherit;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--config);outline-offset:2px}
+.app{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--line);padding:16px 12px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--config-soft);border:1px solid var(--config-line);display:grid;place-items:center;color:var(--config);font-weight:700;font-size:14px}
+.brand-name{font-weight:700;font-size:13px;letter-spacing:.2px}
+.brand-sub{color:var(--muted);font-size:11px}
+.nav-group{margin:14px 0 6px;padding:0 8px;color:var(--muted);font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--text-2);text-align:left;font-size:12.5px}
+.nav-item:hover{background:var(--surface-3)}
+.nav-item.active{background:var(--config-soft);color:var(--config);font-weight:600}
+.nav-ico{width:16px;text-align:center;font-size:13px;opacity:.85}
+.nav-item .count{margin-left:auto;color:var(--muted);font-size:11px;font-family:var(--mono)}
+.dev-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;color:var(--text-2);font-size:12.5px;cursor:pointer}
+.dev-item:hover{background:var(--surface-3)}
+.dev-item.active{background:var(--runtime-soft);color:var(--runtime);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.on{background:#2f9e6f;box-shadow:0 0 0 3px #e2f4ec}
+.dot.off{background:#a7b0c2;box-shadow:0 0 0 3px #eef0f5}
+.dot.warn{background:#d9a441;box-shadow:0 0 0 3px #fbf1dc}
+.dot.err{background:#c8503f;box-shadow:0 0 0 3px #fae7e4}
+.main{min-width:0;padding:0 26px 40px}
+.topbar{height:52px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.crumb{color:var(--muted);font-size:12px}
+.crumb b{color:var(--text);font-weight:600}
+.topbar .spacer{flex:1}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);white-space:nowrap}
+.chip.mono{font-family:var(--mono)}
+.chip.config{background:var(--config-soft);border-color:var(--config-line);color:var(--config)}
+.chip.runtime{background:var(--runtime-soft);border-color:var(--runtime-line);color:var(--runtime)}
+.chip.host{background:var(--host-soft);border-color:var(--host-line);color:var(--host)}
+.chip.ok{background:var(--runtime-soft);border-color:var(--runtime-line);color:var(--runtime)}
+.chip.off{background:var(--surface-3);border-color:var(--line);color:var(--muted)}
+.chip.danger{background:var(--danger-soft);border-color:#f2c8c5;color:var(--danger)}
+.chip.warn{background:var(--warn-soft);border-color:#f0dcb4;color:var(--warn)}
+.page-title{font-size:19px;font-weight:700;margin:0 0 2px}
+.page-desc{color:var(--muted);font-size:12px;margin:0 0 16px}
+.device-head{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.dev-glyph{width:40px;height:40px;border-radius:10px;background:var(--config-soft);border:1px solid var(--config-line);display:grid;place-items:center;color:var(--config);font-size:18px}
+.dev-id{min-width:210px}
+.dev-id h1{font-size:16px;margin:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.dev-id .sub{color:var(--muted);font-size:11.5px;margin-top:3px}
+.head-metrics{display:flex;gap:22px;flex-wrap:wrap;margin-left:8px}
+.metric .k{color:var(--muted);font-size:10.5px;letter-spacing:.3px}
+.metric .v{font-size:13px;font-weight:600;font-family:var(--mono);margin-top:1px}
+.head-actions{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}
+.btn{border:1px solid var(--line-strong);background:var(--surface);color:var(--text-2);padding:6px 12px;border-radius:7px;font-size:12px;font-weight:500}
+.btn:hover{background:var(--surface-3);border-color:#b9c3d8}
+.btn.primary{background:var(--config);border-color:var(--config);color:#fff}
+.btn.primary:hover{background:#3a4cb3}
+.btn.live{background:var(--runtime);border-color:var(--runtime);color:#fff}
+.btn.live:hover{background:#0d755a}
+.btn.host{background:var(--host);border-color:var(--host);color:#fff}
+.btn.host:hover{background:#774b22}
+.btn.danger{color:var(--danger);border-color:#eecac7;background:var(--danger-soft)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:4px 9px;font-size:11.5px}
+.pending{margin-top:12px;border:1px solid #f0dcb4;background:var(--warn-soft);border-radius:9px;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px}
+.pending .txt{color:#8a5e15}
+.pending .spacer{flex:1}
+.zonebar{display:flex;gap:8px;margin:18px 0 0;border-bottom:1px solid var(--line);padding-bottom:0}
+.zone-btn{display:flex;align-items:center;gap:10px;padding:9px 18px 11px;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;background:transparent;color:var(--muted);font-size:13px;font-weight:600;position:relative;top:1px}
+.zone-btn .zi{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px}
+.zone-btn.config .zi{background:var(--config-soft);color:var(--config)}
+.zone-btn.runtime .zi{background:var(--runtime-soft);color:var(--runtime)}
+.zone-btn small{display:block;font-size:10.5px;font-weight:400;color:var(--muted);margin-top:-2px}
+.zone-btn.active.config{background:var(--config-soft);border-color:var(--config-line);color:var(--config)}
+.zone-btn.active.runtime{background:var(--runtime-soft);border-color:var(--runtime-line);color:var(--runtime)}
+.zone-btn.active{border-bottom:2px solid var(--surface)}
+.zone-note{padding:9px 0 0;font-size:11.5px;color:var(--muted)}
+.zone-note.config{color:var(--config)}
+.zone-note.runtime{color:var(--runtime)}
+.subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:12px 0 14px}
+.subtab{padding:5px 11px;border:1px solid transparent;background:transparent;border-radius:7px;color:var(--text-2);font-size:12px}
+.subtab:hover{background:var(--surface-3)}
+.subtab.active{background:var(--surface);border-color:var(--line-strong);color:var(--text);font-weight:600;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+.card h3{margin:0 0 3px;font-size:13px;font-weight:700}
+.card .hint{color:var(--muted);font-size:11px;margin:0 0 12px}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.card-head h3{margin:0}
+.card-head .spacer{flex:1}
+.kpi .v{font-size:22px;font-weight:700;font-family:var(--mono);line-height:1.2}
+.kpi .k{color:var(--muted);font-size:11px}
+.kpi .d{color:var(--muted);font-size:10.5px;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:10.5px;letter-spacing:.3px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2)}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.small{font-size:11px}
+.tag{display:inline-block;padding:1px 7px;border-radius:5px;font-size:10.5px;border:1px solid var(--line);background:var(--surface-2);color:var(--text-2)}
+.tag.c{background:var(--config-soft);border-color:var(--config-line);color:var(--config)}
+.tag.r{background:var(--runtime-soft);border-color:var(--runtime-line);color:var(--runtime)}
+.tag.g{background:var(--runtime-soft);border-color:var(--runtime-line);color:var(--runtime)}
+.tag.h{background:var(--host-soft);border-color:var(--host-line);color:var(--host)}
+.tag.w{background:var(--warn-soft);border-color:#f0dcb4;color:var(--warn)}
+.tag.d{background:var(--danger-soft);border-color:#f2c8c5;color:var(--danger)}
+.field{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)}
+.field:last-child{border-bottom:0}
+.field label{color:var(--text-2);font-size:12px}
+.field .desc{color:var(--muted);font-size:10.5px}
+.field input,.field select,.field textarea{width:100%;padding:6px 9px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font:inherit;font-size:12px}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--config);background:#fff}
+.code{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.65;white-space:pre;overflow:auto;color:#2c3550;max-height:280px}
+.code .k{color:var(--config)} .code .s{color:#a0551f} .code .n{color:#137a68} .code .b{color:#8250b0}
+.plan-card{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:12px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.plan-card.disabled{background:var(--surface-2);color:var(--muted)}
+.plan-card .nm{font-weight:700;font-size:12.5px;font-family:var(--mono)}
+.plan-card .meta{color:var(--muted);font-size:11px}
+.plan-card .spacer{flex:1}
+.switch{width:34px;height:19px;border-radius:12px;background:#c9d0e0;border:0;position:relative;transition:.15s;flex:none}
+.switch::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.switch.on{background:var(--runtime)}
+.switch.on::after{left:17px}
+.timeline{position:relative;padding-left:18px}
+.timeline::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1.5px;background:var(--line-strong)}
+.tl-row{position:relative;margin-bottom:8px}
+.tl-row::before{content:"";position:absolute;left:-16px;top:14px;width:9px;height:9px;border-radius:50%;background:var(--runtime);border:2px solid #fff;box-shadow:0 0 0 1px var(--runtime-line)}
+.tl-row.skip::before{background:#a7b0c2;box-shadow:0 0 0 1px var(--line-strong)}
+.tl-row.fail::before{background:var(--danger);box-shadow:0 0 0 1px #f2c8c5}
+.tl-card{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:9px 12px;cursor:pointer}
+.tl-card:hover{border-color:var(--line-strong);background:var(--surface-2)}
+.tl-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12px}
+.tl-top .spacer{flex:1}
+.tl-detail{margin-top:9px;border-top:1px dashed var(--line);padding-top:9px;display:none}
+.tl-row.open .tl-detail{display:block}
+.kv{display:grid;grid-template-columns:88px minmax(0,1fr);gap:4px 10px;font-size:11.5px;margin-top:6px}
+.kv .k{color:var(--muted)}
+.chart-wrap{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px}
+.chart-legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:10.5px;margin-top:6px}
+.legend-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.empty{display:grid;place-items:center;text-align:center;padding:34px 16px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:10px;background:var(--surface-2)}
+.empty strong{display:block;color:var(--text-2);font-size:13px;margin-bottom:4px}
+.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.row .spacer{flex:1}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--runtime);display:inline-block;animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(15,138,106,.35)}70%{box-shadow:0 0 0 7px rgba(15,138,106,0)}100%{box-shadow:0 0 0 0 rgba(15,138,106,0)}}
+.banner-config{border-left:3px solid var(--config)}
+.banner-runtime{border-left:3px solid var(--runtime)}
+.notice{position:fixed;right:20px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--surface);border:1px solid var(--line-strong);border-left:3px solid var(--runtime);border-radius:8px;box-shadow:var(--shadow);padding:10px 14px;font-size:12px;min-width:220px;animation:slide .2s ease}
+@keyframes slide{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.map-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.map-item{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface-2)}
+.map-item .t{font-weight:600;font-size:12px}
+.map-item .d{color:var(--muted);font-size:11px;margin-top:3px}
+/* 主机列表与主机详情：复用设备详情的全部版式 */
+.host-target{font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:3px 9px;white-space:nowrap}
+.create-form{border:1px dashed var(--host-line);border-radius:9px;background:var(--host-soft);padding:14px 16px;margin-bottom:14px}
+.create-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0}
+.create-grid label{font-size:11px;color:var(--text-2);display:block;margin-bottom:4px}
+.create-grid input{width:100%;padding:6px 9px;border:1px solid var(--line-strong);border-radius:6px;background:#fff;color:var(--text);font:inherit;font-size:12px}
+.host-note{color:var(--muted);font-size:11.5px;margin:0}
+.preset-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.preset-btn{border:1px solid var(--line-strong);background:var(--surface);color:var(--text-2);padding:4px 9px;border-radius:6px;font-size:11.5px}
+.preset-btn:hover{background:var(--config-soft);border-color:var(--config-line);color:var(--config)}
+select.mini,input.mini{padding:5px 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2);color:var(--text);font:inherit;font-size:11.5px;width:100%}
+.svid-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0}
+.svid-opt{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:6px;padding:5px 9px;background:var(--surface-2);font-size:11.5px}
+.filter-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.filter-bar label{display:block;font-size:10.5px;color:var(--muted);margin-bottom:3px}
+.cat-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+.cat{padding:3px 9px;border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--text-2);font-size:11px}
+.cat.off{opacity:.4;text-decoration:line-through}
+.msg-row{display:grid;grid-template-columns:82px 76px 82px 76px minmax(0,1fr);gap:8px;align-items:center;padding:7px 9px;border-bottom:1px solid var(--line);font-size:11.5px}
+.msg-row:hover{background:var(--surface-2)}
+.msg-row .body{font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-2)}
+.msg-list{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.sml-box{width:100%;min-height:96px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-2);color:var(--text);font:12px/1.6 var(--mono);resize:vertical}
+@media(max-width:1180px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}.create-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.svid-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line)}.g2,.g3,.g4,.map-grid{grid-template-columns:1fr}.main{padding:0 14px 30px}.create-grid,.filter-bar,.svid-grid{grid-template-columns:1fr}.msg-row{grid-template-columns:74px 70px minmax(0,1fr)}.msg-row>:nth-child(2),.msg-row>:nth-child(4){display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">S</div>
+      <div><div class="brand-name">SECS Simulator</div><div class="brand-sub">3.0 界面设计</div></div>
+    </div>
+    <div class="nav-group">总览</div>
+    <button class="nav-item" data-view="workbench"><span class="nav-ico">▦</span>工作台<span class="count" id="navDevCount">3</span></button>
+    <div class="nav-group">设备</div>
+    <div id="navDevices"></div>
+    <div class="nav-group">主机</div>
+    <button class="nav-item" data-view="hostlist"><span class="nav-ico">⇄</span>主机模拟<span class="count" id="navHostCount">3</span></button>
+    <div id="navHosts"></div>
+    <div class="nav-group">独立工具</div>
+    <button class="nav-item" data-view="templates"><span class="nav-ico">◇</span>模板管理</button>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <span class="crumb" id="crumb"><b>工作台</b> / 设备 / ETCH-01</span>
+      <span class="spacer"></span>
+      <span class="chip ok"><span class="pulse"></span> 实时更新</span>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+<div class="notice" id="notice"></div>
+
+<script>
+/* 演示数据：交互只改内存状态 */
+const state = {
+  view: 'device',
+  zone: 'config',
+  page: { config: 'overview', runtime: 'executions' },
+  link: 'CONNECTED',
+  controlState: 'ONLINE',
+  configVer: 7, runningVer: 6,
+  svid: 182.4,
+  series: [168,170,171,169,172,175,174,178,180,179,181,182,181,183,182,182.4],
+  plans: [
+    { id:'加工开始', ceid:2001, trigger:'每 60 秒', enabled:true,
+      actions:['事件报告 · CEID 2001'], effects:['1001 脉冲到 250，保持 8 秒','1003 设为 6.5，20 秒回落','1101 增加 20'],
+      next:'00:42', fires:12, skipped:0 },
+    { id:'超温报警', ceid:2004, trigger:'1001 > 240 持续 5 秒', enabled:false,
+      actions:['事件报告 · CEID 2004','报警 · ALID 7'], effects:['1001 恢复曲线','1004 设为 0'],
+      next:'条件驱动', fires:0, skipped:0 },
+    { id:'加工结束', ceid:2002, trigger:'加工开始后 30 秒', enabled:true,
+      actions:['事件报告 · CEID 2002'], effects:['1101 恢复','1004 设为 0'],
+      next:'00:12', fires:11, skipped:0 }
+  ],
+  executions: [
+    { at:'20:06:12.100', plan:'加工开始', ceid:2001, status:'已发送', msgs:1, effects:3,
+      sml:'S6F11 W <L[3] <U4 0> <U4 2001> <L[1] <L[2] <U4 3001> <L[3] <F4 250.0> <F4 6.5> >>>>',
+      before:[['1001','178.0','250.0'],['1003','4.2','6.5'],['1101','40','60']] },
+    { at:'20:05:42.100', plan:'加工结束', ceid:2002, status:'已发送', msgs:1, effects:2,
+      sml:'S6F11 W <L[3] <U4 0> <U4 2002> <L[1] <L[2] <U4 3002> <L[2] <F4 40> <U4 0> >>>>',
+      before:[['1101','60','40'],['1004','1','0']] },
+    { at:'20:05:12.100', plan:'加工开始', ceid:2001, status:'部分失败', msgs:1, effects:3,
+      sml:'S6F11 W <L[3] …>  （报警消息发送超时）', before:[['1001','176.5','250.0']] },
+    { at:'20:04:12.100', plan:'加工开始', ceid:2001, status:'已跳过', msgs:0, effects:0,
+      sml:'未连接主机，本次跳过（不发送消息、不改变变量）', before:[] }
+  ],
+  devices: [
+    { id:'ETCH-01', name:'ETCH-01', template:'etch', port:5000, phase:'CONNECTED', ver:7 },
+    { id:'CVD-01', name:'CVD-01', template:'cvd', port:5001, phase:'DISCONNECTED', ver:3 },
+    { id:'TESTER-01', name:'TESTER-01', template:'tester', port:5002, phase:'LISTENING', ver:2 }
+  ],
+  hosts: [
+    { id:'HOST-A', name:'产线 A 主机', target:'127.0.0.1', port:5000, deviceId:61, note:'产线 A 日常联调',
+      phase:'CONNECTED', control:'ONLINE', manual:false, autoConnect:true, autoReconnect:true,
+      retryCount:0, nextRetryAt:'', varsSource:'auto',
+      vars:[{svid:1001,name:'TEMP_PV',unit:'C',type:'F4'},{svid:1002,name:'PRESS_PV',unit:'kPa',type:''},
+            {svid:1003,name:'GAS_FLOW',unit:'sccm',type:'F4'},{svid:1004,name:'ALARM_FLAG',unit:'—',type:''},
+            {svid:1101,name:'CHAMBER_STATE',unit:'—',type:'U4'}],
+      settingVer:3, runningVer:3, collectorOn:true, samples:248, decodeErrors:0, lastRttMs:8,
+      collector:{ startCeid:'2001', stopCeid:'2002', intervalMs:'1000', svids:[1001,1003,1101] },
+      trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[1001,1003] },
+      sml:'S1F3 W\n<L[1] <U4 1001>>', lastError:'', connectedAt:'20:05:41',
+      messages:[
+        {at:'20:06:12.101',dir:'接收',sf:'S6F11 W',body:'<L[3] <U4 0> <U4 2001> <L[1] …>>'},
+        {at:'20:06:10.004',dir:'接收',sf:'S1F4',body:'<F4 182.4>'},
+        {at:'20:06:10.002',dir:'发送',sf:'S1F3 W',body:'<L[1] <U4 1001>>'},
+        {at:'20:05:58.318',dir:'接收',sf:'S1F14',body:'<L[1] <B 0>>'},
+        {at:'20:05:58.310',dir:'发送',sf:'S1F13 W',body:'<L[0]>'}
+      ]},
+    { id:'HOST-B', name:'MES 联调主机', target:'10.20.3.11', port:5010, deviceId:12, note:'外部 MES 接口',
+      phase:'CONNECTED', control:'ONLINE', manual:true, autoConnect:false, autoReconnect:false,
+      retryCount:0, nextRetryAt:'', varsSource:'manual',
+      vars:[{svid:1001,name:'温度',unit:'C',type:'F4'},{svid:1003,name:'流量',unit:'sccm',type:''}],
+      settingVer:2, runningVer:2, collectorOn:false, samples:0, decodeErrors:0, lastRttMs:23,
+      collector:{ startCeid:'', stopCeid:'', intervalMs:'1000', svids:[] },
+      trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[] },
+      sml:'S1F1 W', lastError:'', connectedAt:'20:04:02',
+      messages:[
+        {at:'20:05:58.318',dir:'接收',sf:'S1F2',body:'<L[2] <A "MDLN"> <A "1.0">>'},
+        {at:'20:05:58.310',dir:'发送',sf:'S1F1 W',body:'<L[2] <A "MDLN"> <A "SOFTREV">>'}
+      ]},
+    { id:'HOST-C', name:'备用主机', target:'192.168.8.30', port:7000, deviceId:5, note:'',
+      phase:'DISCONNECTED', control:'离线', manual:true, autoConnect:false, autoReconnect:false,
+      retryCount:0, nextRetryAt:'', varsSource:'none', vars:[],
+      settingVer:1, runningVer:1, collectorOn:false, samples:0, decodeErrors:0, lastRttMs:null,
+      collector:{ startCeid:'', stopCeid:'', intervalMs:'1000', svids:[] },
+      trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[] },
+      sml:'S1F1 W', lastError:'目标地址未响应', connectedAt:'—', messages:[] },
+    { id:'HOST-D', name:'产线 A 备用通道', target:'127.0.0.1', port:5000, deviceId:61, note:'与 HOST-A 同一目标',
+      phase:'FAILED', control:'离线', manual:false, autoConnect:false, autoReconnect:false,
+      retryCount:0, nextRetryAt:'', varsSource:'none', vars:[],
+      settingVer:1, runningVer:1, collectorOn:false, samples:0, decodeErrors:0, lastRttMs:null,
+      collector:{ startCeid:'', stopCeid:'', intervalMs:'1000', svids:[] },
+      trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[] },
+      sml:'S1F1 W', lastError:'目标已有主机连接', connectedAt:'—', messages:[] }
+  ],
+  hostSeq: 4,
+  selHost: 0,
+  hzone: 'config',
+  hpage: { config:'overview', runtime:'status' },
+  creating: false,
+  newHost: { name:'', target:'', port:'5000', deviceId:'0' },
+  hsearch: '',
+  hSendTargets: ['HOST-A'],
+  hSml: 'S1F3 W\n<L[1] <U4 1001>>',
+  hPreset: '',
+  hSendResults: [],
+  hBurst: null,
+  hBurstCount: '100',
+  hBurstInterval: '0',
+  hTraceText: '',
+  hTraceResult: '',
+  hCollectResult: '',
+  hImported: null,
+  hManualSml: 'S1F3 W\n<L\n  <U4 1001>\n  <U4 1003>\n>.',
+  hManualReply: '',
+  hFilter: { host:'', dir:'all', sf:'', kw:'' },
+  hCats: {},
+  openExec: -1,
+  showDryRun: false,
+  onlyFailed: false,
+  /* 配置区「结构」里的定义 */
+  cfgSvids: [
+    { svid:1001, unit:'CH1', name:'TEMP_PV', type:'F4', source:'curve', value:'' },
+    { svid:1002, unit:'CH1', name:'PRESS_PV', type:'F4', source:'sine', value:'' },
+    { svid:1003, unit:'CH1', name:'GAS_FLOW', type:'F4', source:'fixed', value:'4.2' },
+    { svid:1101, unit:'CH1', name:'CHAMBER_STATE', type:'U4', source:'combo', value:'' },
+    { svid:2101, unit:'CH2', name:'TEMP_PV', type:'F4', source:'curve', value:'' },
+    { svid:2102, unit:'CH2', name:'PRESS_PV', type:'F4', source:'sine', value:'' }
+  ],
+  cfgReports: [
+    { rptid:3001, unit:'CH1', svids:[1001,1003,1101] },
+    { rptid:3002, unit:'CH1', svids:[1101,1004] }
+  ],
+  cfgCeids: [
+    { ceid:2001, unit:'CH1', name:'加工开始', reports:[3001] },
+    { ceid:2002, unit:'CH1', name:'加工结束', reports:[3002] },
+    { ceid:2004, unit:'CH1', name:'超温', reports:[3001] }
+  ],
+  /* 运行区「事件与报告」的临时副本，重载后按配置恢复 */
+  rtReports: [],
+  rtCeids: [],
+  /* 运行区「手动操作」 */
+  alarms: [{ alid:7, text:'CH1 OVER TEMP', category:1, at:'20:05:12' }],
+  alarmForm: { alid:'9', text:'CH1 GAS LOW', category:'2' },
+  manualSml: 'S5F1 W\n<L[3]\n  <B 1>\n  <U4 7>\n  <A "CH1 OVER TEMP">\n>',
+  manualCeid: '2001',
+  manualBurstCount: '100',
+  manualBurstInterval: '0',
+  manualBurstResult: null,
+  editRow: null,
+  editForm: null
+};
+
+const CONFIG_PAGES = [
+  ['overview','概览'],['connection','连接'],['structure','结构'],['templates','值模板'],
+  ['plans','事件计划'],['json','配置原文'],['constants','设备常量'],['revisions','版本历史']
+];
+const RUNTIME_PAGES = [
+  ['status','实时状态'],['executions','事件执行'],['catalog','事件与报告'],['svids','状态变量'],
+  ['messages','报文收发'],['manual','手动操作']
+];
+/* 主机详情：与设备详情同一套「配置区 / 运行区」结构 */
+const HOST_CONFIG_PAGES = [
+  ['overview','概览'],['connection','连接'],['presets','报文模板'],['trace','Trace 设置'],['collect','采集设置']
+];
+const HOST_RUNTIME_PAGES = [
+  ['status','实时状态'],['messages','消息发送'],['trace','Trace 采集'],
+  ['collect','数据采集'],['monitor','收发记录'],['manual','手动操作']
+];
+const SVID_CATALOG = [
+  [1001,'TEMP_PV','C'],[1002,'PRESS_PV','kPa'],[1003,'GAS_FLOW','sccm'],[1004,'ALARM_FLAG','—'],
+  [1101,'CHAMBER_STATE','—'],[2101,'TEMP_PV','C'],[2102,'PRESS_PV','kPa']
+];
+const HOST_PRESETS = [
+  {g:'建链与控制',l:'S1F1 在吗',r:'S1F2',d:'确认设备是否在线',s:'S1F1 W',q:1},
+  {g:'建链与控制',l:'S1F13 建立通信',r:'S1F14',d:'建立通信，之后才能发其它报文',s:'S1F13 W',q:1},
+  {g:'建链与控制',l:'S1F17 上线',r:'S1F18',d:'设备上线后才会主动上报',s:'S1F17 W',q:1},
+  {g:'建链与控制',l:'S1F15 下线',r:'S1F16',d:'设备下线，主动上报停止',s:'S1F15 W',q:1},
+  {g:'查询',l:'S1F3 读状态变量',r:'S1F4',d:'按 SVID 列表读当前值',s:'S1F3 W\n<L <U4 1001> <U4 1003>>.',q:1},
+  {g:'查询',l:'S1F11 读变量名',r:'S1F12',d:'查询 SVID 的名称与单位',s:'S1F11 W\n<L <U4 1001> <U4 1003>>.'},
+  {g:'查询',l:'S2F13 读全部常量',r:'S2F14',d:'空列表表示读取全部设备常量',s:'S2F13 W.'},
+  {g:'查询',l:'S2F17 读设备时间',r:'S2F18',d:'读设备时钟',s:'S2F17 W.'},
+  {g:'查询',l:'S2F31 对时',r:'S2F32',d:'按 A16 格式设置设备时间',s:'S2F31 W\n<A "20261112203000">.'},
+  {g:'报告与事件',l:'S2F33 定义报告',r:'S2F34',d:'定义报告 3001，由 1001/1004 组成',s:'S2F33 W\n<L <U4 0> <L <L <U4 3001> <L <U4 1001> <U4 1004>>>>>.'},
+  {g:'报告与事件',l:'S2F35 链接事件',r:'S2F36',d:'把事件 2001 链接到报告 3001',s:'S2F35 W\n<L <L <U4 2001> <L <U4 3001>>>>.'},
+  {g:'报告与事件',l:'S2F37 停用全部事件',r:'S2F38',d:'关闭全部事件上报',s:'S2F37 W\n<L <BOOLEAN 0x00> <L>>.'},
+  {g:'报告与事件',l:'S2F37 启用 2001',r:'S2F38',d:'只启用事件 2001',s:'S2F37 W\n<L <BOOLEAN 0x01> <L <U4 2001>>>.'},
+  {g:'采集与终端',l:'S2F23 开始 Trace',r:'S2F24',d:'按周期采集并上报 S6F1',s:'S2F23 W\n<L <U4 1> <A "000001"> <U4 100> <U4 1> <L <U4 1001> <U4 1003>>>>.',q:1},
+  {g:'采集与终端',l:'S2F23 停止 Trace',r:'S2F24',d:'总样本数 0 = 提前终止',s:'S2F23 W\n<L <U4 1> <A "000000"> <U4 0> <U4 1> <L>>.'},
+  {g:'采集与终端',l:'S10F3 终端消息',r:'S10F4',d:'向设备显示一行文本',s:'S10F3 W\n<L <B 0x0> <A "Hello from host">>.'}
+];
+const MSG_CATS = ['探测','采集','Trace','事件','通信','报警','终端','其它'];
+const ALARM_CATEGORIES = [
+  [0,'其它'],[1,'人身安全'],[2,'设备安全'],[3,'物料'],[4,'工艺'],[5,'质量'],[6,'环境'],[7,'数据']
+];
+const VAR_TYPES = [['','未声明 · 按数值解析'],['F4','F4 浮点'],['F8','F8 双精度'],['U4','U4 无符号整数'],['I4','I4 整数'],['A','A 文本'],['BOOLEAN','BOOLEAN 布尔']];
+const SVID_SOURCES = [['curve','温度曲线'],['sine','正弦'],['fixed','固定值'],['combo','组合模板']];
+function svidSourceLabel(s){
+  const hit = SVID_SOURCES.find(x=>x[0]===s.source);
+  if (!hit) return '—';
+  return s.source === 'fixed' ? `固定值 ${s.value||'0'}` : hit[1];
+}
+/* 运行区的定义副本来自配置；重载即重建 */
+function resetRuntimeCatalog(){
+  state.rtReports = state.cfgReports.map(r => ({...r, svids:[...r.svids], src:'config'}));
+  state.rtCeids = state.cfgCeids.map(c => ({...c, reports:[...c.reports], src:'config'}));
+}
+function alarmCategoryName(n){
+  const hit = ALARM_CATEGORIES.find(x => x[0] === Number(n));
+  return hit ? hit[1] : '其它';
+}
+function catOf(sf){
+  const s = String(sf).replace(/\s|W/g,'').toUpperCase();
+  if (/^S1F(1|2)$/.test(s)) return '探测';
+  if (/^S1F(3|4|11|12)$/.test(s)) return '采集';
+  if (/^S6F(1|2)$/.test(s)) return 'Trace';
+  if (/^S6F(11|12)$/.test(s)) return '事件';
+  if (/^S1F(13|14|15|16|17|18)$/.test(s)) return '通信';
+  if (/^S5F(1|2)$/.test(s)) return '报警';
+  if (/^S10F(3|4)$/.test(s)) return '终端';
+  return '其它';
+}
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function toast(msg, tone){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.style.borderLeftColor = tone === 'danger' ? 'var(--danger)' : tone === 'config' ? 'var(--config)' : tone === 'host' ? 'var(--host)' : 'var(--runtime)';
+  el.textContent = msg;
+  $('#notice').appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+/* 通用片段 */
+function linkUp(p){
+  return p==='CONNECTED'||p==='LISTENING'||p==='CONNECTING'||p==='STARTING';
+}
+function phaseChip(phase){
+  if (phase === 'CONNECTED') return '<span class="chip ok">● 已连接</span>';
+  if (phase === 'LISTENING') return '<span class="chip warn">◐ 等待连接</span>';
+  if (phase === 'CONNECTING' || phase === 'STARTING') return '<span class="chip warn">◌ 连接中</span>';
+  if (phase === 'FAILED') return '<span class="chip danger">● 连接失败</span>';
+  return '<span class="chip off">○ 已断开</span>';
+}
+function linkChip(){
+  return phaseChip(state.link);
+}
+function ctrlChip(){
+  const on = state.link === 'CONNECTED';
+  return `<span class="chip ${on?'ok':'off'}">${on?state.controlState:'离线'}</span>`;
+}
+function pendingBanner(){
+  if (state.configVer === state.runningVer) return '';
+  return `<div class="pending">
+    <span class="tag w">配置待生效</span>
+    <span class="txt">配置已更新到 <b>v${state.configVer}</b>，当前运行仍是 <b>v${state.runningVer}</b>。</span>
+    <span class="spacer"></span>
+    <button class="btn sm" data-act="diff">查看差异</button>
+    <button class="btn sm primary" data-act="reload">重载使生效</button>
+  </div>`;
+}
+function deviceHead(){
+  const on = state.link === 'CONNECTED';
+  const up = linkUp(state.link);
+  return `<div class="device-head">
+    <div class="dev-glyph">▤</div>
+    <div class="dev-id">
+      <h1>ETCH-01 ${linkChip()} ${ctrlChip()}</h1>
+      <div class="sub">设备 ID 61 · 被动监听 · 2 个单元</div>
+    </div>
+    <div class="head-metrics">
+      <div class="metric"><div class="k">配置版本</div><div class="v">v${state.configVer}</div></div>
+      <div class="metric"><div class="k">当前运行版本</div><div class="v">${on?'v'+state.runningVer:'— 未连接'}</div></div>
+      <div class="metric"><div class="k">监听端口</div><div class="v">${up?'5000':'已释放'}</div></div>
+      <div class="metric"><div class="k">Device ID</div><div class="v">61</div></div>
+    </div>
+    <div class="head-actions">
+      ${up
+        ? `<button class="btn" data-act="disconnect">断开连接</button>`
+        : `<button class="btn live" data-act="connect">重新连接</button>`}
+      <button class="btn" data-act="reload">重载</button>
+      <button class="btn danger" data-act="delete">⋯ 删除设备</button>
+    </div>
+  </div>`;
+}
+function zoneBar(){
+  return `<div class="zonebar">
+    <button class="zone-btn config ${state.zone==='config'?'active':''}" data-zone="config">
+      <span class="zi">▣</span><span>配置区<small>修改设备定义</small></span></button>
+    <button class="zone-btn runtime ${state.zone==='runtime'?'active':''}" data-zone="runtime">
+      <span class="zi">◉</span><span>运行区<small>查看与操作当前运行</small></span></button>
+  </div>
+  <div class="zone-note ${state.zone}">
+    ${state.zone==='config'
+      ? '▣ 修改后点「保存」，再点「重载」才会生效。'
+      : '◉ 这里的操作只对本次运行有效，重载后按配置恢复。'}
+  </div>`;
+}
+function subTabs(){
+  const pages = state.zone === 'config' ? CONFIG_PAGES : RUNTIME_PAGES;
+  return `<div class="subtabs">${pages.map(([id,label]) =>
+    `<button class="subtab ${state.page[state.zone]===id?'active':''}" data-page="${id}">${label}</button>`).join('')}</div>`;
+}
+function card(title, hint, body, extra=''){
+  return `<div class="card ${extra}"><div class="card-head"><h3>${title}</h3><span class="spacer"></span>${hint||''}</div>${body}</div>`;
+}
+function table(headers, rows){
+  return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+function offlineBlock(){
+  if (state.link === 'LISTENING' || state.link === 'CONNECTING' || state.link === 'STARTING') {
+    return `<div class="empty"><div><strong>端口已打开，还没有主机接进来</strong>
+      <div>设备定义与本次运行的设置都保留；主机接入后这里会自动出现数据。</div>
+      <div style="margin-top:12px"><button class="btn" data-act="disconnect">断开并释放端口</button></div>
+    </div></div>`;
+  }
+  if (state.link === 'FAILED') {
+    return `<div class="empty"><div><strong>连接失败，设备仍在工作台里</strong>
+      <div>端口已释放，配置照常可以编辑。</div>
+      <div style="margin-top:12px"><button class="btn live" data-act="connect">重新连接</button></div>
+    </div></div>`;
+  }
+  return `<div class="empty"><div><strong>连接已断开，设备仍在工作台里</strong>
+    <div>端口 5000 已释放，配置照常可以编辑。</div>
+    <div style="margin-top:12px"><button class="btn live" data-act="connect">重新连接</button></div>
+  </div></div>`;
+}
+
+/* 变量 / 报告 / 事件定义的共用编辑卡：配置区与运行区各用一份数据 */
+function catalogRows(kind){
+  if (kind === 'cfgceid') return state.cfgCeids;
+  if (kind === 'cfgrpt') return state.cfgReports;
+  if (kind === 'rtceid') return state.rtCeids;
+  if (kind === 'svid') return state.cfgSvids;
+  return state.rtReports;
+}
+function catalogKey(kind){
+  if (kind.endsWith('ceid')) return 'ceid';
+  if (kind === 'svid') return 'svid';
+  return 'rptid';
+}
+function catalogNoun(kind){
+  if (kind.endsWith('ceid')) return '事件';
+  if (kind === 'svid') return '变量';
+  return '报告';
+}
+function openCatalogEditor(kind, id){
+  const key = catalogKey(kind);
+  const rows = catalogRows(kind);
+  const row = id === null ? null : rows.find(r => r[key] === id);
+  const base = kind === 'svid' ? 1001 : kind.endsWith('ceid') ? 2001 : 3001;
+  const nextId = rows.length ? Math.max(...rows.map(r => r[key])) + 1 : base;
+  state.editRow = { kind, id };
+  if (kind === 'svid') {
+    state.editForm = { id: row ? row.svid : nextId, name: row ? row.name : '', unit: row ? row.unit : 'CH1',
+      type: row ? row.type : 'F4', source: row ? row.source : 'fixed', value: row ? row.value : '' };
+  } else if (kind.endsWith('ceid')) {
+    state.editForm = { id: row ? row.ceid : nextId, name: row ? row.name : '', unit: row ? row.unit : 'CH1', reports: row ? [...row.reports] : [] };
+  } else {
+    state.editForm = { id: row ? row.rptid : nextId, unit: row ? row.unit : 'CH1', svids: row ? [...row.svids] : [] };
+  }
+}
+function catalogEditor(){
+  if (!state.editRow) return '';
+  const { kind } = state.editRow;
+  const runtime = kind.startsWith('rt');
+  const f = state.editForm;
+  const title = (runtime?'本次运行 · ':'设备定义 · ') + (state.editRow.id===null?'新增':'编辑') + catalogNoun(kind);
+  const unitField = `<div class="field"><label>归属单元</label><div><select class="mini" data-ef="unit">
+    ${['CH1','CH2'].map(u=>`<option ${f.unit===u?'selected':''}>${u}</option>`).join('')}</select></div></div>`;
+  let body;
+  if (kind === 'svid') {
+    body = `<div class="field"><label>SVID</label><div><input class="mini" data-ef="id" value="${esc(f.id)}"></div></div>
+      <div class="field"><label>名称</label><div><input class="mini" data-ef="name" value="${esc(f.name)}" placeholder="如 TEMP_PV"></div></div>
+      ${unitField}
+      <div class="field"><label>类型</label><div><select class="mini" data-ef="type">
+        ${VAR_TYPES.filter(t=>t[0]).map(([v,label])=>`<option value="${v}" ${f.type===v?'selected':''}>${label}</option>`).join('')}</select></div></div>
+      <div class="field"><label>取值方式</label><div><select class="mini" data-ef="source">
+        ${SVID_SOURCES.map(([v,label])=>`<option value="${v}" ${f.source===v?'selected':''}>${label}</option>`).join('')}</select></div></div>
+      ${f.source==='fixed'?`<div class="field"><label>固定值</label><div><input class="mini" data-ef="value" value="${esc(f.value)}" placeholder="如 4.2"></div></div>`:''}`;
+  } else if (kind.endsWith('ceid')) {
+    const reports = runtime ? state.rtReports : state.cfgReports;
+    body = `<div class="field"><label>CEID</label><div><input class="mini" data-ef="id" value="${esc(f.id)}"></div></div>
+      <div class="field"><label>名称</label><div><input class="mini" data-ef="name" value="${esc(f.name)}" placeholder="如 加工开始"></div></div>
+      ${unitField}
+      <div class="field" style="grid-template-columns:1fr"><label>绑定报告</label>
+        <div class="svid-grid">${reports.map(r=>`<label class="svid-opt">
+          <input type="checkbox" data-efr="${r.rptid}" ${f.reports.includes(r.rptid)?'checked':''}>
+          <span class="mono">${r.rptid}</span><span class="muted small">${r.svids.join(', ')}</span></label>`).join('')||'<span class="muted small">还没有报告，请先新增报告。</span>'}</div></div>`;
+  } else {
+    const svids = state.cfgSvids.map(v=>v.svid);
+    body = `<div class="field"><label>RPTID</label><div><input class="mini" data-ef="id" value="${esc(f.id)}"></div></div>
+      ${unitField}
+      <div class="field" style="grid-template-columns:1fr"><label>由哪些变量组成</label>
+        <div class="svid-grid">${svids.map(s=>`<label class="svid-opt">
+          <input type="checkbox" data-efs="${s}" ${f.svids.includes(s)?'checked':''}>
+          <span class="mono">${s}</span></label>`).join('')}</div></div>`;
+  }
+  return `<div class="card ${runtime?'banner-runtime':'banner-config'}"><div class="card-head"><h3>${title}</h3><span class="spacer"></span>
+      <button class="btn sm ghost" data-act="edit:cancel">取消</button></div>
+    ${body}
+    <div class="row" style="margin-top:12px">
+      <span class="chip ${runtime?'runtime':'config'}">${runtime?'只对本次运行有效':'保存后需重载'}</span>
+      <span class="spacer"></span><button class="btn primary" data-act="edit:save">确定</button></div>
+  </div>`;
+}
+function saveCatalogEditor(){
+  const { kind, id } = state.editRow;
+  const key = catalogKey(kind);
+  const noun = catalogNoun(kind);
+  const rows = catalogRows(kind);
+  const f = state.editForm;
+  const newId = Number(f.id);
+  if (!Number.isInteger(newId) || newId < 0) { toast('编号需为非负整数', 'danger'); return; }
+  if (id === null && rows.some(r => r[key] === newId)) { toast(`编号 ${newId} 已存在`, 'danger'); return; }
+  if (kind !== 'cfgrpt' && kind !== 'rtrpt' && !String(f.name).trim()) { toast(`请填写${noun}名称`, 'danger'); return; }
+  if ((kind === 'cfgrpt' || kind === 'rtrpt') && !f.svids.length) { toast('报告至少要包含一个变量', 'danger'); return; }
+  let payload;
+  if (kind === 'svid') payload = { svid:newId, name:String(f.name).trim(), unit:f.unit, type:f.type, source:f.source, value:f.source==='fixed'?String(f.value).trim():'' };
+  else if (kind.endsWith('ceid')) payload = { ceid:newId, name:String(f.name).trim(), unit:f.unit, reports:[...f.reports] };
+  else payload = { rptid:newId, unit:f.unit, svids:[...f.svids] };
+  if (id === null) rows.push({...payload, src: kind.startsWith('rt') ? 'new' : 'config'});
+  else {
+    const k = rows.findIndex(r => r[key] === id);
+    if (k >= 0) rows[k] = {...rows[k], ...payload, src: kind.startsWith('rt') ? 'edited' : rows[k].src};
+  }
+  state.editRow = null;
+  toast(kind.startsWith('rt')
+    ? `已${id===null?'新增':'修改'}${noun} ${newId}，只对本次运行有效`
+    : `已${id===null?'新增':'修改'}${noun} ${newId}，点「保存配置」后重载生效`,
+    kind.startsWith('rt') ? undefined : 'config');
+  render();
+}
+
+/* 配置区 */
+function configContent(){
+  const p = state.page.config;
+  if (p === 'overview') return `<div class="grid g2">
+    ${card('设备定义',`<span class="chip config">版本 v${state.configVer} · 已保存</span>`, `
+      <div class="field"><label>设备名称</label><div><input value="ETCH-01"></div></div>
+      <div class="field"><label>来源模板</label><div><select><option>etch · 刻蚀腔</option><option>bare · 空骨架</option></select></div></div>
+      <div class="field"><label>自动连接</label><div><select><option>是 · 启动时自动连接</option><option>否 · 手动连接</option></select></div></div>
+      <div class="field"><label>备注</label><div><input value="产线 A / 双腔体演示"></div></div>
+      <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" data-act="save">保存配置</button></div>`)}
+    ${card('配置内容','', table(['配置段落','条目数'],
+      [['连接','1 组'],['单元','2 个'],['状态变量','12 项'],['报告 / 事件','3 / 6 项'],
+       ['事件计划','3 条'],['曲线 / 组合 / 实例','4 / 1 / 3 项'],['设备常量','3 项']]))}
+    ${card('配置检查','', table(['检查项','结果'],
+      [['格式','通过'],['编号重复','无'],['变量引用','全部有效'],['上次检查','20:04']])) }
+    ${card('最近版本','<button class="btn sm" data-act="revisions">全部历史</button>', table(
+      ['版本','时间','操作者','说明'],
+      [['v7','20:04','我','事件计划新增报警消息'],['v6','19:51','我','修改设备常量 100'],
+       ['v5','19:30','我','调整温度曲线周期'],['v1','18:02','导入','从配置文件导入']]))}
+  </div>`;
+
+  if (p === 'connection') return `<div class="grid g2">
+    ${card('连接设置','', `
+      <div class="field"><label>连接名称</label><div><input value="etch-01"></div></div>
+      <div class="field"><label>连接方式</label><div><select><option>被动监听 · 等待主机连接</option><option>主动连接 · 设备连主机</option></select></div></div>
+      <div class="field"><label>监听地址</label><div><input value="127.0.0.1"></div></div>
+      <div class="field"><label>端口</label><div><input value="5000"></div></div>
+      <div class="field"><label>Device ID</label><div><input value="61"></div></div>
+      <div class="field"><label>随机种子</label><div><input value="20240601"></div></div>`)}
+    ${card('超时与限额','', `
+      <div class="field"><label>T3 / T5 / T6</label><div><input value="45 / 10 / 5 (秒)"></div></div>
+      <div class="field"><label>T7 / T8</label><div><input value="10 / 5 (秒)"></div></div>
+      <div class="field"><label>Trace 上限</label><div><input value="最多 1 组，每组 10 个变量"></div></div>
+      <div class="row" style="margin-top:14px"><span class="chip config">保存后需重载</span><span class="spacer"></span>
+      <button class="btn" data-act="validate">校验</button><button class="btn primary" data-act="save">保存</button></div>`)}
+    ${card('当前连接','', table(['项目','当前值'],
+      [['状态',state.link==='CONNECTED'?'已连接':'已断开'],['监听地址','127.0.0.1:5000'],
+       ['连接方式','被动监听'],['最近连接时间','20:05:41']]))}
+  </div>`;
+
+  if (p === 'structure') return `<div class="grid g2">
+    ${state.editRow && !state.editRow.kind.startsWith('rt') ? catalogEditor() : ''}
+    ${card('单元与状态变量',`<div class="row"><span class="chip config">${state.cfgSvids.length} 项</span><button class="btn sm" data-act="svid:new">新增变量</button></div>`,
+      table(['单元','SVID','名称','类型','取值方式','操作'], state.cfgSvids.map(v=>[
+        esc(v.unit), `<span class="mono">${v.svid}</span>`, esc(v.name), `<span class="mono">${esc(v.type)}</span>`,
+        esc(svidSourceLabel(v)),
+        `<div class="row" style="gap:5px"><button class="btn sm" data-act="svid:edit:${v.svid}">编辑</button><button class="btn sm" data-act="svid:del:${v.svid}">删除</button></div>`])))}
+    ${card('报告定义',`<div class="row"><span class="chip config">${state.cfgReports.length} 项</span><button class="btn sm" data-act="cfgrpt:new">新增报告</button></div>`,
+      table(['RPTID','归属','由哪些变量组成','操作'], state.cfgReports.map(r=>[
+        `<span class="mono">${r.rptid}</span>`, esc(r.unit),
+        `<span class="mono">${r.svids.join(', ')}</span>`,
+        `<div class="row" style="gap:5px"><button class="btn sm" data-act="cfgrpt:edit:${r.rptid}">编辑</button><button class="btn sm" data-act="cfgrpt:del:${r.rptid}">删除</button></div>`])))}
+    ${card('事件定义',`<div class="row"><span class="chip config">${state.cfgCeids.length} 项</span><button class="btn sm" data-act="cfgceid:new">新增事件</button></div>`,
+      table(['CEID','名称','归属','绑定报告','操作'], state.cfgCeids.map(c=>[
+        `<span class="mono">${c.ceid}</span>`, esc(c.name), esc(c.unit),
+        `<span class="mono">${c.reports.join(', ')||'—'}</span>`,
+        `<div class="row" style="gap:5px"><button class="btn sm" data-act="cfgceid:edit:${c.ceid}">编辑</button><button class="btn sm" data-act="cfgceid:del:${c.ceid}">删除</button></div>`])))}
+    ${card('编号规则','', `
+      <div class="field"><label>状态变量起始 / 间隔</label><div><input value="1000 / 100"></div></div>
+      <div class="field"><label>事件起始 / 间隔</label><div><input value="2000 / 100"></div></div>
+      <div class="field"><label>报告起始</label><div><input value="3000"></div></div>`)}
+    <div class="card banner-config"><h3>定义与本次运行的关系</h3>
+      <p class="small muted" style="margin:4px 0 10px">这里的报告与事件属于设备定义，保存后需要「重载」。只想临时改一下、不想动定义，请到运行区「事件与报告」。</p>
+      <div class="row"><button class="btn" data-act="validate">校验</button><button class="btn primary" data-act="save">保存配置</button><span class="chip config">保存后需重载</span></div>
+    </div>
+  </div>`;
+
+  if (p === 'templates') return `<div class="grid g3">
+    ${card('曲线模板','', `<div class="code">温度曲线 : <span class="k">正弦</span>
+  最小 20   最大 250
+  周期 60 秒
+压力曲线 : <span class="k">分段线性</span>
+  [(0,1.2),(30秒,4.8),(60秒,2.1)]</div>`)}
+    ${card('组合模板','', `<div class="code">温度合成.输出 =
+  <span class="n">输入.曲线.V</span> * 0.9
+  + 目标值 * 0.1
+健康度 = (<span class="n">输入.曲线.V</span> &lt; 240)
+  ? 1 : 0</div>`)}
+    ${card('实例绑定','', table(['实例','模板','绑定到'],
+      [['wave','温度曲线','1001 / 2101'],['derived','温度合成','1101'],['press','压力曲线','1002']]))}
+  </div>`;
+
+  if (p === 'plans') return `<div class="grid" style="gap:12px">
+    ${card('计划列表','<button class="btn sm" data-act="newplan">新增计划</button>',
+      table(['计划','CEID','触发规则','发送内容','变量变化','默认启用'],
+      state.plans.map(pl => [
+        `<b>${esc(pl.id)}</b>`, `<span class="mono">${pl.ceid}</span>`, esc(pl.trigger),
+        pl.actions.map(a=>`<div class="tag c">${esc(a)}</div>`).join(' '),
+        pl.effects.map(a=>`<div class="tag r">${esc(a)}</div>`).join(' '),
+        pl.enabled?'<span class="tag g">启用</span>':'<span class="tag">停用</span>'])))}
+    <div class="grid g3">
+      ${card('一次触发可发多条消息','', `<p class="small muted" style="margin:0">除了事件报告，还可以发送报警、终端消息或自定义 SML 报文，消息里能引用变量的当前值。</p>`)}
+      ${card('先改变量，再发消息','', `<p class="small muted" style="margin:0">一次触发按固定顺序执行，所以报文里带的是变化之后的值。</p>`)}
+      ${card('断线时的处理','', `<p class="small muted" style="margin:0">可以设置跳过、排队或记为失败；界面会显示每次触发的结果。</p>`)}
+    </div>
+    <div class="card banner-config"><h3>编辑后如何生效</h3>
+      <p class="small muted" style="margin:4px 0 10px">计划定义属于配置，保存后需要「重载」；运行区的启用开关只影响本次运行。</p>
+      <div class="row"><button class="btn" data-act="validate">校验计划</button><button class="btn primary" data-act="save">保存配置</button><span class="chip config">保存后需重载</span></div>
+    </div>
+  </div>`;
+
+  if (p === 'json') return `<div class="grid g2">
+    ${card('配置原文','', `<div class="code" id="codeBox">{
+  <span class="k">"version"</span>: <span class="n">6</span>,
+  <span class="k">"connection"</span>: { <span class="k">"name"</span>: <span class="s">"etch-01"</span>,
+                  <span class="k">"port"</span>: <span class="n">5000</span>, <span class="k">"deviceId"</span>: <span class="n">61</span> },
+  <span class="k">"equipment"</span>: { <span class="k">"name"</span>: <span class="s">"ETCH-01"</span>, <span class="k">"units"</span>: [ … ] },
+  <span class="k">"events"</span>: {
+    <span class="k">"plans"</span>: [
+      { <span class="k">"id"</span>: <span class="s">"加工开始"</span>, <span class="k">"ceid"</span>: <span class="n">2001</span>,
+        <span class="k">"trigger"</span>: { <span class="k">"type"</span>: <span class="s">"periodic"</span>, <span class="k">"periodMs"</span>: <span class="n">60000</span> },
+        <span class="k">"actions"</span>: [{ <span class="k">"kind"</span>: <span class="s">"s6f11"</span> }],
+        <span class="k">"effects"</span>: [{ <span class="k">"svid"</span>: <span class="n">1001</span>, <span class="k">"op"</span>: <span class="s">"pulse"</span>,
+                      <span class="k">"value"</span>: <span class="n">250</span>, <span class="k">"holdMs"</span>: <span class="n">8000</span> }] }
+    ] }
+}</div>
+      <div class="row" style="margin-top:12px"><span class="chip mono">版本 v${state.configVer}</span><span class="spacer"></span>
+        <button class="btn" data-act="validate">只校验</button><button class="btn primary" data-act="save">保存</button></div>`)}
+    ${card('编辑提示','', `
+      <div class="field"><label>格式</label><div>保存时保持原有空格与缩进，不做重排。</div></div>
+      <div class="field"><label>校验</label><div>保存前会先检查，有问题整份不会改动。</div></div>
+      <div class="field"><label>历史</label><div>每次保存生成一个新版本，可随时恢复。</div></div>
+      <div class="row" style="margin-top:12px"><button class="btn sm" data-act="revisions">版本历史 / 恢复</button><button class="btn sm" data-act="diff">与当前运行对比</button></div>`)}
+  </div>`;
+
+  if (p === 'constants') return `<div class="grid g2">
+    ${card('设备常量','', table(['ECID','名称','类型','当前值','单位'],
+      [['100','TARGET_TEMP','F4','180.0','C'],['101','MAX_PRESSURE','F4','6.5','kPa'],['102','CHAMBER_MODE','U1','1','—']]))}
+    ${card('最近写入','', table(['时间','ECID','写入值','来源'],
+      [['19:51','100','180.0','主机 S2F15'],['18:20','102','1','配置'],['18:02','101','6.5','导入']]))}
+  </div>`;
+
+  if (p === 'revisions') return `<div class="grid g2">
+    ${card('版本历史','', table(['版本','时间','操作者','说明','操作'],
+      [['v7','20:04','我','事件计划新增报警消息','<button class="btn sm">查看</button>'],
+       ['v6','19:51','我','修改设备常量 100','<button class="btn sm">查看</button>'],
+       ['v5','19:30','我','调整温度曲线周期','<button class="btn sm">查看</button>'],
+       ['v1','18:02','导入','从配置文件导入','<button class="btn sm">查看</button>']]))}
+    ${card('恢复版本','', `
+      <p class="small muted">恢复到某个版本会生成一个新版本，已有历史不会被覆盖。</p>
+      <p class="small muted">恢复后同样需要「重载」才会生效。</p>
+      <div class="row" style="margin-top:12px"><button class="btn sm" data-act="diff">与当前运行对比</button></div>`)}
+  </div>`;
+  return '';
+}
+
+/* 运行区 */
+function sparkline(){
+  const w = 620, h = 118, pad = 12;
+  const vals = state.series, min = Math.min(...vals) - 8, max = Math.max(...vals) + 8;
+  const pts = vals.map((v,i) => {
+    const x = pad + i * (w - pad*2) / (vals.length - 1);
+    const y = h - pad - (v - min) / (max - min || 1) * (h - pad*2);
+    return [x,y];
+  });
+  const line = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const area = line + ` L ${pts[pts.length-1][0].toFixed(1)} ${h-pad} L ${pad} ${h-pad} Z`;
+  const marks = [3, 8, 13].map(i => `<line x1="${pts[i][0].toFixed(1)}" y1="${pad}" x2="${pts[i][0].toFixed(1)}" y2="${h-pad}" stroke="#4457c7" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`).join('');
+  const dots = [3,8,13].map(i => `<circle cx="${pts[i][0].toFixed(1)}" cy="${pts[i][1].toFixed(1)}" r="3.2" fill="#0f8a6a" stroke="#fff" stroke-width="1.5"/>`).join('');
+  return `<div class="chart-wrap">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="SVID 1001 曲线">
+      <rect x="0" y="0" width="${w}" height="${h}" fill="#fafbfe"/>
+      ${[0,1,2,3].map(i=>`<line x1="${pad}" y1="${pad+i*(h-pad*2)/3}" x2="${w-pad}" y2="${pad+i*(h-pad*2)/3}" stroke="#e8ecf5" stroke-width="1"/>`).join('')}
+      ${marks}
+      <path d="${area}" fill="#0f8a6a" opacity=".08"/>
+      <path d="${line}" fill="none" stroke="#0f8a6a" stroke-width="2" stroke-linejoin="round"/>
+      ${dots}
+      <text x="${w-pad}" y="${h-2}" text-anchor="end" font-size="9" fill="#78839a">时间 →</text>
+    </svg>
+    <div class="chart-legend">
+      <span><i class="legend-swatch" style="background:#0f8a6a"></i>SVID 1001 · TEMP_PV (C)</span>
+      <span><i class="legend-swatch" style="background:#4457c7"></i>事件触发竖线</span>
+      <span>当前值 <b class="mono">${state.svid.toFixed(1)}</b></span>
+    </div>
+  </div>`;
+}
+function planCards(){
+  return state.plans.map((pl,i)=>`<div class="plan-card ${pl.enabled?'':'disabled'}" style="margin-bottom:9px">
+    <button class="switch ${pl.enabled?'on':''}" data-plan="${i}" aria-label="切换启用状态" title="启用或停用这个计划"></button>
+    <div><div class="nm">${esc(pl.id)}</div><div class="meta">CEID ${pl.ceid} · ${esc(pl.trigger)} · ${pl.actions.length} 条消息 · ${pl.effects.length} 项变量变化</div></div>
+    <span class="spacer"></span>
+    <div class="meta">下次触发 <b class="mono">${pl.next}</b></div>
+    <div class="meta">已触发 <b class="mono">${pl.fires}</b> / 跳过 <b class="mono">${pl.skipped}</b></div>
+    <span class="chip ${pl.enabled?'ok':'off'}">${pl.enabled?'启用中':'已停用'}</span>
+    <button class="btn sm" data-step="${i}">单步试跑</button>
+  </div>`).join('');
+}
+function visibleExecutions(){
+  return state.executions
+    .map((e,i)=>({e,i}))
+    .filter(({e}) => (state.showDryRun || !e.dryRun) && (!state.onlyFailed || e.status==='部分失败' || e.status==='发送失败'));
+}
+function timeline(){
+  const rows = visibleExecutions();
+  if (!rows.length) return '<div class="empty" style="padding:24px"><div>当前条件下没有执行记录。试跑记录默认隐藏，可点「含试跑」显示。</div></div>';
+  return `<div class="timeline">${rows.map(({e,i})=>{
+    const cls = e.status==='已跳过'?'skip':(e.status==='部分失败'||e.status==='发送失败')?'fail':'';
+    const tone = e.status==='已发送'?'g':e.status==='已跳过'?'':'w';
+    return `<div class="tl-row ${cls} ${state.openExec===i?'open':''}" data-exec="${i}">
+      <div class="tl-card"><div class="tl-top">
+        <span class="mono muted">${e.at}</span>
+        <span class="tag c">${esc(e.plan)}</span>
+        <span class="mono">CEID ${e.ceid}</span>
+        <span class="tag ${tone}">${e.status}</span>
+        ${e.dryRun?'<span class="tag w">试跑</span>':''}
+        ${e.rollback?'<span class="tag d">'+esc(e.rollback)+'</span>':''}
+        <span class="muted small">报文 ${e.msgs} 条</span>
+        <span class="muted small">变量变化 ${e.effects} 项</span>
+        <span class="spacer"></span><span class="muted small">${state.openExec===i?'收起 ▴':'展开 ▾'}</span>
+      </div>
+      <div class="tl-detail">
+        <div class="kv"><div class="k">发出的报文</div><div class="mono">${esc(e.sml)}</div>
+        <div class="k">变量变化</div><div>${e.before.length? e.before.map(b=>`<div class="mono">${b[0]} : ${b[1]} → <b style="color:var(--runtime)">${b[2]}</b></div>`).join('') : '<span class="muted">无（本次已跳过）</span>'}</div>
+        ${e.dryRun?'<div class="k">试跑说明</div><div class="muted small">走完整流程，但不计入累计触发数，也不推进下次触发倒计时。</div>':''}</div>
+      </div></div></div>`;
+  }).join('')}</div>`;
+}
+function runtimeContent(){
+  const on = state.link === 'CONNECTED';
+  const p = state.page.runtime;
+  if (p !== 'status' && !on) return offlineBlock();
+
+  if (p === 'status') return `<div class="grid g4">
+    ${card('连接状态','', `<div class="kpi"><div class="v" style="font-size:16px;color:${on?'var(--runtime)':state.link==='FAILED'?'var(--danger)':'var(--muted)'}">${phaseLabel(state.link)}</div><div class="k">链路</div><div class="d">${on?'127.0.0.1:5000':state.link==='LISTENING'?'端口 5000 已打开，等待主机接入':'端口已释放，设备仍保留'}</div></div>`)}
+    ${card('控制状态','', `<div class="kpi"><div class="v" style="font-size:16px">${on?'在线':'离线'}</div><div class="k">控制状态</div></div>`)}
+    ${card('每分钟报文','', `<div class="kpi"><div class="v">${on?42:0}</div><div class="k">本台设备</div></div>`)}
+    ${card('每分钟事件','', `<div class="kpi"><div class="v">${on?3:0}</div><div class="k">事件上报</div></div>`)}
+  </div>
+  <div class="grid g2" style="margin-top:12px">
+    ${card('最近连接记录','', table(['时刻','变化','说明'],
+      [['20:06:12','→ 已连接','主机接入，状态在线'],['20:05:40','→ 已断开','点击「断开连接」，端口释放'],
+       ['20:05:41','→ 已连接','点击「重新连接」，恢复运行'],['20:04:00','→ 等待连接','启动完成，等待主机接入']]))}
+    ${card('配置状态','', `
+      <div class="field"><label>当前运行版本</label><div class="mono">${on?'v'+state.runningVer:'—'}</div></div>
+      <div class="field"><label>最新配置版本</label><div class="mono">v${state.configVer}</div></div>
+      <div class="field"><label>状态</label><div>${state.configVer!==state.runningVer?'<span class="tag w">配置待生效</span>':'<span class="tag g">一致</span>'}</div></div>
+      <p class="small muted" style="margin:10px 0 0">重载会按最新配置重新开始，本次运行临时改的事件、报告与手动设定的值都会恢复默认；计划开关与手动设定在「重新连接」后会保留。</p>`)}
+  </div>`;
+
+  if (p === 'executions') {
+    const real = state.executions.filter(e=>!e.dryRun);
+    const dry = state.executions.length - real.length;
+    return `<div class="grid" style="gap:12px">
+    ${card('计划运行状态','<div class="row"><button class="btn sm" data-act="pauseall">暂停全部</button><button class="btn sm" data-act="export">导出记录</button></div>', planCards())}
+    <div class="grid g2">
+      ${card('变量曲线 · 事件竖线','', sparkline())}
+      ${card('执行摘要',`<span class="muted small">试跑 ${dry} 次不计入</span>`, `<div class="grid g2" style="gap:8px">
+        <div class="map-item"><div class="t">${real.filter(e=>e.status==='已发送').length} 次已发送</div><div class="d">消息与变量变化都已完成</div></div>
+        <div class="map-item"><div class="t">${real.filter(e=>e.status==='部分失败').length} 次部分失败</div><div class="d">有消息未发出</div></div>
+        <div class="map-item"><div class="t">${real.filter(e=>e.status==='已跳过').length} 次已跳过</div><div class="d">未连接主机，不发不改</div></div>
+        <div class="map-item"><div class="t">最近一次</div><div class="d">${real[0]?real[0].at:'—'}</div></div>
+      </div>`)}
+    </div>
+    ${card('执行记录',`<div class="row">
+        <button class="btn sm ${state.onlyFailed?'primary':''}" data-act="onlyfailed">${state.onlyFailed?'✓ 只看失败':'只看失败'}</button>
+        <button class="btn sm ${state.showDryRun?'primary':''}" data-act="showdry">${state.showDryRun?'✓ 含试跑':'含试跑'}</button>
+        <span class="muted small">点击任一行展开明细</span></div>`, timeline())}
+  </div>`;
+  }
+
+  if (p === 'catalog') return `<div class="grid g2">
+    ${state.editRow && state.editRow.kind.startsWith('rt') ? catalogEditor() : ''}
+    ${card('采集事件',`<div class="row"><span class="chip runtime">${state.rtCeids.length} 项 · 仅本次有效</span><button class="btn sm" data-act="rtceid:new">新增事件</button></div>`,
+      table(['CEID','名称','归属','绑定报告','来源','操作'], state.rtCeids.map(c=>[
+        `<span class="mono">${c.ceid}</span>`, esc(c.name), esc(c.unit),
+        `<span class="mono">${c.reports.join(', ')||'—'}</span>`,
+        c.src==='config'?'<span class="tag">来自配置</span>':c.src==='new'?'<span class="tag w">本次新增</span>':'<span class="tag w">本次修改</span>',
+        `<div class="row" style="gap:5px"><button class="btn sm live" data-act="rtceid:fire:${c.ceid}">触发</button><button class="btn sm" data-act="rtceid:edit:${c.ceid}">编辑</button><button class="btn sm" data-act="rtceid:del:${c.ceid}">删除</button></div>`])))}
+    ${card('报告',`<div class="row"><span class="chip runtime">${state.rtReports.length} 项 · 仅本次有效</span><button class="btn sm" data-act="rtrpt:new">新增报告</button></div>`,
+      table(['RPTID','归属','由哪些变量组成','来源','操作'], state.rtReports.map(r=>[
+        `<span class="mono">${r.rptid}</span>`, esc(r.unit),
+        `<span class="mono">${r.svids.join(', ')}</span>`,
+        r.src==='config'?'<span class="tag">来自配置</span>':r.src==='new'?'<span class="tag w">本次新增</span>':'<span class="tag w">本次修改</span>',
+        `<div class="row" style="gap:5px"><button class="btn sm" data-act="rtrpt:edit:${r.rptid}">编辑</button><button class="btn sm" data-act="rtrpt:del:${r.rptid}">删除</button></div>`])))}
+    <div class="card banner-runtime"><h3>这里的改动只对本次运行有效</h3>
+      <p class="small muted" style="margin:4px 0 0">新增、修改、删除都不会写进设备定义；点「重载」后按配置恢复。要长期生效，请到配置区「结构」里改报告定义与事件定义。</p>
+    </div>
+    ${card('删除前请注意','', `<p class="small muted" style="margin:0 0 8px">删掉一个事件后，引用它的编排计划本次运行内会失效，时间轴上记为「已跳过」。</p>
+      <p class="small muted" style="margin:0">删掉一个报告后，绑定它的事件会发出空报告体；建议先改绑定再删。</p>`)}
+  </div>`;
+
+  if (p === 'svids') return `<div class="grid g2">
+    ${card('实时状态变量','<span class="chip runtime">当前运行 · 仅本次有效</span>', table(
+      ['SVID','名称','类型','当前值','生效中的变化','手动设定','操作'],
+      [['1001','TEMP_PV','F4',`<b class="mono" style="color:var(--runtime)">${state.svid.toFixed(1)}</b>`,'<span class="tag r">脉冲到 250，保持 8 秒</span>','—','<button class="btn sm">设定</button>'],
+       ['1003','GAS_FLOW','F4','6.5','<span class="tag r">设为 6.5，20 秒回落</span>','—','<button class="btn sm">设定</button>'],
+       ['1101','CHAMBER_STATE','U4','60','<span class="tag r">增加 20</span>','—','<button class="btn sm">设定</button>'],
+       ['1004','ALARM_FLAG','U1','0','—','<span class="tag w">手动设为 0</span>','<button class="btn sm">取消设定</button>']]))}
+    ${card('逐变量预览','', sparkline())}
+    ${card('手动设定','', `
+      <div class="field"><label>SVID</label><div><input value="1001"></div></div>
+      <div class="field"><label>设定值</label><div><input value="200.0"></div></div>
+      <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn">取消设定</button><button class="btn live">应用设定</button></div>`)}
+  </div>`;
+
+  if (p === 'messages') return card('本设备收发报文','<button class="btn sm" data-act="export">导出记录</button>',
+    table(['时刻','方向','消息','W','正文','说明'],
+    [['20:06:12.101','发送','S6F11','W','<span class="mono">&lt;L[3] &lt;U4 0&gt; &lt;U4 2001&gt; …&gt;</span>','<span class="tag c">加工开始</span>'],
+     ['20:06:12.108','接收','S6F12','—','<span class="mono">&lt;B 0&gt;</span>','主机确认'],
+     ['20:06:10.002','接收','S1F3','W','<span class="mono">&lt;L[1] &lt;U4 1001&gt;&gt;</span>','主机采集'],
+     ['20:06:10.004','发送','S1F4','—','<span class="mono">&lt;F4 182.4&gt;</span>','<span class="tag r">读到变化后的值</span>'],
+     ['20:05:42.101','发送','S6F11','W','<span class="mono">&lt;L[3] &lt;U4 0&gt; &lt;U4 2002&gt; …&gt;</span>','<span class="tag c">加工结束</span>']]));
+
+  if (p === 'manual') {
+    const a = state.alarmForm;
+    return `<div class="grid g2">
+    ${card('报警置位 / 清除','<span class="chip runtime">仅本次运行有效</span>', `
+      <div class="field"><label>ALID</label><div><input class="mini" data-alarm="alid" value="${esc(a.alid)}" placeholder="如 7"></div></div>
+      <div class="field"><label>报警文本</label><div><input class="mini" data-alarm="text" value="${esc(a.text)}" placeholder="留空用默认文本"></div></div>
+      <div class="field"><label>类别</label><div><select class="mini" data-alarm="category">
+        ${ALARM_CATEGORIES.map(([n,label])=>`<option value="${n}" ${String(n)===String(a.category)?'selected':''}>${n} · ${label}</option>`).join('')}
+      </select></div></div>
+      <div class="row" style="margin-top:12px"><span class="spacer"></span>
+        <button class="btn" data-act="alarm:clear">清除报警</button>
+        <button class="btn live" data-act="alarm:set">置位报警</button></div>
+      <p class="small muted" style="margin:10px 0 0">置位发 S5F1（ALCD 最高位为 1），清除发同一 ALID 的 S5F1（最高位为 0）。配置里没有报警定义，报警只存在于本次运行。</p>`)}
+    ${card('当前活动报警',`<span class="chip ${state.alarms.length?'warn':'off'}">${state.alarms.length} 条</span>`,
+      state.alarms.length
+        ? table(['ALID','报警文本','类别','置位时刻','操作'], state.alarms.map(x=>[
+            `<span class="mono">${x.alid}</span>`, esc(x.text),
+            `<span class="tag w">${x.category} · ${alarmCategoryName(x.category)}</span>`,
+            `<span class="mono muted">${x.at}</span>`,
+            `<button class="btn sm" data-act="alarm:rowclear:${x.alid}">清除</button>`]))
+        : '<div class="empty" style="padding:22px"><div>当前没有活动报警。</div></div>')}
+    ${card('发送 SML 报文','<span class="chip runtime">仅本次运行有效</span>', `
+      <textarea class="sml-box" data-msml="1" spellcheck="false">${esc(state.manualSml)}</textarea>
+      <div class="row" style="margin-top:10px"><span class="small muted">带 W 的报文会等待主机回复</span><span class="spacer"></span>
+        <button class="btn live" data-act="send">发送</button></div>`)}
+    ${card('自定义消息压测','<span class="chip runtime">连续发送上面这条报文</span>', `
+      <div class="grid g2" style="gap:10px">
+        <div><label class="small muted">次数</label><input class="mini" data-mburst="count" value="${esc(state.manualBurstCount)}"></div>
+        <div><label class="small muted">间隔 ms（0 = 全速）</label><input class="mini" data-mburst="interval" value="${esc(state.manualBurstInterval)}"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><span class="spacer"></span><button class="btn live" data-act="burst">开始压测</button></div>
+      ${state.manualBurstResult?`<div class="code" style="margin-top:10px">${esc(state.manualBurstResult)}</div>`:'<p class="small muted" style="margin:10px 0 0">结果含成功 / 失败数与耗时 P50 / P95 / Max。</p>'}`)}
+    ${card('常用操作','', `<div class="row" style="gap:8px;flex-wrap:wrap">
+      <select class="mini" data-mceid="1" style="width:auto;min-width:150px">
+        ${state.rtCeids.map(c=>`<option value="${c.ceid}" ${String(c.ceid)===String(state.manualCeid)?'selected':''}>CEID ${c.ceid} · ${esc(c.name)}</option>`).join('')}
+      </select>
+      <button class="btn" data-act="trigger">触发事件</button>
+      <button class="btn" data-act="step">单步试跑计划</button>
+      <button class="btn" data-act="online">设备上线</button>
+      <button class="btn" data-act="offline">设备下线</button></div>
+      <p class="small muted" style="margin-top:12px">手动触发同样记入执行记录，计划一栏显示「手动」。这些操作只对当前运行有效。</p>`)}
+    ${card('终端消息','', table(['时刻','方向','文本'],
+      [['20:05:12','发送','CH1 OVER TEMP'],['20:04:31','接收','ACK FROM MES']]))}
+  </div>`;
+  }
+  return '';
+}
+
+/* 主机模拟：与设备模拟同构 —— 列表页 → 详情页（配置区 / 运行区） */
+const HOST_COMMANDS = {
+  s1f1: ['S1F1 W','<L[2] <A "MDLN"> <A "SOFTREV">>','S1F2'],
+  s1f3: ['S1F3 W','<L[1] <U4 1001>>','S1F4'],
+  s2f15:['S2F15 W','<L[1] <L[2] <U4 100> <F4 185.0>>>','S2F16'],
+  s2f33:['S2F33 W','<L[2] <U4 0> <L[1] <L[2] <U4 3001> <L[1] <U4 1001>>>>>','S2F34']
+};
+const curHost = () => state.hosts[state.selHost] || state.hosts[0];
+const hostById = (id) => state.hosts.find(h => h.id === id);
+function hostChip(phase){
+  return phaseChip(phase);
+}
+function hostCtrlChip(h){
+  const on = h.phase === 'CONNECTED';
+  return `<span class="chip ${on?'ok':'off'}">${on?h.control:'离线'}</span>`;
+}
+function hostPending(){
+  const h = curHost();
+  if (h.settingVer === h.runningVer) return '';
+  return `<div class="pending">
+    <span class="tag w">设置待生效</span>
+    <span class="txt">设置已更新到 <b>v${h.settingVer}</b>，当前生效仍是 <b>v${h.runningVer}</b>。</span>
+    <span class="spacer"></span>
+    <button class="btn sm" data-h="diff">查看改动</button>
+    <button class="btn sm primary" data-h="apply">使设置生效</button>
+  </div>`;
+}
+function hostHead(){
+  const h = curHost(), on = h.phase === 'CONNECTED';
+  const varLabel = h.varsSource==='auto'?'变量自动获取':h.varsSource==='manual'?'变量需手动填写':'变量清单未获取';
+  return `<div class="device-head">
+    <div class="dev-glyph">⇄</div>
+    <div class="dev-id">
+      <h1>${esc(h.id)} · ${esc(h.name)} ${hostChip(h.phase)} ${hostCtrlChip(h)}</h1>
+      <div class="sub">目标 ${esc(h.target)}:${h.port} · Device ID ${h.deviceId} · ${varLabel}${h.autoReconnect?' · 自动重连开':''}</div>
+      ${h.phase==='FAILED'?`<div class="sub" style="color:var(--danger)">连接失败：${esc(h.lastError||'目标未响应')} · ${h.autoReconnect?`已重试 ${h.retryCount} 次，${esc(h.nextRetryAt||'5 秒后')}再试`:'已停止重试'}</div>`:''}
+    </div>
+    <div class="head-metrics">
+      <div class="metric"><div class="k">设置版本</div><div class="v">v${h.settingVer}</div></div>
+      <div class="metric"><div class="k">当前生效</div><div class="v">${on?'v'+h.runningVer:'— 离线'}</div></div>
+      <div class="metric"><div class="k">目标地址</div><div class="v">${on?esc(h.target)+':'+h.port:'已释放'}</div></div>
+      <div class="metric"><div class="k">收发记录</div><div class="v">${h.messages.length} 条</div></div>
+    </div>
+    <div class="head-actions">
+      ${on ? `<button class="btn" data-h="disconnect">断开连接</button>`
+           : `<button class="btn live" data-h="connect">${h.phase==='FAILED'?'重新连接':'连接'}</button>`}
+      <button class="btn" data-h="apply">使设置生效</button>
+      <button class="btn danger" data-h="delete">⋯ 删除主机</button>
+    </div>
+  </div>`;
+}
+function hostZoneBar(){
+  return `<div class="zonebar">
+    <button class="zone-btn config ${state.hzone==='config'?'active':''}" data-hzone="config">
+      <span class="zi">▣</span><span>配置区<small>修改主机设置</small></span></button>
+    <button class="zone-btn runtime ${state.hzone==='runtime'?'active':''}" data-hzone="runtime">
+      <span class="zi">◉</span><span>运行区<small>收发与采集操作</small></span></button>
+  </div>
+  <div class="zone-note ${state.hzone}">
+    ${state.hzone==='config'
+      ? '▣ 修改后点「保存设置」，再点「使设置生效」。'
+      : '◉ 这里的操作只对本次连接有效，重新连接后按设置恢复。'}
+  </div>`;
+}
+function hostSubTabs(){
+  const pages = state.hzone === 'config' ? HOST_CONFIG_PAGES : HOST_RUNTIME_PAGES;
+  return `<div class="subtabs">${pages.map(([id,label]) =>
+    `<button class="subtab ${state.hpage[state.hzone]===id?'active':''}" data-hpage="${id}">${label}</button>`).join('')}</div>`;
+}
+function hostOffline(){
+  const h = curHost();
+  if (h.phase === 'FAILED') return `<div class="empty"><div><strong>连接失败，主机仍在列表里</strong>
+    <div>${esc(h.lastError||'目标未响应')}。${h.autoReconnect?`已重试 ${h.retryCount} 次，${esc(h.nextRetryAt||'5 秒后')}再试`:'已停下不再重试'}，其它主机不受影响；设置照常可以编辑。</div>
+    <div style="margin-top:12px"><button class="btn live" data-h="connect">重新连接</button>
+      <button class="btn" data-h="${h.autoReconnect?'auto:off':'auto:on'}" style="margin-left:8px">${h.autoReconnect?'关闭自动重连':'打开自动重连'}</button></div>
+  </div></div>`;
+  return `<div class="empty"><div><strong>连接已断开，主机仍在列表里</strong>
+    <div>目标地址已释放，设置照常可以编辑。</div>
+    <div style="margin-top:12px"><button class="btn live" data-h="connect">重新连接</button></div>
+  </div></div>`;
+}
+function hostSparkline(){
+  const w = 620, h = 118, pad = 12;
+  const vals = state.series, min = Math.min(...vals) - 8, max = Math.max(...vals) + 8;
+  const pts = vals.map((v,i) => [pad + i * (w - pad*2) / (vals.length - 1),
+    h - pad - (v - min) / (max - min || 1) * (h - pad*2)]);
+  const line = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const area = line + ` L ${pts[pts.length-1][0].toFixed(1)} ${h-pad} L ${pad} ${h-pad} Z`;
+  return `<div class="chart-wrap">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="采集变量曲线">
+      <rect x="0" y="0" width="${w}" height="${h}" fill="#fafbfe"/>
+      ${[0,1,2,3].map(i=>`<line x1="${pad}" y1="${pad+i*(h-pad*2)/3}" x2="${w-pad}" y2="${pad+i*(h-pad*2)/3}" stroke="#e8ecf5" stroke-width="1"/>`).join('')}
+      <path d="${area}" fill="#0f8a6a" opacity=".08"/>
+      <path d="${line}" fill="none" stroke="#0f8a6a" stroke-width="2" stroke-linejoin="round"/>
+      <text x="${w-pad}" y="${h-2}" text-anchor="end" font-size="9" fill="#78839a">时间 →</text>
+    </svg>
+    <div class="chart-legend"><span><i class="legend-swatch" style="background:#0f8a6a"></i>SVID 1001 · TEMP_PV (C)</span>
+      <span>最近 <b class="mono">${state.svid.toFixed(1)}</b> · 范围 168.0–250.0</span>
+      <span>最小 / 最大 / 平均 三条带</span></div>
+  </div>`;
+}
+function svidGrid(h, selected){
+  if (!h.vars.length) return `<div class="empty" style="padding:20px"><div>还没有变量清单。点上方「从目标读取变量」，或切到手动填写。</div></div>`;
+  return `<div class="svid-grid">${h.vars.map(v =>
+    `<label class="svid-opt"><input type="checkbox" data-hsvid="${v.svid}" ${selected.includes(v.svid)?'checked':''}>
+      <span class="mono">${v.svid}</span><span>${esc(v.name||'（未命名）')}</span><span class="muted small">${esc(v.unit||'—')}</span></label>`).join('')}</div>`;
+}
+/* 变量目录：名称与单位可自动读取，解码类型只能由使用者声明 */
+function varCatalogCard(h){
+  const undeclared = h.vars.filter(v=>!v.type).length;
+  return card('变量目录',`<div class="row">
+      <span class="chip ${h.varsSource==='auto'?'ok':h.varsSource==='manual'?'config':'off'}">${h.varsSource==='auto'?'从目标读取':h.varsSource==='manual'?'手动填写':'尚未获取'}</span>
+      <button class="btn sm" data-h="vars:refresh" ${h.phase==='CONNECTED'?'':'disabled'}>从目标读取变量</button>
+      <button class="btn sm" data-h="vars:manual">手动填写</button></div>`,
+    (h.vars.length
+      ? table(['SVID','名称','单位','解码类型','操作'], h.vars.map(v=>[
+          `<span class="mono">${v.svid}</span>`,
+          `<input class="mini" data-hvar="name:${v.svid}" value="${esc(v.name)}">`,
+          `<input class="mini" data-hvar="unit:${v.svid}" value="${esc(v.unit)}">`,
+          `<select class="mini" data-hvar="type:${v.svid}">${VAR_TYPES.map(([t,label])=>`<option value="${t}" ${t===v.type?'selected':''}>${label}</option>`).join('')}</select>`,
+          `<button class="btn sm" data-h="vars:del:${v.svid}">移除</button>`]))
+      : '<div class="empty" style="padding:20px"><div>目录为空。连接后点「从目标读取变量」，或直接手动填写。</div></div>')
+    + `<div class="row" style="margin-top:10px"><button class="btn sm" data-h="vars:add">＋ 添加变量</button><span class="spacer"></span>
+        <span class="small muted">${undeclared?`<b style="color:var(--warn)">${undeclared} 个变量未声明类型</b>，按数值解析`:'全部变量已声明类型'}</span></div>
+       <p class="small muted" style="margin:8px 0 0">名称与单位可以从目标读回来；<b>解码类型读不回来</b>，需要在这里声明。未声明时按数值兜底解析，并在本实例的收发记录里提示一次。</p>`);
+}
+function buildS2F23(h){
+  if (h.manual) return `S2F23 W\n<L[6]\n  <U4 ${h.trace.trid}>\n  <A "000001">\n  <U4 ${h.trace.totsmp}>\n  <U4 ${h.trace.repgsz}>\n  <L[2] <U4 1001> <U4 1003>>\n>`;
+  const list = h.trace.svids.map(id=>`<U4 ${id}>`).join(' ');
+  return `S2F23 W\n<L[6]\n  <U4 ${h.trace.trid}>\n  <A "000001">\n  <U4 ${h.trace.totsmp}>\n  <U4 ${h.trace.repgsz}>\n  <L[${h.trace.svids.length}] ${list}>\n>`;
+}
+function allHostMessages(){
+  const rows = [];
+  state.hosts.forEach(h => h.messages.forEach(m => rows.push({...m, host:h.id, cat:catOf(m.sf)})));
+  return rows.sort((a,b)=> b.at.localeCompare(a.at));
+}
+function filteredHostMessages(){
+  const f = state.hFilter;
+  return allHostMessages().filter(m => {
+    if (f.host && m.host !== f.host) return false;
+    if (f.dir === 'sent' && m.dir !== '发送') return false;
+    if (f.dir === 'received' && m.dir !== '接收') return false;
+    if (f.sf && !m.sf.replace(/\s|W/g,'').toLowerCase().startsWith(f.sf.replace(/\s/g,'').toLowerCase())) return false;
+    if (f.kw && !m.body.toLowerCase().includes(f.kw.toLowerCase())) return false;
+    if (state.hCats[m.cat] === false) return false;
+    return true;
+  });
+}
+function msgListHtml(){
+  const rows = filteredHostMessages();
+  if (!rows.length) return '<div class="empty" style="padding:24px"><div>当前条件下没有报文，放宽条件或点「清空过滤」。</div></div>';
+  return `<div class="msg-list">${rows.map(m => `<div class="msg-row">
+      <span class="mono muted">${m.at}</span>
+      <span class="mono muted">${esc(m.host)}</span>
+      ${m.dir==='发送'?'<span class="tag c">发 → 设备</span>':'<span class="tag r">收 ← 设备</span>'}
+      <span class="mono">${esc(m.sf)}</span>
+      <span class="body" title="${esc(m.body)}">${esc(m.body)}</span>
+    </div>`).join('')}</div>`;
+}
+
+/* 主机列表页：与设备工作台同构 */
+function createForm(){
+  if (!state.creating) return '';
+  const n = state.newHost;
+  return `<div class="create-form">
+    <div class="card-head"><h3>新建主机</h3><span class="spacer"></span>
+      <button class="btn sm ghost" data-h="cancelnew">取消</button></div>
+    <div class="create-grid">
+      <div><label>名称</label><input data-hnew="name" value="${esc(n.name)}" placeholder="例如 产线 B 主机"></div>
+      <div><label>目标地址</label><input data-hnew="target" value="${esc(n.target)}" placeholder="任意设备地址"></div>
+      <div><label>端口</label><input data-hnew="port" value="${esc(n.port)}"></div>
+      <div><label>Device ID</label><input data-hnew="deviceId" value="${esc(n.deviceId)}"></div>
+    </div>
+    <p class="host-note">目标可以填任意设备或第三方模拟器地址；与设备列表无关。可连续新建多台。</p>
+    <div class="row" style="margin-top:12px"><span class="spacer"></span>
+      <button class="btn" data-h="createhost">仅创建</button>
+      <button class="btn host" data-h="createconnect">创建并连接</button></div>
+  </div>`;
+}
+function hostListView(){
+  const on = state.hosts.filter(h=>h.phase==='CONNECTED').length;
+  const failed = state.hosts.filter(h=>h.phase==='FAILED').length;
+  const msgs = state.hosts.reduce((n,h)=>n+h.messages.length,0);
+  const kw = state.hsearch.trim().toLowerCase();
+  const rows = state.hosts.map((h,i)=>({h,i})).filter(({h}) =>
+    !kw || (h.id+' '+h.name+' '+h.target).toLowerCase().includes(kw));
+  return `<h2 class="page-title">主机模拟</h2>
+  <p class="page-desc">每台主机独立运行，可同时开启多台，连接任意设备地址。断开只关连接，主机仍留在列表里；连接失败默认停下，打开自动重连才会按间隔重试。</p>
+  <div class="grid g4">
+    <div class="card kpi"><div class="k">主机</div><div class="v">${state.hosts.length}</div><div class="d">台 · 可继续新建</div></div>
+    <div class="card kpi"><div class="k">已连接</div><div class="v" style="color:var(--runtime)">${on}</div><div class="d">各自独立</div></div>
+    <div class="card kpi"><div class="k">连接失败</div><div class="v" style="color:var(--danger)">${failed}</div><div class="d">${state.hosts.some(h=>h.phase==='FAILED'&&h.autoReconnect)?'有实例按间隔自动重试':'已停止重试'}</div></div>
+    <div class="card kpi"><div class="k">已断开</div><div class="v" style="color:var(--muted)">${state.hosts.length-on-failed}</div><div class="d">可一键重连</div></div>
+  </div>
+  <div class="row" style="margin:14px 0 12px"><span class="chip host">与设备模拟相互独立</span>
+    <span class="chip runtime">收发记录 ${msgs} 条</span><span class="spacer"></span>
+    <button class="btn sm" data-h="list:import">导入</button>
+    <button class="btn sm" data-h="list:export">导出</button>
+    <button class="btn host" data-h="newhost">＋ 新建主机</button></div>
+  ${createForm()}
+  <div class="card"><div class="card-head"><h3>主机与连接</h3><span class="spacer"></span>
+    <input class="mini" style="width:210px" data-hsearch="1" value="${esc(state.hsearch)}" placeholder="搜索主机名称 / 目标地址"></div>
+    ${table(['主机','目标','端口','Device ID','连接','最后错误','采集','收发','操作'], rows.map(({h,i})=>[
+      `<b>${esc(h.id)}</b> <span class="muted small">${esc(h.name)}</span>`,
+      `<span class="mono">${esc(h.target)}</span>`, `<span class="mono">${h.port}</span>`,
+      `<span class="mono">${h.deviceId}</span>`,
+      hostChip(h.phase),
+      h.lastError?`<span class="tag d">${esc(h.lastError)}</span>`:'<span class="muted">—</span>',
+      h.collectorOn?'<span class="tag g">采集中</span>':'<span class="tag">未采集</span>',
+      `<span class="mono">${h.messages.length} 条</span>`,
+      `<div class="row" style="gap:5px"><button class="btn sm" data-h="detail:${i}">详情</button>`+
+      (h.phase==='CONNECTED'
+        ? `<button class="btn sm" data-h="rowdisconnect:${i}">断开</button>`
+        : `<button class="btn sm live" data-h="rowconnect:${i}">连接</button>`)+
+      `<button class="btn sm" data-h="rowdelete:${i}">⋯</button></div>`
+    ]))}
+    <p class="small muted" style="margin:10px 0 0">多台主机可以指向同一地址：先连上的保持「已连接」，后来者显示「连接失败 · 目标已有主机连接」，两者互不影响。</p>
+  </div>`;
+}
+
+/* 主机详情 · 配置区 */
+function hostConfigContent(){
+  const h = curHost(), p = state.hpage.config;
+  if (p === 'overview') return `<div class="grid g2">
+    ${card('主机设置',`<span class="chip config">版本 v${h.settingVer} · 已保存</span>`, `
+      <div class="field"><label>主机名称</label><div><input value="${esc(h.name)}"></div></div>
+      <div class="field"><label>备注</label><div><input value="${esc(h.note)}"></div></div>
+      <div class="field"><label>自动连接</label><div><select><option ${h.autoConnect?'selected':''}>是 · 启动时自动连接</option><option ${h.autoConnect?'':'selected'}>否 · 手动连接</option></select></div></div>
+      <div class="field"><label>变量目录</label><div>${h.varsSource==='auto'?`从目标读取 · ${h.vars.length} 个`:h.varsSource==='manual'?`手动填写 · ${h.vars.length} 个`:'尚未获取'} <button class="btn sm" data-h="goto:collect">去设置</button></div></div>
+      <div class="field"><label>选用为当前主机</label><div>${state.selHost===state.hosts.indexOf(h)?'<span class="tag g">已选用</span>':'<button class="btn sm" data-h="select">选用</button>'}</div></div>
+      <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" data-h="save">保存设置</button></div>`)}
+    ${card('设置内容','', table(['设置段落','条目数'],
+      [['连接','1 组'],['报文模板',HOST_PRESETS.length+' 条'],['Trace 参数','4 项'],
+       ['Trace 采集变量',h.trace.svids.length+' 个'],['周期采集',h.collector.svids.length+' 个变量']]))}
+    ${card('其它主机','', table(['主机','连接','操作'], state.hosts.filter(x=>x.id!==h.id).map(x=>[
+      esc(x.id), hostChip(x.phase), `<button class="btn sm" data-h="goto:${state.hosts.indexOf(x)}">进入详情</button>`])))}
+    ${card('最近改动','', table(['版本','时间','操作者','说明'],
+      [['v'+h.settingVer,'20:04','我','调整采集变量'],['v2','19:40','我','修改目标端口'],['v1','18:02','导入','新建主机']]))}
+  </div>`;
+
+  if (p === 'connection') return `<div class="grid g2">
+    ${card('连接设置','', `
+      <div class="field"><label>目标地址</label><div><input value="${esc(h.target)}"></div></div>
+      <div class="field"><label>端口</label><div><input value="${h.port}"></div></div>
+      <div class="field"><label>Device ID</label><div><input value="${h.deviceId}"></div></div>
+      <div class="field"><label>连接超时 T3 / T5 / T6</label><div><input value="45 / 10 / 5 (秒)"></div></div>
+      <div class="field"><label>自动重连</label><div><select data-hauto="1">
+        <option value="1" ${h.autoReconnect?'selected':''}>是 · 失败后按间隔重试</option>
+        <option value="0" ${h.autoReconnect?'':'selected'}>否 · 停在「连接失败」等我处理</option></select></div></div>
+      <p class="small muted" style="margin:10px 0 0">关闭自动重连时，连接失败就停在「连接失败」，不会自己再试；只有点「连接」才会重连。打开后从 5 秒起逐次加长间隔，最长 60 秒。</p>
+      <div class="row" style="margin-top:14px"><span class="chip config">保存后需重新连接</span><span class="spacer"></span>
+        <button class="btn" data-h="validate">校验</button><button class="btn primary" data-h="save">保存设置</button></div>`)}
+    ${card('当前连接','', table(['项目','当前值'],
+      [['状态',phaseChip(h.phase)],['目标地址',esc(h.target)+':'+h.port],
+       ['连接方式','主动连接 · 主机角色'],['最近连接时间',h.connectedAt],
+       ['已重试次数',h.autoReconnect?`<span class="mono">${h.retryCount}</span>`:'<span class="muted">不自动重试</span>'],
+       ['下次重试',h.autoReconnect&&h.phase==='FAILED'?`<span class="mono">${esc(h.nextRetryAt||'5 秒后')}</span>`:'—'],
+       ['最后错误',h.lastError?'<span class="tag d">'+esc(h.lastError)+'</span>':'—']]))}
+    ${h.phase==='FAILED'?`<div class="card banner-runtime"><h3>${h.autoReconnect?'连接失败，等待自动重试':'连接失败，已停下'}</h3>
+      <p class="small muted" style="margin:4px 0 10px">${esc(h.lastError||'目标未响应')}。${h.autoReconnect?`已重试 ${h.retryCount} 次，${esc(h.nextRetryAt||'5 秒后')}再试，间隔逐次加长到 60 秒；其它主机不受影响。`:'这台主机不会再自己重试，其它主机不受影响。'}</p>
+      <div class="row"><button class="btn live" data-h="connect">重新连接</button>
+        ${h.autoReconnect?'<button class="btn" data-h="auto:off">关闭自动重连</button>':'<button class="btn" data-h="auto:on">打开自动重连</button>'}</div></div>`:''}
+    ${card('连接检查','', table(['检查项','结果'],
+      [['地址格式','通过'],['端口可用','通过'],['编号重复','无'],['上次检查','20:04']]))}
+  </div>`;
+
+  if (p === 'presets') return `<div class="grid g2">
+    ${card('快捷报文','<span class="chip config">'+HOST_PRESETS.filter(x=>x.q).length+' 条</span>',
+      `<div class="preset-row">${HOST_PRESETS.filter(x=>x.q).map(x=>
+        `<button class="preset-btn" title="${esc(x.d)}" data-h="preset:${HOST_PRESETS.indexOf(x)}">${esc(x.l)}</button>`).join('')}</div>
+       <p class="small muted" style="margin:0">选中后填入运行区「消息发送」，可继续修改再发送。</p>`)}
+    ${card('全部报文模板','<span class="chip config">'+HOST_PRESETS.length+' 条 · '+new Set(HOST_PRESETS.map(x=>x.g)).size+' 组</span>',
+      table(['分组','报文','正常回复','说明','操作'], HOST_PRESETS.map(x=>[
+        `<span class="tag c">${esc(x.g)}</span>`, esc(x.l), `<span class="mono">${esc(x.r)}</span>`,
+        `<span class="small">${esc(x.d)}</span>`,
+        `<button class="btn sm" data-h="preset:${HOST_PRESETS.indexOf(x)}">填入</button>`])))}
+    ${card('模板说明','', `<p class="small muted" style="margin:0 0 8px">模板只是报文草稿，不会自动发送；填入后仍可修改 SVID、CEID 与时间。带 W 的报文会等待设备回复。</p>
+      <p class="small muted" style="margin:0">分组：建链与控制 / 查询 / 报告与事件 / 采集与终端。</p>`)}
+  </div>`;
+
+  if (p === 'trace') return `<div class="grid g2">
+    ${h.manual
+      ? card('Trace 报文（手动填写）','', `<div class="field" style="grid-template-columns:1fr">
+          <textarea class="sml-box" data-htrace="1" rows="8">${esc(buildS2F23(h))}</textarea></div>
+          <p class="small muted" style="margin:8px 0 0">目标未提供变量清单，TRID、采样周期、总样本数、每条样本数和变量编号都要在报文里填写。</p>`)
+      : card('Trace 参数','', `
+          <div class="field"><label>TRID</label><div><input value="${h.trace.trid}"></div></div>
+          <div class="field"><label>采样周期 ms</label><div><input value="${h.trace.dsper}"></div></div>
+          <div class="field"><label>总样本数</label><div><input value="${h.trace.totsmp}"></div></div>
+          <div class="field"><label>每条样本数</label><div><input value="${h.trace.repgsz}"></div></div>
+          <p class="small muted" style="margin:10px 0 0">首帧预计约 ${Math.max(1,Math.round(h.trace.dsper/1000))*h.trace.repgsz} 秒；周期会收敛到整秒、最小 1 秒。</p>`)}
+    ${h.manual
+      ? card('填写提示','', `<div class="field"><label>采样周期格式</label><div>hhmmss 六位数字（整秒）</div></div>
+          <div class="field"><label>提前终止</label><div>总样本数填 0</div></div>
+          <div class="field"><label>生效方式</label><div>保存后到运行区「Trace 采集」发送</div></div>`)
+      : card('采集变量',`<div class="row"><span class="chip config">已选 ${h.trace.svids.length} 个</span><button class="btn sm" data-h="vars:refresh" ${h.phase==='CONNECTED'?'':'disabled'}>从目标读取变量</button></div>`,
+          svidGrid(h, h.trace.svids) + `<p class="small muted" style="margin:6px 0 0">数量不限；实际上限由目标设备决定，超出的编号会被拒绝。</p>`)}
+    ${varCatalogCard(h)}
+    ${card('保存设置','', `<p class="small muted" style="margin:0 0 12px">Trace 设置属于主机自己的设置，保存后需到运行区生成并发送 S2F23 才会开始采集。</p>
+      <div class="row"><span class="chip config">保存后需重新连接</span><span class="spacer"></span>
+        <button class="btn primary" data-h="save">保存设置</button></div>`)}
+  </div>`;
+
+  if (p === 'collect') return `<div class="grid g2">
+    ${card('采集设置','', `
+      <div class="field"><label>启动 CEID</label><div><input value="${esc(h.collector.startCeid)}" placeholder="如 2001"></div></div>
+      <div class="field"><label>停止 CEID</label><div><input value="${esc(h.collector.stopCeid)}" placeholder="如 2002"></div></div>
+      <div class="field"><label>周期 ms</label><div><input value="${esc(h.collector.intervalMs)}"></div></div>
+      <p class="small muted" style="margin:10px 0 0">收到启动 CEID 的事件即自动开始拉取，收到停止 CEID 停止；也可以在运行区手动启停。</p>`)}
+    ${h.manual
+      ? card('采集变量（手动填写）','', `<div class="field" style="grid-template-columns:1fr">
+          <div><input class="mini" data-hsvids="1" value="${esc(h.collector.svids.join(', '))}" placeholder="如 1001, 1003, 1005"></div></div>
+          <p class="small muted" style="margin:8px 0 0">目标未提供变量清单，只能按编号填写；目标按收到的列表回复。已填写 ${h.collector.svids.length} 个。</p>`)
+      : card('采集变量',`<div class="row"><span class="chip config">已选 ${h.collector.svids.length} 个</span><button class="btn sm" data-h="vars:refresh" ${h.phase==='CONNECTED'?'':'disabled'}>从目标读取变量</button></div>`,
+          svidGrid(h, h.collector.svids) + `<p class="small muted" style="margin:6px 0 0">数量不限，勾选后可在运行区下发配置。</p>`)}
+    ${varCatalogCard(h)}
+    ${card('保存设置','', `<p class="small muted" style="margin:0 0 12px">设置保存后由运行区「下发配置」发送给当前主机；每台主机的采集设置互不影响。</p>
+      <div class="row"><span class="spacer"></span><button class="btn primary" data-h="save">保存设置</button></div>`)}
+  </div>`;
+  return '';
+}
+
+/* 主机详情 · 运行区 */
+function hostRuntimeContent(){
+  const h = curHost(), on = h.phase === 'CONNECTED', p = state.hpage.runtime;
+  if (p !== 'status' && !on) return hostOffline();
+
+  if (p === 'status') return `<div class="grid g4">
+    ${card('连接状态','', `<div class="kpi"><div class="v" style="font-size:16px;color:${on?'var(--runtime)':h.phase==='FAILED'?'var(--danger)':'var(--muted)'}">${phaseLabel(h.phase)}</div><div class="k">链路</div><div class="d">${on?esc(h.target)+':'+h.port:'目标地址已释放，主机仍保留'}</div></div>`)}
+    ${card('控制状态','', `<div class="kpi"><div class="v" style="font-size:16px">${on?h.control:'离线'}</div><div class="k">控制状态</div></div>`)}
+    ${card('每分钟报文','', `<div class="kpi"><div class="v">${on?42:0}</div><div class="k">本台主机</div></div>`)}
+    ${card('采集状态','', `<div class="kpi"><div class="v" style="font-size:16px">${h.collectorOn?'采集中':'未采集'}</div><div class="k">S1F3 周期采集</div></div>`)}
+  </div>
+  ${h.phase==='FAILED'?`<div class="pending" style="margin-top:12px"><span class="tag d">连接失败</span>
+    <span class="txt">${esc(h.lastError||'目标未响应')}。${h.autoReconnect?`已重试 ${h.retryCount} 次，${esc(h.nextRetryAt||'5 秒后')}再试`:'已停下不再重试'}，其它主机不受影响。</span><span class="spacer"></span>
+    <button class="btn sm" data-h="${h.autoReconnect?'auto:off':'auto:on'}">${h.autoReconnect?'关闭自动重连':'打开自动重连'}</button>
+    <button class="btn sm primary" data-h="connect">重新连接</button></div>`:''}
+  <div class="grid g2" style="margin-top:12px">
+    ${card('最近连接记录','', table(['时刻','变化','说明'],
+      h.phase==='FAILED'
+        ? [[h.connectedAt==='—'?'20:06:40':h.connectedAt,'→ 连接失败',esc(h.lastError||'目标未响应')],
+           ['20:06:35','→ 连接中','点击「连接」'],['20:04:00','→ 已断开','主机创建完成，未连接']]
+        : [['20:06:12','→ 已连接','目标接受连接，状态在线'],['20:05:40','→ 已断开','点击「断开连接」，释放目标地址'],
+           ['20:05:41','→ 已连接','点击「重新连接」，恢复收发'],['20:04:00','→ 已断开','主机启动完成']]))}
+    ${card('设置状态','', `
+      <div class="field"><label>当前生效版本</label><div class="mono">${on?'v'+h.runningVer:'—'}</div></div>
+      <div class="field"><label>最新设置版本</label><div class="mono">v${h.settingVer}</div></div>
+      <div class="field"><label>状态</label><div>${h.settingVer!==h.runningVer?'<span class="tag w">设置待生效</span>':'<span class="tag g">一致</span>'}</div></div>
+      <div class="field"><label>自动重连</label><div>${h.autoReconnect?`<span class="tag g">开</span> <span class="muted small">已重试 ${h.retryCount} 次</span>`:'<span class="tag">关 · 失败即停</span>'}</div></div>
+      <p class="small muted" style="margin:8px 0 10px">重新连接会按最新设置恢复，手动开始或停止的采集会重置。</p>
+      <div class="row"><button class="btn sm" data-h="select">选用为当前主机</button>
+        <button class="btn sm" data-h="collect:${h.collectorOn?'stop':'start'}">${h.collectorOn?'停止采集':'开始采集'}</button></div>`)}
+  </div>`;
+
+  if (p === 'messages') {
+    const open = state.hosts.filter(x=>x.phase==='CONNECTED');
+    const picked = state.hSendTargets.filter(id=>hostById(id) && hostById(id).phase==='CONNECTED');
+    const quick = HOST_PRESETS.filter(x=>x.q);
+    const groups = [...new Set(HOST_PRESETS.map(x=>x.g))];
+    return `<div class="grid g2">
+      ${card('发送到主机',`<span class="chip runtime">已选 ${picked.length} / ${open.length} 台</span>`, `
+        <div class="row" style="margin-bottom:8px"><span class="spacer"></span>
+          <button class="btn sm" data-h="sendall">全选</button><button class="btn sm" data-h="sendnone">清空</button></div>
+        ${open.length?open.map(x=>`<label class="svid-opt" style="margin-bottom:6px">
+          <input type="checkbox" data-hsend="${esc(x.id)}" ${state.hSendTargets.includes(x.id)?'checked':''}>
+          <span class="mono">${esc(x.id)}</span><span class="muted small">${esc(x.target)}:${x.port}</span></label>`).join('')
+          :'<div class="empty" style="padding:18px"><div>还没有已连接的主机。</div></div>'}
+        <p class="small muted" style="margin:8px 0 0">同一条报文会依次发给选中的每台主机。</p>`)}
+      ${card('发送消息','<span class="chip runtime">当前运行 · 仅本次连接有效</span>', `
+        <div class="preset-row">${quick.map(x=>
+          `<button class="preset-btn" title="${esc(x.d)}" data-h="preset:${HOST_PRESETS.indexOf(x)}">${esc(x.l)}</button>`).join('')}</div>
+        <div class="row" style="margin-bottom:9px"><select class="mini" data-hsel="preset" style="width:auto;min-width:190px">
+          <option value="">更多预设…</option>
+          ${groups.map(g=>`<optgroup label="${esc(g)}">${HOST_PRESETS.map((x,i)=>x.g===g?`<option value="${i}">${esc(x.l)} · 回 ${esc(x.r)}</option>`:'').join('')}</optgroup>`).join('')}
+        </select><span class="small muted">共 ${HOST_PRESETS.length} 条模板</span></div>
+        <textarea class="sml-box" data-hsml="1" spellcheck="false">${esc(h.sml)}</textarea>
+        <p class="small muted" style="margin:8px 0 10px">带 W 的报文会等待设备回复；模板填入后仍可修改 SVID、CEID 与时间再发送。</p>
+        <div class="row"><span class="spacer"></span><button class="btn live" data-h="send">发送到 ${picked.length} 台</button></div>`)}
+      ${card('常用命令','', `<div class="row" style="gap:7px">
+          <button class="btn sm" data-h="cmd:s1f1">S1F1 握手</button>
+          <button class="btn sm" data-h="cmd:s1f3">S1F3 读变量</button>
+          <button class="btn sm" data-h="cmd:s2f15">S2F15 写常量</button>
+          <button class="btn sm" data-h="cmd:s2f33">S2F33 定义报告</button></div>
+        <p class="small muted" style="margin:10px 0 0">点击直接以当前主机身份发出，收发明细在「收发记录」里。</p>`)}
+      ${card('发送结果','<button class="btn sm" data-h="results:clear">清空</button>',
+        state.hSendResults.length
+          ? table(['主机','结果','耗时 / 原因'], state.hSendResults.map(r=>[
+              `<span class="mono">${esc(r.id)}</span>`,`<span class="tag g">${esc(r.result)}</span>`,esc(r.detail)]))
+          : '<div class="empty" style="padding:22px"><div>还没有发送结果。</div></div>')}
+      ${card('压测发送','<span class="chip runtime">服务端循环发送</span>', `
+        <div class="grid g2" style="gap:10px">
+          <div><label class="small muted">次数</label><input class="mini" data-hburst="count" value="${esc(state.hBurstCount)}"></div>
+          <div><label class="small muted">间隔 ms（0 = 全速）</label><input class="mini" data-hburst="interval" value="${esc(state.hBurstInterval)}"></div>
+        </div>
+        <p class="small muted" style="margin:9px 0">同一条报文连续发送，带 W 的逐条等待回复，最长 5 分钟自动收尾。</p>
+        <div class="row"><span class="spacer"></span><button class="btn live" data-h="burst">压测发送（${picked.length} 台）</button></div>`)}
+      ${card('压测结果','',
+        state.hBurst && state.hBurst.length
+          ? table(['主机','结果','耗时 / 分位'], state.hBurst.map(r=>[
+              `<span class="mono">${esc(r.id)}</span>`,`<span class="tag g">${esc(r.result)}</span>`,`<span class="small">${esc(r.detail)}</span>`]))
+          : '<div class="empty" style="padding:22px"><div>还没有压测结果。</div></div>')}
+    </div>`;
+  }
+
+  if (p === 'trace') {
+    const btn = h.control === 'ONLINE'
+      ? `<button class="btn sm" data-h="offline">发送 S1F15 下线</button>`
+      : `<button class="btn sm" data-h="online">发送 S1F17 上线</button>`;
+    return `<div class="grid g2">
+      ${card('Trace 采集',`<div class="row">${h.manual?'':btn}<span class="chip ${h.control==='ONLINE'?'ok':'warn'}">${h.control}</span></div>`, `
+        ${h.control!=='ONLINE'&&!h.manual?'<div class="pending" style="margin:0 0 10px"><span class="txt">设备还没上线：S2F23 会被接受，但 S6F1 暂时不会上报。点右上角「发送 S1F17 上线」。</span></div>':''}
+        <div class="field"><label>TRID</label><div class="mono">${h.trace.trid}</div></div>
+        <div class="field"><label>采样周期</label><div class="mono">${h.trace.dsper} ms</div></div>
+        <div class="field"><label>总样本数 / 每条样本数</label><div class="mono">${h.trace.totsmp} / ${h.trace.repgsz}</div></div>
+        <div class="field"><label>采集变量</label><div class="mono">${h.manual?'按报文填写':h.trace.svids.join(', ')}</div></div>
+        <div class="row" style="margin-top:12px"><span class="spacer"></span>
+          <button class="btn" data-h="trace:gen">生成 S2F23</button>
+          <button class="btn live" data-h="trace:send">生成并发送 S2F23</button></div>`)}
+      ${card('生成的 S2F23','<button class="btn sm" data-h="trace:clear">收起</button>',
+        state.hTraceText?`<div class="code">${esc(state.hTraceText)}</div>`
+          :'<div class="empty" style="padding:22px"><div>点「生成 S2F23」查看将要发出的报文。</div></div>')}
+      ${card('发送结果','', state.hTraceResult
+        ? `<div class="code">${esc(state.hTraceResult)}</div>`
+        : '<div class="empty" style="padding:22px"><div>还没有发送结果。</div></div>')}
+      ${card('采集说明','', `<p class="small muted" style="margin:0 0 8px">采样周期按整秒生效、最小 1 秒；总样本数填 0 可提前终止。</p>
+        <p class="small muted" style="margin:0">上报的 S6F1 会出现在「收发记录」里；配置只属于当前主机。</p>`)}
+    </div>`;
+  }
+
+  if (p === 'collect') {
+    const st = h.collectorOn?'采集中':(h.collector.svids.length?'已配置':'未配置');
+    return `<div class="grid g2">
+      ${card('采集控制',`<span class="chip ${h.collectorOn?'ok':'off'}">${st} · ${h.samples} 点</span>`, `
+        <div class="row" style="gap:7px">
+          <button class="btn sm live" data-h="collect:save">下发配置</button>
+          <button class="btn sm" data-h="collect:start" ${h.collectorOn?'disabled':''}>手动开始</button>
+          <button class="btn sm" data-h="collect:stop" ${h.collectorOn?'':'disabled'}>手动停止</button>
+          <span class="spacer"></span>
+          <button class="btn sm" data-h="collect:csv">导出 CSV</button>
+          <button class="btn sm" data-h="collect:import">导入 CSV</button>
+          ${state.hImported?`<button class="btn sm ghost" data-h="collect:exit">退出导入视图</button>`:''}
+        </div>
+        <p class="small muted" style="margin:10px 0 0">收到「启动 CEID」的事件即自动开始采集；手动启停只对本次连接有效。</p>
+        ${state.hImported?`<div class="pending" style="margin-top:10px"><span class="txt">正在查看导入文件 <b>${esc(state.hImported)}</b>，只在本页显示。</span></div>`:''}`)}
+      ${card('采集统计','', `<div class="grid g3" style="gap:8px">
+        <div class="map-item"><div class="t">${h.samples}</div><div class="d">采样点</div></div>
+        <div class="map-item"><div class="t">${h.decodeErrors}</div><div class="d">解码错误</div></div>
+        <div class="map-item"><div class="t">${h.lastRttMs===null?'—':h.lastRttMs+' ms'}</div><div class="d">最近往返耗时</div></div>
+      </div>
+      <p class="small muted" style="margin:10px 0 0">最近值 182.4 · 范围 168.0–250.0 · 最小 / 最大 / 平均 三条带</p>`)}
+      ${card(state.hImported?'导入视图 · SVID 1001':'采集曲线 · SVID 1001','', hostSparkline())}
+      ${card('手动发送一条 S1F3','<span class="small muted">整报文 · 一次性</span>', `
+        <p class="small muted" style="margin:0 0 8px">不进周期采集，只发一次并显示回复：用来确认对端在不在、变量编号对不对。</p>
+        <textarea class="sml-box" data-hmanual="1" rows="4">${esc(state.hManualSml)}</textarea>
+        <div class="row" style="margin-top:9px"><span class="spacer"></span><button class="btn live" data-h="manual:s1f3">发送 S1F3</button></div>
+        ${state.hManualReply?`<div class="code" style="margin-top:9px">${esc(state.hManualReply)}</div>`:''}`)}
+    </div>`;
+  }
+
+  if (p === 'monitor') {
+    const f = state.hFilter, rows = filteredHostMessages(), all = allHostMessages();
+    const sent = all.filter(m=>m.dir==='发送').length, recv = all.length - sent;
+    return `<div class="grid" style="gap:12px">
+      ${card('过滤','<div class="row"><button class="btn sm" data-h="filter:clear">清空过滤</button><button class="btn sm" data-h="filter:export">导出过滤结果</button></div>', `
+        <div class="filter-bar">
+          <div><label>主机</label><select class="mini" data-hfilter="host">
+            <option value="">全部主机（${state.hosts.length}）</option>
+            ${state.hosts.map(x=>`<option value="${esc(x.id)}" ${f.host===x.id?'selected':''}>${esc(x.id)} · ${esc(x.target)}</option>`).join('')}</select></div>
+          <div><label>方向</label><select class="mini" data-hfilter="dir">
+            <option value="all" ${f.dir==='all'?'selected':''}>收发都看</option>
+            <option value="sent" ${f.dir==='sent'?'selected':''}>只看主机发出</option>
+            <option value="received" ${f.dir==='received'?'selected':''}>只看设备发来</option></select></div>
+          <div><label>SxFy</label><input class="mini" data-hfilter="sf" value="${esc(f.sf)}" placeholder="如 S6F1"></div>
+          <div><label>内容</label><input class="mini" data-hfilter="kw" value="${esc(f.kw)}" placeholder="搜报文体里的编号 / 文本"></div>
+        </div>
+        <div class="cat-row">${MSG_CATS.map(c=>`<button class="cat ${state.hCats[c]===false?'off':''}" data-h="cat:${c}">${c}</button>`).join('')}
+          <span class="spacer"></span>
+          <button class="btn sm" data-h="cats:all">全部显示</button>
+          <button class="btn sm" data-h="cats:none">全部屏蔽</button>
+          <button class="btn sm" data-h="filter:import">导入记录</button></div>
+        <p class="small muted" style="margin:0">全部主机的收发都在这里，包含外部设备的报文；显示 ${rows.length} / 合计 ${all.length} 条。</p>`)}
+      ${card('收发记录','<span class="muted small">最新在最上</span>', msgListHtml())}
+      ${card('汇总','', `<div class="grid g3" style="gap:8px">
+        <div class="map-item"><div class="t">${sent} 条</div><div class="d">发（主机 → 设备）</div></div>
+        <div class="map-item"><div class="t">${recv} 条</div><div class="d">收（设备 → 主机）</div></div>
+        <div class="map-item"><div class="t">${rows.length} / ${all.length}</div><div class="d">显示 / 合计</div></div>
+      </div>
+      <p class="small muted" style="margin:10px 0 0">需要完整记录请用「导出过滤结果」；导入的记录只在当前页面查看。</p>`)}
+    </div>`;
+  }
+
+  if (p === 'manual') return `<div class="grid g2">
+    ${card('连接操作','<span class="chip runtime">当前运行 · 仅本次有效</span>', `
+      <div class="row" style="gap:8px">
+        ${on?`<button class="btn" data-h="disconnect">断开连接</button>`:`<button class="btn live" data-h="connect">重新连接</button>`}
+        <button class="btn" data-h="apply">按最新设置重新连接</button>
+        <button class="btn" data-h="select">选用为当前主机</button></div>
+      <p class="small muted" style="margin:12px 0 0">断开只关闭连接，主机仍在列表里，设置不会丢失。</p>`)}
+    ${card('采集操作','', `<div class="row" style="gap:8px">
+        <button class="btn" data-h="collect:${h.collectorOn?'stop':'start'}">${h.collectorOn?'停止采集':'开始采集'}</button>
+        <button class="btn" data-h="collect:save">下发当前设置</button>
+        <button class="btn" data-h="trace:send">发送 S2F23</button></div>
+      <p class="small muted" style="margin:12px 0 0">采集的启停只作用于这一台主机。</p>`)}
+    ${card('快捷发送','', `<div class="row" style="gap:7px">
+        <button class="btn sm" data-h="cmd:s1f1">S1F1 握手</button>
+        <button class="btn sm" data-h="cmd:s1f3">S1F3 读变量</button>
+        <button class="btn sm" data-h="cmd:s2f15">S2F15 写常量</button>
+        <button class="btn sm" data-h="cmd:s2f33">S2F33 定义报告</button></div>
+      <textarea class="sml-box" data-hsml="1" style="margin-top:10px;min-height:82px">${esc(h.sml)}</textarea>
+      <div class="row" style="margin-top:9px"><span class="spacer"></span><button class="btn host" data-h="send">发送</button></div>`)}
+    ${card('收发记录','<button class="btn sm" data-h="goto:monitor">查看全部</button>',
+      h.messages.length?table(['时刻','方向','消息','正文'], h.messages.slice(0,6).map(m=>[
+        `<span class="mono muted">${m.at}</span>`,
+        m.dir==='发送'?'<span class="tag c">发送</span>':'<span class="tag r">接收</span>',
+        `<span class="mono">${esc(m.sf)}</span>`,`<span class="mono">${esc(m.body)}</span>`]))
+        :'<div class="empty" style="padding:22px"><div>还没有报文，连接后可在这里发送消息。</div></div>')}
+  </div>`;
+  return '';
+}
+function hostDetailView(){
+  return hostHead() + hostPending() + hostZoneBar() + hostSubTabs() +
+    `<div class="grid" style="gap:12px">${state.hzone==='config'?hostConfigContent():hostRuntimeContent()}</div>`;
+}
+
+/* 其它视图 */
+function workbenchView(){
+  const on = state.devices.filter(d=>d.phase==='CONNECTED').length;
+  const waiting = state.devices.filter(d=>d.phase==='LISTENING'||d.phase==='CONNECTING'||d.phase==='STARTING').length;
+  const failed = state.devices.filter(d=>d.phase==='FAILED').length;
+  return `<h2 class="page-title">工作台</h2><p class="page-desc">设备断开连接后仍留在列表里，可随时重新连接；删除需要单独操作并确认。</p>
+  <div class="grid g4">
+    <div class="card kpi"><div class="k">设备</div><div class="v">${state.devices.length}</div><div class="d">台</div></div>
+    <div class="card kpi"><div class="k">已连接</div><div class="v" style="color:var(--runtime)">${on}</div><div class="d">台</div></div>
+    <div class="card kpi"><div class="k">等待连接</div><div class="v" style="color:var(--warn)">${waiting}</div><div class="d">端口已开，主机未接入</div></div>
+    <div class="card kpi"><div class="k">已断开${failed?' / 失败 '+failed:''}</div><div class="v" style="color:var(--muted)">${state.devices.length-on-waiting-failed}</div><div class="d">定义完整保留</div></div>
+  </div>
+  <div class="card" style="margin-top:12px"><div class="card-head"><h3>设备与连接</h3><span class="spacer"></span><span class="chip config">配置 v${state.configVer}</span></div>
+    ${table(['设备','模板','端口','连接','配置版本','操作'], state.devices.map((d,i)=>[
+      `<b>${esc(d.name)}</b>`, `<span class="tag c">${esc(d.template)}</span>`, `<span class="mono">${d.port}</span>`,
+      phaseChip(d.phase),
+      `<span class="mono">v${d.ver}</span>`,
+      `<div class="row" style="gap:5px"><button class="btn sm" data-dev="detail:${i}">详情</button>`+
+      (linkUp(d.phase)
+        ? `<button class="btn sm" data-dev="disconnect:${i}">断开</button>`
+        : `<button class="btn sm live" data-dev="connect:${i}">连接</button>`)+
+      `<button class="btn sm" data-dev="delete:${i}">⋯</button></div>`
+    ]))}
+    <p class="small muted" style="margin:10px 0 0">「等待连接」表示端口已经打开、还没有主机接进来；此时点「断开」同样会释放端口。</p>
+  </div>`;
+}
+function templatesView(){
+  return `<h2 class="page-title">模板管理</h2><p class="page-desc">内置模板可复制后修改，自定义模板可编辑。</p>` +
+    card('模板','', table(['ID','名称','来源','只读','操作'],
+      [['bare','空骨架','内置','是','<button class="btn sm">复制</button>'],
+       ['etch','刻蚀腔','内置','是','<button class="btn sm">复制</button>'],
+       ['cvd','CVD 沉积腔','内置','是','<button class="btn sm">复制</button>'],
+       ['my-line','自定义产线','自定义','否','<button class="btn sm">编辑</button>']]));
+}
+
+/* 渲染 */
+function phaseDot(phase){
+  if (phase === 'CONNECTED') return 'on';
+  if (phase === 'FAILED') return 'err';
+  if (phase === 'LISTENING' || phase === 'CONNECTING' || phase === 'STARTING') return 'warn';
+  return 'off';
+}
+function phaseLabel(phase){
+  if (phase === 'CONNECTED') return '在线';
+  if (phase === 'FAILED') return '连接失败';
+  if (phase === 'LISTENING') return '等待连接';
+  if (phase === 'CONNECTING' || phase === 'STARTING') return '连接中';
+  return '已断开';
+}
+function renderNav(){
+  $('#navDevices').innerHTML = state.devices.map((d,i)=>
+    `<div class="dev-item ${state.view==='device'&&i===0?'active':''}" data-navdev="${i}">
+      <span class="dot ${phaseDot(d.phase)}"></span>${esc(d.name)}
+      <span class="count" style="margin-left:auto;color:var(--muted);font-size:10.5px">${phaseLabel(d.phase)}</span></div>`).join('');
+  $('#navHosts').innerHTML = state.hosts.map((h,i)=>
+    `<div class="dev-item ${state.view==='hostdetail'&&i===state.selHost?'active':''}" data-hnav="${i}">
+      <span class="dot ${phaseDot(h.phase)}"></span>${esc(h.id)}
+      <span class="count" style="margin-left:auto;color:var(--muted);font-size:10.5px">${phaseLabel(h.phase)}</span></div>`).join('');
+  $('#navDevCount').textContent = state.devices.length;
+  $('#navHostCount').textContent = state.hosts.length;
+  document.querySelectorAll('.nav-item').forEach(b=>{
+    const v = b.dataset.view;
+    b.classList.toggle('active', v===state.view || (v==='hostlist' && state.view==='hostdetail'));
+  });
+}
+function render(){
+  renderNav();
+  const zoneName = state.zone==='config'?'配置区':'运行区';
+  const hzoneName = state.hzone==='config'?'配置区':'运行区';
+  const crumbs = {
+    device:'<b>工作台</b> / 设备 / ETCH-01 / '+zoneName,
+    workbench:'<b>工作台</b>',
+    hostlist:'<b>主机模拟</b>',
+    hostdetail:'<b>主机模拟</b> / '+esc(curHost().id)+' / '+hzoneName,
+    templates:'<b>模板管理</b>'
+  };
+  $('#crumb').innerHTML = crumbs[state.view] || '';
+
+  if (state.view === 'device') {
+    $('#view').innerHTML = deviceHead() + pendingBanner() + zoneBar() + subTabs() +
+      `<div class="grid" style="gap:12px">${state.zone==='config'?configContent():runtimeContent()}</div>`;
+  } else if (state.view === 'workbench') $('#view').innerHTML = workbenchView();
+  else if (state.view === 'hostlist') $('#view').innerHTML = hostListView();
+  else if (state.view === 'hostdetail') $('#view').innerHTML = hostDetailView();
+  else $('#view').innerHTML = templatesView();
+}
+
+/* 交互 */
+function nowLabel(){
+  const d = new Date();
+  return [d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':') + '.' + String(d.getMilliseconds()).padStart(3,'0');
+}
+function replyOf(sf){
+  const m = /^S(\d+)F(\d+)/.exec(String(sf).replace(/\s/g,''));
+  if (!m) return '';
+  const n = Number(m[2]);
+  return n % 2 === 1 ? `S${m[1]}F${n+1}` : '';
+}
+function pushMessage(h, sf, body, reply){
+  h.messages.unshift({at:nowLabel(), dir:'发送', sf, body});
+  if (reply) h.messages.unshift({at:nowLabel(), dir:'接收', sf:reply, body:'<L[1] <F4 182.4>>'});
+  h.messages = h.messages.slice(0, 24);
+}
+function createHost(connect){
+  const n = state.newHost;
+  if (!n.target.trim()) { toast('请填写目标地址', 'danger'); return; }
+  const port = Number(n.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) { toast('端口需为 1–65535 的整数', 'danger'); return; }
+  const id = state.hostSeq < 26 ? 'HOST-' + String.fromCharCode(65 + state.hostSeq) : 'HOST-' + (state.hostSeq + 1);
+  const name = n.name.trim() || '未命名主机';
+  const target = n.target.trim();
+  const local = target === '127.0.0.1' || target === 'localhost';
+  const fresh = {
+    id, name, target, port, deviceId:Number(n.deviceId)||0, note:'',
+    phase:'DISCONNECTED', control:'离线',
+    manual: !local, autoConnect:false, autoReconnect:false,
+    retryCount:0, nextRetryAt:'', varsSource:'none', vars:[],
+    settingVer:1, runningVer:1,
+    collectorOn:false, samples:0, decodeErrors:0, lastRttMs:null,
+    collector:{ startCeid:'', stopCeid:'', intervalMs:'1000', svids:[] },
+    trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[] },
+    sml:'S1F1 W', lastError:'', connectedAt:'—', messages:[]
+  };
+  state.hosts.push(fresh);
+  state.hostSeq += 1;
+  state.creating = false;
+  state.newHost = { name:'', target:'', port:'5000', deviceId:'0' };
+  if (connect) connectHost(fresh);
+  else toast(`${id} 已创建，可继续新建更多主机`, 'host');
+  render();
+}
+/* 连接一台主机：同一地址只允许一条链路，后来者停在「连接失败」 */
+function connectHost(t){
+  const holder = state.hosts.find(x => x !== t && x.phase === 'CONNECTED'
+    && x.target === t.target && x.port === t.port);
+  t.connectedAt = nowLabel().slice(0,8);
+  if (holder) {
+    t.phase = 'FAILED'; t.control = '离线';
+    t.lastError = '目标已有主机连接';
+    t.retryCount = t.autoReconnect ? t.retryCount + 1 : 0;
+    t.nextRetryAt = t.autoReconnect ? `${Math.min(60, 5 * Math.pow(2, t.retryCount - 1))} 秒后` : '';
+    toast(t.autoReconnect
+      ? `${t.id} 连接失败：目标已有主机连接（${holder.id}）。${t.nextRetryAt}自动重试，${holder.id} 不受影响`
+      : `${t.id} 连接失败：目标已有主机连接（${holder.id}）。已停下不再重试，${holder.id} 不受影响`, 'danger');
+    return;
+  }
+  t.phase = 'CONNECTED'; t.control = 'ONLINE'; t.lastError = '';
+  t.retryCount = 0; t.nextRetryAt = '';
+  toast(`${t.id} 已连接，主机仍保留在列表中`, 'host');
+}
+function disconnectHost(t){
+  t.phase = 'DISCONNECTED'; t.control = '离线';
+  t.connectedAt = '—'; t.collectorOn = false; t.nextRetryAt = '';
+  toast(`${t.id} 已断开连接，目标地址已释放，设置未改动`, 'host');
+}
+function hostSend(sf, body, reply){
+  const h = curHost();
+  if (h.phase !== 'CONNECTED') { toast(`${h.id} 尚未连接`, 'danger'); return; }
+  pushMessage(h, sf, body, reply);
+  toast(`${h.id}：${sf} 已发送`, 'host');
+  render();
+}
+function hSend(){
+  const ids = state.hSendTargets.filter(id => {
+    const h = hostById(id);
+    return h && h.phase === 'CONNECTED';
+  });
+  if (!ids.length) { toast('至少选一台已连接的主机', 'danger'); return; }
+  const h = curHost();
+  const head = h.sml.split('\n')[0].trim() || 'SML';
+  const body = h.sml.split('\n').slice(1).join(' ').trim() || '（空）';
+  const reply = replyOf(head);
+  ids.forEach(id => pushMessage(hostById(id), head, body, reply));
+  state.hSendResults = ids.map((id,k)=>({ id, result:`${head} → ${reply||'已发送'}`, detail:`${8+k*3} ms` }));
+  toast(`已发送到 ${ids.length} 台主机`, 'host');
+  render();
+}
+function rerenderKeepFocus(el){
+  const isFilter = el.dataset.hfilter !== undefined;
+  const key = isFilter ? el.dataset.hfilter : '';
+  let pos = 0;
+  try { pos = el.selectionStart ?? 0; } catch { pos = 0; }
+  render();
+  const sel = isFilter ? `[data-hfilter="${key}"]` : '[data-hsearch]';
+  const next = document.querySelector(sel);
+  if (next) {
+    next.focus();
+    try { next.setSelectionRange(pos, pos); } catch { /* select 无光标 */ }
+  }
+}
+function openHostDetail(i, page){
+  state.selHost = i;
+  state.view = 'hostdetail';
+  if (page === 'monitor') { state.hzone = 'runtime'; state.hpage.runtime = 'monitor'; }
+  else { state.hzone = 'config'; state.hpage.config = 'overview'; }
+  render();
+}
+document.addEventListener('input', (ev) => {
+  const el = ev.target;
+  const d = el.dataset;
+  if (d.hnew !== undefined) { state.newHost[d.hnew] = el.value; return; }
+  if (d.hsml !== undefined) { curHost().sml = el.value; return; }
+  if (d.hmanual !== undefined) { state.hManualSml = el.value; return; }
+  if (d.htrace !== undefined) { state.hTraceText = el.value; return; }
+  if (d.alarm !== undefined) { state.alarmForm[d.alarm] = el.value; return; }
+  if (d.ef !== undefined) { state.editForm[d.ef] = el.value; return; }
+  if (d.msml !== undefined) { state.manualSml = el.value; return; }
+  if (d.mburst !== undefined) {
+    if (d.mburst === 'count') state.manualBurstCount = el.value;
+    else state.manualBurstInterval = el.value;
+    return;
+  }
+  if (d.hvar !== undefined) {
+    const [field, svid] = d.hvar.split(':');
+    const v = curHost().vars.find(x => x.svid === Number(svid));
+    if (v && field !== 'type') { v[field] = el.value; curHost().varsSource = 'manual'; }
+    return;
+  }
+  if (d.hsvids !== undefined) {
+    curHost().collector.svids = el.value.split(/[\s,;，、]+/).map(Number).filter(n=>Number.isInteger(n)&&n>0);
+    return;
+  }
+  if (d.hburst !== undefined) {
+    if (d.hburst === 'count') state.hBurstCount = el.value;
+    else state.hBurstInterval = el.value;
+    return;
+  }
+  if (d.hsearch !== undefined) { state.hsearch = el.value; rerenderKeepFocus(el); return; }
+  if (d.hfilter !== undefined && el.tagName !== 'SELECT') {
+    state.hFilter[d.hfilter] = el.value;
+    rerenderKeepFocus(el);
+  }
+});
+document.addEventListener('change', (ev) => {
+  const el = ev.target, d = el.dataset;
+  if (d.hfilter !== undefined && el.tagName === 'SELECT') {
+    state.hFilter[d.hfilter] = el.value;
+    render(); return;
+  }
+  if (d.alarm !== undefined) {
+    state.alarmForm[d.alarm] = el.value;
+    if (el.tagName === 'SELECT') render();
+    return;
+  }
+  if (d.ef !== undefined) {
+    state.editForm[d.ef] = el.value;
+    if (el.tagName === 'SELECT') render();
+    return;
+  }
+  if (d.efr !== undefined || d.efs !== undefined) {
+    const id = Number(d.efr !== undefined ? d.efr : d.efs);
+    const list = d.efr !== undefined ? state.editForm.reports : state.editForm.svids;
+    if (el.checked) { if (!list.includes(id)) list.push(id); }
+    else { const k = list.indexOf(id); if (k >= 0) list.splice(k, 1); }
+    render(); return;
+  }
+  if (d.mceid !== undefined) { state.manualCeid = el.value; return; }
+  if (d.hauto !== undefined) {
+    const h = curHost();
+    h.autoReconnect = el.value === '1';
+    if (h.autoReconnect && h.phase === 'FAILED') { h.retryCount = 0; h.nextRetryAt = '5 秒后'; }
+    if (!h.autoReconnect) h.nextRetryAt = '';
+    toast(h.autoReconnect ? `${h.id} 已打开自动重连` : `${h.id} 已关闭自动重连，失败后会停下`, 'host');
+    render(); return;
+  }
+  if (d.hvar !== undefined) {
+    const [field, svid] = d.hvar.split(':');
+    const h = curHost();
+    const v = h.vars.find(x => x.svid === Number(svid));
+    if (v) {
+      v[field] = el.value;
+      if (field === 'type') {
+        toast(el.value ? `变量 ${svid} 已声明为 ${el.value}` : `变量 ${svid} 取消声明，按数值解析`, 'host');
+        render();
+      }
+    }
+    return;
+  }
+  if (d.hsel === 'preset') {
+    const i = Number(el.value);
+    if (Number.isInteger(i) && HOST_PRESETS[i]) {
+      curHost().sml = HOST_PRESETS[i].s;
+      state.hzone = 'runtime'; state.hpage.runtime = 'messages';
+      toast(`已填入「${HOST_PRESETS[i].l}」，可修改后发送`);
+      render();
+    }
+    return;
+  }
+  if (d.hsend !== undefined) {
+    if (el.checked) { if (!state.hSendTargets.includes(d.hsend)) state.hSendTargets.push(d.hsend); }
+    else state.hSendTargets = state.hSendTargets.filter(x=>x!==d.hsend);
+    render(); return;
+  }
+  if (d.hsvid !== undefined) {
+    const h = curHost();
+    const list = state.hpage.config === 'trace' ? h.trace.svids : h.collector.svids;
+    const id = Number(d.hsvid);
+    if (el.checked) { if (!list.includes(id)) list.push(id); }
+    else { const k = list.indexOf(id); if (k >= 0) list.splice(k,1); }
+    render();
+  }
+  if (d.hsvids !== undefined) render();
+});
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-view],[data-navdev],[data-zone],[data-page],[data-act],[data-plan],[data-step],[data-exec],[data-dev],[data-hzone],[data-hpage],[data-hnav],[data-h]');
+  if (!el) return;
+  const d = el.dataset;
+
+  if (d.view) { state.view = d.view; render(); return; }
+  if (d.navdev !== undefined) { state.view='device'; render(); return; }
+  if (d.zone) { state.zone = d.zone; state.editRow = null; render(); return; }
+  if (d.page) { state.page[state.zone] = d.page; state.openExec=-1; state.editRow = null; render(); return; }
+  if (d.hzone) { state.hzone = d.hzone; render(); return; }
+  if (d.hpage) { state.hpage[state.hzone] = d.hpage; render(); return; }
+  if (d.hnav !== undefined) { openHostDetail(+d.hnav); return; }
+
+  if (d.plan !== undefined) {
+    const pl = state.plans[+d.plan]; pl.enabled = !pl.enabled;
+    toast(`计划「${pl.id}」已${pl.enabled?'启用':'停用'}`);
+    render(); return;
+  }
+  if (d.step !== undefined) { addExecution(state.plans[+d.step], true); return; }
+  if (d.exec !== undefined) { state.openExec = state.openExec === +d.exec ? -1 : +d.exec; render(); return; }
+
+  if (d.dev) {
+    const [act,idx] = d.dev.split(':'); const dev = state.devices[+idx];
+    if (act==='detail'){ state.view='device'; render(); return; }
+    if (act==='connect'||act==='disconnect'){
+      dev.phase = act==='connect'?'CONNECTED':'DISCONNECTED';
+      if (idx==='0') state.link = dev.phase;
+      toast(`${dev.name} 已${act==='connect'?'连接':'断开连接'}，配置未改动`);
+      render(); return;
+    }
+    if (act==='delete'){ toast('删除设备需先断开连接，并输入设备名确认', 'danger'); return; }
+  }
+
+  /* 主机域：与设备域完全独立的动作 */
+  if (d.h) {
+    /* 形如 detail:0 / preset:3 的动作取冒号前的名字；形如 trace:gen 的固定动作保留全名 */
+    const raw = d.h, colon = raw.indexOf(':');
+    const head = colon < 0 ? raw : raw.slice(0, colon);
+    const arg = colon < 0 ? '' : raw.slice(colon + 1);
+    const PARAM_ACTS = new Set(['detail','goto','rowconnect','rowdisconnect','rowdelete','preset','cmd','cat','vars']);
+    const act = PARAM_ACTS.has(head) ? head : raw;
+    const h = curHost();
+    switch (act) {
+      case 'newhost': state.creating = true; state.view = 'hostlist'; render(); return;
+      case 'cancelnew': state.creating = false; render(); return;
+      case 'createhost': createHost(false); return;
+      case 'createconnect': createHost(true); return;
+      case 'detail': case 'goto':
+        if (arg === 'monitor') { state.hzone='runtime'; state.hpage.runtime='monitor'; render(); }
+        else if (arg === 'collect') { state.hzone='config'; state.hpage.config='collect'; render(); }
+        else openHostDetail(+arg);
+        return;
+      case 'auto:on':
+        h.autoReconnect = true; h.retryCount = 0;
+        h.nextRetryAt = h.phase==='FAILED' ? '5 秒后' : '';
+        toast(`${h.id} 已打开自动重连，失败后从 5 秒起逐次加长间隔`, 'host'); render(); return;
+      case 'auto:off':
+        h.autoReconnect = false; h.retryCount = 0; h.nextRetryAt = '';
+        toast(`${h.id} 已关闭自动重连，失败后会停在「连接失败」等你处理`, 'host'); render(); return;
+      case 'vars': {
+        if (arg === 'refresh') {
+          if (h.phase !== 'CONNECTED') { toast('先连接目标，才能读取变量清单', 'danger'); return; }
+          pushMessage(h, 'S1F11 W', '<L[0]>', 'S1F12');
+          if (h.manual) {
+            h.varsSource = 'manual';
+            toast('目标未提供变量清单，请手动填写；连接不受影响', 'danger');
+          } else {
+            h.vars = SVID_CATALOG.map(([svid,vname,unit])=>{
+              const old = h.vars.find(x=>x.svid===svid);
+              return { svid, name:vname, unit, type: old ? old.type : '' };
+            });
+            h.varsSource = 'auto';
+            const missing = h.vars.filter(v=>!v.type).length;
+            toast(`已读回 ${h.vars.length} 个变量的名称与单位${missing?`；${missing} 个仍需声明解码类型`:''}`, 'host');
+          }
+          render(); return;
+        }
+        if (arg === 'manual') {
+          h.varsSource = 'manual';
+          toast('已切到手动填写：编号、名称、单位、类型都可编辑', 'host'); render(); return;
+        }
+        if (arg === 'add') {
+          const next = h.vars.length ? Math.max(...h.vars.map(v=>v.svid)) + 1 : 1001;
+          h.vars.push({ svid:next, name:'', unit:'', type:'' });
+          h.varsSource = 'manual';
+          toast(`已添加变量 ${next}，请填写名称与解码类型`, 'host'); render(); return;
+        }
+        if (arg.startsWith('del:')) {
+          const svid = Number(arg.slice(4));
+          h.vars = h.vars.filter(v=>v.svid!==svid);
+          h.collector.svids = h.collector.svids.filter(x=>x!==svid);
+          h.trace.svids = h.trace.svids.filter(x=>x!==svid);
+          h.varsSource = 'manual';
+          toast(`变量 ${svid} 已从本台主机的目录移除`, 'host'); render(); return;
+        }
+        return;
+      }
+      case 'rowconnect': case 'rowdisconnect': {
+        const t = state.hosts[+arg];
+        if (act === 'rowconnect') connectHost(t); else disconnectHost(t);
+        render(); return;
+      }
+      case 'rowdelete': toast(`删除 ${state.hosts[+arg].id} 需先断开连接，并再次确认`, 'danger'); return;
+      case 'connect': case 'disconnect':
+        if (act === 'connect') connectHost(h); else disconnectHost(h);
+        render(); return;
+      case 'delete': toast(`删除 ${h.id} 需先断开连接，并再次确认`, 'danger'); return;
+      case 'select': toast(`${h.id} 已选用为当前主机`, 'host'); render(); return;
+      case 'apply':
+        h.runningVer = h.settingVer;
+        toast(`${h.id} 已按设置 v${h.settingVer} 重新连接，设置已生效`, 'host'); render(); return;
+      case 'save':
+        h.settingVer += 1;
+        toast(`设置已保存为版本 v${h.settingVer}；点「使设置生效」`, 'config'); render(); return;
+      case 'validate': toast('连接设置检查通过', 'config'); return;
+      case 'diff': toast(`设置 v${h.runningVer} → v${h.settingVer}：采集变量与超时调整`, 'config'); return;
+      case 'list:import': toast('已导入主机列表（示例）', 'host'); return;
+      case 'list:export': toast('主机列表已导出', 'host'); return;
+      case 'preset': {
+        const p = HOST_PRESETS[+arg];
+        if (p) {
+          h.sml = p.s; state.hzone='runtime'; state.hpage.runtime='messages';
+          toast(`已填入「${p.l}」，可修改后发送`);
+          render();
+        }
+        return;
+      }
+      case 'cmd': {
+        const c = HOST_COMMANDS[arg];
+        if (c) hostSend(c[0], c[1], c[2]);
+        return;
+      }
+      case 'send': hSend(); return;
+      case 'sendall': state.hSendTargets = state.hosts.filter(x=>x.phase==='CONNECTED').map(x=>x.id); render(); return;
+      case 'sendnone': state.hSendTargets = []; render(); return;
+      case 'results:clear': state.hSendResults = []; render(); return;
+      case 'burst': {
+        const ids = state.hSendTargets.filter(id=>hostById(id) && hostById(id).phase==='CONNECTED');
+        if (!ids.length) { toast('至少选一台已连接的主机', 'danger'); return; }
+        const count = Number(state.hBurstCount);
+        if (!Number.isInteger(count) || count < 1 || count > 5000) { toast('次数要在 1–5000 之间', 'danger'); return; }
+        state.hBurst = ids.map((id,k)=>({ id,
+          result:`成功 ${count} / 失败 0`,
+          detail:`耗时 ${1240+k*180} ms · P50 9 ms · P95 18 ms · Max 26 ms` }));
+        ids.forEach(id => pushMessage(hostById(id), h.sml.split('\n')[0].trim()||'SML', '压测连发 '+count+' 条', replyOf(h.sml.split('\n')[0])));
+        toast(`压测完成：已发 ${count*ids.length} 条（${ids.length} 台主机）`, 'host');
+        render(); return;
+      }
+      case 'trace:gen': state.hTraceText = buildS2F23(h); toast('已生成 S2F23'); render(); return;
+      case 'trace:clear': state.hTraceText = ''; render(); return;
+      case 'trace:send':
+        state.hTraceText = buildS2F23(h);
+        pushMessage(h, 'S2F23 W', '<L[6] …>', 'S2F24');
+        state.hTraceResult = 'S2F23 → S2F24 · 12 ms\n目标设备已接受 Trace 配置';
+        toast('S2F23 已发送', 'host'); render(); return;
+      case 'online':
+        h.control = 'ONLINE'; pushMessage(h, 'S1F17 W', '', 'S1F18');
+        toast(`${h.id} 已上线`, 'host'); render(); return;
+      case 'offline':
+        h.control = 'OFFLINE'; pushMessage(h, 'S1F15 W', '', 'S1F16');
+        toast(`${h.id} 已下线`, 'host'); render(); return;
+      case 'collect:save': toast('采集设置已下发', 'host'); render(); return;
+      case 'collect:start': h.collectorOn = true; toast('采集已开始', 'host'); render(); return;
+      case 'collect:stop': h.collectorOn = false; toast('采集已停止', 'host'); render(); return;
+      case 'collect:csv': toast(`已导出 s1f3-${h.id}.csv`, 'host'); return;
+      case 'collect:import': state.hImported = `s1f3-${h.id}-sample.csv`; toast('已导入 CSV，仅本页查看', 'host'); render(); return;
+      case 'collect:exit': state.hImported = null; render(); return;
+      case 'manual:s1f3':
+        pushMessage(h, 'S1F3 W', '<L[2] <U4 1001> <U4 1003>>', 'S1F4');
+        state.hManualReply = 'S1F4 · 9 ms\n<L[2] <F4 182.4> <F4 6.5>>';
+        toast('S1F3 已发送', 'host'); render(); return;
+      case 'filter:clear':
+        state.hFilter = { host:'', dir:'all', sf:'', kw:'' }; state.hCats = {};
+        render(); return;
+      case 'filter:export': toast(`已导出 ${filteredHostMessages().length} 条收发记录`, 'host'); return;
+      case 'filter:import': toast('已导入收发记录，仅本页查看', 'host'); return;
+      case 'cats:all': state.hCats = {}; render(); return;
+      case 'cats:none': MSG_CATS.forEach(c=>state.hCats[c]=false); render(); return;
+      case 'cat': state.hCats[arg] = state.hCats[arg] === false ? true : false; render(); return;
+    }
+  }
+
+  /* 设备域：形如 cfgrpt:edit:3001 的动作取冒号前的名字，其余保留全名 */
+  {
+    const raw = d.act || '', colon = raw.indexOf(':');
+    const head = colon < 0 ? raw : raw.slice(0, colon);
+    const arg = colon < 0 ? '' : raw.slice(colon + 1);
+    const PARAM_ACTS = new Set(['cfgrpt','cfgceid','rtceid','rtrpt','svid','alarm','edit']);
+    const act = PARAM_ACTS.has(head) ? head : raw;
+    const [verb, idText] = arg.includes(':') ? [arg.slice(0, arg.indexOf(':')), arg.slice(arg.indexOf(':')+1)] : [arg, ''];
+    const id = Number(idText);
+
+    if (head === 'cfgrpt' || head === 'cfgceid' || head === 'rtceid' || head === 'rtrpt' || head === 'svid') {
+      const kind = head === 'svid' ? 'svid' : head;
+      const rows = catalogRows(kind);
+      const key = catalogKey(kind);
+      const noun = catalogNoun(kind);
+      if (verb === 'new' || verb === 'edit') {
+        if (kind.startsWith('rt') && state.link !== 'CONNECTED') { toast('先连接主机，才能改本次运行的定义', 'danger'); return; }
+        openCatalogEditor(kind, verb === 'new' ? null : id);
+        render(); return;
+      }
+      if (verb === 'del') {
+        const k = rows.findIndex(r => r[key] === id);
+        if (k < 0) return;
+        rows.splice(k, 1);
+        if (kind === 'svid') {
+          state.cfgReports.forEach(r => { r.svids = r.svids.filter(x => x !== id); });
+          toast(`变量 ${id} 已从设备定义移除，引用它的报告已同步去掉该变量`, 'config');
+        } else if (kind === 'cfgceid') {
+          toast(`事件 ${id} 已从设备定义移除，保存后重载生效`, 'config');
+        } else if (kind === 'cfgrpt') {
+          toast(`报告 ${id} 已从设备定义移除；仍绑定它的事件会发出空报告体`, 'config');
+        } else if (kind === 'rtceid') {
+          toast(`事件 ${id} 已从本次运行移除，引用它的计划本次会记为「已跳过」`);
+        } else {
+          toast(`报告 ${id} 已从本次运行移除；仍绑定它的事件会发出空报告体`);
+        }
+        render(); return;
+      }
+      if (verb === 'fire') {
+        const c = state.rtCeids.find(x => x.ceid === id);
+        if (!c) return;
+        addExecution({ id:'手动 · '+c.name, ceid:id, actions:['事件报告 · CEID '+id], effects:[], fires:0, skipped:0 }, false);
+        return;
+      }
+      return;
+    }
+
+    switch (act) {
+      case 'disconnect':
+        state.link='DISCONNECTED'; state.devices[0].phase='DISCONNECTED';
+        toast('连接已断开，端口已释放，设备仍在工作台里'); render(); break;
+      case 'connect':
+        state.link='CONNECTED'; state.devices[0].phase='CONNECTED';
+        toast('已重新连接，运行恢复'); render(); break;
+      case 'reload':
+        state.runningVer = state.configVer;
+        resetRuntimeCatalog();
+        state.alarms = [];
+        state.editRow = null;
+        toast(`已重载到版本 v${state.configVer}，本次运行临时改的事件、报告与报警已按配置恢复`); render(); break;
+      case 'save':
+        state.configVer += 1;
+        toast(`配置已保存为版本 v${state.configVer}；点击「重载使生效」`, 'config'); render(); break;
+      case 'validate': toast('配置校验通过', 'config'); break;
+      case 'delete': toast('删除设备需先断开连接，并输入设备名确认', 'danger'); break;
+      case 'diff': toast(`版本 v${state.runningVer} → v${state.configVer}：新增 1 条报警消息、修改 1 项变量变化`, 'config'); break;
+      case 'revisions': state.zone='config'; state.page.config='revisions'; render(); break;
+      case 'newplan': toast('新建计划：填写触发规则、发送内容与变量变化'); break;
+      case 'pauseall': state.plans.forEach(p=>p.enabled=false); toast('全部计划已停用'); render(); break;
+      case 'export': toast('执行记录已导出'); break;
+      case 'onlyfailed': state.onlyFailed = !state.onlyFailed; render(); break;
+      case 'showdry': state.showDryRun = !state.showDryRun; render(); break;
+      case 'send': {
+        const first = String(state.manualSml).trim().split('\n')[0] || '报文';
+        toast(`${first} 已发送`); break;
+      }
+      case 'trigger': {
+        const ceid = Number(state.manualCeid);
+        const c = state.rtCeids.find(x => x.ceid === ceid);
+        if (!c) { toast('请先选择要触发的事件', 'danger'); return; }
+        addExecution({ id:'手动 · '+c.name, ceid, actions:['事件报告 · CEID '+ceid], effects:[], fires:0, skipped:0 }, false);
+        break;
+      }
+      case 'alarm': {
+        const a = state.alarmForm;
+        const alid = Number(a.alid);
+        if (!Number.isInteger(alid) || alid < 0) { toast('ALID 需为非负整数', 'danger'); return; }
+        if (verb === 'rowclear') {
+          state.alarms = state.alarms.filter(x => x.alid !== id);
+          toast(`报警 ${id} 已清除，S5F1 已发送`); render(); break;
+        }
+        if (verb === 'clear') {
+          if (!state.alarms.some(x => x.alid === alid)) { toast(`报警 ${alid} 当前未置位，仍会发送清除报文`); }
+          state.alarms = state.alarms.filter(x => x.alid !== alid);
+          toast(`报警 ${alid} 已清除，S5F1（ALCD 最高位 0）已发送`); render(); break;
+        }
+        const text = String(a.text).trim() || `ALARM ${alid}`;
+        const hit = state.alarms.find(x => x.alid === alid);
+        if (hit) { hit.text = text; hit.category = Number(a.category); hit.at = nowLabel().slice(0,8); }
+        else state.alarms.unshift({ alid, text, category:Number(a.category), at:nowLabel().slice(0,8) });
+        toast(`报警 ${alid} 已置位，S5F1（ALCD 最高位 1）已发送`); render(); break;
+      }
+      case 'burst': {
+        const count = Number(state.manualBurstCount);
+        const gap = Number(state.manualBurstInterval);
+        if (!Number.isInteger(count) || count < 1 || count > 5000) { toast('次数要在 1–5000 之间', 'danger'); return; }
+        if (!Number.isInteger(gap) || gap < 0 || gap > 60000) { toast('间隔要在 0–60000 ms 之间', 'danger'); return; }
+        const first = String(state.manualSml).trim().split('\n')[0] || '报文';
+        const ok = Math.max(0, count - Math.floor(count / 50));
+        const total = count * (gap + 9);
+        state.manualBurstResult = `${first} × ${count}\n成功 ${ok} · 失败 ${count-ok}\n耗时 ${total} ms · P50 9 ms · P95 14 ms · Max 31 ms`;
+        toast(`压测完成：${count} 条，成功 ${ok} 条`); render(); break;
+      }
+      case 'step': addExecution(state.plans[0], true); break;
+      case 'online':
+        state.controlState = 'ONLINE';
+        toast('设备已上线，S1F17 已发送，开始主动上报'); render(); break;
+      case 'offline':
+        state.controlState = 'OFFLINE';
+        toast('设备已下线，S1F15 已发送，主动上报停止'); render(); break;
+      case 'edit':
+        if (verb === 'save') saveCatalogEditor();
+        else { state.editRow = null; render(); }
+        break;
+    }
+  }
+});
+
+/* 启用后按计划发送消息并执行变量变化；试跑走同一流程但不计数、不推进倒计时 */
+function addExecution(plan, dryRun){
+  const skipped = state.link !== 'CONNECTED';
+  const before = state.svid, after = 250.0;
+  const changes = (skipped || !plan.effects.length) ? []
+    : [['1001',before.toFixed(1),after.toFixed(1)],['1003','4.2','6.5'],['1101','40','60']];
+  if (!skipped && changes.length) {
+    state.svid = after;
+    state.series = [...state.series.slice(-14), before, after];
+  }
+  state.executions.unshift({
+    at:nowLabel(), plan:plan.id, ceid:plan.ceid, dryRun:!!dryRun,
+    status: skipped ? '已跳过' : '已发送',
+    msgs: skipped ? 0 : plan.actions.length,
+    effects: changes.length,
+    sml: skipped ? '未连接主机，本次跳过（不发送消息、不改变变量）'
+      : `S6F11 W <L[3] <U4 0> <U4 ${plan.ceid}> <L[1] <L[2] <U4 3001> <L[3] <F4 ${after.toFixed(1)}> … >>>>` + (dryRun?'  （试跑）':''),
+    before: changes
+  });
+  if (!dryRun) { if (skipped) plan.skipped += 1; else plan.fires += 1; }
+  state.executions = state.executions.slice(0, 20);
+  toast(dryRun ? `「${plan.id}」试跑完成：不计入触发数，也不推进倒计时`
+    : skipped ? `「${plan.id}」已跳过：未连接主机，不发消息也不改变量`
+    : `「${plan.id}」已触发：消息已发送，变量已更新`);
+  if (state.view === 'device' && state.zone === 'runtime') render();
+}
+setInterval(() => {
+  if (state.link === 'CONNECTED') {
+    const active = state.plans.find(p => p.enabled && p.id === '加工开始');
+    if (active) addExecution(active, false);
+  }
+}, 9000);
+
+resetRuntimeCatalog();
+render();
+</script>
+</body>
+</html>

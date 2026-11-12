@@ -67,3 +67,7 @@ gui/src-tauri/target/
 .freebuff/
 # 旧版实机脚本的临时工作目录；现已改用 build/run 与系统临时目录
 /test-run/
+
+# ---- 会话工具临时目录(本地状态,不入库) ----
+.zcode/
+frontend/.pw-tmp/

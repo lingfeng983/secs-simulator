@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelFootnote } from '../../../shared/ui/Panel';
 import { CeidDatalist } from '../../../shared/ui/CeidPicker';
 import { VariableChart } from '../../charts/VariableChart';
@@ -12,12 +12,41 @@ import type { PreviewSeries } from '../../../api';
 /** 每 SVID 曲线的重采样桶数（画图用，原始采样不均匀）。 */
 const CHART_BUCKETS = 240;
 
+/** 远程主机的默认 S1F3 骨架（手动发送用）。 */
+const MANUAL_S1F3_TEMPLATE = 'S1F3 W\n<L\n  <U4 1001>\n  <U4 1003>\n>.';
+
+/**
+ * 解析手填的 SVID 列表：逗号 / 空格 / 换行 / 分号都当分隔符。
+ *
+ * <p>远程主机没有 catalog，SVID 只能自由输入；这里只做"把一串数字拆开"，
+ * 非法片段直接丢弃并在调用方提示（不要因为一个笔误整份配置下发失败）。</p>
+ */
+export function parseSvidList(text: string): number[] {
+  const seen = new Set<number>();
+  const result: number[] = [];
+  for (const piece of text.split(/[\s,;，、]+/)) {
+    if (piece === '') {
+      continue;
+    }
+    const value = Number(piece);
+    if (!Number.isInteger(value) || value < 1 || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
 /**
  * ③ S1F3 数据采集（主机侧拉取）。
  *
  * <p>配置启停 CEID 与采集 SVID → 收到 startCeid 的 S6F11 开始按周期
  * 轮询 S1F3，收到 stopCeid 停止；数据实时画图，可导出 CSV。
- * 采集器属于**主机实例**，所以多主机时各自独立。</p>
+ * 采集器属于<b>主机实例</b>，所以多主机时各自独立。</p>
+ *
+ * <p>配置入口按主机类型分流：本机设备有 catalog，用多选（不限数量）；
+ * 远程主机没有 catalog，SVID 列表手填，另可手动发一条整报文 S1F3 验证对端。</p>
  */
 export function HostSimCollectPanel({
   backend,
@@ -28,6 +57,12 @@ export function HostSimCollectPanel({
   const [stopCeid, setStopCeid] = useState('');
   const [intervalMs, setIntervalMs] = useState('1000');
   const [selectedSvids, setSelectedSvids] = useState<number[]>([]);
+  /* 远程主机：SVID 自由输入（切换主机时按 host 回填） */
+  const [manualSvids, setManualSvids] = useState('');
+  /* 远程主机：手动发一条整报文 S1F3（验证对端/临时查询） */
+  const [manualSml, setManualSml] = useState('');
+  const [manualReply, setManualReply] = useState('');
+  const [manualBusy, setManualBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState<{ name: string; series: PreviewSeries[] } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -39,20 +74,25 @@ export function HostSimCollectPanel({
   /* 只要任意一台主机在采集，汇总表就要持续刷新 */
   const anyActive = openHosts.some((item) => item.collector?.running || item.collector?.configured);
 
+  const remote = host?.remote === true;
+
   /* 切主机时回填该主机的采集配置 */
   useEffect(() => {
     const collector = host?.collector;
+    setManualReply('');
     if (collector === undefined || collector === null || !collector.configured) {
       setStartCeid('');
       setStopCeid('');
       setIntervalMs('1000');
       setSelectedSvids([]);
+      setManualSvids('');
       return;
     }
     setStartCeid(String(collector.startCeid ?? ''));
     setStopCeid(String(collector.stopCeid ?? ''));
     setIntervalMs(String(collector.intervalMs ?? 1000));
     setSelectedSvids((collector.svids ?? []).map((item) => item.id));
+    setManualSvids((collector.svids ?? []).map((item) => item.id).join(', '));
   }, [host?.id, host?.collector?.configured, host?.collector?.startCeid, host?.collector?.stopCeid, host?.collector?.intervalMs]);
 
   /* 运行中每 2 秒刷一次采集数据（所有主机共用一次刷新）。
@@ -72,12 +112,18 @@ export function HostSimCollectPanel({
     return () => window.clearInterval(timer);
   }, [anyActive, refresh]);
 
+  /** 当前要下发的 SVID 列表：远程手填，本机多选。 */
+  const effectiveSvids = useMemo(
+    () => (remote ? parseSvidList(manualSvids) : selectedSvids),
+    [remote, manualSvids, selectedSvids],
+  );
+
   const save = async () => {
     if (host === null) {
       return;
     }
-    if (selectedSvids.length === 0) {
-      notifier.error('至少选择一个采集 SVID');
+    if (effectiveSvids.length === 0) {
+      notifier.error(remote ? '先填要采集的 SVID' : '至少选择一个采集 SVID');
       return;
     }
     setBusy(true);
@@ -86,9 +132,9 @@ export function HostSimCollectPanel({
         startCeid: Number.parseInt(startCeid, 10) || 0,
         stopCeid: Number.parseInt(stopCeid, 10) || 0,
         intervalMs: Number.parseInt(intervalMs, 10) || 1000,
-        svids: selectedSvids.map((id) => {
+        svids: effectiveSvids.map((id) => {
           const choice = svidChoices.find((item) => item.svid === id);
-          return { id, name: choice?.slot, unit: choice?.unit };
+          return remote ? { id } : { id, name: choice?.slot, unit: choice?.unit };
         }),
       });
       if (error === null) {
@@ -113,6 +159,38 @@ export function HostSimCollectPanel({
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** 远程主机：手动发一条整报文 S1F3（不进周期采集，只做一次性验证/查询）。 */
+  const sendManual = async () => {
+    if (host === null) {
+      return;
+    }
+    setManualBusy(true);
+    setManualReply('');
+    try {
+      const raw = await hostSims.send(host.id, manualSml === '' ? MANUAL_S1F3_TEMPLATE : manualSml);
+      const parsed = raw === null ? null : JSON.parse(raw) as {
+        replySml?: string | null;
+        replyStream?: number;
+        replyFunction?: number;
+        timedOut?: boolean;
+        elapsedMs?: number;
+      };
+      if (parsed === null) {
+        setManualReply('（无结果）');
+      } else if (parsed.replySml != null) {
+        setManualReply(`S${parsed.replyStream}F${parsed.replyFunction} · ${parsed.elapsedMs} ms\n${parsed.replySml}`);
+      } else if (parsed.timedOut) {
+        setManualReply('已发出，但设备未在 T3 内回复');
+      } else {
+        setManualReply('已发出（未带 W，不等回复）');
+      }
+    } catch (error) {
+      setManualReply(`发送失败：${(error as Error).message}`);
+    } finally {
+      setManualBusy(false);
     }
   };
 
@@ -250,60 +328,31 @@ export function HostSimCollectPanel({
     <Panel
       id="panel-hostsim-collect"
       title="③ S1F3 数据采集（主机侧拉取）"
-      description="收到「启动 CEID」的 S6F11 开始按周期拉取 SVID，收到「停止 CEID」停止；数据实时画图，可导出 CSV。"
+      description="收到「启动 CEID」的 S6F11 开始按周期拉取 SVID，收到「停止 CEID」停止；数据实时画图，可导出 CSV。当前主机在顶部选择。"
     >
       <HostTargetPicker backend={backend} notifier={notifier} hostSims={hostSims} allowCreate={false} />
 
-      {openHosts.length > 0 && (
-        <div className="effects-table-wrap">
-          <table className="effects-table">
-            <thead>
-              <tr>
-                <th>主机</th>
-                <th>目标</th>
-                <th>配置</th>
-                <th>状态</th>
-                <th>采样点</th>
-                <th>解码错误</th>
-                <th>最近 RTT</th>
-                <th aria-label="操作" />
-              </tr>
-            </thead>
-            <tbody>
-              {openHosts.map((item) => {
-                const collector = item.collector;
-                return (
-                  <tr key={item.id}>
-                    <td className="mono">{item.id}</td>
-                    <td className="mono">{item.remote ? item.target : item.session}</td>
-                    <td className="hint-inline">
-                      {collector?.configured
-                        ? `${collector.startCeid} → ${collector.stopCeid} · ${collector.intervalMs} ms`
-                        : '未配置'}
-                    </td>
-                    <td>
-                      <span className={`badge ${collector?.running ? 'tone-ok' : collector?.configured ? 'tone-warn' : 'tone-muted'}`}>
-                        {collector?.running ? '采集中' : collector?.configured ? '已配置' : '未配置'}
-                      </span>
-                    </td>
-                    <td>{collector?.samples ?? 0}</td>
-                    <td>{collector?.decodeErrors ?? 0}</td>
-                    <td>{collector?.lastRttMs === undefined ? '—' : `${collector.lastRttMs} ms`}</td>
-                    <td>
-                      <button type="button" onClick={() => hostSims.select(item.id)}>选用</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {host === null || !host.open ? (
-        <p className="hint">当前没有已连接的主机。先到「主机实例」新建一个。</p>
+        <p className="hint">
+          {openHosts.length === 0
+            ? '当前没有已连接的主机。先到「主机实例」新建一个。'
+            : '选一台已连接的主机来配置它的 S1F3 采集。'}
+        </p>
       ) : (
         <>
+          <div className="section-head">
+            <h3 style={{ margin: 0 }}>编辑 {host.id} 的采集配置</h3>
+            <span className={`badge ${host.remote ? 'tone-info' : state?.running ? 'tone-ok' : state?.configured ? 'tone-warn' : 'tone-muted'}`}>
+              {host.remote ? `远程 ${host.target}` : host.session}
+            </span>
+            <span className="spacer" />
+            <span className="hint-inline">
+              {state?.running ? '采集中' : state?.configured ? '已配置' : '未配置'}
+              {' · '}
+              {state?.samples ?? 0} 点
+            </span>
+          </div>
+
           <div className="form-row">
             <label className="field">
               启动 CEID
@@ -336,15 +385,58 @@ export function HostSimCollectPanel({
           </div>
           <CeidDatalist id="hostsim-collect-ceids" ceids={backend.catalog?.ceids ?? []} />
 
-          <div className="field-block">
-            <span className="template-label">采集 SVID（最多 16 个，与 S6F1 采集同一套多选）</span>
-            <SvidCheckList
-              choices={svidChoices}
-              selected={selectedSvids}
-              onChange={setSelectedSvids}
-              max={16}
-            />
-          </div>
+          {remote ? (
+            <>
+              <div className="field-block">
+                <span className="template-label">采集 SVID（手填，逗号/空格分隔，不限数量）</span>
+                <input
+                  value={manualSvids}
+                  onChange={(event) => setManualSvids(event.target.value)}
+                  placeholder="如 1001, 1003, 1005"
+                  aria-label="远程主机的采集 SVID 列表"
+                />
+                <p className="hint">
+                  远程主机没有本地 catalog，SVID 只能手填：设备按收到的列表回 S1F4，
+                  不在设备里的 SVID 通常回 0 或直接报错。已解析 {effectiveSvids.length} 个。
+                </p>
+              </div>
+
+              <details className="inline-create">
+                <summary>手动发送一条 S1F3（整报文，一次性）</summary>
+                <p className="hint">
+                  不进周期采集，只发一次并显示回复：用来确认对端在不在、SVID 对不对。
+                </p>
+                <textarea
+                  className="sml-editor"
+                  spellCheck={false}
+                  value={manualSml === '' ? MANUAL_S1F3_TEMPLATE : manualSml}
+                  onChange={(event) => setManualSml(event.target.value)}
+                  aria-label="手动 S1F3 报文"
+                />
+                <div className="editor-foot">
+                  <span className="hint">S1F3 的 body 就是要读的 SVID 列表。</span>
+                  <button type="button" disabled={manualBusy} onClick={() => void sendManual()}>
+                    {manualBusy ? '发送中…' : '发送 S1F3'}
+                  </button>
+                </div>
+                {manualReply !== '' && <pre className="sml-result">{manualReply}</pre>}
+              </details>
+            </>
+          ) : (
+            <div className="field-block">
+              <span className="template-label">
+                采集 SVID（不限数量，已选 {selectedSvids.length} 个）
+              </span>
+              <SvidCheckList
+                choices={svidChoices}
+                selected={selectedSvids}
+                onChange={setSelectedSvids}
+              />
+              <p className="hint">
+                数量上限由设备侧采集器决定（当前实现为 256 个）；勾选本身不设上限。
+              </p>
+            </div>
+          )}
 
           <div className="editor-foot">
             <span className="hint">

@@ -28,9 +28,10 @@ import { TemplatePage } from '../features/pages/TemplatePage';
 /** 主机模拟各子页的一句话说明(顶栏用)。 */
 const HOSTSIM_PAGE_DESCRIPTIONS: Record<HostSimPage, string> = {
   hosts: '新建 / 断开主机实例：每个主机可以连本库里的任意设备，也可以连远程 SECS。',
-  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文。',
-  fdc: '② FDC Trace 数据采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报。',
-  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停。',
+  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文，可压测连发。',
+  fdc: '② S6F1 采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报；远程主机手填报文。',
+  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停；远程主机手填。',
+  monitor: '实时监控所有主机实例的收发：按主机 / 方向 / 类别 / 关键字过滤。',
 };
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */

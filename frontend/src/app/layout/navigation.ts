@@ -50,7 +50,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'hostsim',
         label: '主机模拟',
-        description: '以主机角色连设备：可开多个主机实例,各自选本机设备或远程 SECS;三类采集分开成页。',
+        description: '以主机角色连设备：可开多个主机实例,各自选本机设备或远程 SECS;采集与消息监控分开成页。',
         icon: 'hostsim',
         route: { name: 'hostsim', page: 'hosts' },
       },

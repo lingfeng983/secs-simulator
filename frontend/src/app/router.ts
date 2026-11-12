@@ -32,14 +32,15 @@ export const DEVICE_PAGES: readonly DevicePage[] = [
   'ceids', 'reports', 'events', 'alarms', 'svids', 'connection', 'structure', 'config', 'send', 'messages',
 ];
 
-/** 主机模拟子页:三类采集分开成三个页面,不再挤在一张面板里。 */
+/** 主机模拟子页:采集按能力分开成页,收发记录独立成「消息监控」。 */
 export type HostSimPage =
   | 'hosts'      // 主机实例:新建/断开/选择目标(本机设备或远程 SECS)
   | 'messages'   // ① 消息发送:以主机角色发 SML
   | 'fdc'        // ② S6F1 数据采集(S2F23 → S6F1,设备推)
-  | 'collect';   // ③ S1F3 数据采集(S1F3 轮询,主机拉)
+  | 'collect'    // ③ S1F3 数据采集(S1F3 轮询,主机拉)
+  | 'monitor';   // 消息监控:全部主机实例的收发实时滚动 + 过滤
 
-export const HOSTSIM_PAGES: readonly HostSimPage[] = ['hosts', 'messages', 'fdc', 'collect'];
+export const HOSTSIM_PAGES: readonly HostSimPage[] = ['hosts', 'messages', 'fdc', 'collect', 'monitor'];
 
 /** 主机模拟子页的中文名。 */
 export const HOSTSIM_PAGE_LABELS: Record<HostSimPage, string> = {
@@ -47,6 +48,7 @@ export const HOSTSIM_PAGE_LABELS: Record<HostSimPage, string> = {
   messages: '① 消息发送',
   fdc: '② S6F1 采集',
   collect: '③ S1F3 采集',
+  monitor: '消息监控',
 };
 
 /** 设备子页的中文名（设备页子导航与命令面板用）。 */

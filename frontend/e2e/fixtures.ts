@@ -189,8 +189,10 @@ export async function mockApi(page: Page): Promise<void> {
             { sessionId: 'line1', direction: 'in', stream: 1, function: 3, wbit: true, body: '<L[1] <U4 1001>>', at: 1_002 },
             { sessionId: 'line1', direction: 'out', stream: 1, function: 4, wbit: false, body: '<L[1] <F4 42.5>>', at: 1_003 },
             { sessionId: 'line1', direction: 'out', stream: 6, function: 11, wbit: true, body: '<L[3]>', at: 1_004 },
+            /* S6F1：主机监控页的 SxFy 过滤要有可命中的目标（否则"全滤掉"也能让断言通过） */
+            { sessionId: 'line1', direction: 'out', stream: 6, function: 1, wbit: true, body: '<L[4]>', at: 1_005 },
           ],
-          total: 5,
+          total: 6,
           limit: 500,
           truncated: false,
         },
@@ -206,6 +208,8 @@ export async function mockApi(page: Page): Promise<void> {
         json: {
           hosts: [
             { id: 'host-1', session: 'line1', open: true, target: '127.0.0.1:5000', port: 5000, deviceId: 10, mode: 'local', remote: false, lastError: '' },
+            /* 远程主机：对端不在本进程，用来验证"手填报文 / 不进设备页"的分支 */
+            { id: 'host-remote', session: 'line1', open: true, target: '192.168.1.50:5000', port: 5000, deviceId: 5, mode: 'remote', remote: true, lastError: '' },
           ],
         },
       });
@@ -214,6 +218,28 @@ export async function mockApi(page: Page): Promise<void> {
     if (path === '/api/v1/host-sims/host-1/collector') {
       return route.fulfill({
         json: { configured: true, running: false, startCeid: 2001, stopCeid: 2002, intervalMs: 1000, svids: [{ id: 1001, name: 'TEMP', unit: 'C' }], samples: 12, decodeErrors: 0 },
+      });
+    }
+
+    if (path === '/api/v1/host-sims/host-remote/collector') {
+      /* 远程主机：没有 name/unit，SVID 是手填的 */
+      return route.fulfill({ json: { configured: false, running: false } });
+    }
+
+    /* 主机级压测：POST 只受理，GET 回已完成的一轮统计 */
+    if (path === '/api/v1/host-sims/host-1/burst' || path === '/api/v1/host-sims/host-remote/burst') {
+      if (method === 'POST') {
+        return route.fulfill({
+          status: 202,
+          json: { ok: true, accepted: true, running: true, count: 3, sent: 0, failed: 0 },
+        });
+      }
+      return route.fulfill({
+        json: {
+          ok: true, running: false, accepted: true, count: 3,
+          sent: 3, failed: 0, skipped: 0, aborted: false,
+          durationMs: 12, latencyP50: 3, latencyP95: 5, latencyMax: 6,
+        },
       });
     }
 

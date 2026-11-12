@@ -14,7 +14,12 @@ import { saveHint, saveTextFile } from '../../shared/lib/saveFile';
 export function MessagePanel({ backend, messages = [], notifier }: PanelBaseProps): JSX.Element {
   const sessionId = backend.activeSession;
   const own = useMemo(
-    () => messages.filter((message) => message.sessionId === sessionId),
+    () => messages.filter((message) => (
+      message.sessionId === sessionId
+      /* 远程主机的报文挂在宿主会话名下，但设备侧从没看见过它：
+         留在设备页会让人以为是本设备收发的，所以排除（它们只在「消息监控」里）。 */
+      && (message.hostId === undefined || message.hostId === '')
+    )),
     [messages, sessionId],
   );
   const inbound = own.filter((message) => message.direction === 'in').length;

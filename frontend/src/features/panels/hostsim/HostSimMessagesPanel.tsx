@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
 import { PresetSelect } from '../../../shared/ui/PresetSelect';
-import { MessageFeed } from '../../../shared/ui/MessageFeed';
 import type { PanelBaseProps } from '../types';
 import type { HostSimCommands } from '../../../state/useHostSims';
-import type { SentMessageResult } from '../../../api';
-import { downloadText, safeFilename } from '../../../shared/lib/table';
+import type { BurstResult, SentMessageResult } from '../../../api';
 
 /** 主机方向的常用报文模板；只列设备真正实现了的报文。 */
 interface HostPreset {
@@ -158,23 +156,38 @@ interface SendOutcome {
   detail: string;
 }
 
+/** 压测统计的展示行。 */
+interface BurstOutcome {
+  hostId: string;
+  ok: boolean;
+  text: string;
+  detail: string;
+}
+
 /**
  * ① 消息发送（以主机角色）。
  *
  * <p>主机的新建/断开只在「主机实例」页做；这里选"发给哪几台"。
  * 多选后同一条 SML 依次发给每台主机，结果逐台列出——修一条报文、
  * 给多台设备同时下发时不用来回切主机。</p>
+ *
+ * <p>收发记录已独立到「消息监控」页：那里能看全部主机（含远程）的实时收发，
+ * 这个页只负责"发"。同一条报文要连发多次用页内的压测。</p>
  */
 export function HostSimMessagesPanel({
-  backend,
   notifier,
   hostSims,
-  messages = [],
 }: PanelBaseProps & { hostSims: HostSimCommands }): JSX.Element {
   const [draft, setDraft] = useState('S1F13 W');
   const [busy, setBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [outcomes, setOutcomes] = useState<SendOutcome[]>([]);
+
+  /* 压测参数 */
+  const [stressCount, setStressCount] = useState('100');
+  const [stressInterval, setStressInterval] = useState('0');
+  const [stressBusy, setStressBusy] = useState(false);
+  const [burstOutcomes, setBurstOutcomes] = useState<BurstOutcome[]>([]);
 
   const openHosts = useMemo(() => hostSims.hosts.filter((host) => host.open), [hostSims.hosts]);
   const openIdsKey = openHosts.map((host) => host.id).join('|');
@@ -189,31 +202,6 @@ export function HostSimMessagesPanel({
   }, [openIdsKey]);
 
   const selected = openHosts.filter((host) => selectedIds.includes(host.id));
-  const viewHost = hostSims.selected;
-
-  /** 只导出当前主机的报文；方向转成主机视角（与页面显示一致）。 */
-  const exportHostLog = async () => {
-    if (viewHost === null || backend.client === null) {
-      return;
-    }
-    try {
-      const text = await backend.client.messagesJsonl(viewHost.session, '', 5000);
-      const lines = text.split('\n').filter((line) => line.trim() !== '').map((line) => {
-        const item = JSON.parse(line) as { direction?: string; perspective?: string; hostId?: string };
-        item.direction = item.direction === 'in' ? 'out' : 'in';
-        item.perspective = 'host';
-        item.hostId = viewHost.id;
-        return JSON.stringify(item);
-      });
-      downloadText(
-        `messages-host-${safeFilename(viewHost.id)}.jsonl`,
-        lines.join('\n') + (lines.length > 0 ? '\n' : ''),
-        'application/jsonl;charset=utf-8',
-      );
-    } catch (error) {
-      notifier.error('导出该主机报文失败', (error as Error).message);
-    }
-  };
 
   const toggle = (hostId: string) => {
     setSelectedIds((previous) => (
@@ -259,11 +247,54 @@ export function HostSimMessagesPanel({
     }
   };
 
+  /**
+   * 压测发送：服务端后台连发同一条 SML。
+   *
+   * <p>逐台串行跑——压测本身已经是"一条报文连发 N 次"，多台同时跑只会让
+   * 统计互相干扰，也容易把设备侧 W 位队列打满。</p>
+   */
+  const runStress = async () => {
+    const count = Number.parseInt(stressCount, 10);
+    const interval = Number.parseInt(stressInterval, 10) || 0;
+    if (draft.trim() === '') {
+      notifier.error('SML 不能为空');
+      return;
+    }
+    if (!Number.isFinite(count) || count < 1 || count > 5000) {
+      notifier.error('次数要在 1..5000 之间');
+      return;
+    }
+    if (selected.length === 0) {
+      notifier.error('至少选一台主机');
+      return;
+    }
+    setStressBusy(true);
+    setBurstOutcomes([]);
+    const results: BurstOutcome[] = [];
+    for (const host of selected) {
+      try {
+        const stats: BurstResult = await hostSims.burst(host.id, draft, count, interval);
+        results.push({
+          hostId: host.id,
+          ok: stats.failed === 0,
+          text: `成功 ${stats.sent} / 失败 ${stats.failed}`,
+          detail: `耗时 ${stats.durationMs} ms · P50 ${stats.latencyP50} ms · P95 ${stats.latencyP95} ms · Max ${stats.latencyMax} ms`,
+        });
+      } catch (error) {
+        results.push({ hostId: host.id, ok: false, text: '压测失败', detail: (error as Error).message });
+      }
+    }
+    setBurstOutcomes(results);
+    setStressBusy(false);
+    const sent = results.reduce((sum, item) => sum + Number(/成功 (\d+)/.exec(item.text)?.[1] ?? 0), 0);
+    notifier.info(`压测完成：已发 ${sent} 条（${results.length} 台主机）`);
+  };
+
   return (
     <Panel
       id="panel-hostsim-messages"
       title="① 消息发送（以主机角色）"
-      description="选择一至多台已连接主机，发送同一条 SML；下方按主机查看收发记录。主机的新建/断开在「主机实例」页。"
+      description="选择一至多台已连接主机，发送同一条 SML；同一条报文可压测连发。收发记录在「消息监控」页。主机的新建/断开在「主机实例」页。"
     >
       <div className="host-multi">
         <div className="host-multi-head">
@@ -327,7 +358,7 @@ export function HostSimMessagesPanel({
             <span className="hint">
               SML 格式；primary（奇数 function）不写 W 也默认要求回复，secondary 不能带 W。
               预设只是模板，选中后仍可改 SVID / CEID / 时间再发送。
-              同一份报文会依次发给选中的每一台主机；回复与耗时逐台列在下方。
+              同一份报文会依次发给选中的每一台主机；收发记录在「消息监控」页。
             </span>
             <button
               type="button"
@@ -391,52 +422,68 @@ export function HostSimMessagesPanel({
               </table>
             </div>
           )}
+
+          <h3 className="sub-title">压测发送（服务端循环这条报文）</h3>
+          <div className="toolbar">
+            <label className="field">
+              次数
+              <input
+                value={stressCount}
+                onChange={(event) => setStressCount(event.target.value)}
+                inputMode="numeric"
+                aria-label="压测次数"
+              />
+            </label>
+            <label className="field">
+              间隔 ms
+              <input
+                value={stressInterval}
+                onChange={(event) => setStressInterval(event.target.value)}
+                inputMode="numeric"
+                title="0 = 全速"
+                aria-label="压测间隔"
+              />
+            </label>
+            <button
+              type="button"
+              className="primary"
+              disabled={stressBusy || busy || draft.trim() === '' || selected.length === 0}
+              onClick={() => void runStress()}
+              title="在服务端循环发送编辑框里这条 SML，消除 HTTP 往返失真"
+            >
+              {stressBusy ? '压测中…' : `压测发送（${selected.length} 台）`}
+            </button>
+            <span className="hint-inline">
+              服务端后台执行：W 位会逐条等回复，最长 5 分钟自动收尾。
+            </span>
+          </div>
+
+          {burstOutcomes.length > 0 && (
+            <div className="effects-table-wrap">
+              <table className="effects-table">
+                <thead>
+                  <tr>
+                    <th>主机</th>
+                    <th>结果</th>
+                    <th>耗时 / 分位</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {burstOutcomes.map((item) => (
+                    <tr key={item.hostId}>
+                      <td className="mono">{item.hostId}</td>
+                      <td>
+                        <span className={`badge ${item.ok ? 'tone-ok' : 'tone-warn'}`}>{item.text}</span>
+                      </td>
+                      <td className="hint-inline">{item.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
-
-      <section className="panel-section">
-        <div className="section-head">
-          <h2>收发记录（主机视角）</h2>
-          <label className="field">
-            查看
-            <select
-              value={viewHost?.id ?? ''}
-              onChange={(event) => hostSims.select(event.target.value)}
-              aria-label="查看哪台主机的收发记录"
-            >
-              {hostSims.hosts.length === 0 && <option value="">（还没有主机）</option>}
-              {hostSims.hosts.map((host) => (
-                <option key={host.id} value={host.id}>
-                  {host.id} · {host.remote ? `远程 ${host.target}` : host.session}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => void exportHostLog()}
-            disabled={viewHost === null || viewHost.remote || backend.client === null}
-            title="只导出当前主机的报文，方向按主机视角翻转"
-          >
-            导出该主机报文
-          </button>
-        </div>
-        {viewHost === null ? (
-          <p className="hint">先在上面选一台主机；它的收发报文会实时列在这里。</p>
-        ) : viewHost.remote ? (
-          <p className="hint">
-            当前是远程主机（<code>{viewHost.target}</code>）：报文不经过本进程的事件流，无法在这里监视；
-            可到对端设备的日志里查。
-          </p>
-        ) : (
-          <MessageFeed
-            messages={messages.filter((message) => message.sessionId === viewHost.session)}
-            perspective="host"
-            emptyText="还没有收发报文。"
-            emptyHint="主机发出请求、设备回复或主动上报后，这里实时滚动。"
-          />
-        )}
-      </section>
     </Panel>
   );
 }

@@ -68,10 +68,13 @@ export function categorizeMessage(stream: number, func: number): MessageCategory
  * 会被误判成重复吞掉。旧日志行没有 seq，退回复合键。</p>
  */
 export function messageKey(message: WireMessage): string {
+  const owner = message.hostId === undefined || message.hostId === ''
+    ? message.sessionId
+    : `${message.sessionId}#${message.hostId}`;
   if (typeof message.seq === 'number' && message.seq > 0) {
-    return `${message.sessionId}|seq:${message.seq}`;
+    return `${owner}|seq:${message.seq}`;
   }
-  return `${message.sessionId}|${message.at}|${message.direction}|${message.stream}|${message.function}|${message.wbit}|${message.body}`;
+  return `${owner}|${message.at}|${message.direction}|${message.stream}|${message.function}|${message.wbit}|${message.body}`;
 }
 
 /**

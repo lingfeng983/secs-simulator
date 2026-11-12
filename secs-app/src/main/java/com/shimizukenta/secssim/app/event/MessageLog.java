@@ -477,6 +477,8 @@ public final class MessageLog implements AutoCloseable {
             /* 旧日志行没有 seq：读回 0，前端会退回旧的复合去重键 */
             long seq = root.get("seq") == null ? 0L : root.get("seq").longValue();
             String sessionId = root.get("sessionId").optionalString().orElse("");
+            JsonHub hostNode = root.get("hostId");
+            String hostId = hostNode == null ? "" : hostNode.optionalString().orElse("");
             String direction = root.get("direction").optionalString().orElse("");
             String body = root.get("body").optionalString().orElse("");
             int stream = root.get("stream").intValue();
@@ -486,7 +488,7 @@ public final class MessageLog implements AutoCloseable {
             if (!"in".equals(direction) && !"out".equals(direction)) {
                 return;
             }
-            addRecent(new MessageEvent(seq, sessionId, direction, stream, function, wbit, body, at));
+            addRecent(new MessageEvent(seq, sessionId, hostId, direction, stream, function, wbit, body, at));
         } catch (RuntimeException e) {
             /* 日志文件允许被人工编辑，一条坏行不该让整个历史不可用 */
         }
@@ -534,6 +536,7 @@ public final class MessageLog implements AutoCloseable {
         return b.object(
                 b.pair("seq", event.seq()),
                 b.pair("sessionId", event.sessionId()),
+                b.pair("hostId", event.hostId()),
                 b.pair("direction", event.direction()),
                 b.pair("stream", event.stream()),
                 b.pair("function", event.function()),
@@ -550,7 +553,8 @@ public final class MessageLog implements AutoCloseable {
      * 主机视角：同一条线上报文，方向与设备相反。
      *
      * <p>本机主机与设备会话一一对应（一台设备只允许一个本机主机），
-     * 所以主机拆分文件按会话 id 命名；远程主机不经过本进程，不在这里。</p>
+     * 所以主机拆分文件按会话 id 命名；远程主机的报文由主机模拟器自己发布，
+     * 带 {@code hostId} 标记，不进这里（设备侧根本没看见它们）。</p>
      */
     private static String toHostJson(MessageEvent event) {
         JsonHubBuilder b = JsonHub.getBuilder();
@@ -558,6 +562,7 @@ public final class MessageLog implements AutoCloseable {
         return b.object(
                 b.pair("seq", event.seq()),
                 b.pair("sessionId", event.sessionId()),
+                b.pair("hostId", event.hostId()),
                 b.pair("perspective", "host"),
                 b.pair("direction", direction),
                 b.pair("stream", event.stream()),

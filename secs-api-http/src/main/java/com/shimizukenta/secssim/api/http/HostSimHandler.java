@@ -14,6 +14,9 @@ import com.sun.net.httpserver.HttpExchange;
  */
 final class HostSimHandler extends HttpSupport {
 
+    /** 状态查询请求：GET 复用同一入口，运行时只回状态、不启动新一轮压测。 */
+    private static final String BURST_STATUS_REQUEST = "{\"status\":true}";
+
     HostSimHandler(ApiContext context, AccessControl access, AuditSink audit) {
         super(context, access, audit);
     }
@@ -205,6 +208,69 @@ final class HostSimHandler extends HttpSupport {
             }
         }
 
+        /* 主机级压测：GET 取状态/最近结果，POST 受理一轮。
+           与会话级 /sessions/{id}/burst 同形；主机模拟页的"压测发送"用它，
+           远程主机（对端不在本进程）也能压。 */
+        if (parts.length == 2 && "burst".equals(parts[1])) {
+            if ("GET".equals(method)) {
+                if (!requireRole(ex, ApiRole.VIEWER)) {
+                    return;
+                }
+                String body = this.context.burstHost(hostId, BURST_STATUS_REQUEST);
+                if (body == null) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-host\"}");
+                    return;
+                }
+                respond(ex, 200, body);
+                return;
+            }
+            if ("POST".equals(method)) {
+                if (!requireRole(ex, ApiRole.OPERATOR)) {
+                    return;
+                }
+                String body = readBody(ex);
+                if (body == null || body.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                String result = this.context.burstHost(hostId, body);
+                if (result == null) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-host\"}");
+                    return;
+                }
+                audit(ex, "host-burst", hostId, "body=" + body.length() + "B");
+                respond(ex, burstStatusOf(result), result);
+                return;
+            }
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
         respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+    }
+
+    /**
+     * 压测响应的状态码：受理 202；忙 409；ok=false 的其余情况 400；其他 200。
+     *
+     * <p>与会话级 {@code /burst} 同一条判据：用字段而不是 {@code contains}，
+     * 错误消息里出现 "burst-busy" 之类的字样时，子串判断会把 400 误报成 409。</p>
+     */
+    private static int burstStatusOf(String result) {
+        try {
+            com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(result);
+            com.shimizukenta.jsonhub.JsonHub accepted = root.get("accepted");
+            if (accepted != null && accepted.optionalBoolean().orElse(false)) {
+                return 202;
+            }
+            com.shimizukenta.jsonhub.JsonHub ok = root.get("ok");
+            if (ok != null && !ok.optionalBoolean().orElse(true)) {
+                com.shimizukenta.jsonhub.JsonHub error = root.get("error");
+                String code = error == null ? "" : error.optionalString().orElse("");
+                return "burst-busy".equals(code) || "burst-running".equals(code) ? 409 : 400;
+            }
+            return 200;
+        } catch (RuntimeException e) {
+            return 500;
+        }
     }
 }

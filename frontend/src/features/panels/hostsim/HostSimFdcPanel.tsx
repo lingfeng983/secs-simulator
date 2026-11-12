@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
 import { NumberField } from '../../../shared/ui/CommitFields';
 import { SmlResult } from '../../../shared/ui/SmlResult';
@@ -10,17 +10,41 @@ import type { HostSimCommands } from '../../../state/useHostSims';
 import { HostTargetPicker } from './HostTargetPicker';
 import { SvidCheckList } from './SvidCheckList';
 
-/** 一个主机的 Trace 配置草稿（不落盘，切换主机时各自保留）。 */
+/** 一个主机的 Trace 配置草稿（落 localStorage，切换主机时各自保留）。 */
 interface FdcDraft {
   trid: number;
   dsper: number;
   totsmp: number;
   repgsz: number;
-  /** null = 还没手动改过，默认取前 4 个 SVID */
+  /** null = 还没手动改过，默认取前 4 个 SVID（仅本机设备） */
   svids: number[] | null;
+  /** 远程主机：整条 S2F23 手填（没有本地 catalog，SVID 只能是自由输入） */
+  manualSml: string;
 }
 
-const DEFAULT_DRAFT: FdcDraft = { trid: 1, dsper: 1000, totsmp: 100, repgsz: 1, svids: null };
+const DEFAULT_DRAFT: FdcDraft = {
+  trid: 1,
+  dsper: 1000,
+  totsmp: 100,
+  repgsz: 1,
+  svids: null,
+  manualSml: '',
+};
+
+/** 远程主机的默认报文骨架：TRID / DSPER / TOTSMP / REPGSZ / SVID 列表。 */
+const MANUAL_TEMPLATE = [
+  'S2F23 W',
+  '<L',
+  '  <U4 1>',
+  '  <A "000001">',
+  '  <U4 100>',
+  '  <U4 1>',
+  '  <L',
+  '    <U4 1001>',
+  '    <U4 1003>',
+  '  >',
+  '>.',
+].join('\n');
 
 /** 每个主机最近一次发送的结果。 */
 interface SendState {
@@ -32,21 +56,24 @@ interface SendState {
 /**
  * ② FDC Trace 数据采集（S2F23 → S6F1）。
  *
- * <p>主机的新建/断开只在「主机实例」页；本页只做"给哪台主机配哪份 Trace"。
- * 每台主机有独立的 TRID / 周期 / 样本 / 变量配置，上方汇总表把它们分开列出，
- * 不会出现"A 的配置发给了 B"。</p>
+ * <p>配置入口按主机类型分流，因为两类主机能"知道"的东西不一样：</p>
+ * <ul>
+ *   <li><b>本机设备</b>：有完整 catalog，用表单（TRID / 周期 / 样本 / 变量多选），
+ *       变量不限数量——上限交给设备自己的 {@code session.trace} 配置，页面不再硬截断；</li>
+ *   <li><b>远程 SECS</b>：对端不在本库，SVID 与格式都无从得知，只能手填整条 S2F23。</li>
+ * </ul>
+ *
+ * <p>当前操作哪台主机由顶部选择条决定，不再用一张汇总表重复列一遍。</p>
  */
 export function HostSimFdcPanel({
   backend,
   notifier,
   hostSims,
-  messages = [],
 }: PanelBaseProps & { hostSims: HostSimCommands }): JSX.Element {
   /* 每台主机的 Trace 配置：落 localStorage，切页面/重开界面后"A 的配置还在 A 上" */
   const [drafts, setDrafts] = usePersistentState<Record<string, FdcDraft>>('secs-sim-fdc-drafts', {});
   const [draftText, setDraftText] = useState('');
   const [sending, setSending] = useState(false);
-  const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [lastResult, setLastResult] = useState<SentMessageResult | null>(null);
   const [sendError, setSendError] = useState('');
 
@@ -56,6 +83,16 @@ export function HostSimFdcPanel({
 
   const draftOf = (hostId: string): FdcDraft => drafts[hostId] ?? DEFAULT_DRAFT;
   const draft = host === null ? DEFAULT_DRAFT : draftOf(host.id);
+
+  /* 切主机时把上一台的结果清掉：否则会把 A 的回复挂在 B 的配置下面 */
+  useEffect(() => {
+    setLastResult(null);
+    setSendError('');
+    setDraftText('');
+  }, [host?.id]);
+
+  /** 远程主机没有 catalog：报文完全手填，空串时给骨架。 */
+  const manualText = draft.manualSml === '' ? MANUAL_TEMPLATE : draft.manualSml;
 
   const effectiveSvids = useMemo(
     () => (draft.svids !== null ? draft.svids : choices.slice(0, 4).map((item) => item.svid)),
@@ -84,65 +121,63 @@ export function HostSimFdcPanel({
       + '>.';
   };
 
-  /** 发送某台主机的 S2F23；汇总表的逐行发送也走这里。 */
-  const sendFor = async (hostId: string): Promise<void> => {
-    const target = hostSims.hosts.find((item) => item.id === hostId);
-    if (target === undefined || !target.open) {
+  /** 当前主机要发出去的 SML：远程手填，本机按表单生成。 */
+  const pendingSml = (): string => {
+    if (host === null) {
+      return '';
+    }
+    if (host.remote) {
+      return manualText;
+    }
+    return buildS2F23(draft, effectiveSvids);
+  };
+
+  const canSend = host !== null && host.open
+    && (host.remote ? manualText.trim() !== '' : effectiveSvids.length > 0);
+
+  /** 发送 S2F23（当前主机）。 */
+  const send = async (): Promise<void> => {
+    if (host === null) {
+      return;
+    }
+    if (!host.open) {
       notifier.error('主机未连接');
       return;
     }
-    const config = draftOf(hostId);
-    const svids = config.svids !== null ? config.svids : choices.slice(0, 4).map((item) => item.svid);
-    if (svids.length === 0) {
+    if (!host.remote && effectiveSvids.length === 0) {
       notifier.error('没有可采集的变量');
       return;
     }
     setSending(true);
     setSendError('');
     setLastResult(null);
-    const sml = buildS2F23(config, svids);
+    const sml = pendingSml();
     try {
-      const raw = await hostSims.send(hostId, sml);
+      const raw = await hostSims.send(host.id, sml);
       const parsed = raw === null ? null : (JSON.parse(raw) as SentMessageResult);
       if (parsed !== null) {
         setLastResult(parsed);
-        setSendStates((previous) => ({
-          ...previous,
-          [hostId]: {
-            at: Date.now(),
-            ok: true,
-            summary: parsed.replySml != null
-              ? `S2F23 → S${parsed.replyStream}F${parsed.replyFunction}`
-              : parsed.timedOut ? '等待回复超时' : '已发送',
-          },
-        }));
         notifier.success(
           parsed.replySml != null ? `S2F23 → S${parsed.replyStream}F${parsed.replyFunction}` : 'S2F23 已发送',
-          `主机 ${hostId} · 耗时 ${parsed.elapsedMs} ms`,
+          `主机 ${host.id} · 耗时 ${parsed.elapsedMs} ms`,
         );
-        const state = controlStateOf(target);
-        if (state !== 'ONLINE' && state !== 'REMOTE') {
-          notifier.warn(
-            'S2F23 已被接受，但设备还没 ONLINE，S6F1 暂时不会上报',
-            `当前 ${controlStateLabel(state)}；先发送 S1F17 上线（上方提供一键按钮）`,
-          );
+        if (!host.remote) {
+          const state = controlStateOf(host);
+          if (state !== 'ONLINE' && state !== 'REMOTE') {
+            notifier.warn(
+              'S2F23 已被接受，但设备还没 ONLINE，S6F1 暂时不会上报',
+              `当前 ${controlStateLabel(state)}；先发送 S1F17 上线（上方提供一键按钮）`,
+            );
+          }
         }
       }
     } catch (error) {
       setSendError((error as Error).message);
-      setSendStates((previous) => ({
-        ...previous,
-        [hostId]: { at: Date.now(), ok: false, summary: '发送失败' },
-      }));
       notifier.error('发送 S2F23 失败', (error as Error).message);
     } finally {
       setSending(false);
     }
   };
-
-  const s6f1Count = (sessionId: string): number => messages.filter(
-    (message) => message.sessionId === sessionId && message.stream === 6 && message.function === 1,
-  ).length;
 
   /** 本机主机的设备控制状态：S6F1 只在 ONLINE 后上报（E30 主动上报门槛）。 */
   const controlStateOf = (hostItem: { session: string; remote: boolean }): string => {
@@ -172,104 +207,61 @@ export function HostSimFdcPanel({
     }
   };
 
+  const control = host === null ? '' : controlStateOf(host);
+
   return (
     <Panel
       id="panel-hostsim-fdc"
       title="② S6F1 采集（S2F23 → S6F1）"
-      description="设备按 DSPER 采样、REPGSZ 分条上报 S6F1。每台主机有独立的采集配置，上方汇总分开展示。"
+      description="设备按 DSPER 采样、REPGSZ 分条上报 S6F1。当前主机在顶部选择；本机设备用表单配置，远程主机手填 S2F23。"
     >
       <HostTargetPicker backend={backend} notifier={notifier} hostSims={hostSims} allowCreate={false} />
 
       {openHosts.length === 0 ? (
         <p className="hint">还没有已连接的主机：先到「主机实例」页新建一个。</p>
+      ) : host === null || !host.open ? (
+        <p className="hint">选一台已连接的主机来配置它的 Trace。</p>
       ) : (
         <>
-          <div className="effects-table-wrap">
-            <table className="effects-table">
-              <thead>
-                <tr>
-                  <th>主机</th>
-                  <th>目标</th>
-                  <th>控制</th>
-                  <th>TRID</th>
-                  <th>采样周期</th>
-                  <th>样本 / 分组</th>
-                  <th>采集变量</th>
-                  <th>S6F1 帧</th>
-                  <th>最近发送</th>
-                  <th aria-label="操作" />
-                </tr>
-              </thead>
-              <tbody>
-                {openHosts.map((item) => {
-                  const config = draftOf(item.id);
-                  const svids = config.svids !== null
-                    ? config.svids
-                    : choices.slice(0, 4).map((choice) => choice.svid);
-                  const sent = sendStates[item.id];
-                  const control = controlStateOf(item);
-                  return (
-                    <tr key={item.id}>
-                      <td className="mono">{item.id}</td>
-                      <td className="mono">{item.remote ? item.target : item.session}</td>
-                      <td>
-                        <span className={`badge ${control === 'ONLINE' ? 'tone-ok' : control === 'COMMUNICATING' ? 'tone-warn' : control === 'REMOTE' ? 'tone-info' : 'tone-muted'}`}>
-                          {control === 'REMOTE' ? '远程' : controlStateLabel(control)}
-                        </span>
-                      </td>
-                      <td>{config.trid}</td>
-                      <td>{config.dsper} ms</td>
-                      <td>{config.totsmp} / {config.repgsz}</td>
-                      <td>{svids.length} 个</td>
-                      <td>{item.remote ? '—' : s6f1Count(item.session)}</td>
-                      <td className="hint-inline">
-                        {sent === undefined ? '—' : `${new Date(sent.at).toLocaleTimeString()} · ${sent.summary}`}
-                      </td>
-                      <td>
-                        <div className="row-actions">
-                          <button type="button" onClick={() => hostSims.select(item.id)}>选用</button>
-                          {control !== 'ONLINE' && control !== 'REMOTE' && (
-                            <button type="button" onClick={() => void bringOnline(item.id)} title="发送 S1F17，让设备进入 ONLINE 后 S6F1 才会真正上报">
-                              上线
-                            </button>
-                          )}
-                          {control === 'ONLINE' && (
-                            <button type="button" onClick={() => void takeOffline(item.id)} title="发送 S1F15，设备转为 OFFLINE（S6F1 停止上报）">
-                              下线
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            disabled={sending}
-                            onClick={() => void sendFor(item.id)}
-                            title="用该主机自己的配置发送 S2F23"
-                          >
-                            发送
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="section-head">
+            <h3 style={{ margin: 0 }}>编辑 {host.id} 的 Trace 配置</h3>
+            <span className={`badge ${host.remote ? 'tone-info' : control === 'ONLINE' ? 'tone-ok' : control === 'COMMUNICATING' ? 'tone-warn' : 'tone-muted'}`}>
+              {host.remote ? `远程 ${host.target}` : `${host.session} · ${controlStateLabel(control)}`}
+            </span>
+            <span className="spacer" />
+            {!host.remote && control !== 'ONLINE' && (
+              <button type="button" onClick={() => void bringOnline(host.id)} title="发送 S1F17，让设备进入 ONLINE 后 S6F1 才会真正上报">
+                发送 S1F17 上线
+              </button>
+            )}
+            {!host.remote && control === 'ONLINE' && (
+              <button type="button" onClick={() => void takeOffline(host.id)} title="发送 S1F15，设备转为 OFFLINE（S6F1 停止上报）">
+                发送 S1F15 下线
+              </button>
+            )}
           </div>
 
-          {host === null || !host.open ? (
-            <p className="hint">选一台主机来编辑它的 Trace 配置。</p>
+          {host.remote ? (
+            <>
+              <p className="hint">
+                远程主机没有本地 catalog：TRID / DSPER / TOTSMP / REPGSZ 与 SVID 列表都在报文里手填，
+                设备只按 S2F24 回 TIAACK。改完直接发送；解析错误会在「发送失败」里给出位置。
+              </p>
+              <textarea
+                className="sml-editor sml-editor-tall"
+                spellCheck={false}
+                value={manualText}
+                onChange={(event) => update({ manualSml: event.target.value })}
+                aria-label="远程主机的 S2F23 报文"
+              />
+            </>
           ) : (
             <>
-              <div className="section-head">
-                <h3 style={{ margin: 0 }}>编辑 {host.id} 的 Trace 配置</h3>
-                <span className="hint-inline">{host.remote ? `远程 ${host.target}` : host.session}</span>
-              </div>
-              {!host.remote && controlStateOf(host) !== 'ONLINE' && (
+              {control !== 'ONLINE' && (
                 <p className="problems">
-                  设备当前是「{controlStateLabel(controlStateOf(host))}」：S2F23 会正常回 S2F24，
+                  设备当前是「{controlStateLabel(control)}」：S2F23 会正常回 S2F24，
                   但 <b>S6F1 只在 ONLINE 后才上报</b>，此刻下发不会看到帧。
-                  <button type="button" onClick={() => void bringOnline(host.id)}>
-                    发送 S1F17 上线
-                  </button>
+                  点右上角「发送 S1F17 上线」即可。
                 </p>
               )}
               <p className="hint">
@@ -296,58 +288,64 @@ export function HostSimFdcPanel({
               </div>
 
               <div className="field-block">
-                <span className="template-label">采集变量（最多 10 个）</span>
+                <span className="template-label">
+                  采集变量（不限数量，已选 {effectiveSvids.length} 个）
+                </span>
                 <SvidCheckList
                   choices={choices}
                   selected={effectiveSvids}
                   onChange={(next) => update({ svids: next })}
-                  max={10}
                 />
+                <p className="hint">
+                  上限由设备自己的 <code>session.trace.maxSvidCount</code> 决定（默认 10）：
+                  勾多了 S2F24 会回 TIAACK=1，设备侧不会采。
+                </p>
               </div>
-
-              <div className="editor-foot">
-                <span className="hint">
-                  DSPER 是 hhmmss 六位数字（整秒）：周期 ms 会收敛到最近的整秒、最小 1 秒。
-                  TOTSMP=0 用于提前终止该 TRID。配置只属于当前主机。
-                </span>
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={effectiveSvids.length === 0 || sending}
-                  onClick={() => void sendFor(host.id)}
-                  title="按当前参数生成 S2F23 并以当前主机发出（W 位等 S2F24）"
-                >
-                  {sending ? '发送中…' : '生成并发送 S2F23'}
-                </button>
-                <button
-                  type="button"
-                  disabled={effectiveSvids.length === 0}
-                  onClick={() => setDraftText(buildS2F23(draft, effectiveSvids))}
-                  title="只生成 S2F23 文本，便于检查或复制"
-                >
-                  生成 S2F23
-                </button>
-              </div>
-
-              {draftText !== '' && (
-                <>
-                  <div className="section-head">
-                    <h3>生成的 S2F23</h3>
-                    <button type="button" className="link" onClick={() => setDraftText('')}>收起</button>
-                  </div>
-                  <pre className="sml-result">{draftText}</pre>
-                </>
-              )}
-              {lastResult !== null && (
-                <SmlResult
-                  header={`发送 ${host.id}  S${lastResult.stream}F${lastResult.function}${lastResult.wbit ? ' W' : ''}`}
-                  result={lastResult}
-                  peerLabel="设备"
-                />
-              )}
-              {sendError !== '' && <pre className="sml-result error-result">发送失败：{sendError}</pre>}
             </>
           )}
+
+          <div className="editor-foot">
+            <span className="hint">
+              {host.remote
+                ? 'DSPER 是 hhmmss 六位数字（整秒）。TOTSMP=0 用于提前终止该 TRID。配置只属于当前主机。'
+                : 'DSPER 是 hhmmss 六位数字（整秒）：周期 ms 会收敛到最近的整秒、最小 1 秒。TOTSMP=0 用于提前终止该 TRID。配置只属于当前主机。'}
+            </span>
+            <button
+              type="button"
+              className="primary"
+              disabled={!canSend || sending}
+              onClick={() => void send()}
+              title="按当前配置生成 S2F23 并以当前主机发出（W 位等 S2F24）"
+            >
+              {sending ? '发送中…' : '生成并发送 S2F23'}
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => setDraftText(pendingSml())}
+              title="只生成 S2F23 文本，便于检查或复制"
+            >
+              生成 S2F23
+            </button>
+          </div>
+
+          {draftText !== '' && (
+            <>
+              <div className="section-head">
+                <h3>生成的 S2F23</h3>
+                <button type="button" className="link" onClick={() => setDraftText('')}>收起</button>
+              </div>
+              <pre className="sml-result">{draftText}</pre>
+            </>
+          )}
+          {lastResult !== null && (
+            <SmlResult
+              header={`发送 ${host.id}  S${lastResult.stream}F${lastResult.function}${lastResult.wbit ? ' W' : ''}`}
+              result={lastResult}
+              peerLabel="设备"
+            />
+          )}
+          {sendError !== '' && <pre className="sml-result error-result">发送失败：{sendError}</pre>}
         </>
       )}
     </Panel>

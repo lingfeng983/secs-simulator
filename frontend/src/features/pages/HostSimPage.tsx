@@ -1,10 +1,10 @@
 import type { HostSimPage as HostSimPageId } from '../../app/router';
 import { HOSTSIM_PAGE_LABELS, HOSTSIM_PAGES } from '../../app/router';
-import { Icon } from '../../shared/ui/Icon';
 import { HostSimHostsPanel } from '../panels/hostsim/HostSimHostsPanel';
 import { HostSimMessagesPanel } from '../panels/hostsim/HostSimMessagesPanel';
 import { HostSimFdcPanel } from '../panels/hostsim/HostSimFdcPanel';
 import { HostSimCollectPanel } from '../panels/hostsim/HostSimCollectPanel';
+import { HostSimMonitorPanel } from '../panels/hostsim/HostSimMonitorPanel';
 import type { PanelBaseProps } from '../panels/types';
 import { useHostSims } from '../../state/useHostSims';
 import { useEffect } from 'react';
@@ -12,16 +12,19 @@ import { useEffect } from 'react';
 /** 各子页的一句话说明。 */
 const PAGE_DESCRIPTIONS: Record<HostSimPageId, string> = {
   hosts: '新建 / 断开主机实例：每个主机可以连当前库里的任意设备，也可以连远程 SECS。',
-  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文。',
-  fdc: '② S6F1 采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报。',
-  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停。',
+  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文，可压测连发。',
+  fdc: '② S6F1 采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报。本机设备用表单，远程主机手填报文。',
+  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停。本机设备多选变量，远程主机手填。',
+  monitor: '实时监控所有主机实例的收发：按主机 / 方向 / 类别 / 关键字过滤，远程主机也在内。',
 };
 
 /**
  * 主机模拟页（顶层入口，不在设备页签里）。
  *
- * <p>四块：主机实例（建/断/选）、① 消息发送、② S6F1 采集、③ S1F3 采集。
- * 三类采集各自成页——原来挤在一张面板里，参数多到看不清谁在配谁。</p>
+ * <p>五块：主机实例（建/断/选）、① 消息发送（含压测）、② S6F1 采集、
+ * ③ S1F3 采集、消息监控。三类采集各自成页——原来挤在一张面板里，
+ * 参数多到看不清谁在配谁；收发记录独立成「消息监控」，全部主机（含远程）
+ * 一起看。</p>
  */
 export function HostSimPage({
   page,
@@ -82,6 +85,9 @@ export function HostSimPage({
       )}
       {page === 'collect' && (
         <HostSimCollectPanel {...baseProps} hostSims={hostSims} />
+      )}
+      {page === 'monitor' && (
+        <HostSimMonitorPanel {...baseProps} hostSims={hostSims} />
       )}
       </div>
     </div>

@@ -82,6 +82,8 @@ export interface WireMessage {
   /** 后端单调序号；历史补拉与 SSE 用它去重（旧日志行可能没有）。 */
   seq?: number;
   sessionId: string;
+  /** 主机模拟实例 id；空/缺省 = 这条报文属于设备会话本身。 */
+  hostId?: string;
   direction: 'in' | 'out';
   stream: number;
   function: number;
@@ -556,6 +558,10 @@ export interface ApiClient {
   setHostInstanceCollector(hostId: string, config: CollectorConfigInput): Promise<{ ok: boolean; error?: string }>;
   /** 按实例 id 手动启停采集器。 */
   hostInstanceCollectorCommand(hostId: string, start: boolean): Promise<{ ok: boolean; error?: string }>;
+  /** 按实例 id 压测发送（服务端后台连发同一条 SML，POST 只回受理）。 */
+  hostInstanceBurst(hostId: string, request: BurstRequest): Promise<BurstResult>;
+  /** 主机实例的压测进度/最近一次结果。 */
+  hostInstanceBurstStatus(hostId: string): Promise<BurstStatus>;
 
   /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
   openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;

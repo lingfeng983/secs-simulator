@@ -85,6 +85,27 @@ class MessageLogTest {
     }
 
     @Test
+    void keepsHostIdAcrossRestart() throws Exception {
+        /* 远程主机的报文也要落盘：重启后消息监控页仍能按 hostId 归属到实例上。 */
+        try (MessageLog log = MessageLog.open(this.temp)) {
+            log.append(MessageEvent.ofHost("line1", "host-9", "in", 1, 3, true, "<A \"REQ\">", 1_000L));
+            log.append(MessageEvent.ofHost("line1", "host-9", "out", 1, 4, false, "<A \"ACK\">", 1_100L));
+            /* 设备会话自己发布的报文没有主机标记 */
+            log.append(new MessageEvent("line1", "in", 1, 1, true, "", 1_200L));
+        }
+
+        try (MessageLog reopened = MessageLog.open(this.temp)) {
+            JsonHub root = JsonHub.fromJson(reopened.recentJson(10, "", ""));
+            assertEquals(3, root.get("messages").length());
+            assertEquals("host-9",
+                    root.get("messages").get(0).get("hostId").optionalString().orElse(""));
+            /* 旧行/设备行读回空串而不是缺字段：前端据此判"设备侧发布" */
+            assertEquals("",
+                    root.get("messages").get(2).get("hostId").optionalString().orElse("x"));
+        }
+    }
+
+    @Test
     void filtersAndMarksTruncation() throws Exception {
         try (MessageLog log = MessageLog.open(this.temp)) {
             for (int i = 0; i < 5; i++) {

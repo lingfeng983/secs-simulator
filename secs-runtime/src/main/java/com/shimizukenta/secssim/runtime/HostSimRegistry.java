@@ -30,6 +30,9 @@ final class HostSimRegistry {
 
     private final SessionManager sessions;
 
+    /** 事件总线：远程主机的收发不进设备会话，只有主机实例自己会发布。 */
+    private final com.shimizukenta.secssim.app.event.EventBus eventBus;
+
     /** 主机实例注册表：hostId → 模拟器（多主机：同一台设备可以开多个主机）。 */
     private final ConcurrentMap<String, HostSimulator> hostSims = new ConcurrentHashMap<>();
 
@@ -39,8 +42,9 @@ final class HostSimRegistry {
     /** 主机实例 id 计数器。 */
     private final AtomicLong hostSeq = new AtomicLong();
 
-    HostSimRegistry(SessionManager sessions) {
+    HostSimRegistry(SessionManager sessions, com.shimizukenta.secssim.app.event.EventBus eventBus) {
         this.sessions = sessions;
+        this.eventBus = eventBus;
     }
 
     /**
@@ -101,6 +105,8 @@ final class HostSimRegistry {
 
         try {
             HostSimulator created = HostSimulator.open(id, session, override);
+            /* 远程实例的报文只有这一条通道：设备会话看不见对端。 */
+            created.eventBus(this.eventBus);
             /* containsKey → put 之间有窗口：并发同名实例会互相覆盖并泄漏一个连接。
                putIfAbsent 失败时把这次新建的这个关掉。 */
             HostSimulator previous = this.hostSims.putIfAbsent(id, created);
@@ -281,6 +287,39 @@ final class HostSimRegistry {
             return null;
         }
         return sim.collectorJson();
+    }
+
+    /**
+     * 主机实例句柄：给压测这类需要"反复发同一条"的调用方。
+     *
+     * <p>压测不能在每一条上都重新查表并把重连逻辑走一遍；句柄里固化实例与
+     * 打开状态，发送仍走注册表的自动重连路径。</p>
+     *
+     * @param hostId 实例 id
+     * @return 句柄；实例不存在返回 {@code null}
+     */
+    HostHandle handle(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        return sim == null ? null : new HostHandle(this, sim);
+    }
+
+    /** 主机实例句柄：{@link #open()} 判活，{@link #send(String)} 发一条 SML。 */
+    record HostHandle(HostSimRegistry registry, HostSimulator sim) {
+
+        /** 实例当前是否可用（连接已断时压测应直接记失败，而不是逐条试）。 */
+        boolean open() {
+            return this.sim.isOpen();
+        }
+
+        /**
+         * 发一条 SML（连接断了自动重连一次，与会话级发送同一套语义）。
+         *
+         * @param sml SML 文本
+         * @throws IOException 发送失败
+         */
+        void send(String sml) throws IOException {
+            this.registry.send(this.sim, sml, this.sim.hostId());
+        }
     }
 
     /** 会话级：下发采集器配置。 */

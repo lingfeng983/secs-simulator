@@ -142,7 +142,7 @@ button.active:not(.segment):not(.segmented > button) {
   }
 }
 
-/* ===== 报文收发监视（设备页·消息 / 主机模拟·收发记录） ===== */
+/* ===== 报文收发监视（设备页·消息 / 主机模拟·消息监控） ===== */
 .message-feed {
   display: flex;
   flex-direction: column;

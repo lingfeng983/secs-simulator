@@ -84,6 +84,25 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String burstHost(String hostId, String requestJson) {
+                if ("missing".equals(hostId)) {
+                    return null;
+                }
+                if (requestJson.contains("\"status\":true")) {
+                    return "{\"ok\":true,\"running\":false,\"accepted\":false}";
+                }
+                if (requestJson.contains("\"kind\":\"ceid\"") || requestJson.contains("\"kind\":\"alarm\"")) {
+                    return "{\"ok\":false,\"error\":\"unsupported-kind\"}";
+                }
+                if (requestJson.contains("\"count\":0")) {
+                    return "{\"ok\":false,\"error\":\"count-out-of-range\"}";
+                }
+                return "{\"ok\":true,\"accepted\":true,\"running\":true,\"count\":3,"
+                        + "\"sent\":0,\"failed\":0,\"skipped\":0,\"aborted\":false,"
+                        + "\"durationMs\":0,\"latencyP50\":0,\"latencyP95\":0,\"latencyMax\":0}";
+            }
+
+            @Override
             public SessionOutcome openHostSim(String sessionId, String targetJson, String hostId) {
                 return SessionOutcome.OK;
             }
@@ -896,6 +915,41 @@ class HttpApiServerTest {
         HttpResponse<String> response = get("/api/v1/host-sims/", null);
         assertTrue(response.statusCode() == 400 || response.statusCode() == 404,
                 "空实例 id 应回 4xx，实际 " + response.statusCode() + "：" + response.body());
+    }
+
+    /**
+     * 主机级压测路由：POST 受理回 202、GET 回状态、未知实例 404、参数错误 400。
+     *
+     * <p>与会话级 {@code /sessions/{id}/burst} 同一套状态码约定——前端按
+     * {@code running}/{@code accepted} 轮询，不能靠 HTTP 200 判断"跑完了"。</p>
+     */
+    @Test
+    void hostBurstAcceptsThenReportsStatus() throws Exception {
+        HttpResponse<String> accepted = postJson("/api/v1/host-sims/host-1/burst", null,
+                "{\"kind\":\"message\",\"sml\":\"S1F1 W.\",\"count\":3}");
+        assertEquals(202, accepted.statusCode(), accepted.body());
+        assertTrue(accepted.body().contains("\"accepted\":true"), accepted.body());
+
+        HttpResponse<String> status = get("/api/v1/host-sims/host-1/burst", null);
+        assertEquals(200, status.statusCode(), status.body());
+        assertTrue(status.body().contains("\"running\":false"), status.body());
+
+        HttpResponse<String> unknown = postJson("/api/v1/host-sims/missing/burst", null,
+                "{\"kind\":\"message\",\"sml\":\"S1F1 W.\",\"count\":3}");
+        assertEquals(404, unknown.statusCode(), unknown.body());
+
+        HttpResponse<String> badCount = postJson("/api/v1/host-sims/host-1/burst", null,
+                "{\"kind\":\"message\",\"sml\":\"S1F1 W.\",\"count\":0}");
+        assertEquals(400, badCount.statusCode(), badCount.body());
+    }
+
+    /** 主机级压测只接受报文：CEID / 报警是设备侧能力，主机没有对应语义。 */
+    @Test
+    void hostBurstRejectsNonMessageKinds() throws Exception {
+        HttpResponse<String> response = postJson("/api/v1/host-sims/host-1/burst", null,
+                "{\"kind\":\"ceid\",\"ceid\":2001,\"count\":1}");
+        assertEquals(400, response.statusCode(), response.body());
+        assertTrue(response.body().contains("unsupported-kind"), response.body());
     }
 
 }

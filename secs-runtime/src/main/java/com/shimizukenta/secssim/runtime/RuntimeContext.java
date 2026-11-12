@@ -40,13 +40,13 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-            MessageLog messages, AuditLog audit) {
+            MessageLog messages, AuditLog audit, com.shimizukenta.secssim.app.event.EventBus eventBus) {
         this.mode = mode;
         this.version = version;
         this.extraHealthJson = extraHealthJson;
         this.shutdown = shutdown;
-        this.hosts = new HostSimRegistry(sessions);
-        this.bursts = new BurstRunner(sessions);
+        this.hosts = new HostSimRegistry(sessions, eventBus);
+        this.bursts = new BurstRunner(sessions, this.hosts);
         this.api = new RuntimeApi(sessions, launcher, configs, messages, audit, this.hosts, this.bursts);
     }
 
@@ -306,7 +306,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public SessionOutcome closeHostSimById(String hostId) {
-        return this.hosts.closeById(hostId);
+        SessionOutcome outcome = this.hosts.closeById(hostId);
+        /* 实例没了，它的压测状态也不该留着：map 会随手建/删实例无限增长，
+           在跑的那一轮也该停下（否则一直对着已关闭的连接重试） */
+        this.bursts.cancelHost(hostId);
+        return outcome;
     }
 
     @Override
@@ -378,6 +382,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public String burst(String sessionId, String requestJson) {
         return this.bursts.burst(sessionId, requestJson);
+    }
+
+    @Override
+    public String burstHost(String hostId, String requestJson) {
+        return this.bursts.burstHost(hostId, requestJson);
     }
 
     /* ---------- 配置与模板 ---------- */

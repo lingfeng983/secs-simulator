@@ -311,22 +311,23 @@ test('sidebar does not show the version line', async ({ page }) => {
   await expect(page.locator('.sidenav')).not.toContainText('SNAPSHOT');
 });
 
-test('host simulation is a top-level menu with three separate collection pages', async ({ page }) => {
+test('host simulation is a top-level menu with separate collection and monitor pages', async ({ page }) => {
   await page.goto('/');
 
   /* 主菜单里有「主机模拟」入口 */
   const nav = page.locator('.sidenav');
   await expect(nav.locator('.nav-item', { hasText: '主机模拟' }).first()).toBeVisible();
 
-  /* 进去后是四个子页:实例 / 消息 / S6F1 / S1F3 */
+  /* 进去后是五个子页:实例 / 消息发送 / S6F1 / S1F3 / 消息监控 */
   await nav.locator('.nav-item', { hasText: '主机模拟' }).first().click();
   await expect(page.locator('#panel-hostsim-hosts')).toBeVisible();
   await expect(page.getByRole('tab', { name: '主机实例' })).toBeVisible();
   await expect(page.getByRole('tab', { name: '① 消息发送' })).toBeVisible();
   await expect(page.getByRole('tab', { name: '② S6F1 采集' })).toBeVisible();
   await expect(page.getByRole('tab', { name: '③ S1F3 采集' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '消息监控' })).toBeVisible();
 
-  /* 三类采集各自成页,不挤在一起 */
+  /* 各页独立,不挤在一起 */
   await page.getByRole('tab', { name: '② S6F1 采集' }).click();
   await expect(page.locator('#panel-hostsim-fdc')).toBeVisible();
   await expect(page.locator('#panel-hostsim-collect')).toHaveCount(0);
@@ -337,6 +338,9 @@ test('host simulation is a top-level menu with three separate collection pages',
 
   await page.getByRole('tab', { name: '① 消息发送' }).click();
   await expect(page.locator('#panel-hostsim-messages')).toBeVisible();
+
+  await page.getByRole('tab', { name: '消息监控' }).click();
+  await expect(page.locator('#panel-hostsim-monitor')).toBeVisible();
 
   /* 主机实例页可以选本机设备或远程 SECS */
   await page.getByRole('tab', { name: '主机实例' }).click();
@@ -362,16 +366,73 @@ test('device message monitor lists traffic and filters by category', async ({ pa
   await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
 });
 
-test('host simulation message page monitors traffic with the host perspective', async ({ page }) => {
+test('host simulation monitor page lists host traffic and filters it', async ({ page }) => {
+  await page.goto('/#/hostsim/monitor');
+
+  const panel = page.locator('#panel-hostsim-monitor');
+  await expect(panel).toBeVisible();
+  /* 本机主机的报文没有 hostId（设备侧发布），监控页按会话把它归到该主机上 */
+  await expect(panel.getByText('发 → 设备').first()).toBeVisible();
+  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+
+  /* 方向过滤：只看主机发出 = 设备视角的 in */
+  await panel.getByLabel('按方向过滤').selectOption('sent');
+  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+  await expect(panel.getByText('收 ← 设备').first()).toHaveCount(0);
+
+  await panel.getByLabel('按方向过滤').selectOption('all');
+
+  /* 类别过滤走 MessageFeed 的类别条：屏蔽事件后 S6F11 消失 */
+  await panel.getByRole('button', { name: /^事件/ }).click();
+  await expect(panel.getByText('S6F11 W', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: '全部显示' }).click();
+
+  /* SxFy 过滤：只看 S6F1 —— 必须"S1F1 消失且 S6F1 仍在"，
+     只断言消失会把"什么都过滤掉"也判成通过（大小写不一致时就是这样） */
+  await panel.getByLabel('按 SxFy 过滤').fill('S6F1');
+  await expect(panel.getByText('S1F1 W', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('S6F1 W', { exact: true })).toBeVisible();
+
+  /* 小写输入也要认（输入容错） */
+  await panel.getByLabel('按 SxFy 过滤').fill('s6f1');
+  await expect(panel.getByText('S1F1 W', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('S6F1 W', { exact: true })).toBeVisible();
+
+  await panel.getByRole('button', { name: '清空过滤' }).click();
+  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+});
+
+test('host simulation message page sends and has stress controls, no log table', async ({ page }) => {
   await page.goto('/#/hostsim/messages');
 
   const panel = page.locator('#panel-hostsim-messages');
   await expect(panel).toBeVisible();
-  await expect(panel.getByRole('heading', { name: '收发记录（主机视角）' })).toBeVisible();
-  /* 设备视角的 in 在主机视角是"发 → 设备" */
-  await expect(panel.getByText('发 → 设备').first()).toBeVisible();
+  /* 收发记录已搬到「消息监控」：这里不再有那张「收发记录（主机视角）」表 */
+  await expect(panel.getByRole('heading', { name: '收发记录（主机视角）' })).toHaveCount(0);
 
-  await panel.getByRole('button', { name: /^事件/ }).click();
-  await expect(panel.getByText('S6F11 W', { exact: true })).toHaveCount(0);
-  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+  /* 压测发送：次数 / 间隔 / 按钮都在 */
+  await expect(panel.getByLabel('压测次数')).toBeVisible();
+  await expect(panel.getByLabel('压测间隔')).toBeVisible();
+  await expect(panel.getByRole('button', { name: /压测发送/ })).toBeVisible();
+
+  /* 单发仍按主机逐台列出结果 */
+  await panel.getByRole('button', { name: /发送到 \d+ 台/ }).click();
+  await expect(page.locator('.toast').first()).toBeVisible();
+});
+
+test('host sim S6F1 page uses the top host picker and a hand-filled S2F23 for remote hosts', async ({ page }) => {
+  await page.goto('/#/hostsim/fdc');
+
+  const panel = page.locator('#panel-hostsim-fdc');
+  await expect(panel).toBeVisible();
+  /* 顶部已有主机选择：页面里不再重复一张主机汇总表 */
+  await expect(panel.locator('table')).toHaveCount(0);
+
+  /* 切到远程主机：报文改为手填 */
+  await panel.getByLabel('当前主机实例').selectOption('host-remote');
+  await expect(panel.getByLabel('远程主机的 S2F23 报文')).toBeVisible();
+  await expect(panel.getByLabel('远程主机的 S2F23 报文')).toHaveValue(/S2F23 W/);
+  /* 远程主机没有本地 catalog，不该出现变量多选 */
+  await expect(panel.locator('.svid-check-grid')).toHaveCount(0);
 });

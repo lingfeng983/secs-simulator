@@ -65,6 +65,42 @@ class SseMessageTest {
     }
 
     @Test
+    void hostInstanceMessagesCarryTheirHostId() throws Exception {
+        /* 远程主机的报文由主机实例自己发布：SSE 帧必须带 hostId，
+           否则消息监控页无法把"这条是谁发的"分开（远程实例之间会串台）。 */
+        EventBus bus = new EventBus();
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
+                new StubContext(), null, bus);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
+            HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            Future<String> reader = pool.submit(() -> readUntilMessage(stream));
+
+            MessageEvent event = MessageEvent.ofHost("s1", "host-7", "in",
+                    1, 3, true, "<L[1] <U4 1001>>", 123L);
+            for (int i = 0; i < 30 && !reader.isDone(); i++) {
+                bus.publish(event);
+                Thread.sleep(100L);
+            }
+
+            String text = reader.get(5L, TimeUnit.SECONDS);
+            assertTrue(text.contains("\"hostId\":\"host-7\""), text);
+            /* 设备会话本身的报文仍然是空串，前端据此区分"设备侧发布" */
+            assertTrue(text.contains("\"sessionId\":\"s1\""), text);
+        } finally {
+            pool.shutdownNow();
+            server.close();
+        }
+    }
+
+    @Test
     void nonObjectNoticePayloadStaysValidJson() throws Exception {
         /* payload 不一定是 JSON 对象（数组/字符串/数字）；过去一律丢掉首字符再拼接，
            "[1,2]" 会变成 {...,"at":456,1,2]} 这种非法帧，前端 SSE 解析直接断流。 */

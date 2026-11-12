@@ -161,7 +161,8 @@ public final class Bootstrap {
         }
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog, auditLog);
+                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog, auditLog,
+                bus);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,

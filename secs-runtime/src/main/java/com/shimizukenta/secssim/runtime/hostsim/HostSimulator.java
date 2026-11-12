@@ -88,6 +88,8 @@ public final class HostSimulator {
     private final HsmsConnectionTarget target;
     /** 本机模式才有:用于 S1F4 按声明类型解码与采集 SVID 存在性校验。 */
     private final ResolvedEquipment localModel;
+    /** 事件总线：远程主机的收发不经过设备会话，只有这里能看见。 */
+    private volatile com.shimizukenta.secssim.app.event.EventBus eventBus;
     private final AtomicBoolean open = new AtomicBoolean(false);
     private volatile SecsCommunicator communicator;
     private volatile String lastError = "";
@@ -119,6 +121,23 @@ public final class HostSimulator {
      */
     public String hostId() {
         return this.hostId;
+    }
+
+    /**
+     * 挂上事件总线：本实例的收发报文会以 {@code hostId} 标记发布。
+     *
+     * <p>本机主机的报文设备侧也会发一份（不带 hostId），消息监控页按方向去重；
+     * 远程主机的报文对端不在本进程里，只有这条通道，必须打开才能监控。</p>
+     *
+     * @param bus 事件总线；{@code null} 表示不发布
+     */
+    public void eventBus(com.shimizukenta.secssim.app.event.EventBus bus) {
+        this.eventBus = bus;
+        SecsCommunicator comm = this.communicator;
+        if (comm != null) {
+            /* 重连后会换一个 communicator，这一步也由 connect() 重新挂 */
+            installPassThrough(comm);
+        }
     }
 
     /**
@@ -184,6 +203,7 @@ public final class HostSimulator {
 
         SecsCommunicator comm = HsmsSsCommunicator.open(config);
         comm.addSecsMessageReceiveListener(this::onPrimary);
+        this.installPassThrough(comm);
         this.communicator = comm;
         /* 连接与 SELECT 是异步的：不等通信建立就发会撞 NotConnected。
            但 openAndWaitUntilCommunicating() 内部是无限等待，对端不可达时会
@@ -238,6 +258,46 @@ public final class HostSimulator {
         this.connect();
         this.open.set(true);
         this.lastError = "";
+    }
+
+    /**
+     * 把主机侧的收发挂到事件总线。
+     *
+     * <p>只有远程主机需要：本机主机的报文走的就是设备会话，设备侧已经发布过一份
+     * （不带 hostId），这里再发一遍会让监控页每条报文出现两次。远程主机的对端
+     * 不在本进程里，本进程只有这一条通道。</p>
+     */
+    private void installPassThrough(SecsCommunicator comm) {
+        final com.shimizukenta.secssim.app.event.EventBus bus = this.eventBus;
+        if (bus == null || !this.isRemote()) {
+            return;
+        }
+        comm.addSendedMessagePassThroughListener(message -> this.publishHost(bus, message, true));
+        comm.addReceiveMessagePassThroughListener(message -> this.publishHost(bus, message, false));
+    }
+
+    /**
+     * 发布一条主机侧报文。
+     *
+     * <p>{@code direction} 全项目统一按<b>设备视角</b>记（{@code in} = 设备收到），
+     * 界面再按需要翻转成主机视角；远程主机这条通道也照这个约定写，
+     * 否则同一个监控列表里两种方向语义会混在一起。</p>
+     */
+    private void publishHost(com.shimizukenta.secssim.app.event.EventBus bus,
+                             SecsMessage message, boolean sentByHost) {
+        if (message.getStream() < 0) {
+            return;
+        }
+        String body;
+        try {
+            body = SmlRenderer.render(message.secs2());
+        } catch (RuntimeException e) {
+            body = "<不可渲染>";
+        }
+        bus.publish(com.shimizukenta.secssim.app.event.MessageEvent.ofHost(
+                this.sessionId, this.hostId, sentByHost ? "in" : "out",
+                message.getStream(), message.getFunction(), message.wbit(),
+                body, System.currentTimeMillis()));
     }
 
     /**
