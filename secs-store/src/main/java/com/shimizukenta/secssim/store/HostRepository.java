@@ -267,6 +267,22 @@ public final class HostRepository {
         }
     }
 
+    /** 全部未删除主机模板的 JSON 数组。 */
+    public String listTemplatesJson() {
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        List<com.shimizukenta.jsonhub.JsonHub> items = new ArrayList<>();
+        for (HostTemplateView view : listTemplates()) {
+            items.add(b.object(
+                    b.pair("id", view.id()),
+                    b.pair("name", view.name()),
+                    b.pair("host", view.host()),
+                    b.pair("port", view.port()),
+                    b.pair("deviceId", view.deviceIdNum()),
+                    b.pair("note", view.note())));
+        }
+        return b.object(b.pair("templates", b.array(items))).toJson();
+    }
+
     /** 更新主机模板。 */
     public void saveTemplate(String id, String name, String host, int port,
                              int deviceIdNum, String collectorJson, String note) {

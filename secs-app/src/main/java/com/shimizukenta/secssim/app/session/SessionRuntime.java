@@ -32,6 +32,58 @@ public interface SessionRuntime {
     void close();
 
     /**
+     * 链路相位（3.0 需求 1：关闭 ≠ 删除）。
+     *
+     * <p>与 {@link #state()} 的会话状态并存：{@code state()} 说"这个对象处于
+     * 生命周期的哪一步"，{@code linkPhase()} 说"链路现在通不通"。</p>
+     */
+    enum LinkPhase {
+        /** 初始 / 已销毁。 */
+        STOPPED,
+        /** 正在打开（bind / connect 中）。 */
+        STARTING,
+        /** 被动监听已就绪，主机尚未 select。 */
+        LISTENING,
+        /** HSMS selected，链路可用。 */
+        CONNECTED,
+        /** 只断链：对象与配置、运行态编辑全部保留，可重连。 */
+        DISCONNECTED,
+        /** 打开失败的终态（主动侧不再自动重试）。 */
+        FAILED,
+    }
+
+    /**
+     * 只断链不断对象（3.0 需求 1）：配置、模型、钉值、计划启用态全部保留，
+     * {@link #reconnect()} 后原样恢复。幂等；与 {@link #close()} 的区别是
+     * 对象仍留在注册表里。
+     */
+    default void disconnect() {
+        this.close();
+    }
+
+    /**
+     * 复用同一对象重开链路（等价于断开后的 {@link #open()}）。
+     *
+     * @throws IOException 绑定 / 连接失败
+     */
+    default void reconnect() throws IOException {
+        this.open();
+    }
+
+    /**
+     * 当前链路相位。
+     *
+     * @return 相位；不支持相位概念的实现按会话状态近似
+     */
+    default LinkPhase linkPhase() {
+        return switch (this.state()) {
+            case OPEN, OPENING -> LinkPhase.CONNECTED;
+            case FAILED -> LinkPhase.FAILED;
+            default -> LinkPhase.STOPPED;
+        };
+    }
+
+    /**
      * 当前状态。
      *
      * @return 状态

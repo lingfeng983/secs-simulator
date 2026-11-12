@@ -2,10 +2,9 @@ package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicLong;
 
 import com.shimizukenta.secssim.api.http.CollectorOutcome;
 import com.shimizukenta.secssim.api.http.CollectorResult;
@@ -13,175 +12,131 @@ import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.app.session.SessionManager;
+import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.hostsim.HostSimulator;
+import com.shimizukenta.secssim.store.HostRepository;
+import com.shimizukenta.secssim.store.RuntimeStateRepository;
 
 /**
- * 主机模拟器注册表：会话 ↔ 主机实例的双向索引，以及每个实例的报文/采集器入口。
+ * 主机模拟器注册表（3.0：主机是与设备完全无关的独立实体，设计 §2.4）。
  *
- * <p>从 {@code RuntimeContext} 拆出来的第一块：主机实例是独立于会话生命周期的
- * 连接（多主机：同一台设备可以开多个，远程实例连的是别的设备），
- * 它的注册、查找、重连与关闭自成一套，不需要和会话查询/配置读写混在一个文件里。</p>
+ * <p>实例按持久 hostId 全局唯一寻址，数量不设上限，多台可指向同一地址；
+ * 不再有 {@code hostsBySession} 反向索引、不再有「一台设备一个本机主机」检查、
+ * 设备断开/删除不再触碰主机。实例的持久行在 {@code host} 表（HostRepository），
+ * 链路相位在 {@code host_link} 表（RuntimeStateRepository）。</p>
  *
- * <p>并发约定：注册表本身是两把 ConcurrentMap，"同一 id 并发打开"由
- * {@code putIfAbsent} 兜底——失败的那一方把自己的连接关掉再返回冲突。</p>
+ * <p>并发约定：注册表是 ConcurrentMap；「同一 id 并发打开」由 putIfAbsent 兜底——
+ * 失败的一方把自己的连接关掉再返回冲突。</p>
  */
 final class HostSimRegistry {
 
     private final SessionManager sessions;
-
-    /** 事件总线：远程主机的收发不进设备会话，只有主机实例自己会发布。 */
     private final com.shimizukenta.secssim.app.event.EventBus eventBus;
+    private final HostRepository hosts;
+    private final RuntimeStateRepository linkState;
 
-    /** 主机实例注册表：hostId → 模拟器（多主机：同一台设备可以开多个主机）。 */
+    /** 主机实例注册表：hostId → 模拟器。 */
     private final ConcurrentMap<String, HostSimulator> hostSims = new ConcurrentHashMap<>();
 
-    /** 会话 → 它开的主机实例 id 列表。 */
-    private final ConcurrentMap<String, List<String>> hostsBySession = new ConcurrentHashMap<>();
-
-    /** 主机实例 id 计数器。 */
-    private final AtomicLong hostSeq = new AtomicLong();
-
-    HostSimRegistry(SessionManager sessions, com.shimizukenta.secssim.app.event.EventBus eventBus) {
+    HostSimRegistry(SessionManager sessions, com.shimizukenta.secssim.app.event.EventBus eventBus,
+                    HostRepository hosts, RuntimeStateRepository linkState) {
         this.sessions = sessions;
         this.eventBus = eventBus;
+        this.hosts = hosts;
+        this.linkState = linkState;
     }
 
     /**
-     * 为会话打开一个主机模拟器。
+     * 新建主机实例并连接（v2 主入口：目标任意，与设备无关）。
      *
-     * @param sessionId  所属会话
-     * @param targetJson 远程目标（{@code {"host","port","deviceId"}}）；空 = 连本机
-     * @param hostId     指定实例 id；空则自动生成
-     * @return 打开结果
+     * @param name          显示名
+     * @param target        连接目标
+     * @param autoReconnect 失败后是否自动重连
+     * @return 新实例 id；冲突/失败经 SessionOutcome 表达
      */
-    SessionOutcome open(String sessionId, String targetJson, String hostId) {
-        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        String id = hostId == null || hostId.isBlank()
-                ? "host-" + this.hostSeq.incrementAndGet()
-                : hostId.trim();
-        if (this.hostSims.containsKey(id)) {
-            return SessionOutcome.CONFLICT;
-        }
-
-        /* v6:target 为空连本机(保留"设备已有真主机→409"检查);
-           远程目标连别的 SECS,占用情况不可知,冲突由连接行为自然暴露 */
-        HsmsConnectionTarget override = null;
-        boolean remote = targetJson != null && !targetJson.isBlank();
-        if (remote) {
-            try {
-                com.shimizukenta.jsonhub.JsonHub target = com.shimizukenta.jsonhub.JsonHub.fromJson(targetJson);
-                String host = target.get("host").optionalString().orElse("");
-                int port = target.get("port").optionalInt().orElse(0);
-                int deviceId = target.get("deviceId").optionalInt().orElse(0);
-                if (host.isBlank() || port < 1 || port > 65535) {
-                    Log.error("主机模拟远程目标非法（会话 " + sessionId + "）", null);
-                    return SessionOutcome.FAILED;
-                }
-                override = new HsmsConnectionTarget(host, port, deviceId);
-            } catch (RuntimeException e) {
-                Log.error("主机模拟远程目标解析失败（会话 " + sessionId + "）: " + e.getMessage(), null);
-                return SessionOutcome.FAILED;
-            }
-        }
-
-        /* 一台设备只允许一个本机主机：E5 的一台设备只接受一个选中的主机，
-           再开一个会让"当前主机"与报文归属变得不可解释。远程实例连的是别的设备，不受此限。 */
-        if (!remote) {
-            List<String> existing = this.hostsBySession.get(sessionId);
-            if (existing != null) {
-                for (String existingHostId : existing) {
-                    HostSimulator previous = this.hostSims.get(existingHostId);
-                    if (previous != null && previous.isOpen()) {
-                        Log.info("会话 " + sessionId + " 已有主机 " + existingHostId + "，拒绝再建一个本机主机");
-                        return SessionOutcome.CONFLICT;
-                    }
-                }
-            }
-        }
-
-        try {
-            HostSimulator created = HostSimulator.open(id, session, override);
-            /* 远程实例的报文只有这一条通道：设备会话看不见对端。 */
-            created.eventBus(this.eventBus);
-            /* containsKey → put 之间有窗口：并发同名实例会互相覆盖并泄漏一个连接。
-               putIfAbsent 失败时把这次新建的这个关掉。 */
-            HostSimulator previous = this.hostSims.putIfAbsent(id, created);
-            if (previous != null) {
-                created.close();
-                return SessionOutcome.CONFLICT;
-            }
-            this.hostsBySession.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>())
-                    .add(id);
-            Log.info("主机模拟器 " + id + " 已连接会话 " + sessionId + (remote ? "（远程）" : ""));
-            return SessionOutcome.OK;
-        } catch (IOException e) {
-            Log.error("主机模拟器连接失败（会话 " + sessionId + "）: " + e.getMessage(), null);
-            return SessionOutcome.FAILED;
-        } catch (IllegalArgumentException e) {
-            Log.error("主机模拟器连接失败（设备已有主机）: " + e.getMessage(), null);
-            return SessionOutcome.CONFLICT;
-        }
-    }
-
-    /** 关掉会话当前的主机实例（没有就是未知会话）。 */
-    SessionOutcome closeBySession(String sessionId) {
-        return this.closeById(this.hostIdOf(sessionId));
-    }
-
-    /** 按实例 id 关闭；同步清理会话索引，避免残留已不存在的 id。 */
-    SessionOutcome closeById(String hostId) {
-        HostSimulator sim = this.hostSims.remove(hostId);
+    synchronized CreateResult open(String name, HsmsConnectionTarget target, boolean autoReconnect) {
+        String id = this.hosts.create(name, target.bindHost(), target.port(), target.deviceId(),
+                "{}", autoReconnect, "");
+        HostSimulator sim = attach(id);
         if (sim == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
+            return new CreateResult(id, SessionOutcome.FAILED);
         }
-        sim.close();
-        /* 同步清理会话 → 实例的索引：否则关掉最后一个实例后，
-           会话级接口还会拿着一个已经不存在的 id 去查。 */
-        for (List<String> ids : this.hostsBySession.values()) {
-            ids.remove(hostId);
+        try {
+            sim.connect();
+        } catch (IOException e) {
+            /* 连接失败：实例留在注册表（FAILED 终态可重连），如实报告 */
+            return new CreateResult(id, SessionOutcome.FAILED);
         }
-        this.hostsBySession.entrySet().removeIf(entry -> entry.getValue().isEmpty());
-        return SessionOutcome.OK;
+        return new CreateResult(id, SessionOutcome.OK);
+    }
+
+    /** 打开结果：实例 id + 结果码（FAILED 时实例已存在但停在 FAILED）。 */
+    record CreateResult(String hostId, SessionOutcome outcome) {
     }
 
     /**
-     * 会话的主机状态 JSON。
-     *
-     * @param sessionId 会话
-     * @return 会话不存在返回 {@code null}（HTTP 404），没开过主机返回 {@code {"open":false}}
+     * 装配一个已持久化的实例（内存 + 相位监听），失败返回 null。
      */
-    String jsonOfSession(String sessionId) {
-        if (this.sessions.find(sessionId).isEmpty()) {
+    private HostSimulator attach(String hostId) {
+        Optional<HostRepository.HostView> view = this.hosts.find(hostId);
+        if (view.isEmpty()) {
             return null;
         }
-        String hostId = this.hostIdOf(sessionId);
-        if (hostId.isEmpty()) {
-            return "{\"open\":false}";
-        }
-        return this.jsonById(hostId);
+        HostSimulator sim = HostSimulator.fromView(view.get(), this.eventBus);
+        sim.onPhase((phaseId, phase) ->
+                this.linkState.upsertHostLink(phaseId, phase.name(),
+                        view.get().targetHost() + ":" + view.get().targetPort(),
+                        view.get().settingRevision()));
+        HostSimulator previous = this.hostSims.putIfAbsent(hostId, sim);
+        return previous == null ? sim : previous;
     }
 
-    /** 会话当前的主机实例 id（没开过、或实例已被关掉就是空串）。 */
-    private String hostIdOf(String sessionId) {
-        List<String> ids = this.hostsBySession.get(sessionId);
-        if (ids == null || ids.isEmpty()) {
-            return "";
+    /** 实例是否在册。 */
+    boolean exists(String hostId) {
+        return this.hostSims.containsKey(hostId);
+    }
+
+    /**
+     * v1 兼容入口：为会话打开主机实例。session 只在「没给目标」时一次性解析成
+     * 目标地址（设备的监听地址），此后实例与那台设备再无关系（设计 §2.5）。
+     *
+     * @param sessionId  宿主会话（解析默认目标用）
+     * @param targetJson 远程目标；空 = 用会话的监听地址
+     * @param name       显示名；空 = 用 hostId
+     * @return 打开结果
+     */
+    CreateResult openForSession(String sessionId, String targetJson, String name) {
+        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+        if (session == null) {
+            return new CreateResult("", SessionOutcome.UNKNOWN_SESSION);
         }
-        for (int i = ids.size() - 1; i >= 0; i--) {
-            String id = ids.get(i);
-            if (this.hostSims.containsKey(id)) {
-                return id;
+        HsmsConnectionTarget target;
+        if (targetJson != null && !targetJson.isBlank()) {
+            try {
+                com.shimizukenta.jsonhub.JsonHub parsed = com.shimizukenta.jsonhub.JsonHub.fromJson(targetJson);
+                String host = parsed.get("host").optionalString().orElse("");
+                int port = parsed.get("port").optionalInt().orElse(0);
+                int deviceId = parsed.get("deviceId").optionalInt().orElse(0);
+                if (host.isBlank() || port < 1 || port > 65535) {
+                    Log.error("主机模拟远程目标非法（会话 " + sessionId + "）", null);
+                    return new CreateResult("", SessionOutcome.FAILED);
+                }
+                target = new HsmsConnectionTarget(host, port, deviceId);
+            } catch (RuntimeException e) {
+                Log.error("主机模拟远程目标解析失败（会话 " + sessionId + "）: " + e.getMessage(), null);
+                return new CreateResult("", SessionOutcome.FAILED);
             }
-            ids.remove(i);
+        } else {
+            target = session.hostTarget();
+            if (target == null) {
+                return new CreateResult("", SessionOutcome.FAILED);
+            }
         }
-        return "";
+        return open(name == null || name.isBlank() ? sessionId : name, target, false);
     }
 
-    /** 全部主机实例（JSON 数组）。 */
+    /** 全部实例的 JSON 数组（内存态相位为准）。 */
     String allJson() {
         com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
         List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
@@ -195,26 +150,72 @@ final class HostSimRegistry {
     String jsonById(String hostId) {
         HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
-            /* 实例不存在 = 未知资源，交给 HTTP 层回 404；不要伪装成"存在但已断开" */
+            /* 实例不在内存 = 不存在；持久行由 v2 /hosts 列表给出断开态 */
             return null;
         }
         return sim.stateJson();
     }
 
-    /**
-     * 会话级发送：找会话当前的主机实例发一条 SML。
-     *
-     * @param sessionId 会话
-     * @param sml       SML 文本
-     * @return 响应文本；没有实例/会话不存在返回 {@code null}
-     * @throws IOException 发送失败（会自动重连重试一次）
-     */
-    String sendBySession(String sessionId, String sml) throws IOException {
-        HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
-            return null;
+    /** 断开一个实例（实例保留，可重连）。 */
+    SessionOutcome disconnectById(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
         }
-        return this.send(sim, sml, "会话 " + sessionId);
+        sim.disconnect();
+        return SessionOutcome.OK;
+    }
+
+    /** 重连一个实例。 */
+    SessionOutcome connectById(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        try {
+            if (sim.phase() == HostSimulator.HostLinkPhase.DISCONNECTED || !sim.isOpen()) {
+                sim.disconnect();
+            }
+            sim.connect();
+            return SessionOutcome.OK;
+        } catch (IOException e) {
+            Log.error("主机重连失败: " + hostId + ": " + e.getMessage(), null);
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    /** 使设置生效（按最新设置重连）。 */
+    SessionOutcome applyById(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        try {
+            sim.apply();
+            return SessionOutcome.OK;
+        } catch (IOException e) {
+            Log.error("主机使设置生效失败: " + hostId + ": " + e.getMessage(), null);
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    /**
+     * 删除实例（显式销毁 + 持久行软删）。断开态才允许的检查在 HTTP 层。
+     */
+    SessionOutcome destroyById(String hostId) {
+        HostSimulator sim = this.hostSims.remove(hostId);
+        if (sim != null) {
+            sim.destroy();
+        }
+        try {
+            this.hosts.delete(hostId);
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            if (e.kind() == com.shimizukenta.secssim.store.StoreException.Kind.NOT_FOUND) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            throw e;
+        }
+        return SessionOutcome.OK;
     }
 
     /**
@@ -235,16 +236,13 @@ final class HostSimRegistry {
 
     /**
      * 发送并在连接已死时自动重连重试一次。
-     *
-     * <p>设备重载后端口重绑会让连接死亡：自动重连让"改配置→重载→继续用主机模拟"
-     * 不需要手动断开重连。v6 用 {@code reconnect()} 保留原目标（远程模式同样适用）。</p>
      */
     private String send(HostSimulator sim, String sml, String who) throws IOException {
         try {
             return sim.sendSml(sml);
         } catch (IOException e) {
             if (!sim.isOpen()) {
-                Log.info("主机模拟器连接已断（" + who + "），自动重连后重试");
+                Log.info("主机连接已断（" + who + "），自动重连后重试");
                 try {
                     sim.reconnect();
                 } catch (IOException reconnectError) {
@@ -256,7 +254,7 @@ final class HostSimRegistry {
         }
     }
 
-    /** 实例级：下发采集器配置。 */
+    /** 实例级：下发采集器配置（同步持久到 host.collector_json）。 */
     CollectorResult setCollectorById(String hostId, String requestJson) {
         HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
@@ -264,6 +262,10 @@ final class HostSimRegistry {
         }
         try {
             sim.setCollectorConfig(requestJson);
+            /* 采集配置属于实例设置：持久化，重连/重启后恢复 */
+            this.hosts.find(hostId).ifPresent(view ->
+                    this.hosts.save(hostId, view.name(), view.targetHost(), view.targetPort(),
+                            view.targetDeviceIdNum(), requestJson, view.autoReconnect(), view.note()));
             return CollectorResult.ok();
         } catch (IllegalArgumentException e) {
             return CollectorResult.invalid(e.getMessage());
@@ -283,81 +285,12 @@ final class HostSimRegistry {
     String collectorJsonById(String hostId) {
         HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
-            /* 实例不存在 → HTTP 404；已存在的实例未配置才是 configured:false */
             return null;
         }
         return sim.collectorJson();
     }
 
-    /**
-     * 主机实例句柄：给压测这类需要"反复发同一条"的调用方。
-     *
-     * <p>压测不能在每一条上都重新查表并把重连逻辑走一遍；句柄里固化实例与
-     * 打开状态，发送仍走注册表的自动重连路径。</p>
-     *
-     * @param hostId 实例 id
-     * @return 句柄；实例不存在返回 {@code null}
-     */
-    HostHandle handle(String hostId) {
-        HostSimulator sim = this.hostSims.get(hostId);
-        return sim == null ? null : new HostHandle(this, sim);
-    }
-
-    /** 主机实例句柄：{@link #open()} 判活，{@link #send(String)} 发一条 SML。 */
-    record HostHandle(HostSimRegistry registry, HostSimulator sim) {
-
-        /** 实例当前是否可用（连接已断时压测应直接记失败，而不是逐条试）。 */
-        boolean open() {
-            return this.sim.isOpen();
-        }
-
-        /**
-         * 发一条 SML（连接断了自动重连一次，与会话级发送同一套语义）。
-         *
-         * @param sml SML 文本
-         * @throws IOException 发送失败
-         */
-        void send(String sml) throws IOException {
-            this.registry.send(this.sim, sml, this.sim.hostId());
-        }
-    }
-
-    /** 会话级：下发采集器配置。 */
-    CollectorResult setCollectorBySession(String sessionId, String requestJson) {
-        HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
-            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
-        }
-        try {
-            sim.setCollectorConfig(requestJson);
-            return CollectorResult.ok();
-        } catch (IllegalArgumentException e) {
-            return CollectorResult.invalid(e.getMessage());
-        }
-    }
-
-    /** 会话级：启停采集。 */
-    CollectorResult commandBySession(String sessionId, boolean start) {
-        HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-        if (sim == null || this.sessions.find(sessionId).isEmpty()) {
-            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
-        }
-        return this.command(sim, start);
-    }
-
-    /** 会话级：采集器状态；会话不存在返回 {@code null}，没开主机返回 {@code {"configured":false}}。 */
-    String collectorJsonBySession(String sessionId) {
-        if (this.sessions.find(sessionId).isEmpty()) {
-            return null;
-        }
-        HostSimulator sim = this.hostSims.get(this.hostIdOf(sessionId));
-        if (sim == null) {
-            return "{\"configured\":false}";
-        }
-        return sim.collectorJson();
-    }
-
-    /** 启停采集；"没有配置"是状态冲突（409），不是请求非法，界面据此提示先下发配置。 */
+    /** 启停采集；"没有配置"是状态冲突（409），不是请求非法。 */
     private CollectorResult command(HostSimulator sim, boolean start) {
         try {
             if (start) {
@@ -373,47 +306,191 @@ final class HostSimRegistry {
         }
     }
 
-    /** 会话是否挂着至少一个已连接的主机实例（总览页打标记用）。 */
-    boolean anyOpen(String sessionId) {
-        List<String> hostIds = this.hostsBySession.get(sessionId);
-        if (hostIds == null) {
+    /**
+     * 从目标读取变量目录（S1F11 → S1F12）并持久化到实例行。
+     *
+     * @return {@code {"ok":true,"count":n}}；目标不支持时 {@code {"ok":false,...}}
+     */
+    String refreshVariables(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
+            return "{\"ok\":false,\"error\":\"host-sim-not-open\"}";
+        }
+        try {
+            int count = sim.refreshVariables();
+            this.hosts.saveVariableCatalog(hostId, sim.catalogJson());
+            return "{\"ok\":true,\"count\":" + count + "}";
+        } catch (IOException e) {
+            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        }
+    }
+
+    /** 声明变量解码类型并持久化。 */
+    boolean declareVariableType(String hostId, int svid, String type) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
             return false;
         }
-        for (String hostId : hostIds) {
-            HostSimulator sim = this.hostSims.get(hostId);
-            if (sim != null && sim.isOpen()) {
-                return true;
-            }
-        }
-        return false;
+        sim.declareType(svid, type);
+        this.hosts.saveVariableCatalog(hostId, sim.catalogJson());
+        return true;
     }
 
-    /** 会话被删时收掉它的全部主机实例：会话都没了，主机不该继续挂着一条死连接。 */
-    void closeAllOf(String sessionId) {
-        List<String> hostIds = this.hostsBySession.remove(sessionId);
-        if (hostIds == null) {
-            return;
+    /** 实例变量目录 JSON；实例不存在返回 null。 */
+    String variablesJson(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null) {
+            return null;
         }
-        for (String hostId : hostIds) {
-            HostSimulator sim = this.hostSims.remove(hostId);
-            if (sim != null) {
-                sim.close();
-            }
+        return sim.catalogJson();
+    }
+
+    /**
+     * 主机实例句柄：给压测这类需要"反复发同一条"的调用方。
+     */
+    HostHandle handle(String hostId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        return sim == null ? null : new HostHandle(this, sim);
+    }
+
+    /** 主机实例句柄：{@link #open()} 判活，{@link #send(String)} 发一条 SML。 */
+    record HostHandle(HostSimRegistry registry, HostSimulator sim) {
+
+        /** 实例当前是否可用。 */
+        boolean open() {
+            return this.sim.isOpen();
+        }
+
+        /**
+         * 发一条 SML（连接断了自动重连一次）。
+         *
+         * @param sml SML 文本
+         * @throws IOException 发送失败
+         */
+        void send(String sml) throws IOException {
+            this.registry.send(this.sim, sml, this.sim.hostId());
         }
     }
 
-    /** 停机：关掉所有实例；单个失败只记录，停机继续。 */
+    /** 启动装配：把 host 表里的持久实例装回内存（全部断开态；不自动连接）。 */
+    void loadPersisted() {
+        for (HostRepository.HostView view : this.hosts.list()) {
+            if (this.hostSims.containsKey(view.id())) {
+                continue;
+            }
+            attach(view.id());
+        }
+        Log.info("主机实例已从配置库装回内存 " + this.hostSims.size() + " 台（全部断开态）");
+    }
+
+    /** 停机：断开所有实例（实例行保留，重启后仍是列表里的一员）。 */
     void close() {
         for (String hostId : List.copyOf(this.hostSims.keySet())) {
-            HostSimulator sim = this.hostSims.remove(hostId);
+            HostSimulator sim = this.hostSims.get(hostId);
             if (sim != null) {
                 try {
-                    sim.close();
+                    sim.disconnect();
                 } catch (RuntimeException e) {
-                    Log.error("关闭主机模拟器失败（停机继续）: " + hostId, e);
+                    Log.error("关闭主机实例失败（停机继续）: " + hostId, e);
                 }
             }
         }
-        this.hostsBySession.clear();
+    }
+
+    /* ---------- v1 会话级兼容（设计 §2.5：session 只在创建瞬间解析目标） ---------- */
+
+    /** 按显示名找实例（v1 的"会话的主机"≈ 以会话名建的主机）。 */
+    private HostSimulator findByName(String name) {
+        for (HostSimulator sim : this.hostSims.values()) {
+            if (sim.name().equals(name)) {
+                return sim;
+            }
+        }
+        return null;
+    }
+
+    /** v1:会话的主机状态（找不到绑定实例时回 allJson 里的第一台，没有则 open:false）。 */
+    String jsonOfSession(String sessionId) {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return null;
+        }
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return "{\"open\":false}";
+        }
+        return sim.stateJson();
+    }
+
+    /** v1:会话级发送。 */
+    String sendBySession(String sessionId, String sml) throws IOException {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return null;
+        }
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return null;
+        }
+        return this.send(sim, sml, sessionId);
+    }
+
+    /** v1:会话级下发采集配置。 */
+    CollectorResult setCollectorBySession(String sessionId, String requestJson) {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
+        }
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
+        }
+        try {
+            sim.setCollectorConfig(requestJson);
+            return CollectorResult.ok();
+        } catch (IllegalArgumentException e) {
+            return CollectorResult.invalid(e.getMessage());
+        }
+    }
+
+    /** v1:会话级启停采集。 */
+    CollectorResult commandBySession(String sessionId, boolean start) {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
+        }
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
+        }
+        return this.command(sim, start);
+    }
+
+    /** v1:会话级采集器状态。 */
+    String collectorJsonBySession(String sessionId) {
+        if (this.sessions.find(sessionId).isEmpty()) {
+            return null;
+        }
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return "{\"configured\":false}";
+        }
+        return sim.collectorJson();
+    }
+
+    /** v1:按名称断开（closeHostSim(sessionId) 的兼容路径）。 */
+    SessionOutcome disconnectByName(String sessionId) {
+        HostSimulator sim = findByName(sessionId);
+        if (sim == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        sim.disconnect();
+        return SessionOutcome.OK;
+    }
+
+    /** 会话删除时不再触碰主机（3.0：无级联）——保留空实现给旧调用点。 */
+    void closeAllOf(String sessionId) {
+        /* 设计 §2.4.1 约束 2：设备断开/删除不调用主机注册表 */
+    }
+
+    /** v1 兼容：会话当前是否挂着已连接主机（总览页标记；v1 里按宿主关系不存在，恒 false）。 */
+    boolean anyOpen(String sessionId) {
+        return false;
     }
 }

@@ -61,7 +61,7 @@ class SessionSelectedLinkSurvivesRogueHostTest {
 
         try {
             /* 真实主站上线：ACTIVE + SELECT，随后做一次真实事务 */
-            mainHost = HostSimulator.open("host-main", device, null);
+            mainHost = HostSimulator.open("host-main", "main", device.hostTarget(), null);
             SessionTestSupport.awaitPeer(device);
 
             JsonHub first = JsonHub.fromJson(mainHost.sendSml("S1F1 W."));

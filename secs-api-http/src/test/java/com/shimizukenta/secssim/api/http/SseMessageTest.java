@@ -83,7 +83,7 @@ class SseMessageTest {
 
             Future<String> reader = pool.submit(() -> readUntilMessage(stream));
 
-            MessageEvent event = MessageEvent.ofHost("s1", "host-7", "in",
+            MessageEvent event = MessageEvent.ofHost("host-7", "in",
                     1, 3, true, "<L[1] <U4 1001>>", 123L);
             for (int i = 0; i < 30 && !reader.isDone(); i++) {
                 bus.publish(event);
@@ -93,7 +93,7 @@ class SseMessageTest {
             String text = reader.get(5L, TimeUnit.SECONDS);
             assertTrue(text.contains("\"hostId\":\"host-7\""), text);
             /* 设备会话本身的报文仍然是空串，前端据此区分"设备侧发布" */
-            assertTrue(text.contains("\"sessionId\":\"s1\""), text);
+            assertTrue(text.contains("\"perspective\":\"host\""), text);
         } finally {
             pool.shutdownNow();
             server.close();

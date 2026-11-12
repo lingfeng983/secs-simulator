@@ -71,6 +71,18 @@ final class ApiPaths {
     /** 单个主机实例前缀。 */
     static final String HOST_SIM_PREFIX = "/api/v1/host-sims/";
 
+    /** v2 主机集合。 */
+    static final String HOSTS_V2 = "/api/v2/hosts";
+
+    /** v2 单主机前缀。 */
+    static final String HOST_V2_PREFIX = "/api/v2/hosts/";
+
+    /** v2 主机模板集合。 */
+    static final String HOST_TEMPLATES_V2 = "/api/v2/host-templates";
+
+    /** v2 单个主机模板前缀。 */
+    static final String HOST_TEMPLATE_V2_PREFIX = "/api/v2/host-templates/";
+
     /** 只校验不落盘的子路径。 */
     static final String VALIDATE_SUFFIX = "validate";
 

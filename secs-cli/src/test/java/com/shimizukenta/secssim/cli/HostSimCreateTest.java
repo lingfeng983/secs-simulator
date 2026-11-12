@@ -34,7 +34,7 @@ class HostSimCreateTest {
         HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
         session.open();
         try {
-            HostSimulator sim = HostSimulator.open("host-1", session, null);
+            HostSimulator sim = HostSimulator.open("host-1", "cs", session.hostTarget(), null);
             assertNotNull(sim);
             assertTrue(sim.isOpen(), "新建的主机实例应是打开状态");
             sim.close();

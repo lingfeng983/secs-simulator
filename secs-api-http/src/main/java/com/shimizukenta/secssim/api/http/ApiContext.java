@@ -471,6 +471,85 @@ public interface ApiContext {
         return openHostSim(sessionId, targetJson);
     }
 
+    /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
+
+    /** v2：主机实例列表（含持久行与内存相位）。 */
+    default String hostsV2Json() {
+        return "{\"ok\":false,\"error\":\"not-supported\"}";
+    }
+
+    /** v2：新建主机。 */
+    default SessionOutcome openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
+        return SessionOutcome.FAILED;
+    }
+
+    /** v2：新主机 id（openHostV2 成功后读取；进程内最新一次创建）。 */
+    default String lastCreatedHostId() {
+        return "";
+    }
+
+    /** v2：单主机状态。 */
+    default String hostV2Json(String hostId) {
+        return null;
+    }
+
+    /** v2：删除主机。 */
+    default SessionOutcome destroyHostV2(String hostId) {
+        return SessionOutcome.FAILED;
+    }
+
+    /** v2：连接 / 断开 / 使设置生效。 */
+    default SessionOutcome hostConnectV2(String hostId) {
+        return SessionOutcome.FAILED;
+    }
+
+    default SessionOutcome hostDisconnectV2(String hostId) {
+        return SessionOutcome.FAILED;
+    }
+
+    default SessionOutcome hostApplyV2(String hostId) {
+        return SessionOutcome.FAILED;
+    }
+
+    /** v2：以主机角色发送 SML。 */
+    default String hostSendV2(String hostId, String sml) {
+        return null;
+    }
+
+    /** v2：从目标读取变量目录。 */
+    default String hostVariablesRefreshV2(String hostId) {
+        return "{\"ok\":false,\"error\":\"not-supported\"}";
+    }
+
+    /** v2：声明变量解码类型。 */
+    default boolean hostVariableDeclareV2(String hostId, int svid, String type) {
+        return false;
+    }
+
+    /** v2：主机变量目录。 */
+    default String hostVariablesV2(String hostId) {
+        return null;
+    }
+
+    /** v2：主机模板列表 / 新建 / 更新 / 删除。 */
+    default String hostTemplatesJson() {
+        return "{\"ok\":false,\"error\":\"not-supported\"}";
+    }
+
+    default SessionOutcome createHostTemplateV2(String id, String name, String host, int port,
+                                                int deviceId, String note) {
+        return SessionOutcome.FAILED;
+    }
+
+    default SessionOutcome deleteHostTemplateV2(String id) {
+        return SessionOutcome.FAILED;
+    }
+
+    /** v2：每主机收发记录（perspective=host）。 */
+    default String hostMessagesV2(String hostId, int limit) {
+        return "{\"ok\":false,\"error\":\"not-supported\"}";
+    }
+
     /**
      * 列出全部主机实例。
      *

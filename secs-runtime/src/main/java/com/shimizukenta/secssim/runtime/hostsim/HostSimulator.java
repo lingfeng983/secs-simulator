@@ -9,6 +9,7 @@ import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.secssim.app.log.Log;
+import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
 import com.shimizukenta.secs.SecsCommunicator;
@@ -81,14 +82,26 @@ public final class HostSimulator {
      */
     static final int MAX_JSON_POINTS_PER_SVID = 720;
 
-    /** 宿主会话 id(本机模式连的是它;远程模式只是借用它的模型)。 */
-    private final String sessionId;
-    /** 主机实例 id:同一台设备可以开多个主机,各自有独立 id。 */
+    /** 主机实例 id(持久稳定 host_01J…)。 */
     private final String hostId;
-    private final HsmsConnectionTarget target;
-    /** 本机模式才有:用于 S1F4 按声明类型解码与采集 SVID 存在性校验。 */
-    private final ResolvedEquipment localModel;
-    /** 事件总线：远程主机的收发不经过设备会话，只有这里能看见。 */
+    /** 显示名。 */
+    private volatile String name;
+    private volatile HsmsConnectionTarget target;
+    /** 是否在失败/掉线后自动重连(退避定时器在实例侧)。 */
+    private final boolean autoReconnect;
+    /** 实例自带变量目录:svid → 条目(名称/单位可自动读取,类型只能声明)。 */
+    private final Map<Integer, CatalogEntry> variableCatalog = new ConcurrentHashMap<>();
+    /** 设置版本:保存设置 +1;appliedRevision 追平它 = 设置已生效。 */
+    private final AtomicLong settingRevision = new AtomicLong(1);
+    private final AtomicLong appliedRevision = new AtomicLong(1);
+    /** 链路相位(host_link 的事件源)。 */
+    private volatile HostLinkPhase phase = HostLinkPhase.DISCONNECTED;
+    private volatile java.util.function.BiConsumer<String, HostLinkPhase> phaseListener;
+    private volatile boolean manualDisconnect;
+    private volatile ScheduledExecutorService retryExecutor;
+    private final AtomicLong retryCount = new AtomicLong();
+    private volatile long nextRetryAt;
+    /** 事件总线：所有主机的收发都从这里发布(perspective=host)。 */
     private volatile com.shimizukenta.secssim.app.event.EventBus eventBus;
     private final AtomicBoolean open = new AtomicBoolean(false);
     private volatile SecsCommunicator communicator;
@@ -106,12 +119,203 @@ public final class HostSimulator {
     private final Map<Integer, Deque<double[]>> collectorData = new ConcurrentHashMap<>();
     private volatile ScheduledExecutorService collectorExecutor;
 
-    private HostSimulator(String hostId, String sessionId, HsmsConnectionTarget target,
-                          ResolvedEquipment localModel) {
+    /** 主机链路相位(host_link.phase)。 */
+    public enum HostLinkPhase {
+        DISCONNECTED, CONNECTING, CONNECTED, FAILED,
+    }
+
+    /** 变量目录条目:名称/单位可自动读取;类型只能声明(S1F12 不含类型)。 */
+    public record CatalogEntry(String name, String unit, String declaredType) {
+    }
+
+    private HostSimulator(String hostId, String name, HsmsConnectionTarget target,
+                          boolean autoReconnect, Map<Integer, CatalogEntry> catalog) {
         this.hostId = hostId;
-        this.sessionId = sessionId;
+        this.name = name;
         this.target = target;
-        this.localModel = localModel;
+        this.autoReconnect = autoReconnect;
+        if (catalog != null) {
+            this.variableCatalog.putAll(catalog);
+        }
+    }
+
+    /**
+     * 从持久行装配实例(不连接;连接由显式 connect() 触发)。
+     *
+     * @param view 主机实体(host 表)
+     * @param bus  事件总线
+     * @return 模拟器
+     */
+    public static HostSimulator fromView(com.shimizukenta.secssim.store.HostRepository.HostView view,
+                                         com.shimizukenta.secssim.app.event.EventBus bus) {
+        HostSimulator sim = new HostSimulator(view.id(), view.name(),
+                new HsmsConnectionTarget(view.targetHost(), view.targetPort(), view.targetDeviceIdNum()),
+                view.autoReconnect(), parseCatalog(view.variableCatalogJson()));
+        sim.eventBus = bus;
+        sim.settingRevision.set(view.settingRevision());
+        return sim;
+    }
+
+    /** 变量目录 JSON → 映射;坏目录按空目录继续(手动填写形态)。 */
+    private static Map<Integer, CatalogEntry> parseCatalog(String json) {
+        Map<Integer, CatalogEntry> result = new ConcurrentHashMap<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            JsonHub root = JsonHub.fromJson(json);
+            JsonHub svids = root.get("svids");
+            if (svids != null && svids.isArray()) {
+                for (JsonHub item : svids.values()) {
+                    int svid = item.get("svid").optionalInt().orElse(0);
+                    if (svid < 1) {
+                        continue;
+                    }
+                    result.put(svid, new CatalogEntry(
+                            item.get("name") == null ? "" : item.get("name").optionalString().orElse(""),
+                            item.get("unit") == null ? "" : item.get("unit").optionalString().orElse(""),
+                            item.get("type") == null ? "" : item.get("type").optionalString().orElse("")));
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.warn("主机变量目录解析失败（按空目录继续）: " + e);
+        }
+        return result;
+    }
+
+    /** 目录 → JSON(持久化用)。 */
+    public String catalogJson() {
+        JsonHubBuilder b = JsonHub.getBuilder();
+        List<JsonHub> items = new ArrayList<>();
+        for (Map.Entry<Integer, CatalogEntry> entry : this.variableCatalog.entrySet()) {
+            items.add(b.object(
+                    b.pair("svid", entry.getKey()),
+                    b.pair("name", entry.getValue().name()),
+                    b.pair("unit", entry.getValue().unit()),
+                    b.pair("type", entry.getValue().declaredType())));
+        }
+        return b.object(b.pair("svids", b.array(items))).toJson();
+    }
+
+    /** 声明/更新一个变量的解码类型。 */
+    public void declareType(int svid, String type) {
+        CatalogEntry entry = this.variableCatalog.get(svid);
+        String safe = type == null ? "" : type;
+        this.variableCatalog.put(svid, entry == null
+                ? new CatalogEntry("", "", safe)
+                : new CatalogEntry(entry.name(), entry.unit(), safe));
+    }
+
+    /** 挂相位监听(持久化 + SSE 在装配层接)。 */
+    public void onPhase(java.util.function.BiConsumer<String, HostLinkPhase> listener) {
+        this.phaseListener = listener;
+    }
+
+    private void changePhase(HostLinkPhase next) {
+        HostLinkPhase previous = this.phase;
+        if (previous == next) {
+            return;
+        }
+        this.phase = next;
+        var listener = this.phaseListener;
+        if (listener != null) {
+            try {
+                listener.accept(this.hostId, next);
+            } catch (RuntimeException e) {
+                Log.error("主机相位监听失败: " + this.hostId, e);
+            }
+        }
+    }
+
+    /** 当前相位。 */
+    public HostLinkPhase phase() {
+        return this.phase;
+    }
+
+    /** 显示名。 */
+    public String name() {
+        return this.name;
+    }
+
+    /** 自动重连开关。 */
+    public boolean autoReconnect() {
+        return this.autoReconnect;
+    }
+
+    /** 设置版本(保存设置 +1)。 */
+    public long settingRevision() {
+        return this.settingRevision.get();
+    }
+
+    /** 当前连接实际生效的设置版本。 */
+    public long appliedRevision() {
+        return this.appliedRevision.get();
+    }
+
+    /** 重试次数(autoReconnect 开启时递增)。 */
+    public long retryCount() {
+        return this.retryCount.get();
+    }
+
+    /** 下一次重试时刻(epoch ms);无排程为 0。 */
+    public long nextRetryAt() {
+        return this.nextRetryAt;
+    }
+
+    /** 变量目录(只读视图)。 */
+    public Map<Integer, CatalogEntry> variableCatalog() {
+        return Map.copyOf(this.variableCatalog);
+    }
+
+    /**
+     * 保存设置(名称/目标):settingRevision +1,下次连接生效。
+     *
+     * @param name      新名称;null 不改
+     * @param newTarget 新目标;null 不改
+     */
+    public void saveSettings(String name, HsmsConnectionTarget newTarget) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+        if (newTarget != null) {
+            this.target = newTarget;
+        }
+        this.settingRevision.incrementAndGet();
+    }
+
+    private void cancelRetry() {
+        ScheduledExecutorService retry = this.retryExecutor;
+        if (retry != null) {
+            retry.shutdownNow();
+        }
+        this.nextRetryAt = 0;
+    }
+
+    /** autoReconnect 开启时按指数退避排一次重连(5s 起、上限 60s)。 */
+    private void scheduleRetryIfEnabled() {
+        if (!this.autoReconnect || this.communicator != null || this.manualDisconnect) {
+            return;
+        }
+        if (this.retryExecutor == null || this.retryExecutor.isShutdown()) {
+            this.retryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "hostsim-retry-" + this.hostId);
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+        long attempt = this.retryCount.incrementAndGet();
+        long delay = Math.min(60_000L, 5_000L * (1L << Math.min(4, attempt - 1)));
+        this.nextRetryAt = System.currentTimeMillis() + delay;
+        Log.info("主机 " + this.hostId + " 将在 " + delay / 1000 + " 秒后重试（第 " + attempt + " 次）");
+        this.retryExecutor.schedule(() -> {
+            if (this.communicator == null && !this.manualDisconnect) {
+                try {
+                    this.connect();
+                } catch (IOException | RuntimeException e) {
+                    /* connect 内部已置 FAILED 并排下一次退避 */
+                }
+            }
+        }, delay, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -141,68 +345,52 @@ public final class HostSimulator {
     }
 
     /**
-     * 连接到设备会话（本机默认目标）。
+     * 打开一个主机实例并立即建链（目标由调用方解析好；3.0 里与设备无关）。
      *
-     * @param runtime 目标会话
-     * @return 模拟器
-     * @throws IOException         连接失败
-     * @throws IllegalStateException 已有主机占用设备
-     */
-    public static HostSimulator open(SessionRuntime runtime) throws IOException {
-        return doOpen(runtime.id(), runtime, null);
-    }
-
-    /**
-     * 打开一个主机实例（指定实例 id）。
-     *
-     * @param hostId   主机实例 id（同一台设备可开多个）
-     * @param runtime  宿主会话
-     * @param override 远程目标；{@code null} 连本机
-     * @return 模拟器
+     * @param hostId 实例 id
+     * @param name   显示名
+     * @param target 连接目标（任意地址）
+     * @param bus    事件总线
+     * @return 已连接的模拟器
      * @throws IOException 连接失败
      */
-    public static HostSimulator open(String hostId, SessionRuntime runtime, HsmsConnectionTarget override)
-            throws IOException {
-        return doOpen(hostId, runtime, override);
-    }
-
-    /**
-     * 连接到设备会话或远程 SECS（schema v6）。
-     *
-     * @param runtime 会话（只作为工具实例的宿主与本地模型来源）
-     * @param override 远程目标;{@code null} 连本机（现状行为）
-     * @return 模拟器
-     * @throws IOException 连接失败
-     */
-    private static HostSimulator doOpen(String hostId, SessionRuntime runtime, HsmsConnectionTarget override) throws IOException {
-        boolean remote = override != null;
-        HsmsConnectionTarget target = remote ? override : runtime.hostTarget();
-        if (target == null) {
-            throw new IOException("会话 " + runtime.id() + " 不支持主机模拟（无连接目标）");
-        }
-
-        ResolvedEquipment model = remote ? null : localModelOf(runtime);
-        HostSimulator sim = new HostSimulator(hostId, runtime.id(), target, model);
+    public static HostSimulator open(String hostId, String name, HsmsConnectionTarget target,
+                                     com.shimizukenta.secssim.app.event.EventBus bus) throws IOException {
+        HostSimulator sim = new HostSimulator(hostId, name, target, false, null);
+        sim.eventBus = bus;
         sim.connect();
-        sim.open.set(true);
-        Log.info("主机模拟器已" + (remote ? "远程" : "") + "连接会话 " + runtime.id()
-                + "（" + target.bindHost() + ":" + target.port() + "）");
         return sim;
     }
 
-    private static ResolvedEquipment localModelOf(SessionRuntime runtime) {
-        return runtime instanceof HsmsSessionRuntime hsms ? hsms.model() : null;
-    }
+    public void connect() throws IOException {
+        if (this.communicator != null) {
+            throw new IOException("主机已连接: " + this.hostId);
+        }
+        this.cancelRetry();
+        this.manualDisconnect = false;
+        this.lastError = "";
+        this.changePhase(HostLinkPhase.CONNECTING);
+        HsmsConnectionTarget current = this.target;
 
-    private void connect() throws IOException {
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
         config.protocol(HsmsSsProtocol.ACTIVE);
-        config.socketAddress(new InetSocketAddress(this.target.bindHost(), this.target.port()));
-        config.deviceId(this.target.deviceId());
+        config.socketAddress(new InetSocketAddress(current.bindHost(), current.port()));
+        config.deviceId(current.deviceId());
         config.isEquip(false);
 
         SecsCommunicator comm = HsmsSsCommunicator.open(config);
         comm.addSecsMessageReceiveListener(this::onPrimary);
+        /* 链路相位的事件源（设计 §2.4.2）：communicatable 是唯一权威 */
+        comm.addSecsCommunicatableStateChangeListener(communicatable -> {
+            if (communicatable) {
+                this.open.set(true);
+                this.changePhase(HostLinkPhase.CONNECTED);
+            } else {
+                this.open.set(false);
+                this.changePhase(HostLinkPhase.DISCONNECTED);
+                scheduleRetryIfEnabled();
+            }
+        });
         this.installPassThrough(comm);
         this.communicator = comm;
         /* 连接与 SELECT 是异步的：不等通信建立就发会撞 NotConnected。
@@ -233,43 +421,73 @@ public final class HostSimulator {
         }
         if (failure.get() != null) {
             comm.close();
-            throw new IOException("主机模拟器连接失败: " + failure.get().getMessage(), failure.get());
+            /* FAILED 是终态：必须真的销毁 communicator——ACTIVE 侧内部是
+               for(;;)+T5 无限重连，留着它会静默重试并抢链路（设计约束 5） */
+            this.changePhase(HostLinkPhase.FAILED);
+            this.lastError = failure.get().getMessage();
+            scheduleRetryIfEnabled();
+            throw new IOException("主机连接失败: " + failure.get().getMessage(), failure.get());
+        }
+        this.open.set(true);
+        this.appliedRevision.set(this.settingRevision.get());
+        this.retryCount.set(0);
+        this.nextRetryAt = 0;
+        this.changePhase(HostLinkPhase.CONNECTED);
+        Log.info("主机 " + this.hostId + " 已连接 " + current.bindHost() + ":" + current.port());
+        /* 采集配置已在（重连恢复）：连接成功后自动恢复采集 */
+        if (this.collectorConfig != null && !this.collectorRunning) {
+            this.collectorStart("连接恢复");
         }
     }
 
     /**
-     * 断线重连（保留原目标,远程模式同样适用）。
+     * 只断链（断开 = 保留实例、目标与采集设置，设计 §2.4.1）。
+     */
+    public void disconnect() {
+        this.manualDisconnect = true;
+        this.cancelRetry();
+        this.collectorStop("手动断开");
+        SecsCommunicator comm = this.communicator;
+        this.communicator = null;
+        this.open.set(false);
+        if (comm != null) {
+            try {
+                comm.close();
+            } catch (IOException e) {
+                Log.warn("主机关闭连接失败: " + this.hostId + ": " + e);
+            }
+        }
+        this.changePhase(HostLinkPhase.DISCONNECTED);
+        Log.info("主机 " + this.hostId + " 已断开（实例与设置保留）");
+    }
+
+    /**
+     * 使设置生效（与设备「重载」对齐）：按最新设置重连并恢复采集。
+     *
+     * @throws IOException 重连失败
+     */
+    public void apply() throws IOException {
+        this.reconnect();
+    }
+
+    /**
+     * 断线重连（保留原目标；= disconnect + connect）。
      *
      * @throws IOException 重连失败
      */
     public void reconnect() throws IOException {
-        SecsCommunicator old = this.communicator;
-        this.open.set(false);
-        this.communicator = null;
-        /* 先摘掉引用再关旧连接：失败时 isOpen() 必须为 false，
-           否则"断了自动重连一次"的分支永远不再触发（RuntimeContext 靠它判重试）。 */
-        if (old != null) {
-            try {
-                old.close();
-            } catch (IOException e) {
-                Log.warn("主机模拟器旧连接关闭失败（会话 " + this.sessionId + "）: " + e);
-            }
-        }
+        this.disconnect();
+        this.manualDisconnect = false;
         this.connect();
-        this.open.set(true);
-        this.lastError = "";
     }
 
     /**
-     * 把主机侧的收发挂到事件总线。
-     *
-     * <p>只有远程主机需要：本机主机的报文走的就是设备会话，设备侧已经发布过一份
-     * （不带 hostId），这里再发一遍会让监控页每条报文出现两次。远程主机的对端
-     * 不在本进程里，本进程只有这一条通道。</p>
+     * 把主机侧的收发挂到事件总线（3.0：所有主机都发布，perspective=host；
+     * 设备侧同一帧是设备视角，二者不去重）。
      */
     private void installPassThrough(SecsCommunicator comm) {
         final com.shimizukenta.secssim.app.event.EventBus bus = this.eventBus;
-        if (bus == null || !this.isRemote()) {
+        if (bus == null) {
             return;
         }
         comm.addSendedMessagePassThroughListener(message -> this.publishHost(bus, message, true));
@@ -295,7 +513,7 @@ public final class HostSimulator {
             body = "<不可渲染>";
         }
         bus.publish(com.shimizukenta.secssim.app.event.MessageEvent.ofHost(
-                this.sessionId, this.hostId, sentByHost ? "in" : "out",
+                this.hostId, sentByHost ? "in" : "out",
                 message.getStream(), message.getFunction(), message.wbit(),
                 body, System.currentTimeMillis()));
     }
@@ -329,7 +547,7 @@ public final class HostSimulator {
                 this.onS6f11(message);
             }
         } catch (Exception e) {
-            Log.warn("主机模拟器自动应答失败（会话 " + this.sessionId + "）: " + e);
+            Log.warn("主机自动应答失败（" + this.hostId + "）: " + e);
         }
     }
 
@@ -427,11 +645,11 @@ public final class HostSimulator {
 
         CollectorConfig config = new CollectorConfig(startCeid, stopCeid, intervalMs, svids);
 
-        /* 本机模式:SVID 必须在设备模型里;远程模式没有 catalog,不做存在性校验 */
-        if (this.localModel != null) {
+        /* 变量目录非空时做存在性校验（目录为空 = 手动填写形态，不校验） */
+        if (!this.variableCatalog.isEmpty()) {
             for (CollectorSvid svid : svids) {
-                if (!this.localModel.svids().containsKey(svid.id())) {
-                    throw new IllegalArgumentException("采集 SVID " + svid.id() + " 不在设备配置里");
+                if (!this.variableCatalog.containsKey(svid.id())) {
+                    throw new IllegalArgumentException("采集 SVID " + svid.id() + " 不在变量目录里（可先从目标读取变量）");
                 }
             }
         }
@@ -478,14 +696,14 @@ public final class HostSimulator {
         this.collectorStoppedAt = 0;
 
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "hostsim-collector-" + this.sessionId);
+            Thread thread = new Thread(runnable, "hostsim-collector-" + this.hostId);
             thread.setDaemon(true);
             return thread;
         });
         this.collectorExecutor = executor;
         executor.scheduleAtFixedRate(this::collectorTick,
                 0L, config.intervalMs(), TimeUnit.MILLISECONDS);
-        Log.info("主机模拟采集器已启动（会话 " + this.sessionId + "，" + cause + "）");
+        Log.info("主机采集器已启动（" + this.hostId + "，" + cause + "）");
     }
 
     private synchronized void collectorStop(String cause) {
@@ -499,7 +717,7 @@ public final class HostSimulator {
             executor.shutdownNow();
             this.collectorExecutor = null;
         }
-        Log.info("主机模拟采集器已停止（会话 " + this.sessionId + "，" + cause + "）");
+        Log.info("主机采集器已停止（" + this.hostId + "，" + cause + "）");
     }
 
     /** 一轮 S1F3 轮询:上一轮没回来就跳过本拍,避免在 T3 上叠队列。 */
@@ -539,7 +757,7 @@ public final class HostSimulator {
         }
     }
 
-    /** S1F4 应答按位置解码;远程模式按应答项自带格式码,不依赖本地类型声明。 */
+    /** S1F4 应答按位置解码;目录里声明过的类型优先,未声明按应答项格式码探测。 */
     private void decodeS1f4(CollectorConfig config, SecsMessage reply) {
         Secs2 body = reply.secs2();
         long now = System.currentTimeMillis();
@@ -553,7 +771,7 @@ public final class HostSimulator {
             CollectorSvid svid = config.svids().get(i);
             Double value;
             try {
-                value = decodeScalar(body.get(i));
+                value = decodeScalar(body.get(i), svid.id());
             } catch (Secs2Exception e) {
                 value = null;
             }
@@ -573,11 +791,28 @@ public final class HostSimulator {
         }
     }
 
-    /** 宽容解码:双精度 → 整型 → 单字节 → 布尔;嵌套 L 返回 null（记解码错误）。 */
-    private static Double decodeScalar(Secs2 item) {
+    /**
+     * 宽容解码：目录里声明过的类型优先，未声明按应答项格式码探测
+     * （双精度 → 整型 → 单字节 → 布尔；嵌套 L 返回 null 记解码错误）。
+     */
+    private Double decodeScalar(Secs2 item, int svid) throws Secs2Exception {
         if (item.secs2Item() == Secs2Item.LIST || item.isEmpty()) {
             return null;
         }
+        CatalogEntry entry = this.variableCatalog.get(svid);
+        String declared = entry == null ? "" : entry.declaredType();
+        if (!declared.isEmpty()) {
+            return switch (declared.toUpperCase(java.util.Locale.ROOT)) {
+                case "U1", "U2", "U4", "U8", "I1", "I2", "I4", "I8" -> (double) item.getInt(0);
+                case "F4", "F8" -> item.getDouble(0);
+                case "BOOLEAN" -> item.getBoolean(0) ? 1.0 : 0.0;
+                default -> probeScalar(item);
+            };
+        }
+        return probeScalar(item);
+    }
+
+    private static Double probeScalar(Secs2 item) {
         try {
             return item.getDouble(0);
         } catch (Secs2Exception ignored) {
@@ -597,6 +832,82 @@ public final class HostSimulator {
             return item.getBoolean(0) ? 1.0 : 0.0;
         } catch (Secs2Exception ignored) {
             return null;
+        }
+    }
+
+    /**
+     * 从目标读取变量目录：发 S1F11 W + 空列表，解析 S1F12 的 SVID/名称/单位。
+     *
+     * <p>目标不支持（S1F0 / 超时 / 异常）时抛 IOException：目录保持原样、
+     * 连接不受影响（设计 §3.4.2 的失败处理）。</p>
+     *
+     * @return 读取到的条目数
+     * @throws IOException 未连接或目标未提供变量清单
+     */
+    public int refreshVariables() throws IOException {
+        SecsCommunicator comm = this.communicator;
+        if (comm == null || !this.open.get()) {
+            throw new IOException("主机未连接：先连接目标再读取变量");
+        }
+        Optional<SecsMessage> reply;
+        try {
+            reply = comm.send(1, 11, true, Secs2.getBuilder().list());
+        } catch (com.shimizukenta.secs.SecsWaitReplyMessageException e) {
+            throw new IOException("目标未响应 S1F11（T3 超时），请手动填写变量");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("读取变量被中断", e);
+        } catch (com.shimizukenta.secs.SecsException e) {
+            throw new IOException("S1F11 发送失败: " + e.getMessage(), e);
+        }
+        if (reply.isEmpty()) {
+            throw new IOException("目标未提供变量清单（S1F0），请手动填写");
+        }
+        Secs2 body = reply.get().secs2();
+        if (body.secs2Item() != Secs2Item.LIST || body.isEmpty()) {
+            throw new IOException("目标返回的 S1F12 为空，请手动填写");
+        }
+
+        Map<Integer, CatalogEntry> read = new ConcurrentHashMap<>();
+        for (int i = 0; i < body.size(); i++) {
+            String svName;
+            String unit;
+            Secs2 item;
+            try {
+                item = body.get(i);
+            } catch (com.shimizukenta.secs.secs2.Secs2Exception e) {
+                continue;
+            }
+            if (item.secs2Item() != Secs2Item.LIST || item.size() < 3) {
+                continue;
+            }
+            int svid;
+            try {
+                svid = Secs2Read.asInt(item.get(0));
+                svName = safeAscii(item.get(1));
+                unit = safeAscii(item.get(2));
+            } catch (com.shimizukenta.secs.secs2.Secs2Exception | RuntimeException e) {
+                continue;
+            }
+            CatalogEntry previous = this.variableCatalog.get(svid);
+            /* 自动获取只覆盖名称与单位，不覆盖使用者已声明的类型 */
+            read.put(svid, new CatalogEntry(svName, unit,
+                    previous == null ? "" : previous.declaredType()));
+        }
+        if (read.isEmpty()) {
+            throw new IOException("目标返回的变量清单为空，请手动填写");
+        }
+        this.variableCatalog.clear();
+        this.variableCatalog.putAll(read);
+        Log.info("主机 " + this.hostId + " 变量目录已读取 " + read.size() + " 项（类型仍需声明）");
+        return read.size();
+    }
+
+    private static String safeAscii(Secs2 item) {
+        try {
+            return item.getAscii();
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -657,11 +968,11 @@ public final class HostSimulator {
                     b.pair("v", b.array(vs))));
         }
 
-        /* 本机模式下热重载删掉的 SVID 标 stale(数据停止追加) */
+        /* 变量目录里声明过但已移除的 SVID 标 stale(数据停止追加) */
         List<JsonHub> stale = new ArrayList<>();
-        if (this.localModel != null) {
+        if (!this.variableCatalog.isEmpty()) {
             for (CollectorSvid svid : config.svids()) {
-                if (!this.localModel.svids().containsKey(svid.id())) {
+                if (!this.variableCatalog.containsKey(svid.id())) {
                     stale.add(b.number(svid.id()));
                 }
             }
@@ -670,7 +981,6 @@ public final class HostSimulator {
         return b.object(
                 b.pair("configured", true),
                 b.pair("running", this.collectorRunning),
-                b.pair("mode", this.localModel == null ? "remote" : "local"),
                 b.pair("startCeid", config.startCeid()),
                 b.pair("stopCeid", config.stopCeid()),
                 b.pair("intervalMs", config.intervalMs()),
@@ -748,27 +1058,20 @@ public final class HostSimulator {
     }
 
     /**
-     * 关闭连接。
+     * 销毁语义（注册表移除实例时用）；一般断开用 {@link #disconnect()}。
      */
+    public void destroy() {
+        this.disconnect();
+        this.cancelRetry();
+        ScheduledExecutorService collector = this.collectorExecutor;
+        if (collector != null) {
+            collector.shutdownNow();
+        }
+    }
+
+    /** close() 保留为 destroy 的同义别名（旧调用方）。 */
     public void close() {
-        this.collectorStop("主机模拟关闭");
-        /* 无条件释放连接：发送失败路径会先把 open 置 false，
-           以前 close 用 CAS(true,false) 包住真正的 comm.close()，
-           那条路径下 communicator 既不关也不置 null——线程与 socket 泄漏，
-           而实例已经移出注册表，之后没有人能再关它。 */
-        boolean wasOpen = this.open.getAndSet(false);
-        SecsCommunicator comm = this.communicator;
-        this.communicator = null;
-        if (comm != null) {
-            try {
-                comm.close();
-            } catch (IOException e) {
-                Log.warn("主机模拟器关闭失败（会话 " + this.sessionId + "）: " + e);
-            }
-        }
-        if (wasOpen) {
-            Log.info("主机模拟器已断开会话 " + this.sessionId);
-        }
+        this.destroy();
     }
 
     /**
@@ -790,15 +1093,6 @@ public final class HostSimulator {
     }
 
     /**
-     * 是否远程模式（schema v6）。
-     *
-     * @return 远程返回 {@code true}
-     */
-    public boolean isRemote() {
-        return this.localModel == null;
-    }
-
-    /**
      * 最近一次错误（连接/发送）；空串表示没有。
      *
      * @return 错误描述
@@ -808,21 +1102,27 @@ public final class HostSimulator {
     }
 
     /**
-     * 状态 JSON。
-     *
-     * @return {@code {"open":true,"target":"127.0.0.1:5000","mode":"local","remote":false,...}}
+     * 状态 JSON（3.0 形状；session/mode/remote 为 v1 兼容字段）。
      */
     public String stateJson() {
         JsonHubBuilder b = JsonHub.getBuilder();
         return b.object(
                 b.pair("id", this.hostId),
-                b.pair("session", this.sessionId),
+                b.pair("name", this.name),
+                b.pair("phase", this.phase.name()),
                 b.pair("open", this.isOpen()),
                 b.pair("target", this.target.bindHost() + ":" + this.target.port()),
                 b.pair("port", this.target.port()),
                 b.pair("deviceId", this.target.deviceId()),
-                b.pair("mode", this.isRemote() ? "remote" : "local"),
-                b.pair("remote", this.isRemote()),
+                b.pair("autoReconnect", this.autoReconnect),
+                b.pair("retryCount", this.retryCount.get()),
+                b.pair("nextRetryAt", this.nextRetryAt),
+                b.pair("settingRevision", this.settingRevision.get()),
+                b.pair("appliedRevision", this.appliedRevision.get()),
+                /* v1 兼容字段（3.0 无本机/远程之分）：旧前端未升级期间不崩 */
+                b.pair("session", ""),
+                b.pair("mode", "target"),
+                b.pair("remote", true),
                 b.pair("lastError", this.lastError))
                 .toJson();
     }

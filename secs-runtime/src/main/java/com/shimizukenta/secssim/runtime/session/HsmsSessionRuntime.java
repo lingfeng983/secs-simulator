@@ -767,6 +767,68 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.spec.id();
     }
 
+    /** 链路相位（3.0 需求 1）；变化经 {@code linkListener} 通知（持久化 + SSE 在装配层接）。 */
+    private volatile SessionRuntime.LinkPhase linkPhase = SessionRuntime.LinkPhase.STOPPED;
+    private volatile java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> linkListener;
+
+    /** 挂链路相位监听（幂等覆盖）。 */
+    public void onLinkPhase(java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> listener) {
+        this.linkListener = listener;
+    }
+
+    private void changeLinkPhase(SessionRuntime.LinkPhase next) {
+        SessionRuntime.LinkPhase previous = this.linkPhase;
+        if (previous == next) {
+            return;
+        }
+        this.linkPhase = next;
+        var listener = this.linkListener;
+        if (listener != null) {
+            try {
+                listener.accept(this.spec.id(), next);
+            } catch (RuntimeException e) {
+                recordError(e);
+            }
+        }
+    }
+
+    @Override
+    public SessionRuntime.LinkPhase linkPhase() {
+        return this.linkPhase;
+    }
+
+    @Override
+    public void disconnect() {
+        /* 只断链：模型 / 值来源 / 编排 / 钉值 / 计划启用态全留在对象里，
+           reconnect() 后原样恢复（3.0 设计 §2.4.1）。 */
+        this.stopTicker();
+        for (ExecutorService pool : new ExecutorService[] {
+                this.ackSender, this.traceAckSender, this.alarmAckSender }) {
+            if (pool != null) {
+                pool.shutdownNow();
+            }
+        }
+        SecsCommunicator comm = this.communicator;
+        this.communicator = null;
+        this.dispatcher = null;
+        if (comm != null) {
+            try {
+                comm.close();
+            } catch (IOException e) {
+                recordError(e);
+            }
+        }
+        this.changeControlState(EquipmentControlState.OFFLINE);
+        this.state.set(SessionState.CLOSED);
+        this.changeLinkPhase(SessionRuntime.LinkPhase.DISCONNECTED);
+    }
+
+    @Override
+    public void reconnect() throws IOException {
+        /* 对象复用：open() 在 communicator 为空时重建链路，内存态天然保留 */
+        this.open();
+    }
+
     @Override
     public void open() throws IOException {
         if (this.communicator != null) {
@@ -774,6 +836,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
 
         this.state.set(SessionState.OPENING);
+        this.changeLinkPhase(SessionRuntime.LinkPhase.STARTING);
         if (this.ackSender == null || this.ackSender.isShutdown()) {
             this.ackSender = newAckSender("s6f11-ack-" + this.spec.id());
         }
@@ -803,10 +866,16 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                     message -> this.publish("out", message),
                     value -> {
                         this.control.communicatable(value);
-                        if (!value) {
+                        /* 链路相位跟着 communicatable 走：select 成功 = CONNECTED，
+                           掉线 = DISCONNECTED（被动监听未 select 时保持 LISTENING） */
+                        if (value) {
+                            this.changeLinkPhase(SessionRuntime.LinkPhase.CONNECTED);
+                            if (this.control.state() == EquipmentControlState.OFFLINE) {
+                                this.changeControlState(EquipmentControlState.COMMUNICATING);
+                            }
+                        } else {
+                            this.changeLinkPhase(SessionRuntime.LinkPhase.DISCONNECTED);
                             this.changeControlState(EquipmentControlState.OFFLINE);
-                        } else if (this.control.state() == EquipmentControlState.OFFLINE) {
-                            this.changeControlState(EquipmentControlState.COMMUNICATING);
                         }
                     },
                     this::recordFailure);
@@ -827,10 +896,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 early.clear();
             }
             this.state.set(SessionState.OPEN);
+            this.changeLinkPhase(this.spec.passive()
+                    ? SessionRuntime.LinkPhase.LISTENING
+                    : SessionRuntime.LinkPhase.CONNECTED);
             this.startTicker();
         } catch (IOException | RuntimeException e) {
             recordError(e);
             this.state.set(SessionState.FAILED);
+            this.changeLinkPhase(SessionRuntime.LinkPhase.FAILED);
             /* connector.open 成功之后、TerminalInbox/PrimaryDispatcher 构造失败时，
                已打开的 communicator 必须关掉：否则端口/线程会跟着一个 FAILED 会话泄漏。 */
             SecsCommunicator opened = this.communicator;
@@ -866,6 +939,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         SecsCommunicator comm = this.communicator;
         if (comm == null) {
             this.state.set(SessionState.CLOSED);
+            this.changeLinkPhase(SessionRuntime.LinkPhase.STOPPED);
             return;
         }
 
@@ -876,7 +950,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             recordError(e);
         } finally {
             this.communicator = null;
+            this.dispatcher = null;
             this.state.set(SessionState.CLOSED);
+            this.changeLinkPhase(SessionRuntime.LinkPhase.STOPPED);
         }
     }
 

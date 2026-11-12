@@ -35,6 +35,7 @@ import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.store.ConfigMigrator;
 import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.Db;
+import com.shimizukenta.secssim.store.HostRepository;
 import com.shimizukenta.secssim.store.PlanExecutionRepository;
 import com.shimizukenta.secssim.store.RuntimeStateRepository;
 import com.shimizukenta.secssim.store.TemplateRepository;
@@ -159,6 +160,10 @@ public final class Bootstrap {
         ConfigStore configStore = new ConfigStore(configRepo, templateRepo, options.workDir());
         TemplateStore templates = new TemplateStore(options.workDir(), templateRepo);
         launcher.configStore(configStore);
+        HostRepository hostRepo = new HostRepository(db);
+        RuntimeStateRepository linkState = new RuntimeStateRepository(db);
+        HostSimRegistry hostRegistry = new HostSimRegistry(sessions, bus, hostRepo, linkState);
+        hostRegistry.loadPersisted();
 
         if (options.exportConfig() != null) {
             int exported = migrator.exportTo(options.exportConfig());
@@ -170,10 +175,9 @@ public final class Bootstrap {
 
         /* 启动对账（设计 §2.4.4 的存储侧）：清掉不属于存活设备的运行态残留、裁剪台账。
            设备/主机的连接恢复在 M2 接线；现在只做数据收敛。 */
-        RuntimeStateRepository runtimeState = new RuntimeStateRepository(db);
         List<String> liveDeviceIds = configRepo.listDevices().stream()
                 .map(ConfigRepository.DeviceView::id).toList();
-        long removed = runtimeState.cleanupOrphans(liveDeviceIds);
+        long removed = linkState.cleanupOrphans(liveDeviceIds);
         planExecutions.trim();
         if (removed > 0) {
             Log.info("启动对账清理运行态残留 " + removed + " 行");
@@ -211,7 +215,7 @@ public final class Bootstrap {
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
                 extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
-                messageLog, auditLog, bus);
+                messageLog, auditLog, bus, hostRepo, linkState);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,

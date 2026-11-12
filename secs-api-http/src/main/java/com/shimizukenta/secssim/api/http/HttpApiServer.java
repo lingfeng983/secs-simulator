@@ -370,6 +370,11 @@ public final class HttpApiServer {
            处理器按 "/host-sims/" 切分得到空数组，实例 id 取不到就直接崩。 */
         http.createContext(ApiPaths.HOST_SIMS, withCors(this.hostSims::handleHostSims));
         http.createContext(ApiPaths.HOST_SIM_PREFIX, withCors(this.hostSims::handleHostSimPath));
+        /* 3.0 v2：主机独立命名空间（设计 §2.5） */
+        http.createContext(ApiPaths.HOSTS_V2, withCors(this.hostSims::handleHostsV2));
+        http.createContext(ApiPaths.HOST_V2_PREFIX, withCors(this.hostSims::handleHostV2Path));
+        http.createContext(ApiPaths.HOST_TEMPLATES_V2, withCors(this.hostSims::handleHostTemplatesV2));
+        http.createContext(ApiPaths.HOST_TEMPLATE_V2_PREFIX, withCors(this.hostSims::handleHostTemplateV2Path));
 
         if (this.webRoot != null) {
             /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */

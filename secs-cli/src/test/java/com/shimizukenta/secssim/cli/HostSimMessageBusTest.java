@@ -57,8 +57,8 @@ class HostSimMessageBusTest {
             /* 远程主机 = 以另一条 ACTIVE 连接连同一台设备；
                对端在这个进程里只是测试的便利，语义与"连别的机器"一致：
                它不经过 device 会话的事件总线。 */
-            remote = HostSimulator.open("host-r",
-                    device, new HsmsConnectionTarget("127.0.0.1", port, 10));
+            remote = HostSimulator.open("host-r", "remote",
+                    new HsmsConnectionTarget("127.0.0.1", port, 10), null);
             remote.eventBus(bus);
             SessionTestSupport.awaitPeer(device);
 
@@ -79,8 +79,11 @@ class HostSimMessageBusTest {
             assertTrue(hasSent, () -> "远程主机发出的 S1F1 没有进事件流: " + describe(events));
             assertTrue(hasReceived, () -> "远程主机收到的 S1F2 没有进事件流: " + describe(events));
             assertTrue(hostEvents.stream().allMatch(e -> e.stream() >= 0), "控制帧不应出现在事件里");
-            assertTrue(hostEvents.stream().allMatch(e -> "remote-dst".equals(e.sessionId())),
-                    "主机实例的报文要挂在宿主会话下（前端按会话归属）");
+            /* 3.0：主机侧报文不再挂宿主会话——perspective=host、sessionId 为空，
+               前端按 hostId + perspective 归属 */
+            assertTrue(hostEvents.stream().allMatch(e ->
+                            "".equals(e.sessionId()) && "host".equals(e.perspective())),
+                    "主机侧报文应为空 sessionId + host 视角: " + describe(events));
         } finally {
             if (remote != null) {
                 remote.close();
@@ -106,7 +109,7 @@ class HostSimMessageBusTest {
 
         HostSimulator local = null;
         try {
-            local = HostSimulator.open("host-l", device, null);
+            local = HostSimulator.open("host-l", "local", device.hostTarget(), null);
             local.eventBus(bus);
             SessionTestSupport.awaitPeer(device);
             JsonHub reply = JsonHub.fromJson(local.sendSml("S1F1 W."));
@@ -119,13 +122,20 @@ class HostSimMessageBusTest {
             }
             Thread.sleep(300L);
 
-            /* S1F1 只出现一次（设备侧 in），S1F2 只出现一次（设备侧 out） */
-            long s1f1 = events.stream().filter(e -> e.stream() == 1 && e.function() == 1).count();
-            long s1f2 = events.stream().filter(e -> e.stream() == 1 && e.function() == 2).count();
-            assertEquals(1L, s1f1, () -> "本机主机的 S1F1 被发布了两次: " + describe(events));
-            assertEquals(1L, s1f2, () -> "本机主机的 S1F2 被发布了两次: " + describe(events));
-            assertFalse(events.stream().anyMatch(e -> e.stream() == 1 && e.function() == 1 && e.fromHost()),
-                    "本机主机的报文应只有设备侧那一份（不带 hostId）");
+            /* 3.0 双视角：设备侧一份（device 视角，无 hostId）+ 主机侧一份
+               （host 视角，带 hostId），各自恰好一次——同一帧不串视角重复 */
+            long deviceS1f1 = events.stream()
+                    .filter(e -> e.stream() == 1 && e.function() == 1 && "device".equals(e.perspective()))
+                    .count();
+            long hostS1f1 = events.stream()
+                    .filter(e -> e.stream() == 1 && e.function() == 1 && "host".equals(e.perspective()))
+                    .count();
+            assertEquals(1L, deviceS1f1, () -> "设备侧 S1F1 应恰好一份: " + describe(events));
+            assertEquals(1L, hostS1f1, () -> "主机侧 S1F1 应恰好一份: " + describe(events));
+            assertEquals(1L, events.stream()
+                            .filter(e -> e.stream() == 1 && e.function() == 1 && e.fromHost())
+                            .count(),
+                    "主机视角的报文都带 hostId");
         } finally {
             if (local != null) {
                 local.close();

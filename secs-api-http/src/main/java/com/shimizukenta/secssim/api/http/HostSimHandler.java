@@ -273,4 +273,207 @@ final class HostSimHandler extends HttpSupport {
             return 500;
         }
     }
+
+    /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
+
+    /** v2 主机集合：GET 列表 / POST 新建。 */
+    void handleHostsV2(HttpExchange ex) throws IOException {
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        if ("GET".equals(method)) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, this.context.hostsV2Json());
+            return;
+        }
+        if (!"POST".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String raw = readBody(ex, MAX_CONFIG_BYTES);
+        JsonHub request;
+        try {
+            request = JsonHub.fromJson(raw == null ? "" : raw);
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        String name = str(request, "name");
+        String host = str(request, "host");
+        int port = num(request, "port");
+        int deviceId = num(request, "deviceId");
+        boolean autoReconnect = request.containsKey("autoReconnect")
+                && request.get("autoReconnect").booleanValue();
+        if (host.isBlank() || port < 1 || port > 65535) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
+            return;
+        }
+        SessionOutcome outcome = this.context.openHostV2(name, host, port, deviceId, autoReconnect);
+        audit(ex, "host-v2-open", host + ":" + port, "outcome=" + outcome);
+        if (outcome == SessionOutcome.OK) {
+            respond(ex, 201, "{\"ok\":true,\"hostId\":\"" + json(this.context.lastCreatedHostId()) + "\"}");
+            return;
+        }
+        respond(ex, 502, "{\"ok\":false,\"error\":\"open-failed\"}");
+    }
+
+    /** v2 单主机：GET 状态 / DELETE 删除 / POST 子动作。 */
+    void handleHostV2Path(HttpExchange ex) throws IOException {
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        String rest = ex.getRequestURI().getPath().substring(ApiPaths.HOST_V2_PREFIX.length());
+        String[] parts = rest.split("/");
+        String hostId = parts[0];
+        if (hostId.isBlank()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+        String action = parts.length > 1 ? parts[1] : "";
+
+        if ("GET".equals(method) && action.isEmpty()) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            String body = this.context.hostV2Json(hostId);
+            if (body == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"host-not-found\"}");
+                return;
+            }
+            respond(ex, 200, body);
+            return;
+        }
+        if ("DELETE".equals(method) && action.isEmpty()) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            SessionOutcome outcome = this.context.destroyHostV2(hostId);
+            audit(ex, "host-v2-destroy", hostId, "outcome=" + outcome);
+            respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
+                    "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            return;
+        }
+        if ("POST".equals(method)) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            SessionOutcome outcome = switch (action) {
+                case "connect" -> this.context.hostConnectV2(hostId);
+                case "disconnect" -> this.context.hostDisconnectV2(hostId);
+                case "apply" -> this.context.hostApplyV2(hostId);
+                default -> null;
+            };
+            if (outcome != null) {
+                audit(ex, "host-v2-" + action, hostId, "outcome=" + outcome);
+                respond(ex, 200, "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+                return;
+            }
+            if ("send".equals(action)) {
+                String raw = readBody(ex, MAX_CONFIG_BYTES);
+                JsonHub request;
+                try {
+                    request = JsonHub.fromJson(raw == null ? "" : raw);
+                } catch (RuntimeException e) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                String sml = str(request, "sml");
+                if (sml.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"missing-sml\"}");
+                    return;
+                }
+                String reply = this.context.hostSendV2(hostId, sml);
+                if (reply == null) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"host-not-found\"}");
+                    return;
+                }
+                respond(ex, 200, reply);
+                return;
+            }
+            if ("variables".equals(action) && (parts.length == 2)) {
+                String reply = this.context.hostVariablesRefreshV2(hostId);
+                audit(ex, "host-v2-vars-refresh", hostId, "");
+                respond(ex, 200, reply);
+                return;
+            }
+            if ("messages".equals(action)) {
+                if (!requireRole(ex, ApiRole.VIEWER)) {
+                    return;
+                }
+                int limit = 500;
+                String query = ex.getRequestURI().getQuery();
+                if (query != null) {
+                    for (String pair : query.split("&")) {
+                        if (pair.startsWith("limit=")) {
+                            limit = java.lang.Integer.parseInt(pair.substring(6));
+                        }
+                    }
+                }
+                respond(ex, 200, this.context.hostMessagesV2(hostId, limit));
+                return;
+            }
+        }
+        respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+    }
+
+    /** v2 主机模板：GET 列表 / POST 新建或更新（带 id 即更新）。 */
+    void handleHostTemplatesV2(HttpExchange ex) throws IOException {
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        if ("GET".equals(method)) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, this.context.hostTemplatesJson());
+            return;
+        }
+        if (!"POST".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String raw = readBody(ex, MAX_CONFIG_BYTES);
+        JsonHub request;
+        try {
+            request = JsonHub.fromJson(raw == null ? "" : raw);
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        String id = str(request, "id");
+        String name = str(request, "name");
+        String host = str(request, "host");
+        int port = num(request, "port");
+        int deviceId = num(request, "deviceId");
+        String note = str(request, "note");
+        if (name.isBlank() || host.isBlank() || port < 1 || port > 65535) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-template\"}");
+            return;
+        }
+        SessionOutcome outcome = this.context.createHostTemplateV2(
+                id.isBlank() ? null : id, name, host, port, deviceId, note);
+        audit(ex, "host-template-save", name, "outcome=" + outcome);
+        respond(ex, outcome == SessionOutcome.OK ? 201 : 502,
+                "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+    }
+
+    /** v2 单个主机模板：DELETE 删除。 */
+    void handleHostTemplateV2Path(HttpExchange ex) throws IOException {
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        String rest = ex.getRequestURI().getPath().substring(ApiPaths.HOST_TEMPLATE_V2_PREFIX.length());
+        String id = rest.split("/")[0];
+        if (!"DELETE".equals(method) || id.isBlank()) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        SessionOutcome outcome = this.context.deleteHostTemplateV2(id);
+        audit(ex, "host-template-delete", id, "outcome=" + outcome);
+        respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
+                "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+    }
 }

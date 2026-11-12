@@ -12,6 +12,8 @@ import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.audit.AuditLog;
 import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.session.SessionManager;
+import com.shimizukenta.secssim.store.HostRepository;
+import com.shimizukenta.secssim.store.RuntimeStateRepository;
 
 /**
  * 运行时上下文：{@code ApiContext} 的门面，也是停机时统一关闭后台资源的入口。
@@ -36,17 +38,24 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final Runnable shutdown;
     private final RuntimeApi api;
     private final HostSimRegistry hosts;
+    private final com.shimizukenta.secssim.store.HostRepository hostRepository;
+    private final MessageLog messageLog;
+    private volatile String lastCreatedHostId = "";
     private final BurstRunner bursts;
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, MessageLog messages, AuditLog audit,
-            com.shimizukenta.secssim.app.event.EventBus eventBus) {
+            com.shimizukenta.secssim.app.event.EventBus eventBus,
+            com.shimizukenta.secssim.store.HostRepository hostRepository,
+            RuntimeStateRepository linkState) {
         this.mode = mode;
         this.version = version;
         this.extraHealthJson = extraHealthJson;
         this.shutdown = shutdown;
-        this.hosts = new HostSimRegistry(sessions, eventBus);
+        this.hosts = new HostSimRegistry(sessions, eventBus, hostRepository, linkState);
+        this.hostRepository = hostRepository;
+        this.messageLog = messages;
         this.bursts = new BurstRunner(sessions, this.hosts);
         this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit, this.hosts, this.bursts);
     }
@@ -287,29 +296,32 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public SessionOutcome openHostSim(String sessionId) {
-        return this.hosts.open(sessionId, null, null);
+        /* v1 兼容：session 只在创建瞬间解析成目标地址，此后主机与设备再无关系 */
+        return this.hosts.openForSession(sessionId, null, null).outcome();
     }
 
     @Override
     public SessionOutcome openHostSim(String sessionId, String targetJson) {
-        return this.hosts.open(sessionId, targetJson, null);
+        return this.hosts.openForSession(sessionId, targetJson, null).outcome();
     }
 
     @Override
     public SessionOutcome openHostSim(String sessionId, String targetJson, String hostId) {
-        return this.hosts.open(sessionId, targetJson, hostId);
+        /* v1 的 hostId 参数被持久 ULID 取代：忽略并按新实例创建 */
+        return this.hosts.openForSession(sessionId, targetJson, null).outcome();
     }
 
     @Override
     public SessionOutcome closeHostSim(String sessionId) {
-        return this.hosts.closeBySession(sessionId);
+        /* v1:断开以会话名建的主机实例 */
+        return this.hosts.disconnectByName(sessionId);
     }
 
     @Override
     public SessionOutcome closeHostSimById(String hostId) {
-        SessionOutcome outcome = this.hosts.closeById(hostId);
-        /* 实例没了，它的压测状态也不该留着：map 会随手建/删实例无限增长，
-           在跑的那一轮也该停下（否则一直对着已关闭的连接重试） */
+        /* v1 的「断开实例」= 3.0 的 disconnect（实例保留，可重连） */
+        SessionOutcome outcome = this.hosts.disconnectById(hostId);
+        /* 在跑的压测也该停下（否则一直对着已断开的连接重试） */
         this.bursts.cancelHost(hostId);
         return outcome;
     }
@@ -373,6 +385,154 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.hosts.collectorJsonBySession(sessionId);
     }
 
+    /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
+
+    @Override
+    public String hostsV2Json() {
+        return this.hosts.allJson();
+    }
+
+    @Override
+    public SessionOutcome openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
+        if (host == null || host.isBlank() || port < 1 || port > 65535) {
+            return SessionOutcome.FAILED;
+        }
+        var result = this.hosts.open(name == null || name.isBlank() ? "host" : name,
+                new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId),
+                autoReconnect);
+        this.lastCreatedHostId = result.hostId();
+        return result.outcome();
+    }
+
+    @Override
+    public String lastCreatedHostId() {
+        return this.lastCreatedHostId;
+    }
+
+    @Override
+    public String hostV2Json(String hostId) {
+        return this.hosts.jsonById(hostId);
+    }
+
+    @Override
+    public SessionOutcome destroyHostV2(String hostId) {
+        SessionOutcome outcome = this.hosts.destroyById(hostId);
+        this.bursts.cancelHost(hostId);
+        return outcome;
+    }
+
+    @Override
+    public SessionOutcome hostConnectV2(String hostId) {
+        return this.hosts.connectById(hostId);
+    }
+
+    @Override
+    public SessionOutcome hostDisconnectV2(String hostId) {
+        SessionOutcome outcome = this.hosts.disconnectById(hostId);
+        this.bursts.cancelHost(hostId);
+        return outcome;
+    }
+
+    @Override
+    public SessionOutcome hostApplyV2(String hostId) {
+        return this.hosts.applyById(hostId);
+    }
+
+    @Override
+    public String hostSendV2(String hostId, String sml) {
+        try {
+            return this.hosts.sendById(hostId, sml);
+        } catch (java.io.IOException e) {
+            return "{\"ok\":false,\"error\":\"" + escape(e.getMessage() == null ? "send-failed" : e.getMessage()) + "\"}";
+        }
+    }
+
+    @Override
+    public String hostVariablesRefreshV2(String hostId) {
+        return this.hosts.refreshVariables(hostId);
+    }
+
+    @Override
+    public boolean hostVariableDeclareV2(String hostId, int svid, String type) {
+        return this.hosts.declareVariableType(hostId, svid, type);
+    }
+
+    @Override
+    public String hostVariablesV2(String hostId) {
+        return this.hosts.variablesJson(hostId);
+    }
+
+    @Override
+    public String hostTemplatesJson() {
+        return this.hostRepository.listTemplatesJson();
+    }
+
+    @Override
+    public SessionOutcome createHostTemplateV2(String id, String name, String host, int port,
+                                               int deviceId, String note) {
+        try {
+            if (id != null && !id.isBlank()) {
+                this.hostRepository.saveTemplate(id, name, host, port, deviceId, "{}", note);
+            } else {
+                this.hostRepository.createTemplate(name, host, port, deviceId, "{}", note);
+            }
+            return SessionOutcome.OK;
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    @Override
+    public SessionOutcome deleteHostTemplateV2(String id) {
+        try {
+            this.hostRepository.deleteTemplate(id);
+            return SessionOutcome.OK;
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    @Override
+    public String hostMessagesV2(String hostId, int limit) {
+        var snapshot = this.messageLog.selectHostMessages(Math.max(1, limit), hostId, "host");
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
+        for (var event : snapshot.messages()) {
+            items.add(com.shimizukenta.jsonhub.JsonHub.fromJson(toMessageJson(event)));
+        }
+        return b.object(
+                b.pair("ok", true),
+                b.pair("total", snapshot.total()),
+                b.pair("messages", b.array(items))).toJson();
+    }
+
+    private String toMessageJson(com.shimizukenta.secssim.app.event.MessageEvent event) {
+        return "{\"seq\":" + event.seq()
+                + ",\"hostId\":\"" + escape(event.hostId()) + "\""
+                + ",\"perspective\":\"" + event.perspective() + "\""
+                + ",\"direction\":\"" + event.direction() + "\""
+                + ",\"stream\":" + event.stream()
+                + ",\"function\":" + event.function()
+                + ",\"wbit\":" + event.wbit()
+                + ",\"body\":\"" + escape(event.body()) + "\""
+                + ",\"at\":" + event.atMillis() + "}";
+    }
+
+    private static String escape(String value) {
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append('\\').append('n');
+                case '\r' -> sb.append('\\').append('r');
+                case '\t' -> sb.append('\\').append('t');
+                default -> sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
     /* ---------- 总览与压测 ---------- */
 
     @Override

@@ -503,11 +503,35 @@ public final class MessageLog implements AutoCloseable {
 
     private Snapshot select(int limit, String sessionId, String direction,
                             long beforeMs, Integer stream, Integer function) {
+        return this.select(limit, sessionId, direction, beforeMs, stream, function, null, null);
+    }
+
+    /**
+     * 按 hostId / perspective 过滤的查询（3.0：每主机收发记录）。
+     *
+     * @param hostId      主机实例 id；null 不过滤
+     * @param perspective 视角（device/host）；null 不过滤
+     */
+    public Snapshot selectHostMessages(int limit, String hostId, String perspective) {
+        return this.select(limit, null, null, 0L, null, null, hostId, perspective);
+    }
+
+    private Snapshot select(int limit, String sessionId, String direction,
+                            long beforeMs, Integer stream, Integer function,
+                            String hostId, String perspective) {
         String session = sessionId == null ? "" : sessionId.trim();
         String dir = direction == null ? "" : direction.trim();
+        String host = hostId == null ? "" : hostId.trim();
+        String view = perspective == null ? "" : perspective.trim();
         List<MessageEvent> matches = new ArrayList<>();
         for (MessageEvent event : this.recent) {
             if (!session.isEmpty() && !session.equals(event.sessionId())) {
+                continue;
+            }
+            if (!host.isEmpty() && !host.equals(event.hostId())) {
+                continue;
+            }
+            if (!view.isEmpty() && !view.equals(event.perspective())) {
                 continue;
             }
             if (!dir.isEmpty() && !dir.equals(event.direction())) {
@@ -542,7 +566,8 @@ public final class MessageLog implements AutoCloseable {
                 b.pair("function", event.function()),
                 b.pair("wbit", event.wbit()),
                 b.pair("body", event.body()),
-                b.pair("at", event.atMillis()));
+                b.pair("at", event.atMillis()),
+                b.pair("perspective", event.perspective()));
     }
 
     private static String toJson(MessageEvent event) {
@@ -572,7 +597,7 @@ public final class MessageLog implements AutoCloseable {
                 b.pair("at", event.atMillis())).toJson();
     }
 
-    private record Snapshot(List<MessageEvent> messages, int total) {
+    public record Snapshot(List<MessageEvent> messages, int total) {
     }
 
     /** 一行待写内容：正文 + 会话名 + 主机视角正文。 */

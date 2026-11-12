@@ -872,6 +872,138 @@ paths:
         '200': { description: 已停止 }
         '404': { description: 主机模拟未开启（host-sim-not-open） }
         '409': { description: 还没有采集配置（collector-not-configured，原因在 message） }
+  /api/v2/hosts:
+    get:
+      tags: [host-sims]
+      summary: 主机实例列表（3.0：主机是与设备无关的独立实体）
+      responses:
+        '200': { description: 实例数组（含持久行与链路相位） }
+    post:
+      tags: [host-sims]
+      summary: 新建主机实例（只填目标地址，与设备无关）
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, port]
+              properties:
+                name: { type: string }
+                host: { type: string }
+                port: { type: integer }
+                deviceId: { type: integer }
+                autoReconnect: { type: boolean }
+      responses:
+        '201': { description: 已创建（body 带 hostId） }
+        '400': { description: 目标非法 }
+  /api/v2/hosts/{hostId}:
+    get:
+      tags: [host-sims]
+      summary: 单主机状态（相位 / 设置版本 / 收发错误）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 状态 }
+        '404': { description: 主机不存在 }
+    delete:
+      tags: [host-sims]
+      summary: 删除主机（显式销毁；建议先断开）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已删除 }
+        '404': { description: 主机不存在 }
+  /api/v2/hosts/{hostId}/connect:
+    post:
+      tags: [host-sims]
+      summary: 建链
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 结果 }
+  /api/v2/hosts/{hostId}/disconnect:
+    post:
+      tags: [host-sims]
+      summary: 只断链（实例与设置保留）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 结果 }
+  /api/v2/hosts/{hostId}/apply:
+    post:
+      tags: [host-sims]
+      summary: 使设置生效（按最新设置重连）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 结果 }
+  /api/v2/hosts/{hostId}/send:
+    post:
+      tags: [host-sims]
+      summary: 以主机角色发送 SML
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sml]
+              properties:
+                sml: { type: string }
+      responses:
+        '200': { description: 发送结果 }
+        '404': { description: 主机不存在 }
+  /api/v2/hosts/{hostId}/messages:
+    get:
+      tags: [host-sims]
+      summary: 该实例独立的收发记录（perspective=host）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 500 } }
+      responses:
+        '200': { description: 报文数组 }
+  /api/v2/hosts/{hostId}/variables:
+    post:
+      tags: [host-sims]
+      summary: 从目标读取变量目录（S1F11 → S1F12；类型仍需声明）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 读取结果（目标不支持时 ok=false 且连接不受影响） }
+  /api/v2/host-templates:
+    get:
+      tags: [host-sims]
+      summary: 主机实例模板列表
+      responses:
+        '200': { description: 模板数组 }
+    post:
+      tags: [host-sims]
+      summary: 新建（或带 id 更新）主机模板
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, host, port]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                host: { type: string }
+                port: { type: integer }
+                deviceId: { type: integer }
+                note: { type: string }
+      responses:
+        '201': { description: 已保存 }
+  /api/v2/host-templates/{templateId}:
+    delete:
+      tags: [host-sims]
+      summary: 删除主机模板
+      parameters:
+        - { name: templateId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已删除 }
+        '404': { description: 模板不存在 }
   /api/v1/host-sims:
     get:
       tags: [host-sims]
