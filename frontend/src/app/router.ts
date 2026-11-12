@@ -1,110 +1,200 @@
 import { useCallback, useEffect, useState } from 'react';
 
 /**
- * 轻量 hash 路由（零依赖,约 80 行）。
+ * 轻量 hash 路由（零依赖）。
  *
- * <p>精简后的信息架构——每个页面只做一件事：</p>
+ * <p>3.0 两段式信息架构（设计 §3.1）：</p>
  * <pre>
- *   #/workbench                 工作台(默认):KPI + 设备卡墙 + 会话管理
- *   #/device/{id}/{page}        设备子页(见 DEVICE_PAGES,一页一能力)
- *   #/system/audit              系统 · 审计
+ *   #/workbench                          工作台（设备清单入口）
+ *   #/device/{id}/{zone}/{page}          设备详情：配置区 / 运行区
+ *   #/hosts                              主机列表页
+ *   #/hosts/{hostId}/{zone}/{page}       主机详情：配置区 / 运行区
+ *   #/host-templates                     独立工具 · 主机模板
+ *   #/templates                          独立工具 · 设备模板
+ *   #/system/audit                       独立工具 · 审计
  * </pre>
  *
- * <p>用 hash 而不是 history API:界面由后端静态托管,深链刷新不需要服务端
- * 回退规则。旧版把面板 id 存在 preferences.activeTab 里,迁移:首次进入
- * 无 hash 时按旧值映射一次。</p>
+ * <p>用 hash 而不是 history API：界面由后端静态托管，深链刷新不需要服务端
+ * 回退规则。2.x 的旧 hash（扁平子页 / hostsim 五页）在这里一次性映射到新家。</p>
  */
 
-/** 设备子页:一个能力一页。曲线预览并入「状态变量」的逐变量预览;压测拆并到发送/报警/事件。 */
-export type DevicePage =
-  | 'ceids'      // 事件:采集事件(CEID)定义 + 压测上报
-  | 'reports'    // 报告:RPTID 与变量列表
-  | 'events'     // 事件编排:引用已设置的事件做计划(增删改/启停/触发) + 本设备实时事件
-  | 'alarms'     // 报警与终端 + 报警风暴
-  | 'svids'      // 状态变量:增删改查 + 曲线预览 + 值设定
-  | 'connection' // 连接:配置里的 session 段(端口/地址/device-id/超时)
-  | 'structure'  // 结构:配置里的 equipment/templates 段(单元/SVID/曲线/模板)
-  | 'config'     // 配置编辑(只保留 JSON 原文)
-  | 'send'       // SML 发送 + 自定义消息压测
-  | 'messages';  // 报文收发监视(按类别屏蔽)
+/** 设备配置区子页：描述「这台设备是什么」（保存后需重载）。 */
+export type DeviceConfigPage =
+  | 'overview'    // 概览：名称/模板/自动连接
+  | 'connection'  // 连接：session 段
+  | 'structure'   // 结构：单元/SVID/曲线/组合/实例
+  | 'document'    // 配置原文
+  | 'constants'   // 设备常量（ECV）
+  | 'revisions';  // 版本历史
 
-export const DEVICE_PAGES: readonly DevicePage[] = [
-  'ceids', 'reports', 'events', 'alarms', 'svids', 'connection', 'structure', 'config', 'send', 'messages',
+/** 设备运行区子页：当前运行（仅本次运行有效）。 */
+export type DeviceRuntimePage =
+  | 'status'    // 实时状态：链路/控制状态/计数
+  | 'plans'     // 事件计划与执行：计划 CRUD + 启停 + 本设备实时事件
+  | 'catalog'   // 事件与报告：CEID/RPTID 运行时增删改 + 手动触发
+  | 'svids'     // 状态变量：曲线预览 + 值设定
+  | 'messages'  // 报文收发
+  | 'manual';   // 手动操作：SML 发送 + 报警置位/清除
+
+export type DeviceZone = 'config' | 'runtime';
+export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
+
+export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
+  'overview', 'connection', 'structure', 'document', 'constants', 'revisions',
+];
+export const DEVICE_RUNTIME_PAGES: readonly DeviceRuntimePage[] = [
+  'status', 'plans', 'catalog', 'svids', 'messages', 'manual',
 ];
 
-/** 主机模拟子页:采集按能力分开成页,收发记录独立成「消息监控」。 */
-export type HostSimPage =
-  | 'hosts'      // 主机实例:新建/断开/选择目标(本机设备或远程 SECS)
-  | 'messages'   // ① 消息发送:以主机角色发 SML
-  | 'fdc'        // ② S6F1 数据采集(S2F23 → S6F1,设备推)
-  | 'collect'    // ③ S1F3 数据采集(S1F3 轮询,主机拉)
-  | 'monitor';   // 消息监控:全部主机实例的收发实时滚动 + 过滤
+/** 主机配置区子页（设计 §3.4：5 页）。 */
+export type HostConfigPage =
+  | 'overview'   // 概览：名称/目标/设置版本/自动重连
+  | 'connection' // 连接：目标地址/端口/Device ID
+  | 'presets'    // 报文模板：16 条预设 + 说明
+  | 'trace'      // Trace 设置：S2F23 表单
+  | 'collect';   // 采集设置：启停 CEID + SVID
 
-export const HOSTSIM_PAGES: readonly HostSimPage[] = ['hosts', 'messages', 'fdc', 'collect', 'monitor'];
+/** 主机运行区子页（设计 §3.4：6 页）。 */
+export type HostRuntimePage =
+  | 'status'   // 实时状态
+  | 'messages' // 消息发送（只发本主机）
+  | 'trace'    // Trace 采集
+  | 'collect'  // 数据采集
+  | 'monitor'  // 收发记录（只看本主机 + 清理）
+  | 'manual';  // 手动操作
 
-/** 主机模拟子页的中文名。 */
-export const HOSTSIM_PAGE_LABELS: Record<HostSimPage, string> = {
-  hosts: '主机实例',
-  messages: '① 消息发送',
-  fdc: '② S6F1 采集',
-  collect: '③ S1F3 采集',
-  monitor: '消息监控',
-};
+export type HostZone = 'config' | 'runtime';
+export type HostPage = HostConfigPage | HostRuntimePage;
 
-/** 设备子页的中文名（设备页子导航与命令面板用）。 */
-export const DEVICE_PAGE_LABELS: Record<DevicePage, string> = {
-  ceids: '事件',
-  reports: '报告',
-  events: '事件编排',
-  alarms: '报警',
-  svids: '状态变量',
+export const HOST_CONFIG_PAGES: readonly HostConfigPage[] = [
+  'overview', 'connection', 'presets', 'trace', 'collect',
+];
+export const HOST_RUNTIME_PAGES: readonly HostRuntimePage[] = [
+  'status', 'messages', 'trace', 'collect', 'monitor', 'manual',
+];
+
+export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
+  overview: '概览',
   connection: '连接',
   structure: '结构',
-  config: '配置',
-  send: '发送',
-  messages: '消息',
+  document: '配置原文',
+  constants: '设备常量',
+  revisions: '版本历史',
+};
+export const DEVICE_RUNTIME_PAGE_LABELS: Record<DeviceRuntimePage, string> = {
+  status: '实时状态',
+  plans: '事件计划',
+  catalog: '事件与报告',
+  svids: '状态变量',
+  messages: '报文收发',
+  manual: '手动操作',
+};
+export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
+  overview: '概览',
+  connection: '连接',
+  presets: '报文模板',
+  trace: 'Trace 设置',
+  collect: '采集设置',
+};
+export const HOST_RUNTIME_PAGE_LABELS: Record<HostRuntimePage, string> = {
+  status: '实时状态',
+  messages: '消息发送',
+  trace: 'Trace 采集',
+  collect: '数据采集',
+  monitor: '收发记录',
+  manual: '手动操作',
 };
 
-/** 全局单功能页已精简掉(events/messages/sessions 并入工作台,console 并入审计);旧 hash 一律回落工作台。 */
+/** 全局单功能页已精简掉；旧 hash 一律回落工作台。 */
 export type SystemPage = 'audit';
 
 export type Route =
   | { name: 'workbench' }
   | { name: 'templates' }
-  | { name: 'device'; sessionId: string; tab: DevicePage }
-  | { name: 'hostsim'; page: HostSimPage }
+  | { name: 'device'; sessionId: string; zone: DeviceZone; page: DevicePage }
+  | { name: 'hosts' }
+  | { name: 'host'; hostId: string; zone: HostZone; page: HostPage }
+  | { name: 'host-templates' }
   | { name: 'system'; page: SystemPage };
 
-/** 解析当前 hash;空/非法回落工作台。 */
+/** 旧设备扁平子页 → 两段式新家（一次性迁移映射）。 */
+const LEGACY_DEVICE_PAGE: Record<string, [DeviceZone, DevicePage]> = {
+  ceids: ['runtime', 'catalog'],
+  reports: ['runtime', 'catalog'],
+  events: ['runtime', 'plans'],
+  alarms: ['runtime', 'manual'],
+  svids: ['runtime', 'svids'],
+  messages: ['runtime', 'messages'],
+  send: ['runtime', 'manual'],
+  connection: ['config', 'connection'],
+  structure: ['config', 'structure'],
+  config: ['config', 'document'],
+};
+
+/** 旧 hostsim 子页 → 主机域新家。 */
+const LEGACY_HOSTSIM_PAGE: Record<string, [HostZone, HostPage]> = {
+  hosts: ['config', 'overview'],
+  messages: ['runtime', 'messages'],
+  fdc: ['runtime', 'trace'],
+  collect: ['runtime', 'collect'],
+  monitor: ['runtime', 'monitor'],
+};
+
+function isDeviceZone(value: string | undefined): value is DeviceZone {
+  return value === 'config' || value === 'runtime';
+}
+
+function isHostZone(value: string | undefined): value is HostZone {
+  return value === 'config' || value === 'runtime';
+}
+
+/** 解析当前 hash；空/非法回落工作台。 */
 export function parseHash(hash: string, legacyTab?: string): Route {
   const text = hash.replace(/^#\/?/, '');
   if (text === '') {
     return legacyRoute(legacyTab);
   }
   const parts = text.split('/').filter((piece) => piece !== '');
-  if (parts[0] === 'device' && parts[1] !== undefined && parts[1] !== '') {
-    const tab = DEVICE_PAGES.includes(parts[2] as DevicePage) ? (parts[2] as DevicePage) : 'ceids';
-    let sessionId: string;
-    try {
-      sessionId = decodeURIComponent(parts[1]);
-    } catch {
-      /* 地址里是坏的 %-转义：回工作台，别让解析异常把整页打白 */
-      return legacyRoute(legacyTab);
+  try {
+    if (parts[0] === 'device' && parts[1] !== undefined && parts[1] !== '') {
+      const sessionId = decodeURIComponent(parts[1]);
+      if (isDeviceZone(parts[2]) && parts[3] !== undefined) {
+        return { name: 'device', sessionId, zone: parts[2], page: parts[3] as DevicePage };
+      }
+      /* 2.x 旧深链：#/device/{id}/{page} → 一次性映射 */
+      const legacy = parts[2] ?? 'ceids';
+      const mapped = LEGACY_DEVICE_PAGE[legacy] ?? ['runtime', 'catalog'];
+      return { name: 'device', sessionId, zone: mapped[0], page: mapped[1] };
     }
-    return { name: 'device', sessionId, tab };
-  }
-  if (parts[0] === 'hostsim') {
-    const page = HOSTSIM_PAGES.includes(parts[1] as HostSimPage) ? (parts[1] as HostSimPage) : 'hosts';
-    return { name: 'hostsim', page };
-  }
-  if (parts[0] === 'system') {
-    return { name: 'system', page: 'audit' };
-  }
-  if (parts[0] === 'workbench') {
-    return { name: 'workbench' };
-  }
-  if (parts[0] === 'templates') {
-    return { name: 'templates' };
+    if (parts[0] === 'hostsim') {
+      /* 2.x：#/hostsim/{page} → 主机列表页（实例树里再进详情） */
+      void LEGACY_HOSTSIM_PAGE;
+      return { name: 'hosts' };
+    }
+    if (parts[0] === 'hosts' && parts[1] === undefined) {
+      return { name: 'hosts' };
+    }
+    if (parts[0] === 'hosts' && parts[1] !== undefined && parts[1] !== '') {
+      const hostId = decodeURIComponent(parts[1]);
+      if (isHostZone(parts[2]) && parts[3] !== undefined) {
+        return { name: 'host', hostId, zone: parts[2], page: parts[3] as HostPage };
+      }
+      return { name: 'host', hostId, zone: 'config', page: 'overview' };
+    }
+    if (parts[0] === 'host-templates') {
+      return { name: 'host-templates' };
+    }
+    if (parts[0] === 'system') {
+      return { name: 'system', page: 'audit' };
+    }
+    if (parts[0] === 'workbench') {
+      return { name: 'workbench' };
+    }
+    if (parts[0] === 'templates') {
+      return { name: 'templates' };
+    }
+  } catch {
+    /* 地址里是坏的 %-转义：回工作台，别让解析异常把整页打白 */
   }
   return legacyRoute(legacyTab);
 }
@@ -127,9 +217,13 @@ export function toHash(route: Route): string {
     case 'templates':
       return '#/templates';
     case 'device':
-      return `#/device/${encodeURIComponent(route.sessionId)}/${route.tab}`;
-    case 'hostsim':
-      return `#/hostsim/${route.page}`;
+      return `#/device/${encodeURIComponent(route.sessionId)}/${route.zone}/${route.page}`;
+    case 'hosts':
+      return '#/hosts';
+    case 'host':
+      return `#/hosts/${encodeURIComponent(route.hostId)}/${route.zone}/${route.page}`;
+    case 'host-templates':
+      return '#/host-templates';
     case 'system':
       return `#/system/${route.page}`;
   }
@@ -139,7 +233,7 @@ export function sameRoute(left: Route, right: Route): boolean {
   return toHash(left) === toHash(right);
 }
 
-/** 当前路由 + 导航函数;hashchange 驱动,浏览器前进后退可用。 */
+/** 当前路由 + 导航函数；hashchange 驱动,浏览器前进后退可用。 */
 export function useRoute(legacyTab?: string): [Route, (route: Route) => void] {
   const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash, legacyTab));
 

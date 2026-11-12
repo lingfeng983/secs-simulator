@@ -6,7 +6,7 @@ import type { HostSimCommands } from '../../../state/useHostSims';
 import type { BurstResult, SentMessageResult } from '../../../api';
 
 /** 主机方向的常用报文模板；只列设备真正实现了的报文。 */
-interface HostPreset {
+export interface HostPreset {
   label: string;
   group: string;
   /** 一句话说明"这条报文是干什么的" */
@@ -18,7 +18,7 @@ interface HostPreset {
   quick?: boolean;
 }
 
-const HOST_PRESETS: readonly HostPreset[] = [
+export const HOST_PRESETS: readonly HostPreset[] = [
   {
     label: 'S1F1 在吗',
     group: '建链与控制',
@@ -139,10 +139,10 @@ const HOST_PRESETS: readonly HostPreset[] = [
   },
 ];
 
-const QUICK_PRESETS = HOST_PRESETS.filter((preset) => preset.quick === true);
+export const QUICK_PRESETS = HOST_PRESETS.filter((preset) => preset.quick === true);
 
 /** 下拉按组归类；保持定义顺序。 */
-const PRESET_GROUPS = [...new Set(HOST_PRESETS.map((preset) => preset.group))].map((group) => ({
+export const PRESET_GROUPS = [...new Set(HOST_PRESETS.map((preset) => preset.group))].map((group) => ({
   label: group,
   items: HOST_PRESETS.filter((preset) => preset.group === group)
     .map((preset) => ({ label: preset.label, value: preset.sml })),

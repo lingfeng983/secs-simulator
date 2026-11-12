@@ -35,6 +35,56 @@ http.createServer(async (req, res) => {
     return json(res, {});
   }
   // 静态文件(未知路径回 index.html)
+  /* ---- 3.0 v2 mock:主机独立命名空间 + 配置版本历史 ---- */
+  const v2Hosts = [
+    { id: 'host_01MDEMO0000000000000000A', name: '产线 A 主机', phase: 'CONNECTED', open: true,
+      target: '127.0.0.1:5000', port: 5000, deviceId: 10, autoReconnect: true, retryCount: 0,
+      nextRetryAt: 0, settingRevision: 3, appliedRevision: 3, session: '', mode: 'target',
+      remote: true, lastError: '' },
+    { id: 'host_01MDEMO0000000000000000B', name: '远端 CVD', phase: 'DISCONNECTED', open: false,
+      target: '192.168.8.30:7000', port: 7000, deviceId: 5, autoReconnect: false, retryCount: 0,
+      nextRetryAt: 0, settingRevision: 1, appliedRevision: 1, session: '', mode: 'target',
+      remote: true, lastError: '' },
+  ];
+  const v2Templates = [
+    { id: 'ht_01MDEMOTPL00000000000000A', name: '产线 A 目标', host: '127.0.0.1', port: 5000,
+      deviceId: 10, note: '日常联调' },
+  ];
+  const v2Messages = [
+    { seq: 2, sessionId: '', hostId: 'host_01MDEMO0000000000000000A', perspective: 'host',
+      direction: 'in', stream: 1, function: 1, wbit: true, body: '<L[2] <A "MDLN"> <A "SOFTREV">>', at: Date.now() - 8000 },
+    { seq: 1, sessionId: '', hostId: 'host_01MDEMO0000000000000000A', perspective: 'host',
+      direction: 'out', stream: 1, function: 2, wbit: false, body: '<L[2] <A "SECS-SIM"> <A "2.0">>', at: Date.now() - 7500 },
+  ];
+  if (path === '/api/v2/hosts') {
+    return json(res, { hosts: v2Hosts });
+  }
+  if (path.startsWith('/api/v2/hosts/') && path.endsWith('/messages')) {
+    return json(res, { ok: true, total: v2Messages.length, messages: v2Messages });
+  }
+  if (path.startsWith('/api/v2/hosts/') && path.endsWith('/variables')) {
+    return json(res, { ok: true, count: 2 });
+  }
+  if (path.startsWith('/api/v2/hosts/')) {
+    const host = v2Hosts.find((h) => path === `/api/v2/hosts/${h.id}`);
+    if (host !== undefined) {
+      return json(res, host);
+    }
+    return json(res, { ok: false, error: 'host-not-found' }, 404);
+  }
+  if (path === '/api/v2/host-templates') {
+    return json(res, { templates: v2Templates });
+  }
+  if (path.startsWith('/api/v2/host-templates/')) {
+    return json(res, { ok: true });
+  }
+  if (/^\/api\/v2\/devices\/[^/]+\/config\/revisions$/.test(path)) {
+    return json(res, { revisions: [
+      { revision: 2, sha256: 'aabbccddeeff00112233', createdAt: Date.now() - 600000, createdBy: 'ui', note: '修改超时' },
+      { revision: 1, sha256: '11223344556677889900', createdAt: Date.now() - 3600000, createdBy: 'migrate', note: 'created' },
+    ] });
+  }
+
   let file = join(DIST, path === '/' ? 'index.html' : path);
   try {
     const data = await readFile(file);

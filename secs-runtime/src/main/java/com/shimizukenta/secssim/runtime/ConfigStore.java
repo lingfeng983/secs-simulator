@@ -405,6 +405,36 @@ public final class ConfigStore {
     }
 
     /**
+     * 版本历史（新→旧；3.0 的 config_revision 快照）。
+     *
+     * @param name  文件名
+     * @param limit 条数上限
+     * @return JSON 数组；设备不存在返回 {@code null}
+     */
+    public String revisionsJson(String name, int limit) {
+        String key;
+        try {
+            key = keyOf(name);
+        } catch (ConfigException e) {
+            return null;
+        }
+        if (this.repository.findDevice(key).isEmpty()) {
+            return null;
+        }
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        List<com.shimizukenta.jsonhub.JsonHub> items = new ArrayList<>();
+        for (ConfigRepository.RevisionView revision : this.repository.listRevisions(key, Math.max(1, limit))) {
+            items.add(b.object(
+                    b.pair("revision", revision.revision()),
+                    b.pair("sha256", revision.sha256()),
+                    b.pair("createdAt", revision.createdAt()),
+                    b.pair("createdBy", revision.createdBy()),
+                    b.pair("note", revision.note())));
+        }
+        return b.object(b.pair("revisions", b.array(items))).toJson();
+    }
+
+    /**
      * 校验配置文件名，只允许文件名（静态保留：SessionLauncher 共用这一份判据）。
      *
      * @param name  请求给的名字

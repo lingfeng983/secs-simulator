@@ -84,6 +84,8 @@ export interface WireMessage {
   sessionId: string;
   /** 主机模拟实例 id；空/缺省 = 这条报文属于设备会话本身。 */
   hostId?: string;
+  /** 视角：device 设备侧（默认）/ host 主机侧；两侧各记一份，按视角各读各的。 */
+  perspective?: 'device' | 'host';
   direction: 'in' | 'out';
   stream: number;
   function: number;
@@ -581,4 +583,45 @@ export interface ApiClient {
   setCollector(sessionId: string, config: CollectorConfigInput): Promise<string | null>;
   /** 手动启停采集器。 */
   collectorCommand(sessionId: string, start: boolean): Promise<string | null>;
+  /** v2:设备配置版本历史(config_revision 快照,新→旧)。 */
+  configRevisions(name: string, limit?: number): Promise<Array<{
+    revision: number; sha256: string; createdAt: number; createdBy: string; note: string;
+  }>>;
+}
+
+/** 3.0 v2：主机独立命名空间（实现见 api/hostsV2.ts）。 */
+export interface ApiClient {
+  hostsV2(): Promise<import('./hostsV2').HostV2[]>;
+  createHostV2(request: {
+    name?: string;
+    host: string;
+    port: number;
+    deviceId?: number;
+    autoReconnect?: boolean;
+  }): Promise<string>;
+  hostV2(hostId: string): Promise<import('./hostsV2').HostV2 | null>;
+  deleteHostV2(hostId: string): Promise<boolean>;
+  saveHostV2(hostId: string, request: {
+    name: string;
+    host: string;
+    port: number;
+    deviceId: number;
+  }): Promise<void>;
+  connectHostV2(hostId: string): Promise<void>;
+  disconnectHostV2(hostId: string): Promise<void>;
+  applyHostV2(hostId: string): Promise<void>;
+  sendHostV2(hostId: string, sml: string): Promise<SentMessageResult>;
+  hostMessagesV2(hostId: string, limit?: number): Promise<WireMessage[]>;
+  refreshHostVariablesV2(hostId: string): Promise<number>;
+  declareHostVariableTypeV2(hostId: string, svid: number, type: string): Promise<boolean>;
+  hostTemplatesV2(): Promise<import('./hostsV2').HostTemplate[]>;
+  saveHostTemplateV2(request: {
+    id?: string;
+    name: string;
+    host: string;
+    port: number;
+    deviceId?: number;
+    note?: string;
+  }): Promise<void>;
+  deleteHostTemplateV2(id: string): Promise<boolean>;
 }

@@ -1,0 +1,228 @@
+/* ============================================================
+   3.0 两段式骨架:实例头 / 配置区·运行区切换 / 子页签 / 待生效横幅
+   配色遵循设计 §3.3:配置区靛蓝、运行区青绿。
+   ============================================================ */
+
+/* ---------- 实例头 ---------- */
+.instance-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.instance-head-main {
+  min-width: 220px;
+  flex: 1 1 260px;
+}
+
+.instance-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.instance-subtitle {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.instance-metrics {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.instance-metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.instance-metric-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.instance-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- 配置区 / 运行区切换 ---------- */
+.zonebar-wrap {
+  margin-bottom: 8px;
+}
+
+.zonebar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.zone-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.zone-btn small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.zone-btn .zone-ico {
+  font-size: 15px;
+}
+
+.zone-btn.config.active {
+  border-color: #4457c7;
+  color: #4457c7;
+  background: rgba(68, 87, 199, 0.07);
+}
+
+.zone-btn.runtime.active {
+  border-color: #0f8a6a;
+  color: #0f8a6a;
+  background: rgba(15, 138, 106, 0.07);
+}
+
+.zone-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.zone-note.config {
+  color: #4457c7;
+}
+
+.zone-note.runtime {
+  color: #0f8a6a;
+}
+
+/* ---------- 子页签 ---------- */
+.subtabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.subtab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  padding: 5px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.subtab:hover {
+  background: var(--surface-2);
+}
+
+.subtab.active {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- 待生效横幅 ---------- */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+
+.pending-banner.config {
+  border-color: #4457c7;
+  background: rgba(68, 87, 199, 0.06);
+}
+
+.pending-banner.settings {
+  border-color: #0f8a6a;
+  background: rgba(15, 138, 106, 0.06);
+}
+
+.pending-tag {
+  font-weight: 700;
+}
+
+.pending-banner.config .pending-tag {
+  color: #4457c7;
+}
+
+.pending-banner.settings .pending-tag {
+  color: #0f8a6a;
+}
+
+/* ---------- 主机列表 KPI 卡 ---------- */
+.kpi-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 14px;
+}
+
+.kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.kpi-value.tone-ok {
+  color: var(--ok);
+}
+
+.kpi-value.tone-danger {
+  color: var(--danger);
+}
+
+.kpi-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- 运行区空态 ---------- */
+.empty-zone {
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--text-2);
+}
+
+.empty-zone strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* 侧栏动态组副标题(设备 · n/n) */
+.nav-group-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 2px;
+}

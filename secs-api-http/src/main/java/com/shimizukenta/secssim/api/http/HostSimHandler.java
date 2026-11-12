@@ -344,6 +344,32 @@ final class HostSimHandler extends HttpSupport {
             respond(ex, 200, body);
             return;
         }
+        if ("PUT".equals(method) && action.isEmpty()) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            String raw = readBody(ex, MAX_CONFIG_BYTES);
+            JsonHub request;
+            try {
+                request = JsonHub.fromJson(raw == null ? "" : raw);
+            } catch (RuntimeException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            String name = str(request, "name");
+            String host = str(request, "host");
+            int port = num(request, "port");
+            int deviceId = num(request, "deviceId");
+            if (host.isBlank() || port < 1 || port > 65535) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
+                return;
+            }
+            SessionOutcome outcome = this.context.saveHostV2(hostId, name, host, port, deviceId);
+            audit(ex, "host-v2-save", hostId, "outcome=" + outcome);
+            respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
+                    "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            return;
+        }
         if ("DELETE".equals(method) && action.isEmpty()) {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;

@@ -385,6 +385,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.hosts.collectorJsonBySession(sessionId);
     }
 
+    @Override
+    public String configRevisionsV2(String name, int limit) {
+        return this.configs.revisionsJson(name, limit);
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     @Override
@@ -407,6 +412,19 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public String lastCreatedHostId() {
         return this.lastCreatedHostId;
+    }
+
+    @Override
+    public SessionOutcome saveHostV2(String hostId, String name, String host, int port, int deviceId) {
+        var sim = this.hosts.findSim(hostId);
+        if (sim == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        sim.saveSettings(name, new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId));
+        this.hostRepository.save(hostId, sim.name(), sim.target().bindHost(), sim.target().port(),
+                sim.target().deviceId(), sim.collectorConfigJson() == null ? "{}" : sim.collectorConfigJson(),
+                sim.autoReconnect(), "");
+        return SessionOutcome.OK;
     }
 
     @Override

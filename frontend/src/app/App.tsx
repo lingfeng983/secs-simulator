@@ -18,21 +18,24 @@ import { NAV_ITEMS, routeTitle } from './layout/navigation';
 import { Sidebar, type SidebarDevice } from './layout/Sidebar';
 import { Topbar } from './layout/Topbar';
 
-import { useRoute, DEVICE_PAGES, DEVICE_PAGE_LABELS, HOSTSIM_PAGES, HOSTSIM_PAGE_LABELS, type DevicePage, type HostSimPage } from './router';
+import { useRoute, type DevicePage, type DeviceZone, type HostPage, type HostZone } from './router';
+import { useHostsV2, hostPhaseLabel, hostPhaseTone } from '../state/useHostsV2';
+import { setHostDetailClient } from '../features/panels/hostsim/HostDetailPanels';
 import { WorkbenchPage } from '../features/pages/WorkbenchPage';
 import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from '../features/pages/DevicePage';
-import { HostSimPage as HostSimPageView } from '../features/pages/HostSimPage';
+import {
+  DEVICE_CONFIG_PAGES,
+  DEVICE_CONFIG_PAGE_LABELS,
+  DEVICE_RUNTIME_PAGES,
+  DEVICE_RUNTIME_PAGE_LABELS,
+  HOST_CONFIG_PAGE_LABELS,
+  HOST_RUNTIME_PAGE_LABELS,
+} from './router';
+import { HostListPage } from '../features/pages/HostListPage';
+import { HostDetailPage } from '../features/pages/HostDetailPage';
+import { HostTemplatePage } from '../features/pages/HostTemplatePage';
 import { SystemPage } from '../features/pages/SystemPage';
 import { TemplatePage } from '../features/pages/TemplatePage';
-
-/** 主机模拟各子页的一句话说明(顶栏用)。 */
-const HOSTSIM_PAGE_DESCRIPTIONS: Record<HostSimPage, string> = {
-  hosts: '新建 / 断开主机实例：每个主机可以连本库里的任意设备，也可以连远程 SECS。',
-  messages: '以主机角色发 SML：补上 S2F33 / S2F35 / S2F37 这类只有主机能发的报文，可压测连发。',
-  fdc: '② S6F1 采集（S2F23 → S6F1）：设备按 DSPER 采样、REPGSZ 分条上报；远程主机手填报文。',
-  collect: '③ S1F3 数据采集：主机侧按周期拉取 SVID，设备推 S6F11 触发起停；远程主机手填。',
-  monitor: '实时监控所有主机实例的收发：按主机 / 方向 / 类别 / 关键字过滤。',
-};
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
@@ -79,6 +82,8 @@ export function App(): JSX.Element {
   const backend = useBackend(client, notifier);
 
   const [route, navigate] = useRoute(preferences.activeTab);
+  const hostV2 = useHostsV2(client);
+  setHostDetailClient(client);
 
   /** 打开「连接设置」：桌面壳内显示当前模式并预填远程地址；浏览器环境维持 localStorage 编辑。 */
   const openConnection = useCallback(() => {
@@ -176,21 +181,67 @@ export function App(): JSX.Element {
   const goTo = useCallback(
     (id: string) => {
       if (id.startsWith('device-tab:')) {
+        /* 旧面板 id:映射进两段式 */
         const [, sessionId, tab] = id.split(':');
-        if (sessionId !== undefined && DEVICE_PAGES.includes(tab as never)) {
-          navigate({ name: 'device', sessionId, tab: tab as DevicePage });
-        }
+        const mapped: Record<string, [DeviceZone, DevicePage]> = {
+          ceids: ['runtime', 'catalog'],
+          reports: ['runtime', 'catalog'],
+          events: ['runtime', 'plans'],
+          alarms: ['runtime', 'manual'],
+          svids: ['runtime', 'svids'],
+          messages: ['runtime', 'messages'],
+          send: ['runtime', 'manual'],
+          connection: ['config', 'connection'],
+          structure: ['config', 'structure'],
+          config: ['config', 'document'],
+        };
+        const hit = mapped[tab] ?? ['runtime', 'catalog'];
+        navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
+        return;
+      }
+      if (id.startsWith('device-zone:')) {
+        const [, sessionId, zone] = id.split(':');
+        navigate({ name: 'device', sessionId, zone: zone as DeviceZone, page: zone === 'config' ? 'overview' : 'status' });
+        return;
+      }
+      if (id.startsWith('device-page:')) {
+        const [, sessionId, zone, page] = id.split(':');
+        navigate({ name: 'device', sessionId, zone: zone as DeviceZone, page: page as DevicePage });
+        return;
+      }
+      if (id.startsWith('host-open:')) {
+        navigate({ name: 'host', hostId: id.slice('host-open:'.length), zone: 'config', page: 'overview' });
+        return;
+      }
+      if (id.startsWith('host-zone:')) {
+        const [, hostId, zone] = id.split(':');
+        navigate({ name: 'host', hostId, zone: zone as HostZone, page: zone === 'config' ? 'overview' : 'status' });
+        return;
+      }
+      if (id.startsWith('host-page:')) {
+        const [, hostId, zone, page] = id.split(':');
+        navigate({ name: 'host', hostId, zone: zone as HostZone, page: page as HostPage });
+        return;
+      }
+      if (id === 'hosts') {
+        navigate({ name: 'hosts' });
+        return;
+      }
+      if (id === 'host-templates') {
+        navigate({ name: 'host-templates' });
         return;
       }
       if (id.startsWith('device:')) {
-        navigate({ name: 'device', sessionId: id.slice('device:'.length), tab: 'ceids' });
+        navigate({ name: 'device', sessionId: id.slice('device:'.length), zone: 'runtime', page: 'catalog' });
+        return;
+      }
+      if (id.startsWith('device-open:')) {
+        navigate({ name: 'device', sessionId: id.slice('device-open:'.length), zone: 'config', page: 'overview' });
         return;
       }
       if (id.startsWith('hostsim-page:')) {
-        const page = id.slice('hostsim-page:'.length);
-        if (HOSTSIM_PAGES.includes(page as HostSimPage)) {
-          navigate({ name: 'hostsim', page: page as HostSimPage });
-        }
+        /* 旧主机模拟子页 → 主机列表页(详情从实例树进) */
+        navigate({ name: 'hosts' });
         return;
       }
       switch (id) {
@@ -209,15 +260,23 @@ export function App(): JSX.Element {
           navigate({ name: 'templates' });
           return;
         case 'hostsim':
-          navigate({ name: 'hostsim', page: 'hosts' });
+          navigate({ name: 'hosts' });
+          return;
+        case 'host-templates':
+          navigate({ name: 'host-templates' });
           return;
         default: {
           /* 设备能力 id → 当前设备对应子页;旧 id 归到新家(preview/catalog→状态变量,burst/collector→就近) */
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
-            const legacy = id === 'preview' || id === 'catalog' ? 'svids' : id === 'burst' ? 'send' : id === 'collector' ? 'hostsim' : id;
-            const tab = (DEVICE_PAGES as readonly string[]).includes(legacy) ? (legacy as DevicePage) : 'ceids';
-            navigate({ name: 'device', sessionId, tab });
+            const mapped: Record<string, [DeviceZone, DevicePage]> = {
+              preview: ['runtime', 'svids'],
+              catalog: ['runtime', 'catalog'],
+              burst: ['runtime', 'manual'],
+              collector: ['config', 'overview'],
+            };
+            const hit = mapped[id] ?? ['runtime', 'catalog'];
+            navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
           } else {
             navigate({ name: 'workbench' });
           }
@@ -233,10 +292,13 @@ export function App(): JSX.Element {
   refreshRef.current = backend.refreshAll;
 
   const routeKey = route.name === 'device'
-    ? `device:${route.sessionId}:${route.tab}`
-    : route.name === 'hostsim'
-      ? `hostsim:${route.page}`
-      : route.name === 'system' ? `system:${route.page}` : route.name === 'templates' ? 'templates' : 'workbench';
+    ? `device:${route.sessionId}:${route.zone}:${route.page}`
+    : route.name === 'host'
+      ? `host:${route.hostId}:${route.zone}:${route.page}`
+      : route.name === 'hosts' ? 'hosts'
+        : route.name === 'host-templates' ? 'host-templates'
+          : route.name === 'system' ? `system:${route.page}`
+            : route.name === 'templates' ? 'templates' : 'workbench';
 
   useEffect(() => {
     void refreshRef.current();
@@ -266,27 +328,30 @@ export function App(): JSX.Element {
         keywords: ['device', session.id, session.device],
         run: () => goTo(`device:${session.id}`),
       });
-      for (const tab of DEVICE_PAGES) {
-        if (tab === 'ceids') {
-          continue;
-        }
-        items.push({
-          id: `device-tab:${session.id}:${tab}`,
-          label: `${session.id} · ${DEVICE_PAGE_LABELS[tab]}`,
-          group: '设备',
-          keywords: [session.id, tab],
-          run: () => goTo(`device-tab:${session.id}:${tab}`),
-        });
-      }
+      items.push({
+        id: `device-page:${session.id}:config`,
+        label: `${session.id} · 配置区`,
+        group: '设备',
+        keywords: [session.id, 'config'],
+        run: () => goTo(`device-open:${session.id}`),
+      });
+      items.push({
+        id: `device-page:${session.id}:runtime`,
+        label: `${session.id} · 运行区`,
+        group: '设备',
+        keywords: [session.id, 'runtime'],
+        run: () => goTo(`device-tab:${session.id}:svids`),
+      });
     }
 
-    for (const page of HOSTSIM_PAGES) {
+    for (const host of hostV2.hosts) {
       items.push({
-        id: `hostsim-page:${page}`,
-        label: `主机模拟 · ${HOSTSIM_PAGE_LABELS[page]}`,
-        group: '主机模拟',
-        keywords: ['hostsim', page],
-        run: () => goTo(`hostsim-page:${page}`),
+        id: `host:${host.id}`,
+        label: `打开主机 ${host.name}（${host.id}）`,
+        group: '主机',
+        hint: hostPhaseLabel(host.phase),
+        keywords: ['host', host.id, host.name],
+        run: () => goTo(`host-open:${host.id}`),
       });
     }
 
@@ -397,10 +462,23 @@ export function App(): JSX.Element {
   const deviceName = route.name === 'device'
     ? backend.sessions.find((session) => session.id === route.sessionId)?.device ?? route.sessionId
     : '';
+  const devicePageDescription = route.name === 'device'
+    ? (route.zone === 'config' ? DEVICE_CONFIG_PAGE_LABELS : DEVICE_RUNTIME_PAGE_LABELS)[route.page as never]
+    : '';
+  const hostTitle = route.name === 'host'
+    ? (() => {
+      const host = hostV2.find(route.hostId);
+      const label = host === null ? route.hostId : `${host.name} · ${host.id}`;
+      const description = route.zone === 'config'
+        ? HOST_CONFIG_PAGE_LABELS[route.page as never]
+        : HOST_RUNTIME_PAGE_LABELS[route.page as never];
+      return { group: '主机清单', label, description };
+    })()
+    : null;
   const title = route.name === 'device'
-    ? { group: '设备', label: deviceName, description: DEVICE_PAGE_DESCRIPTIONS[route.tab] }
-    : route.name === 'hostsim'
-      ? { group: '主机模拟', label: HOSTSIM_PAGE_LABELS[route.page], description: HOSTSIM_PAGE_DESCRIPTIONS[route.page] }
+    ? { group: '设备清单', label: deviceName, description: devicePageDescription }
+    : route.name === 'host' && hostTitle !== null
+      ? hostTitle
       : routeTitle(route);
 
   const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
@@ -430,6 +508,8 @@ export function App(): JSX.Element {
       <Sidebar
         route={route}
         devices={sidebarDevices}
+        hostInstances={hostV2.hosts}
+        onNavigateHost={(hostId) => goTo(`host-open:${hostId}`)}
         collapsed={preferences.sidebarCollapsed}
         width={preferences.sidebarWidth}
         onResize={(sidebarWidth) => update({ sidebarWidth })}
@@ -471,10 +551,14 @@ export function App(): JSX.Element {
         <main className="content">
           {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
           {route.name === 'device' && (
-            <DevicePageView {...panelProps} sessionId={route.sessionId} tab={route.tab} />
+            <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />
           )}
-          {route.name === 'hostsim' && (
-            <HostSimPageView {...panelProps} page={route.page} />
+          {route.name === 'hosts' && <HostListPage {...panelProps} hosts={hostV2} />}
+          {route.name === 'host' && (
+            <HostDetailPage {...panelProps} hosts={hostV2} hostId={route.hostId} zone={route.zone} page={route.page} />
+          )}
+          {route.name === 'host-templates' && (
+            <HostTemplatePage {...panelProps} hosts={hostV2} />
           )}
           {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
       {route.name === 'templates' && <TemplatePage {...panelProps} />}

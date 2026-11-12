@@ -92,6 +92,11 @@ final class HostSimRegistry {
         return previous == null ? sim : previous;
     }
 
+    /** 按实例 id 取内存实例（设置保存等需要直接操作实例的调用方用）。 */
+    HostSimulator findSim(String hostId) {
+        return this.hostSims.get(hostId);
+    }
+
     /** 实例是否在册。 */
     boolean exists(String hostId) {
         return this.hostSims.containsKey(hostId);

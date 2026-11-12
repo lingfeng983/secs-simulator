@@ -471,6 +471,11 @@ public interface ApiContext {
         return openHostSim(sessionId, targetJson);
     }
 
+    /** v2：设备配置版本历史（3.0 config_revision 快照）。 */
+    default String configRevisionsV2(String name, int limit) {
+        return null;
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     /** v2：主机实例列表（含持久行与内存相位）。 */
@@ -491,6 +496,11 @@ public interface ApiContext {
     /** v2：单主机状态。 */
     default String hostV2Json(String hostId) {
         return null;
+    }
+
+    /** v2：保存主机设置（名称/目标；settingRevision +1，需「使设置生效」）。 */
+    default SessionOutcome saveHostV2(String hostId, String name, String host, int port, int deviceId) {
+        return SessionOutcome.FAILED;
     }
 
     /** v2：删除主机。 */

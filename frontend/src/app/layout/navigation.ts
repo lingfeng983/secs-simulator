@@ -2,11 +2,13 @@ import type { IconName } from '../../shared/ui/Icon';
 import type { Route } from '../router';
 
 /**
- * 导航结构（单一事实来源）。
+ * 导航结构（单一事实来源，3.0 侧栏三组 · 第三轮修订 11）：
  *
- * <p>拆分后的信息架构:静态入口每个只代表一个页面、一个核心能力;
- * 「设备」组是动态的（来自会话列表）,由 Sidebar 渲染在上下两组之间。
- * 设备内部的子页也不进这份表——它们是设备页的状态。</p>
+ * <ol>
+ *   <li>设备清单——工作台入口 + 动态设备树（Sidebar 渲染在组内）；</li>
+ *   <li>主机清单——主机模拟列表入口 + 动态主机实例树；</li>
+ *   <li>独立工具——主机模板 / 设备模板 / 审计。</li>
+ * </ol>
  */
 
 export interface NavItemDef {
@@ -24,15 +26,16 @@ export interface NavItemDef {
 export interface NavGroupDef {
   id: string;
   label: string;
-  /** true = 渲染在「设备」动态组下方（管理类入口）。 */
-  belowDevices?: boolean;
+  /** 该组挂哪种动态实例树（Sidebar 在组内渲染）。 */
+  dynamic?: 'devices' | 'hosts';
   items: readonly NavItemDef[];
 }
 
 export const NAV_GROUPS: readonly NavGroupDef[] = [
   {
-    id: 'workbench',
-    label: '总览',
+    id: 'devices',
+    label: '设备清单',
+    dynamic: 'devices',
     items: [
       {
         id: 'workbench',
@@ -44,26 +47,33 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
     ],
   },
   {
-    id: 'hostsim',
-    label: '主机模拟',
+    id: 'hosts',
+    label: '主机清单',
+    dynamic: 'hosts',
     items: [
       {
-        id: 'hostsim',
+        id: 'hosts',
         label: '主机模拟',
-        description: '以主机角色连设备：可开多个主机实例,各自选本机设备或远程 SECS;采集与消息监控分开成页。',
+        description: '以主机角色连任意设备地址:可同时开多台,每台有独立的设置与收发记录。',
         icon: 'hostsim',
-        route: { name: 'hostsim', page: 'hosts' },
+        route: { name: 'hosts' },
       },
     ],
   },
   {
-    id: 'manage',
-    label: '管理',
-    belowDevices: true,
+    id: 'tools',
+    label: '独立工具',
     items: [
       {
+        id: 'host-templates',
+        label: '主机模板',
+        description: '预存目标地址/端口/Device ID 的主机实例模板,新建主机时可一键填入。',
+        icon: 'hostsim',
+        route: { name: 'host-templates' },
+      },
+      {
         id: 'templates',
-        label: '模板管理',
+        label: '设备模板',
         description: '设备模板的增删改查；工作台新建设备只从这里选模板。',
         icon: 'config',
         route: { name: 'templates' },
@@ -82,12 +92,15 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
 /** 所有静态入口的平铺清单。 */
 export const NAV_ITEMS: readonly NavItemDef[] = NAV_GROUPS.flatMap((group) => group.items);
 
-/** 路由 → 顶栏标题（设备页在 Sidebar 里动态列出,标题在 App 单独拼）。 */
+/** 路由 → 顶栏标题（设备/主机详情页在 Sidebar 里动态列出,标题在 App 单独拼）。 */
 export function routeTitle(route: Route): { group: string; label: string; description: string } {
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
       if (
         (route.name === 'workbench' && item.id === 'workbench')
+        || (route.name === 'hosts' && item.id === 'hosts')
+        || (route.name === 'host-templates' && item.id === 'host-templates')
+        || (route.name === 'templates' && item.id === 'templates')
         || (route.name === 'system' && item.id === route.page)
       ) {
         return { group: group.label, label: item.label, description: item.description };

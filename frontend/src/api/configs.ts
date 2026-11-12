@@ -20,7 +20,8 @@ type ConfigApi = Pick<
   | 'configText'
   | 'validateConfig'
   | 'saveConfig'
->;
+  | 'configRevisions'
+>;;
 
 export const configApi: ConfigApi = {
   async configs() {
@@ -120,5 +121,13 @@ export const configApi: ConfigApi = {
       /* 非 JSON 响应（网关错误页等）没有可带回来的问题 */
     }
     return { status: response.status, problems };
+  },
+  async configRevisions(name, limit = 50) {
+    const body = await readJson<{ revisions?: Array<{
+      revision: number; sha256: string; createdAt: number; createdBy: string; note: string;
+    }> }>(
+      await request(apiUrl(`/api/v2/devices/${encodeURIComponent(name)}/config/revisions?limit=${limit}`)),
+    );
+    return body.revisions ?? [];
   },
 };

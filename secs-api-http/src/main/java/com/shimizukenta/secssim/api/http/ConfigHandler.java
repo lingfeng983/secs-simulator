@@ -317,6 +317,43 @@ final class ConfigHandler extends HttpSupport {
 
 
     /**
+     * v2:设备配置版本历史(GET /api/v2/devices/{name}/config/revisions)。
+     */
+    void handleConfigRevisionsV2(HttpExchange ex) throws IOException {
+        if (!"GET".equals(ex.getRequestMethod().toUpperCase(java.util.Locale.ROOT))) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        String rest = ex.getRequestURI().getPath()
+                .substring(ApiPaths.DEVICE_REVISIONS_V2.length());
+        /* 形如 {name}/config/revisions */
+        String[] parts = rest.split("/");
+        if (parts.length < 1 || parts[0].isBlank()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+        String name = parts[0];
+        int limit = 50;
+        String query = ex.getRequestURI().getQuery();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                if (pair.startsWith("limit=")) {
+                    limit = java.lang.Integer.parseInt(pair.substring(6));
+                }
+            }
+        }
+        String body = this.context.configRevisionsV2(name, limit);
+        if (body == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"config-not-found\"}");
+            return;
+        }
+        respond(ex, 200, body);
+    }
+
+    /**
      * 单份配置的读取、校验与保存。
      *
      * <p>读是 {@link ApiRole#VIEWER}；保存是 {@link ApiRole#OPERATOR}：

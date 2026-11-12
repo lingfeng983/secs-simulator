@@ -1,6 +1,16 @@
 import { Icon } from '../../shared/ui/Icon';
 import type { Route } from '../router';
-import { DEVICE_PAGES, DEVICE_PAGE_LABELS, sameRoute } from '../router';
+import {
+  DEVICE_CONFIG_PAGES,
+  DEVICE_CONFIG_PAGE_LABELS,
+  DEVICE_RUNTIME_PAGES,
+  DEVICE_RUNTIME_PAGE_LABELS,
+  HOST_CONFIG_PAGES,
+  HOST_CONFIG_PAGE_LABELS,
+  HOST_RUNTIME_PAGES,
+  HOST_RUNTIME_PAGE_LABELS,
+  sameRoute,
+} from '../router';
 import { NAV_GROUPS } from './navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
@@ -10,8 +20,9 @@ import {
   SIDEBAR_MIN_W,
   clampSidebarWidth,
 } from '../../state/usePreferences';
+import type { HostV2 } from '../../api';
 
-/** 侧栏「设备」动态组里的一台设备。 */
+/** 侧栏「设备清单」动态组里的一台设备。 */
 export interface SidebarDevice {
   id: string;
   label: string;
@@ -23,7 +34,10 @@ export interface SidebarDevice {
   config?: string;
 }
 
-/** 状态字与色调：主机连上但还没 S1F17 时是"通讯中"，不能算离线。 */
+/** 侧栏「主机清单」动态组里的一台主机（v2 独立实例）。 */
+export type SidebarHost = HostV2;
+
+/** 状态字与色调：主机连上但还没 SELECT 时是"连接中"，不能算离线。 */
 function stateLabel(state: string): string {
   if (state === 'ONLINE') {
     return '在线';
@@ -49,6 +63,10 @@ export interface SidebarProps {
   route: Route;
   /** 动态设备列表(来自会话)。 */
   devices: readonly SidebarDevice[];
+  /** 动态主机实例列表(v2)。 */
+  hostInstances?: readonly SidebarHost[];
+  /** 点主机实例 → 进详情。 */
+  onNavigateHost?: (hostId: string) => void;
   /** 折叠为纯图标栏。 */
   collapsed: boolean;
   /** 展开时的宽度（px）。 */
@@ -60,24 +78,21 @@ export interface SidebarProps {
 }
 
 /**
- * 左侧导航栏（"机箱"）。
- *
- * <p>静态入口在上，设备是动态组，管理入口在下。
- * 设备项右侧带状态字，不点开就知道哪台离线。
- * 折叠后只剩图标，悬停靠 title 提示。</p>
+ * 左侧导航栏（3.0 三组 · 第三轮修订 11）：
+ * 设备清单 / 主机清单 / 独立工具。设备与主机都是动态树,
+ * 展开后可直达两段式子页。
  */
 export function Sidebar({
   route,
   devices,
+  hostInstances = [],
+  onNavigateHost,
   collapsed,
   width,
   onResize,
   onNavigate,
   onToggleCollapse,
 }: SidebarProps): JSX.Element {
-  const groupsAbove = NAV_GROUPS.filter((group) => !group.belowDevices);
-  const groupsBelow = NAV_GROUPS.filter((group) => group.belowDevices);
-
   /* ===== 宽度拖动 =====
      指针按下后把移动/抬起交给 handle 自己（pointer capture），
      这样鼠标划过内容区也不会丢事件；双击恢复默认宽度。 */
@@ -91,7 +106,6 @@ export function Sidebar({
     return () => document.body.classList.remove('sidenav-resizing');
   }, [dragging]);
 
-  /* 指针移动频率高于刷新率：每帧最多提交一次宽度，避免拖动时把主线程塞满 */
   useEffect(() => () => {
     if (frameRef.current !== null) {
       window.cancelAnimationFrame(frameRef.current);
@@ -135,7 +149,6 @@ export function Sidebar({
     if (dragRef.current === null) {
       return;
     }
-    /* 松手时把还没来得及提交的那一帧补上，避免"拖到位、宽度差几像素" */
     if (frameRef.current !== null) {
       window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
@@ -190,15 +203,19 @@ export function Sidebar({
           </button>
         );
       })}
+      {/* 动态实例树挂在本组内 */}
+      {group.dynamic === 'devices' && renderDeviceTree()}
+      {group.dynamic === 'hosts' && renderHostTree()}
     </div>
   );
 
+  /* ===== 设备树 ===== */
   const onlineCount = devices.filter((device) => device.state !== 'OFFLINE').length;
-  const [filter, setFilter] = useState('');
+  const [deviceFilter, setDeviceFilter] = useState('');
   const [groupByTemplate, setGroupByTemplate] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
-  const query = filter.trim().toLowerCase();
+  const query = deviceFilter.trim().toLowerCase();
   const visibleDevices = query === ''
     ? devices
     : devices.filter((device) => (
@@ -241,7 +258,7 @@ export function Sidebar({
           <button
             type="button"
             className={`nav-item${active ? ' active' : ''}`}
-            onClick={() => onNavigate({ name: 'device', sessionId: device.id, tab: 'ceids' })}
+            onClick={() => onNavigate({ name: 'device', sessionId: device.id, zone: 'runtime', page: 'catalog' })}
             aria-current={active ? 'page' : undefined}
             title={`${device.label}（${stateLabel(device.state)}）${device.template === undefined || device.template === '' ? '' : `\n模板：${device.template}`}`}
           >
@@ -271,22 +288,167 @@ export function Sidebar({
         </div>
         {withPages && !collapsed && expanded && (
           <div className="nav-subpages">
-            {DEVICE_PAGES.map((page) => {
-              const selected = active && route.name === 'device' && route.tab === page;
+            {[
+              ...DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id], zone: 'config' as const })),
+              ...DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const })),
+            ].map((entry) => {
+              const selected = active && route.name === 'device' && route.zone === entry.zone && route.page === entry.id;
               return (
                 <button
-                  key={page}
+                  key={`${entry.zone}:${entry.id}`}
                   type="button"
                   className={`nav-subpage${selected ? ' active' : ''}`}
-                  onClick={() => onNavigate({ name: 'device', sessionId: device.id, tab: page })}
+                  onClick={() => onNavigate({
+                    name: 'device', sessionId: device.id, zone: entry.zone, page: entry.id,
+                  })}
                 >
-                  {DEVICE_PAGE_LABELS[page]}
+                  {entry.zone === 'runtime' ? '◉ ' : '▣ '}{entry.label}
                 </button>
               );
             })}
           </div>
         )}
       </div>
+    );
+  };
+
+  const renderDeviceTree = () => (
+    <>
+      {!collapsed && (
+        <div className="nav-device-tools">
+          <input
+            type="search"
+            className="nav-filter"
+            placeholder="筛选设备/模板"
+            value={deviceFilter}
+            onChange={(event) => setDeviceFilter(event.target.value)}
+            aria-label="筛选设备"
+          />
+          <button
+            type="button"
+            className={`nav-mode${groupByTemplate ? ' active' : ''}`}
+            onClick={() => setGroupByTemplate((previous) => !previous)}
+            title={groupByTemplate ? '切换为平铺设备列表' : '按设备模板聚合为三级菜单'}
+          >
+            {groupByTemplate ? '平铺' : '分组'}
+          </button>
+        </div>
+      )}
+      {!collapsed && <div className="nav-group-title nav-group-subtitle">设备 · {onlineCount}/{devices.length}</div>}
+      {visibleDevices.length === 0 && !collapsed && (
+        <p className="nav-empty">{devices.length === 0 ? '暂无设备' : '没有匹配的设备'}</p>
+      )}
+      {!groupByTemplate && visibleDevices.map((device) => renderDevice(device, false))}
+      {groupByTemplate && collapsed && visibleDevices.map((device) => renderDevice(device, false))}
+      {groupByTemplate && !collapsed && [...templateGroups.entries()].map(([template, groupDevices]) => {
+        const folded = collapsedGroups.has(template);
+        return (
+          <div className="nav-template-group" key={template}>
+            <button
+              type="button"
+              className={`nav-template-head${folded ? ' folded' : ''}`}
+              onClick={() => toggleSet(setCollapsedGroups, template)}
+              aria-expanded={!folded}
+              title={`模板 ${template}（${groupDevices.length} 台）`}
+            >
+              <span className="nav-caret">{folded ? '▸' : '▾'}</span>
+              <span className="nav-template-name">{template}</span>
+              <span className="nav-template-count">{groupDevices.length}</span>
+            </button>
+            {!folded && groupDevices.map((device) => renderDevice(device, true))}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  /* ===== 主机树 ===== */
+  const [expandedHosts, setExpandedHosts] = useState<ReadonlySet<string>>(new Set());
+
+  const renderHostTree = () => {
+    const connected = hostInstances.filter((host) => host.phase === 'CONNECTED').length;
+    if (collapsed) {
+      return hostInstances.map((host) => {
+        const active = route.name === 'host' && route.hostId === host.id;
+        return (
+          <button
+            key={host.id}
+            type="button"
+            className={`nav-item${active ? ' active' : ''}`}
+            onClick={() => onNavigateHost?.(host.id)}
+            title={host.name}
+          >
+            <span className={`nav-monogram ${host.phase === 'CONNECTED' ? 'ok' : 'muted'}`} aria-hidden="true">
+              {host.name.slice(0, 2).toUpperCase()}
+            </span>
+          </button>
+        );
+      });
+    }
+    return (
+      <>
+        <div className="nav-group-title nav-group-subtitle">主机 · {connected}/{hostInstances.length}</div>
+        {hostInstances.length === 0 && <p className="nav-empty">暂无主机</p>}
+        {hostInstances.map((host) => {
+          const active = route.name === 'host' && route.hostId === host.id;
+          const expanded = expandedHosts.has(host.id);
+          const tone = host.phase === 'CONNECTED' ? 'ok' : host.phase === 'FAILED' ? 'danger' : 'muted';
+          const phase = host.phase === 'CONNECTED' ? '已连接' : host.phase === 'CONNECTING' ? '连接中'
+            : host.phase === 'FAILED' ? '连接失败' : '已断开';
+          return (
+            <div className="nav-device" key={host.id}>
+              <div className="nav-device-row">
+                <button
+                  type="button"
+                  className={`nav-item${active ? ' active' : ''}`}
+                  onClick={() => onNavigateHost?.(host.id)}
+                  aria-current={active ? 'page' : undefined}
+                  title={`${host.name}（${phase}）\n${host.target}`}
+                >
+                  <span className="nav-icon" aria-hidden="true">
+                    <span className={`conn-dot ${tone}`} />
+                  </span>
+                  {!collapsed && <span className="nav-label">{host.name}</span>}
+                  {!collapsed && <span className={`nav-state tone-${tone}`}>{phase}</span>}
+                </button>
+                {!collapsed && (
+                  <button
+                    type="button"
+                    className={`nav-caret${expanded ? ' open' : ''}`}
+                    aria-label={`${expanded ? '收起' : '展开'} ${host.name} 的子页`}
+                    aria-expanded={expanded}
+                    onClick={() => toggleSet(setExpandedHosts, host.id)}
+                  >
+                    ▸
+                  </button>
+                )}
+              </div>
+              {!collapsed && expanded && (
+                <div className="nav-subpages">
+                  {[
+                    ...HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id], zone: 'config' as const })),
+                    ...HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const })),
+                  ].map((entry) => {
+                    const selected = active && route.name === 'host' && route.zone === entry.zone && route.page === entry.id;
+                    return (
+                      <button
+                        key={`${entry.zone}:${entry.id}`}
+                        type="button"
+                        className={`nav-subpage${selected ? ' active' : ''}`}
+                        onClick={() => onNavigate({
+                          name: 'host', hostId: host.id, zone: entry.zone, page: entry.id,
+                        })}
+                      >
+                        {entry.zone === 'runtime' ? '◉ ' : '▣ '}{entry.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </>
     );
   };
 
@@ -312,60 +474,7 @@ export function Sidebar({
         />
       )}
       <nav className="sidenav-nav">
-        {groupsAbove.map(renderGroup)}
-
-        {/* 设备组(动态):筛选 / 折叠 / 按模板聚合 */}
-        <div className="nav-group">
-          {!collapsed && (
-            <div className="nav-group-title">设备 · {onlineCount}/{devices.length}</div>
-          )}
-          {!collapsed && (
-            <div className="nav-device-tools">
-              <input
-                type="search"
-                className="nav-filter"
-                placeholder="筛选设备/模板"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                aria-label="筛选设备"
-              />
-              <button
-                type="button"
-                className={`nav-mode${groupByTemplate ? ' active' : ''}`}
-                onClick={() => setGroupByTemplate((previous) => !previous)}
-                title={groupByTemplate ? '切换为平铺设备列表' : '按设备模板聚合为三级菜单'}
-              >
-                {groupByTemplate ? '平铺' : '分组'}
-              </button>
-            </div>
-          )}
-          {visibleDevices.length === 0 && !collapsed && (
-            <p className="nav-empty">{devices.length === 0 ? '暂无设备' : '没有匹配的设备'}</p>
-          )}
-          {!groupByTemplate && visibleDevices.map((device) => renderDevice(device, false))}
-          {groupByTemplate && collapsed && visibleDevices.map((device) => renderDevice(device, false))}
-          {groupByTemplate && !collapsed && [...templateGroups.entries()].map(([template, groupDevices]) => {
-            const folded = collapsedGroups.has(template);
-            return (
-              <div className="nav-template-group" key={template}>
-                <button
-                  type="button"
-                  className={`nav-template-head${folded ? ' folded' : ''}`}
-                  onClick={() => toggleSet(setCollapsedGroups, template)}
-                  aria-expanded={!folded}
-                  title={`模板 ${template}（${groupDevices.length} 台）`}
-                >
-                  <span className="nav-caret">{folded ? '▸' : '▾'}</span>
-                  <span className="nav-template-name">{template}</span>
-                  <span className="nav-template-count">{groupDevices.length}</span>
-                </button>
-                {!folded && groupDevices.map((device) => renderDevice(device, true))}
-              </div>
-            );
-          })}
-        </div>
-
-        {groupsBelow.map(renderGroup)}
+        {NAV_GROUPS.map(renderGroup)}
       </nav>
 
       <div className="sidenav-foot">
