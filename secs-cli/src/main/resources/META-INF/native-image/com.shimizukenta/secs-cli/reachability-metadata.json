@@ -1,0 +1,24 @@
+{
+  "reflection": [
+    { "type": "org.sqlite.JDBC", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.SQLiteConfig", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.SQLiteConfig$Pragma", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.SQLiteConnection", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.SQLiteConnectionConfig", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.SQLiteStatement", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.core.CoreStatement", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.core.CoreDatabase", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.core.DB", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.core.NativeDB", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.jdbc4.JDBC4Statement", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.jdbc4.JDBC4ResultSet", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true },
+    { "type": "org.sqlite.jdbc4.JDBC4DatabaseMetaData", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true }
+  ],
+  "jni": [
+    { "type": "org.sqlite.core.NativeDB", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true }
+  ],
+  "resources": [
+    { "pattern": "org/sqlite/native/.*" },
+    { "pattern": "sqlite.properties" }
+  ]
+}

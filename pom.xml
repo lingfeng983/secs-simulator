@@ -62,6 +62,11 @@
         <groupId>org.ow2.asm</groupId><artifactId>asm</artifactId>
         <version>${asm.version}</version>
       </dependency>
+      <!-- 3.0 存储地基（ADR 0017）：配置与运行态台账入 SQLite；版本见 ADR 0017 §3（要求 3.47+） -->
+      <dependency>
+        <groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId>
+        <version>3.49.1.0</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 

@@ -30,6 +30,12 @@
       <groupId>com.shimizukenta</groupId>
       <artifactId>secs-json</artifactId>
     </dependency>
+    <!-- M0 尖峰（3.0 设计 §2.3.1）：验证 sqlite-jdbc 的 JNI 本地库在 native-image 里可用；
+         M1 存储地基落地后依赖迁往 secs-store，这里保留给 db-spike 冒烟路径 -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -68,6 +74,8 @@
                 <buildArg>-Dfile.encoding=UTF-8</buildArg>
                 <buildArg>-Os</buildArg>
                 <buildArg>-H:IncludeResources=defaults/.*</buildArg>
+                <!-- M0 尖峰：sqlite-jdbc 平台本地库要进镜像（运行时由 DbSpike 释放到 work-dir） -->
+                <buildArg>-H:IncludeResources=org/sqlite/native/.*</buildArg>
               </buildArgs>
             </configuration>
             <executions>

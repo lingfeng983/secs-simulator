@@ -62,6 +62,27 @@ New-Item -ItemType Directory -Force -Path $resources | Out-Null
 
 Copy-Item $exe (Join-Path $resources 'secs-sim.exe')
 
+# sqlite-jdbc 平台本地库作为外部文件随包（3.0 M0 / ADR 0017）：
+# exe 镜像内仍带一份用于自释放；这份放在旁边，排障时可直接替换验证
+$pomText = Get-Content (Join-Path $root 'pom.xml') -Raw
+if ($pomText -notmatch 'sqlite-jdbc</artifactId>\s*<version>([^<]+)</version>') {
+    throw 'pom.xml 里找不到 sqlite-jdbc 的版本号（依赖管理段被改动了？）'
+}
+$sqliteVersion = $Matches[1]
+$sqliteJar = Join-Path $env:USERPROFILE ".m2/repository/org/xerial/sqlite-jdbc/$sqliteVersion/sqlite-jdbc-$sqliteVersion.jar"
+if (-not (Test-Path $sqliteJar)) { throw "缺少 sqlite-jdbc-$sqliteVersion.jar（先 mvn package 拉取依赖）" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$sqliteZip = [System.IO.Compression.ZipFile]::OpenRead($sqliteJar)
+try {
+    $dllEntry = $sqliteZip.Entries | Where-Object { $_.FullName -eq 'org/sqlite/native/Windows/x86_64/sqlitejdbc.dll' }
+    if ($null -eq $dllEntry) { throw "sqlite-jdbc jar 里没有 Windows 本地库（版本 $sqliteVersion）" }
+    New-Item -ItemType Directory -Force -Path (Join-Path $resources 'native') | Out-Null
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+        $dllEntry, (Join-Path $resources 'native/sqlitejdbc.dll'), $true)
+} finally {
+    $sqliteZip.Dispose()
+}
+
 # ---- 4. tauri build（Rust release + NSIS 安装程序）----
 Write-Host '--- tauri build ---'
 Push-Location (Join-Path $root 'gui')

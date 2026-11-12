@@ -38,6 +38,55 @@ import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
  */
 class NativeRuntimeIT {
 
+    /**
+     * M0 闸门（3.0 设计 §2.3.1）：原生 exe 内 sqlite-jdbc 的 JNI 链路可用——
+     * 释放本地库、建双库、读版本号、写一条台账。
+     */
+    @Test
+    void nativeImageOpensSqliteDatabases() throws Exception {
+        String exe = System.getProperty("secs.smoke.exe", "");
+        assumeTrue(!exe.isBlank(), "skip: -Dsecs.smoke.exe not set");
+        Path exePath = Path.of(exe);
+        assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
+
+        Path workDir = Files.createTempDirectory("secs-sim-dbspike-");
+        Process process = new ProcessBuilder(
+                exePath.toString(),
+                "--mode=probe",
+                "--db-spike",
+                "--work-dir", workDir.toString())
+                .redirectErrorStream(true)
+                .start();
+
+        try {
+            String output = awaitReadyCollecting(process);
+            assertTrue(output.contains("DBSPIKE ok sqlite="),
+                    "原生进程没有输出 DBSPIKE ok（JNI 链路失败）: " + output);
+            assertTrue(Files.isRegularFile(workDir.resolve("config.db")), "原生进程没有建 config.db");
+            assertTrue(Files.isRegularFile(workDir.resolve("runtime.db")), "原生进程没有建 runtime.db");
+            assertTrue(Files.isRegularFile(workDir.resolve("native").resolve(expectedSqliteLibName())),
+                    "本地库没有释放到 native/");
+
+            /* 尖峰过后进程继续正常启动：握手与健康检查都还要在 */
+            int httpPort = intToken(output, "http=");
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+            HttpResponse<String> health = client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            assertEquals(200, health.statusCode(), health.body());
+
+            client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/shutdown"))
+                            .timeout(Duration.ofSeconds(10))
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.discarding());
+            assertTrue(process.waitFor(15, TimeUnit.SECONDS), "native 进程没有退出");
+            assertEquals(0, process.exitValue(), "native 进程退出码");
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
     @Test
     void nativeRuntimeServesApiAndSecs() throws Exception {
         String exe = System.getProperty("secs.smoke.exe", "");
@@ -254,6 +303,18 @@ class NativeRuntimeIT {
         }
     }
 
+    /** 与 DbSpike 的资源布局保持一致：当前平台的 sqlite-jdbc 本地库文件名。 */
+    private static String expectedSqliteLibName() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (os.contains("win")) {
+            return "sqlitejdbc.dll";
+        }
+        if (os.contains("mac")) {
+            return "libsqlitejdbc.jnilib";
+        }
+        return "libsqlitejdbc.so";
+    }
+
     private static String awaitReady(Process process) throws Exception {
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
@@ -264,6 +325,22 @@ class NativeRuntimeIT {
             }
         }
         throw new IllegalStateException("进程在 READY 之前结束, exit=" + process.exitValue());
+    }
+
+    /** 与 {@link #awaitReady} 相同，但保留 READY 之前的所有输出（DBSPIKE 行在里面）。 */
+    private static String awaitReadyCollecting(Process process) throws Exception {
+        BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        StringBuilder all = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            all.append(line).append('\n');
+            if (line.startsWith("READY ")) {
+                return all.toString();
+            }
+        }
+        throw new IllegalStateException("进程在 READY 之前结束, exit=" + process.exitValue()
+                + ", output=" + all);
     }
 
     private static int intToken(String line, String prefix) {

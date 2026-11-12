@@ -26,7 +26,9 @@ public final class CliMain {
     public static void main(String[] args) {
         int code;
         try {
-            code = Bootstrap.run(args);
+            /* M0 尖峰：--db-spike 时先验证 sqlite-jdbc 的 JNI 链路（3.0 设计 §2.3.1），
+               成功则去掉旗标继续正常启动，失败直接按启动失败退出。 */
+            code = Bootstrap.run(DbSpike.maybeRun(args));
         } catch (Exception e) {
             /* 单行摘要给桌面壳看；完整栈只在需要时输出，避免刷屏 */
             Log.error("启动失败", e);

@@ -42,16 +42,40 @@ foreach ($module in $modules) {
     }
 }
 
+# ---- 2b. sqlite-jdbc（3.0 M0 / ADR 0017）：唯一 JNI 依赖，jar 进包进 classpath，
+#         Linux 平台 .so 另放 native/ 供排障直接替换（JVM 下 sqlite-jdbc 会自解压）----
+$pomText = Get-Content (Join-Path $root 'pom.xml') -Raw
+if ($pomText -notmatch 'sqlite-jdbc</artifactId>\s*<version>([^<]+)</version>') {
+    throw 'pom.xml 里找不到 sqlite-jdbc 的版本号（依赖管理段被改动了？）'
+}
+$sqliteVersion = $Matches[1]
+$sqliteJar = Join-Path $env:USERPROFILE ".m2/repository/org/xerial/sqlite-jdbc/$sqliteVersion/sqlite-jdbc-$sqliteVersion.jar"
+if (-not (Test-Path $sqliteJar)) { throw "缺少 sqlite-jdbc-$sqliteVersion.jar（先 mvn package 拉取依赖）" }
+
 # ---- 3. 组装（产物统一收到 build/installer）----
 $packageDir = Join-Path $root 'build/installer'
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 $stage = Join-Path $packageDir "secs-sim-server-$version-linux"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'web') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'thirdparty') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'native') | Out-Null
 
 foreach ($module in $modules) {
     # 目标名去掉版本号：start-server.sh 的 classpath 按 <module>.jar 引用，升级换版本不用改脚本
     Copy-Item (Join-Path $root "$module/target/$module-$version.jar") (Join-Path $stage "$module.jar")
+}
+Copy-Item $sqliteJar (Join-Path $stage 'thirdparty/sqlite-jdbc.jar')
+# 平台 .so 随包发布（3.0 M0）：JVM 下由 sqlite-jdbc 自解压，这份给排障/替换用
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$sqliteZip = [System.IO.Compression.ZipFile]::OpenRead($sqliteJar)
+try {
+    $soEntry = $sqliteZip.Entries | Where-Object { $_.FullName -eq 'org/sqlite/native/Linux/x86_64/libsqlitejdbc.so' }
+    if ($null -eq $soEntry) { throw "sqlite-jdbc jar 里没有 Linux 本地库（版本 $sqliteVersion）" }
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+        $soEntry, (Join-Path $stage 'native/libsqlitejdbc.so'), $true)
+} finally {
+    $sqliteZip.Dispose()
 }
 Copy-Item "$web/*" (Join-Path $stage 'web') -Recurse
 Copy-Item (Join-Path $root 'packaging/start-server.sh') $stage

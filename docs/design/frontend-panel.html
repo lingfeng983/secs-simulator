@@ -192,13 +192,13 @@ select.mini,input.mini{padding:5px 8px;border:1px solid var(--line-strong);borde
 .cat-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
 .cat{padding:3px 9px;border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--text-2);font-size:11px}
 .cat.off{opacity:.4;text-decoration:line-through}
-.msg-row{display:grid;grid-template-columns:82px 76px 82px 76px minmax(0,1fr);gap:8px;align-items:center;padding:7px 9px;border-bottom:1px solid var(--line);font-size:11.5px}
+.msg-row{display:grid;grid-template-columns:82px 84px 76px minmax(0,1fr);gap:8px;align-items:center;padding:7px 9px;border-bottom:1px solid var(--line);font-size:11.5px}
 .msg-row:hover{background:var(--surface-2)}
 .msg-row .body{font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-2)}
 .msg-list{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
 .sml-box{width:100%;min-height:96px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-2);color:var(--text);font:12px/1.6 var(--mono);resize:vertical}
 @media(max-width:1180px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}.create-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.svid-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line)}.g2,.g3,.g4,.map-grid{grid-template-columns:1fr}.main{padding:0 14px 30px}.create-grid,.filter-bar,.svid-grid{grid-template-columns:1fr}.msg-row{grid-template-columns:74px 70px minmax(0,1fr)}.msg-row>:nth-child(2),.msg-row>:nth-child(4){display:none}}
+@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line)}.g2,.g3,.g4,.map-grid{grid-template-columns:1fr}.main{padding:0 14px 30px}.create-grid,.filter-bar,.svid-grid{grid-template-columns:1fr}.msg-row{grid-template-columns:74px 74px minmax(0,1fr)}.msg-row>:nth-child(3){display:none}}
 </style>
 </head>
 <body>
@@ -208,15 +208,16 @@ select.mini,input.mini{padding:5px 8px;border:1px solid var(--line-strong);borde
       <div class="brand-mark">S</div>
       <div><div class="brand-name">SECS Simulator</div><div class="brand-sub">3.0 界面设计</div></div>
     </div>
-    <div class="nav-group">总览</div>
+    <div class="nav-group">设备清单</div>
     <button class="nav-item" data-view="workbench"><span class="nav-ico">▦</span>工作台<span class="count" id="navDevCount">3</span></button>
-    <div class="nav-group">设备</div>
     <div id="navDevices"></div>
-    <div class="nav-group">主机</div>
-    <button class="nav-item" data-view="hostlist"><span class="nav-ico">⇄</span>主机模拟<span class="count" id="navHostCount">3</span></button>
+    <div class="nav-group">主机清单</div>
+    <button class="nav-item" data-view="hostlist"><span class="nav-ico">⇄</span>主机模拟<span class="count" id="navHostCount">4</span></button>
     <div id="navHosts"></div>
     <div class="nav-group">独立工具</div>
-    <button class="nav-item" data-view="templates"><span class="nav-ico">◇</span>模板管理</button>
+    <button class="nav-item" data-view="hosttemplates"><span class="nav-ico">◈</span>主机模板</button>
+    <button class="nav-item" data-view="templates"><span class="nav-ico">◇</span>设备模板</button>
+    <button class="nav-item" data-view="audit"><span class="nav-ico">☰</span>审计</button>
   </aside>
 
   <main class="main">
@@ -320,9 +321,14 @@ const state = {
   hpage: { config:'overview', runtime:'status' },
   creating: false,
   newHost: { name:'', target:'', port:'5000', deviceId:'0' },
+  htCreating: false,
+  htForm: { name:'', host:'', port:'5000', deviceId:'0', note:'' },
   hsearch: '',
-  hSendTargets: ['HOST-A'],
   hSml: 'S1F3 W\n<L[1] <U4 1001>>',
+  hostTemplates: [
+    { id:'ht-line-a', name:'产线 A 目标', host:'127.0.0.1', port:5000, deviceId:61, collector:'S1F3 · 1001/1003 · 1s', note:'日常联调' },
+    { id:'ht-cvd-remote', name:'远端 CVD', host:'192.168.8.30', port:7000, deviceId:5, collector:'', note:'第三方模拟器' }
+  ],
   hPreset: '',
   hSendResults: [],
   hBurst: null,
@@ -334,7 +340,7 @@ const state = {
   hImported: null,
   hManualSml: 'S1F3 W\n<L\n  <U4 1001>\n  <U4 1003>\n>.',
   hManualReply: '',
-  hFilter: { host:'', dir:'all', sf:'', kw:'' },
+  hFilter: { dir:'all', sf:'', kw:'', clearAt:null },
   hCats: {},
   openExec: -1,
   showDryRun: false,
@@ -1137,15 +1143,15 @@ function buildS2F23(h){
   const list = h.trace.svids.map(id=>`<U4 ${id}>`).join(' ');
   return `S2F23 W\n<L[6]\n  <U4 ${h.trace.trid}>\n  <A "000001">\n  <U4 ${h.trace.totsmp}>\n  <U4 ${h.trace.repgsz}>\n  <L[${h.trace.svids.length}] ${list}>\n>`;
 }
-function allHostMessages(){
-  const rows = [];
-  state.hosts.forEach(h => h.messages.forEach(m => rows.push({...m, host:h.id, cat:catOf(m.sf)})));
-  return rows.sort((a,b)=> b.at.localeCompare(a.at));
+function hostMessages(h){
+  /* 第三轮修订 13:收发记录只看本主机 */
+  return h.messages.map(m => ({...m, host:h.id, cat:catOf(m.sf)}))
+    .sort((a,b)=> b.at.localeCompare(a.at));
 }
 function filteredHostMessages(){
-  const f = state.hFilter;
-  return allHostMessages().filter(m => {
-    if (f.host && m.host !== f.host) return false;
+  const f = state.hFilter, h = curHost();
+  return hostMessages(h).filter(m => {
+    if (f.clearAt && m.at <= f.clearAt) return false;   /* 「清理」水位:只显示清理之后的报文 */
     if (f.dir === 'sent' && m.dir !== '发送') return false;
     if (f.dir === 'received' && m.dir !== '接收') return false;
     if (f.sf && !m.sf.replace(/\s|W/g,'').toLowerCase().startsWith(f.sf.replace(/\s/g,'').toLowerCase())) return false;
@@ -1156,10 +1162,9 @@ function filteredHostMessages(){
 }
 function msgListHtml(){
   const rows = filteredHostMessages();
-  if (!rows.length) return '<div class="empty" style="padding:24px"><div>当前条件下没有报文，放宽条件或点「清空过滤」。</div></div>';
+  if (!rows.length) return '<div class="empty" style="padding:24px"><div>当前条件下没有报文，放宽条件、点「清理」后再收，或点「清空过滤」。</div></div>';
   return `<div class="msg-list">${rows.map(m => `<div class="msg-row">
       <span class="mono muted">${m.at}</span>
-      <span class="mono muted">${esc(m.host)}</span>
       ${m.dir==='发送'?'<span class="tag c">发 → 设备</span>':'<span class="tag r">收 ← 设备</span>'}
       <span class="mono">${esc(m.sf)}</span>
       <span class="body" title="${esc(m.body)}">${esc(m.body)}</span>
@@ -1179,7 +1184,12 @@ function createForm(){
       <div><label>端口</label><input data-hnew="port" value="${esc(n.port)}"></div>
       <div><label>Device ID</label><input data-hnew="deviceId" value="${esc(n.deviceId)}"></div>
     </div>
-    <p class="host-note">目标可以填任意设备或第三方模拟器地址；与设备列表无关。可连续新建多台。</p>
+    <p class="host-note">目标可以填任意设备或第三方模拟器地址；与设备列表无关。可连续新建多台${state.hostTemplates.length?'，也可先从主机模板填入':''}。</p>
+    ${state.hostTemplates.length?`<div class="row" style="margin:9px 0 0">
+      <select class="mini" data-hsel="tplfill" style="width:auto;min-width:220px">
+        <option value="">从主机模板填入…</option>
+        ${state.hostTemplates.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} · ${esc(x.host)}:${x.port}</option>`).join('')}
+      </select></div>`:''}
     <div class="row" style="margin-top:12px"><span class="spacer"></span>
       <button class="btn" data-h="createhost">仅创建</button>
       <button class="btn host" data-h="createconnect">创建并连接</button></div>
@@ -1361,19 +1371,12 @@ function hostRuntimeContent(){
   </div>`;
 
   if (p === 'messages') {
-    const open = state.hosts.filter(x=>x.phase==='CONNECTED');
-    const picked = state.hSendTargets.filter(id=>hostById(id) && hostById(id).phase==='CONNECTED');
     const quick = HOST_PRESETS.filter(x=>x.q);
     const groups = [...new Set(HOST_PRESETS.map(x=>x.g))];
     return `<div class="grid g2">
-      ${card('发送到主机',`<span class="chip runtime">已选 ${picked.length} / ${open.length} 台</span>`, `
-        <div class="row" style="margin-bottom:8px"><span class="spacer"></span>
-          <button class="btn sm" data-h="sendall">全选</button><button class="btn sm" data-h="sendnone">清空</button></div>
-        ${open.length?open.map(x=>`<label class="svid-opt" style="margin-bottom:6px">
-          <input type="checkbox" data-hsend="${esc(x.id)}" ${state.hSendTargets.includes(x.id)?'checked':''}>
-          <span class="mono">${esc(x.id)}</span><span class="muted small">${esc(x.target)}:${x.port}</span></label>`).join('')
-          :'<div class="empty" style="padding:18px"><div>还没有已连接的主机。</div></div>'}
-        <p class="small muted" style="margin:8px 0 0">同一条报文会依次发给选中的每台主机。</p>`)}
+      ${card('发送目标','<span class="chip runtime">本主机</span>', `
+        <div class="field"><label>当前主机</label><div class="mono">${esc(h.id)} · ${esc(h.target)}:${h.port}</div></div>
+        <p class="small muted" style="margin:6px 0 0">运行区只操作本主机：发送、压测、采集都只作用于这一台；其它主机请在各自详情页操作。</p>`)}
       ${card('发送消息','<span class="chip runtime">当前运行 · 仅本次连接有效</span>', `
         <div class="preset-row">${quick.map(x=>
           `<button class="preset-btn" title="${esc(x.d)}" data-h="preset:${HOST_PRESETS.indexOf(x)}">${esc(x.l)}</button>`).join('')}</div>
@@ -1383,7 +1386,7 @@ function hostRuntimeContent(){
         </select><span class="small muted">共 ${HOST_PRESETS.length} 条模板</span></div>
         <textarea class="sml-box" data-hsml="1" spellcheck="false">${esc(h.sml)}</textarea>
         <p class="small muted" style="margin:8px 0 10px">带 W 的报文会等待设备回复；模板填入后仍可修改 SVID、CEID 与时间再发送。</p>
-        <div class="row"><span class="spacer"></span><button class="btn live" data-h="send">发送到 ${picked.length} 台</button></div>`)}
+        <div class="row"><span class="spacer"></span><button class="btn live" data-h="send">发送</button></div>`)}
       ${card('常用命令','', `<div class="row" style="gap:7px">
           <button class="btn sm" data-h="cmd:s1f1">S1F1 握手</button>
           <button class="btn sm" data-h="cmd:s1f3">S1F3 读变量</button>
@@ -1392,8 +1395,8 @@ function hostRuntimeContent(){
         <p class="small muted" style="margin:10px 0 0">点击直接以当前主机身份发出，收发明细在「收发记录」里。</p>`)}
       ${card('发送结果','<button class="btn sm" data-h="results:clear">清空</button>',
         state.hSendResults.length
-          ? table(['主机','结果','耗时 / 原因'], state.hSendResults.map(r=>[
-              `<span class="mono">${esc(r.id)}</span>`,`<span class="tag g">${esc(r.result)}</span>`,esc(r.detail)]))
+          ? table(['结果','耗时 / 原因'], state.hSendResults.map(r=>[
+              `<span class="tag g">${esc(r.result)}</span>`,esc(r.detail)]))
           : '<div class="empty" style="padding:22px"><div>还没有发送结果。</div></div>')}
       ${card('压测发送','<span class="chip runtime">服务端循环发送</span>', `
         <div class="grid g2" style="gap:10px">
@@ -1401,11 +1404,11 @@ function hostRuntimeContent(){
           <div><label class="small muted">间隔 ms（0 = 全速）</label><input class="mini" data-hburst="interval" value="${esc(state.hBurstInterval)}"></div>
         </div>
         <p class="small muted" style="margin:9px 0">同一条报文连续发送，带 W 的逐条等待回复，最长 5 分钟自动收尾。</p>
-        <div class="row"><span class="spacer"></span><button class="btn live" data-h="burst">压测发送（${picked.length} 台）</button></div>`)}
+        <div class="row"><span class="spacer"></span><button class="btn live" data-h="burst">压测发送</button></div>`)}
       ${card('压测结果','',
         state.hBurst && state.hBurst.length
-          ? table(['主机','结果','耗时 / 分位'], state.hBurst.map(r=>[
-              `<span class="mono">${esc(r.id)}</span>`,`<span class="tag g">${esc(r.result)}</span>`,`<span class="small">${esc(r.detail)}</span>`]))
+          ? table(['结果','耗时 / 分位'], state.hBurst.map(r=>[
+              `<span class="tag g">${esc(r.result)}</span>`,`<span class="small">${esc(r.detail)}</span>`]))
           : '<div class="empty" style="padding:22px"><div>还没有压测结果。</div></div>')}
     </div>`;
   }
@@ -1466,14 +1469,14 @@ function hostRuntimeContent(){
   }
 
   if (p === 'monitor') {
-    const f = state.hFilter, rows = filteredHostMessages(), all = allHostMessages();
+    const f = state.hFilter, rows = filteredHostMessages(), all = hostMessages(curHost());
     const sent = all.filter(m=>m.dir==='发送').length, recv = all.length - sent;
+    const cleared = !!f.clearAt;
     return `<div class="grid" style="gap:12px">
-      ${card('过滤','<div class="row"><button class="btn sm" data-h="filter:clear">清空过滤</button><button class="btn sm" data-h="filter:export">导出过滤结果</button></div>', `
+      ${card(`过滤 · ${esc(curHost().id)}`,`<div class="row"><button class="btn sm" data-h="filter:clear">清空过滤</button>
+        <button class="btn sm" data-h="monitor:clear" title="清掉当前显示的报文，之后只显示新收发的">清理</button>
+        <button class="btn sm" data-h="filter:export">导出过滤结果</button></div>`, `
         <div class="filter-bar">
-          <div><label>主机</label><select class="mini" data-hfilter="host">
-            <option value="">全部主机（${state.hosts.length}）</option>
-            ${state.hosts.map(x=>`<option value="${esc(x.id)}" ${f.host===x.id?'selected':''}>${esc(x.id)} · ${esc(x.target)}</option>`).join('')}</select></div>
           <div><label>方向</label><select class="mini" data-hfilter="dir">
             <option value="all" ${f.dir==='all'?'selected':''}>收发都看</option>
             <option value="sent" ${f.dir==='sent'?'selected':''}>只看主机发出</option>
@@ -1486,7 +1489,7 @@ function hostRuntimeContent(){
           <button class="btn sm" data-h="cats:all">全部显示</button>
           <button class="btn sm" data-h="cats:none">全部屏蔽</button>
           <button class="btn sm" data-h="filter:import">导入记录</button></div>
-        <p class="small muted" style="margin:0">全部主机的收发都在这里，包含外部设备的报文；显示 ${rows.length} / 合计 ${all.length} 条。</p>`)}
+        <p class="small muted" style="margin:0">只显示本主机的收发（第三轮修订 13）；其它主机在各自详情页查看。${cleared?'已清理：只显示清理之后的新报文。':''}显示 ${rows.length} / 合计 ${all.length} 条。</p>`)}
       ${card('收发记录','<span class="muted small">最新在最上</span>', msgListHtml())}
       ${card('汇总','', `<div class="grid g3" style="gap:8px">
         <div class="map-item"><div class="t">${sent} 条</div><div class="d">发（主机 → 设备）</div></div>
@@ -1528,6 +1531,41 @@ function hostRuntimeContent(){
 function hostDetailView(){
   return hostHead() + hostPending() + hostZoneBar() + hostSubTabs() +
     `<div class="grid" style="gap:12px">${state.hzone==='config'?hostConfigContent():hostRuntimeContent()}</div>`;
+}
+
+/* 独立工具 · 主机模板（第三轮修订 12） */
+function hostTemplatesView(){
+  const t = state.htForm;
+  return `<h2 class="page-title">主机模板</h2>
+  <p class="page-desc">预存目标地址 / 端口 / Device ID 的主机实例模板；新建主机时可一键填入，也可以在这里直接「套用新建」。模板只保存目标信息，与设备列表无关。</p>
+  <div class="grid" style="gap:12px">
+    ${state.htCreating?`<div class="card">
+      <div class="card-head"><h3>新建主机模板</h3><span class="spacer"></span>
+        <button class="btn sm ghost" data-h="htcancel">取消</button></div>
+      <div class="create-grid">
+        <div><label>模板名称</label><input data-htform="name" value="${esc(t.name)}" placeholder="例如 产线 B 目标"></div>
+        <div><label>目标地址</label><input data-htform="host" value="${esc(t.host)}" placeholder="任意设备地址"></div>
+        <div><label>端口</label><input data-htform="port" value="${esc(t.port)}"></div>
+        <div><label>Device ID</label><input data-htform="deviceId" value="${esc(t.deviceId)}"></div>
+      </div>
+      <div style="margin-top:9px"><label class="small muted">说明</label><input class="mini" data-htform="note" value="${esc(t.note)}" placeholder="可选"></div>
+      <div class="row" style="margin-top:11px"><span class="spacer"></span>
+        <button class="btn primary" data-h="htsave">保存模板</button></div>
+    </div>`:''}
+    <div class="card">
+      <div class="card-head"><h3>模板列表</h3><span class="spacer"></span>
+        <button class="btn sm primary" data-h="htnew">＋ 新建模板</button></div>
+      ${state.hostTemplates.length
+        ? table(['模板','目标','Device ID','说明','操作'], state.hostTemplates.map(x=>[
+            `<b>${esc(x.name)}</b> <span class="mono muted small">${esc(x.id)}</span>`,
+            `<span class="mono">${esc(x.host)}:${x.port}</span>`,
+            `<span class="mono">${x.deviceId}</span>`,
+            esc(x.note||'—'),
+            `<button class="btn sm host" data-h="htapply:${esc(x.id)}">套用新建</button>
+             <button class="btn sm danger" data-h="htdel:${esc(x.id)}">删除</button>`]))
+        : '<div class="empty" style="padding:22px"><div>还没有主机模板。新建一台主机后，可把它的目标存成模板。</div></div>'}
+    </div>
+  </div>`;
 }
 
 /* 其它视图 */
@@ -1614,6 +1652,7 @@ function render(){
   } else if (state.view === 'workbench') $('#view').innerHTML = workbenchView();
   else if (state.view === 'hostlist') $('#view').innerHTML = hostListView();
   else if (state.view === 'hostdetail') $('#view').innerHTML = hostDetailView();
+  else if (state.view === 'hosttemplates') $('#view').innerHTML = hostTemplatesView();
   else $('#view').innerHTML = templatesView();
 }
 
@@ -1693,18 +1732,15 @@ function hostSend(sf, body, reply){
   render();
 }
 function hSend(){
-  const ids = state.hSendTargets.filter(id => {
-    const h = hostById(id);
-    return h && h.phase === 'CONNECTED';
-  });
-  if (!ids.length) { toast('至少选一台已连接的主机', 'danger'); return; }
+  /* 第三轮修订 13:运行区只发本主机 */
   const h = curHost();
+  if (h.phase !== 'CONNECTED') { toast(`${h.id} 尚未连接`, 'danger'); return; }
   const head = h.sml.split('\n')[0].trim() || 'SML';
   const body = h.sml.split('\n').slice(1).join(' ').trim() || '（空）';
   const reply = replyOf(head);
-  ids.forEach(id => pushMessage(hostById(id), head, body, reply));
-  state.hSendResults = ids.map((id,k)=>({ id, result:`${head} → ${reply||'已发送'}`, detail:`${8+k*3} ms` }));
-  toast(`已发送到 ${ids.length} 台主机`, 'host');
+  pushMessage(h, head, body, reply);
+  state.hSendResults = [{ result:`${head} → ${reply||'已发送'}`, detail:'8 ms' }];
+  toast(`${h.id}：${head} 已发送`, 'host');
   render();
 }
 function rerenderKeepFocus(el){
@@ -1731,6 +1767,7 @@ document.addEventListener('input', (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (d.hnew !== undefined) { state.newHost[d.hnew] = el.value; return; }
+  if (d.htform !== undefined) { state.htForm[d.htform] = el.value; return; }
   if (d.hsml !== undefined) { curHost().sml = el.value; return; }
   if (d.hmanual !== undefined) { state.hManualSml = el.value; return; }
   if (d.htrace !== undefined) { state.hTraceText = el.value; return; }
@@ -1808,6 +1845,16 @@ document.addEventListener('change', (ev) => {
     }
     return;
   }
+  if (d.hsel === 'tplfill') {
+    /* 第三轮修订 12:新建主机时从模板一键填入 */
+    const t = state.hostTemplates.find(x=>x.id===el.value);
+    if (t) {
+      state.newHost = { name:t.name, target:t.host, port:String(t.port), deviceId:String(t.deviceId) };
+      toast(`已按模板「${t.name}」填入，可再修改`, 'config');
+      render();
+    }
+    return;
+  }
   if (d.hsel === 'preset') {
     const i = Number(el.value);
     if (Number.isInteger(i) && HOST_PRESETS[i]) {
@@ -1817,11 +1864,6 @@ document.addEventListener('change', (ev) => {
       render();
     }
     return;
-  }
-  if (d.hsend !== undefined) {
-    if (el.checked) { if (!state.hSendTargets.includes(d.hsend)) state.hSendTargets.push(d.hsend); }
-    else state.hSendTargets = state.hSendTargets.filter(x=>x!==d.hsend);
-    render(); return;
   }
   if (d.hsvid !== undefined) {
     const h = curHost();
@@ -1880,6 +1922,41 @@ document.addEventListener('click', (ev) => {
       case 'cancelnew': state.creating = false; render(); return;
       case 'createhost': createHost(false); return;
       case 'createconnect': createHost(true); return;
+      case 'htnew': state.htCreating = true; render(); return;
+      case 'htcancel': state.htCreating = false; render(); return;
+      case 'htsave': {
+        const t = state.htForm;
+        if (!t.name.trim() || !t.host.trim()) { toast('名称与目标地址必填', 'danger'); return; }
+        const port = Number(t.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) { toast('端口要在 1–65535 之间', 'danger'); return; }
+        state.hostTemplates.push({ id:'ht-'+Date.now().toString(36), name:t.name.trim(), host:t.host.trim(),
+          port, deviceId:Number(t.deviceId)||0, collector:'', note:t.note.trim() });
+        state.htForm = { name:'', host:'', port:'5000', deviceId:'0', note:'' };
+        state.htCreating = false;
+        toast('主机模板已保存', 'config'); render(); return;
+      }
+      case 'htdel': {
+        const i = state.hostTemplates.findIndex(x=>x.id===arg);
+        if (i >= 0) { const [t] = state.hostTemplates.splice(i,1); toast(`已删除模板「${t.name}」`, 'config'); }
+        render(); return;
+      }
+      case 'htapply': {
+        /* 第三轮修订 12:用模板新建主机(仅创建,连接仍需手动) */
+        const t = state.hostTemplates.find(x=>x.id===arg);
+        if (!t) return;
+        const hid = 'HOST-' + state.hostSeq;
+        state.hostSeq += 1;
+        state.hosts.push({ id:hid, name:t.name, target:t.host, port:t.port, deviceId:t.deviceId, note:t.note,
+          phase:'DISCONNECTED', control:'离线', manual:false, autoConnect:false, autoReconnect:false,
+          retryCount:0, nextRetryAt:'', varsSource:'none', vars:[],
+          settingVer:1, runningVer:1, collectorOn:false, samples:0, decodeErrors:0, lastRttMs:null,
+          collector:{ startCeid:'', stopCeid:'', intervalMs:'1000', svids:[] },
+          trace:{ trid:1, dsper:1000, totsmp:100, repgsz:1, svids:[] },
+          sml:'S1F1 W', lastError:'', connectedAt:'—', messages:[] });
+        state.view = 'hostlist';
+        toast(`已按模板「${t.name}」创建 ${hid}（未连接，可在详情页修改并连接）`, 'host');
+        render(); return;
+      }
       case 'detail': case 'goto':
         if (arg === 'monitor') { state.hzone='runtime'; state.hpage.runtime='monitor'; render(); }
         else if (arg === 'collect') { state.hzone='config'; state.hpage.config='collect'; render(); }
@@ -1966,19 +2043,15 @@ document.addEventListener('click', (ev) => {
         return;
       }
       case 'send': hSend(); return;
-      case 'sendall': state.hSendTargets = state.hosts.filter(x=>x.phase==='CONNECTED').map(x=>x.id); render(); return;
-      case 'sendnone': state.hSendTargets = []; render(); return;
       case 'results:clear': state.hSendResults = []; render(); return;
       case 'burst': {
-        const ids = state.hSendTargets.filter(id=>hostById(id) && hostById(id).phase==='CONNECTED');
-        if (!ids.length) { toast('至少选一台已连接的主机', 'danger'); return; }
+        /* 第三轮修订 13:压测只作用于本主机 */
+        if (h.phase !== 'CONNECTED') { toast(`${h.id} 尚未连接`, 'danger'); return; }
         const count = Number(state.hBurstCount);
         if (!Number.isInteger(count) || count < 1 || count > 5000) { toast('次数要在 1–5000 之间', 'danger'); return; }
-        state.hBurst = ids.map((id,k)=>({ id,
-          result:`成功 ${count} / 失败 0`,
-          detail:`耗时 ${1240+k*180} ms · P50 9 ms · P95 18 ms · Max 26 ms` }));
-        ids.forEach(id => pushMessage(hostById(id), h.sml.split('\n')[0].trim()||'SML', '压测连发 '+count+' 条', replyOf(h.sml.split('\n')[0])));
-        toast(`压测完成：已发 ${count*ids.length} 条（${ids.length} 台主机）`, 'host');
+        state.hBurst = [{ result:`成功 ${count} / 失败 0`, detail:'耗时 1240 ms · P50 9 ms · P95 18 ms · Max 26 ms' }];
+        pushMessage(h, h.sml.split('\n')[0].trim()||'SML', '压测连发 '+count+' 条', replyOf(h.sml.split('\n')[0]));
+        toast(`压测完成：已发 ${count} 条`, 'host');
         render(); return;
       }
       case 'trace:gen': state.hTraceText = buildS2F23(h); toast('已生成 S2F23'); render(); return;
@@ -2005,8 +2078,15 @@ document.addEventListener('click', (ev) => {
         state.hManualReply = 'S1F4 · 9 ms\n<L[2] <F4 182.4> <F4 6.5>>';
         toast('S1F3 已发送', 'host'); render(); return;
       case 'filter:clear':
-        state.hFilter = { host:'', dir:'all', sf:'', kw:'' }; state.hCats = {};
+        state.hFilter = { dir:'all', sf:'', kw:'', clearAt:state.hFilter.clearAt }; state.hCats = {};
         render(); return;
+      case 'monitor:clear': {
+        /* 第三轮修订 13:清理 = 按当前最新一条打水位,只显示之后的新报文 */
+        const rows = hostMessages(h);
+        state.hFilter.clearAt = rows.length ? rows[0].at : state.hFilter.clearAt;
+        toast('已清理：之后只显示新收发的报文', 'host');
+        render(); return;
+      }
       case 'filter:export': toast(`已导出 ${filteredHostMessages().length} 条收发记录`, 'host'); return;
       case 'filter:import': toast('已导入收发记录，仅本页查看', 'host'); return;
       case 'cats:all': state.hCats = {}; render(); return;
