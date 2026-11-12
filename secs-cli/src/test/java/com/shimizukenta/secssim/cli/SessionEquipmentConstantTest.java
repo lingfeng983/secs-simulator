@@ -149,7 +149,7 @@ class SessionEquipmentConstantTest {
      * 新值必须在。只留在内存里的话，重启就回到出厂值，现场会认为设备"忘了设置"。</p>
      */
     @Test
-    void writtenValueSurvivesConfigReload(@TempDir Path dir) throws Exception {
+    void writtenValueSurvivesConfigReload(@TempDir(cleanup = org.junit.jupiter.api.io.CleanupMode.NEVER) Path dir) throws Exception {
         Path config = dir.resolve("ecv.json");
         Files.writeString(config, CONFIG, StandardCharsets.UTF_8);
 
@@ -157,8 +157,10 @@ class SessionEquipmentConstantTest {
         int deviceId = 10;
         EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", deviceId);
 
-        /* 用真实文件驱动：常量初值来自文件 */
-        HsmsSessionRuntime session = openFrom(config, port, demo);
+        /* 用真实配置驱动：常量初值来自配置正文（3.0 走 config.db） */
+        Opened opened = openFrom(config, port, demo);
+        HsmsSessionRuntime session = opened.session();
+        ConfigStore store = opened.store();
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
@@ -176,25 +178,27 @@ class SessionEquipmentConstantTest {
             session.close();
         }
 
-        /* 重新解析同一个文件：新值必须写进去了 */
-        String reloaded = Files.readString(config, StandardCharsets.UTF_8);
+        /* 重新读库里的正文（3.0：常量落 config.db，不再写文件）：新值必须写进去了 */
+        String reloaded = store.read(NAME);
         double stored = SessionConfigJson.parse(reloaded).spec().equipment().constants().stream()
                 .filter(c -> c.id() == 501)
                 .findFirst()
                 .orElseThrow()
                 .value();
-        assertEquals(77.25, stored, 1e-6, "S2F15 的值必须落盘");
+        assertEquals(77.25, stored, 1e-6, "S2F15 的值必须落库");
     }
 
     /** 配置文件里的其它段在这次写入后必须原样保留。 */
     @Test
-    void writingConstantsKeepsOtherConfigSections(@TempDir Path dir) throws Exception {
+    void writingConstantsKeepsOtherConfigSections(@TempDir(cleanup = org.junit.jupiter.api.io.CleanupMode.NEVER) Path dir) throws Exception {
         Path config = dir.resolve("ecv.json");
         Files.writeString(config, CONFIG, StandardCharsets.UTF_8);
 
         int port = freePort();
         EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
-        HsmsSessionRuntime session = openFrom(config, port, demo);
+        Opened opened = openFrom(config, port, demo);
+        HsmsSessionRuntime session = opened.session();
+        ConfigStore store = opened.store();
 
         try (SecsCommunicator client = connect(port)) {
             client.openAndWaitUntilCommunicating();
@@ -209,25 +213,42 @@ class SessionEquipmentConstantTest {
             session.close();
         }
 
-        String reloaded = Files.readString(config, StandardCharsets.UTF_8);
+        String reloaded = store.read(NAME);
         var parsed = SessionConfigJson.parse(reloaded);
         assertEquals("ECV-EQ", parsed.spec().equipment().name(), "设备名不能被冲掉");
         assertEquals("ecv-1", parsed.spec().id(), "会话 id 不能被冲掉");
         assertEquals(2, parsed.spec().equipment().units().size(), "单元定义不能被冲掉");
     }
 
-    /** 从配置文件建会话，并把常量落盘接回该文件（复刻 SessionLauncher 的接线）。 */
-    private static HsmsSessionRuntime openFrom(Path config, int port, EquipmentSpec demo) throws Exception {
+    /** 配置名（导入设备用的 legacy key）。 */
+    private static final String NAME = "ecv.json";
+
+    /** openFrom 的返回：会话 + 配置门面（读回断言用）。 */
+    private record Opened(HsmsSessionRuntime session, ConfigStore store) {
+    }
+
+    /**
+     * 导入配置正文到 config.db 并建会话，常量落盘接配置门面（复刻 SessionLauncher 的接线）。
+     */
+    private static Opened openFrom(Path config, int port, EquipmentSpec demo) throws Exception {
         var parsed = SessionConfigJson.parse(Files.readString(config, StandardCharsets.UTF_8));
         CompilationResult compiled = EquipmentCompiler.compile(demo);
 
         SessionSpec spec = new SessionSpec(parsed.spec().id(), true, "127.0.0.1", port,
                 parsed.spec().deviceId(), parsed.spec().seed(), parsed.spec().equipment());
 
+        com.shimizukenta.secssim.store.Db db = com.shimizukenta.secssim.store.Db.open(config.getParent());
+        com.shimizukenta.secssim.store.ConfigRepository repo = new com.shimizukenta.secssim.store.ConfigRepository(
+                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        ConfigStore store = new ConfigStore(repo, new com.shimizukenta.secssim.store.TemplateRepository(db),
+                config.getParent());
+        repo.createDevice(NAME.substring(0, NAME.length() - 5), NAME.substring(0, NAME.length() - 5),
+                null, Files.readString(config, StandardCharsets.UTF_8), true, "test");
+
         HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
-        session.constantSaver(constants -> ConfigStore.writeConstants(config, constants));
+        session.constantSaver(constants -> store.writeConstants(NAME, constants));
         session.open();
-        return session;
+        return new Opened(session, store);
     }
 
     private static int freePort() throws Exception {

@@ -40,14 +40,15 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-            MessageLog messages, AuditLog audit, com.shimizukenta.secssim.app.event.EventBus eventBus) {
+            TemplateStore templates, MessageLog messages, AuditLog audit,
+            com.shimizukenta.secssim.app.event.EventBus eventBus) {
         this.mode = mode;
         this.version = version;
         this.extraHealthJson = extraHealthJson;
         this.shutdown = shutdown;
         this.hosts = new HostSimRegistry(sessions, eventBus);
         this.bursts = new BurstRunner(sessions, this.hosts);
-        this.api = new RuntimeApi(sessions, launcher, configs, messages, audit, this.hosts, this.bursts);
+        this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit, this.hosts, this.bursts);
     }
 
     /**

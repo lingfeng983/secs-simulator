@@ -2,22 +2,16 @@ package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.jsonhub.JsonObjectPair;
 import com.shimizukenta.jsonhub.JsonString;
-import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.app.config.ConfigException;
 import com.shimizukenta.secssim.app.config.SessionConfig;
@@ -25,46 +19,42 @@ import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
+import com.shimizukenta.secssim.store.ConfigRepository;
+import com.shimizukenta.secssim.store.StoreException;
+import com.shimizukenta.secssim.store.TemplateRepository;
 
 /**
- * 配置文件的读取、校验与保存。
+ * 配置门面（3.0 / ADR 0017）：v1 的「work-dir 文件」语义原样保留，
+ * 存储换成 config.db 的 config_document。
  *
- * <p><b>编辑器操作的是原始 JSON 文本</b>，不经过领域模型往返：
- * {@link SessionConfigJson#toJson} 只认模型里有的字段，手写的额外键会被静默丢掉。
- * 一个保存动作悄悄改掉用户的配置，比报错糟糕得多。
- * 模型往返仍用于"生成一份新配置"。
- * </p>
+ * <p><b>正文仍是权威</b>：编辑器操作的还是原始 JSON 文本，不经过领域模型往返；
+ * <b>先校验再入库</b>的判据不变。文件名（{@code line1.json}）继续是 v1 的身份——
+ * 门面把它映射成设备的 legacy_id（文件名 stem），正文与版本存
+ * {@code config_document}，修改时间用 {@code updated_at}（毫秒）承担 If-Match
+ * （设计 §2.5 的 v1 兼容规则）。</p>
  *
- * <p><b>先校验再落盘</b>：存一份编译不过的配置，等于给下一次启动埋雷。
- * </p>
- *
- * <p>文件名的约束与 {@link SessionLauncher} 一致：只收文件名，不收路径。
- * </p>
+ * <p>S2F15 的常量回写走 {@link #writeConstants}：只替换 constants 子树、
+ * 升版本但不写快照、不产生配置漂移（{@link ConfigRepository#updateConstants}）。</p>
  */
 public final class ConfigStore {
 
     /** 配置文件名后缀。 */
     private static final String CONFIG_SUFFIX = ".json";
 
-    /**
-     * 进程内的「读-改-写」串行锁。
-     *
-     * <p>同一份配置有两条写入路径：界面保存（{@link #save}）与主机 S2F15 常量落盘
-     * （{@link #writeConstants}，由协议线程直接调用）。两者都是「读原文 → 改一段 →
-     * 原子替换」，不加锁就会互相覆盖：用户刚存的其他段落被 S2F15 写回旧版本，
-     * 或者反过来。跨进程的外部修改由 mtime 乐观检查兜底。</p>
-     */
-    private static final java.util.concurrent.locks.ReentrantLock FILE_LOCK =
-            new java.util.concurrent.locks.ReentrantLock();
-
+    private final ConfigRepository repository;
+    private final TemplateRepository templates;
     private final Path workDir;
 
     /**
-     * 创建配置仓库。
+     * 创建配置门面。
      *
-     * @param workDir 配置目录
+     * @param repository 配置仓储（含投影器）
+     * @param templates  设备模板仓储
+     * @param workDir    工作目录（legacy 文件归档仍在它下面）
      */
-    public ConfigStore(Path workDir) {
+    public ConfigStore(ConfigRepository repository, TemplateRepository templates, Path workDir) {
+        this.repository = repository;
+        this.templates = templates;
         this.workDir = workDir;
     }
 
@@ -74,39 +64,26 @@ public final class ConfigStore {
     }
 
     /**
-     * 目录下的配置文件（按名称排序）。
+     * 全部配置（按名称排序）。
      *
-     * <p>只收<b>普通文件</b>：一个恰好叫 {@code backup.json} 的子目录不是配置，
-     * 把它列进编辑器，用户点进去才发现打不开。
-     * </p>
+     * <p>3.0 里这就是设备列表：v1 的「配置文件名」= legacy_id + {@code .json}。</p>
      */
     public List<Entry> list() {
-        if (!Files.isDirectory(this.workDir)) {
-            return List.of();
+        List<Entry> entries = new ArrayList<>();
+        for (ConfigRepository.DeviceView device : this.repository.listDevices()) {
+            String body = this.repository.readDocument(device.legacyId() != null
+                            ? device.legacyId() : device.id())
+                    .map(ConfigRepository.DocumentView::body)
+                    .orElse("");
+            String name = (device.legacyId() != null ? device.legacyId() : device.name()) + CONFIG_SUFFIX;
+            entries.add(new Entry(name, body.getBytes(StandardCharsets.UTF_8).length,
+                    device.updatedAt(), device.templateId() == null ? "" : device.templateId()));
         }
-        try (Stream<Path> entries = Files.list(this.workDir)) {
-            return entries
-                    .filter(Files::isRegularFile)
-                    .map(p -> p.getFileName().toString())
-                    .filter(name -> name.endsWith(CONFIG_SUFFIX))
-                    .map(this::describe)
-                    .sorted(Comparator.comparing(Entry::name))
-                    .toList();
-        } catch (IOException e) {
-            Log.error("读取配置目录失败: " + this.workDir, e);
-            return List.of();
-        }
+        entries.sort(Comparator.comparing(Entry::name));
+        return entries;
     }
 
-    /**
-     * 目录内容的 JSON 数组。
-     *
-     * <p>顺带带上大小与修改时间：编辑器的"这份配置被谁改过"一栏，
-     * 光看文件名根本无从判断。
-     * </p>
-     *
-     * @return JSON 数组文本
-     */
+    /** 目录内容的 JSON 数组（与 v1 形状一致）。 */
     public String listJson() {
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
@@ -125,123 +102,54 @@ public final class ConfigStore {
     }
 
     /**
-     * 一次读取配置正文与修改时间（编辑器保存用的并发基准）。
-     *
-     * <p>分两次取会出现「旧正文 + 新 mtime」：保存时被判为"没人改过"，
-     * 于是绕过 If-Match 覆盖别人的修改。这里在锁内读，并用前后 mtime 比对重试，
-     * 同时挡住进程内的写（save / S2F15）与进程外的编辑。</p>
+     * 一次读取正文与修改时间（编辑器保存的并发基准）。
      *
      * @param name 文件名
-     * @return 快照；文件不存在或读失败返回 {@code null}
+     * @return 快照；设备不存在或名字非法返回 {@code null}
      */
     public com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot readSnapshot(String name) {
-        Path file;
+        String key;
         try {
-            file = this.workDir.resolve(requireFileName(name, "$.name"));
+            key = keyOf(name);
         } catch (ConfigException e) {
             return null;
         }
-
-        FILE_LOCK.lock();
-        try {
-            for (int attempt = 0; attempt < 3; attempt++) {
-                long before = Files.getLastModifiedTime(file).toMillis();
-                String text = Files.readString(file, StandardCharsets.UTF_8);
-                long after = Files.getLastModifiedTime(file).toMillis();
-                if (before == after) {
-                    return new com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot(text, after);
-                }
-            }
-            Log.warn("配置在读期间连续变化，返回最新一次内容: " + file.getFileName());
-            return new com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot(
-                    Files.readString(file, StandardCharsets.UTF_8),
-                    Files.getLastModifiedTime(file).toMillis());
-        } catch (IOException e) {
-            Log.error("读取配置失败: " + file.getFileName(), e);
-            return null;
-        } finally {
-            FILE_LOCK.unlock();
-        }
+        return this.repository.readDocument(key)
+                .map(doc -> new com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot(
+                        doc.body(), doc.updatedAt()))
+                .orElse(null);
     }
 
-    /**
-     * 取一份配置的最后修改时间（epoch 毫秒）。
-     *
-     * @param name 文件名
-     * @return 修改时间；文件不存在、名字非法或取不到时返回 {@code null}
-     */
+    /** 取一份配置的最后「修改时间」（= 文档 updated_at，epoch 毫秒）。 */
     public Long modifiedMs(String name) {
-        Path file;
+        String key;
         try {
-            file = this.workDir.resolve(requireFileName(name, "$.name"));
+            key = keyOf(name);
         } catch (ConfigException e) {
             return null;
         }
-        if (!Files.isRegularFile(file)) {
-            return null;
-        }
-        try {
-            return Files.getLastModifiedTime(file).toMillis();
-        } catch (IOException e) {
-            return null;
-        }
+        return this.repository.readDocument(key)
+                .map(ConfigRepository.DocumentView::updatedAt)
+                .orElse(null);
     }
 
-    /** 取一个配置文件的大小与修改时间；取不到就报 0/0，列表不该因为一个坏文件整列崩掉。 */
-    private Entry describe(String name) {
-        Path file = this.workDir.resolve(name);
-        if (!Files.isRegularFile(file)) {
-            return new Entry(name, 0L, 0L, "");
-        }
-        String template = "";
-        try {
-            JsonHub root = JsonHub.fromJson(Files.readString(file, StandardCharsets.UTF_8));
-            if (root != null && root.isObject()) {
-                JsonHub marker = root.get("template");
-                if (marker != null) {
-                    template = marker.optionalString().orElse("");
-                }
-            }
-        } catch (RuntimeException | IOException e) {
-            /* 坏配置仍要出现在列表里，只是没有模板归属 */
-        }
-        try {
-            return new Entry(name, Files.size(file), Files.getLastModifiedTime(file).toMillis(), template);
-        } catch (IOException e) {
-            return new Entry(name, 0L, 0L, template);
-        }
-    }
-
-    /**
-     * 一个配置文件的元信息。
-     *
-     * @param name       文件名
-     * @param sizeBytes  字节数
-     * @param modifiedMs 最后修改时间（epoch 毫秒）
-     */
+    /** 一个配置文件的元信息。 */
     public record Entry(String name, long sizeBytes, long modifiedMs, String template) {
     }
 
-    /**
-     * 读原始文本。
-     *
-     * @param name 文件名
-     * @return 原文
-     * @throws ConfigException 名字非法或文件不存在
-     * @throws IOException     读失败
-     */
+    /** 读原始文本。 */
     public String read(String name) throws ConfigException, IOException {
-        return Files.readString(this.resolve(name), StandardCharsets.UTF_8);
+        String key = keyOf(name);
+        return this.repository.readDocument(key)
+                .map(ConfigRepository.DocumentView::body)
+                .orElseThrow(() -> new ConfigException("$.name", "配置不存在: " + name));
     }
 
     /**
      * 校验一段配置文本（不落盘）。
      *
-     * <p>判据要和 {@code SessionLauncher.prepare} 一致：解析、编译设备模型、
-     * 再把模板图建一遍。只编译设备是不够的——
-     * 模板表达式写错一样起不来，而用户是从编辑器里按下"校验"的，
-     * 他要的就是"这份配置能不能起得来"这句话的答案。
-     * </p>
+     * <p>判据与 {@code SessionLauncher.prepare} 一致：解析、编译设备模型、
+     * 模板图建一遍。静态方法保留：TemplateStore 与接口校验共用这一份。</p>
      *
      * @param text JSON 文本
      * @return 问题列表；空表示合法
@@ -278,45 +186,29 @@ public final class ConfigStore {
         return List.of();
     }
 
-    /**
-     * 新建一份配置，内容是能直接编译的骨架。
-     *
-     * <p>骨架由后端生成而不是前端各抄一份：只有一份判据，
-     * 不会出现"界面上给的模板起不来"。
-     * </p>
-     *
-     * @param name 文件名
-     * @return 结果
-     */
+    /** 新建一份配置，内容是能直接编译的骨架。 */
     public ConfigResult create(String name) {
         return this.create(name, DeviceTemplates.BARE_ID);
     }
 
     /**
-     * 按内置设备模板新建一份配置。
-     *
-     * <p>模板目录见 {@link DeviceTemplates#catalog()}。模板生成后仍要过一遍
-     * {@link #validate}：模板是代码里的字符串，改了模板忘了跟着改设备模型，
-     * 用户就会拿到一份起不来的起点——校验是同一道门，不会漏。</p>
+     * 按内置设备模板新建一份配置（= 新建设备实体）。
      *
      * @param name       文件名
-     * @param templateId 模板标识；未知模板按非法请求拒绝，不静默退回骨架
+     * @param templateId 模板标识；未知模板按非法请求拒绝
      * @return 结果
      */
     public ConfigResult create(String name, String templateId) {
-        Path file;
+        String stem;
         try {
-            file = this.workDir.resolve(requireFileName(name, "$.name"));
+            stem = stemOf(name);
         } catch (ConfigException e) {
             return ConfigResult.notFound(e.getMessage());
         }
-
-        if (Files.exists(file)) {
-            /* 新建不该悄悄覆盖别人的配置：让用户直接打开那份改 */
-            return ConfigResult.conflict("已经有同名的配置了: " + file.getFileName());
+        if (this.repository.findDevice(stem).isPresent()) {
+            return ConfigResult.conflict("已经有同名的配置了: " + name);
         }
-
-        String text = DeviceTemplates.json(templateId, file.getFileName().toString()).orElse(null);
+        String text = DeviceTemplates.json(templateId, name).orElse(null);
         if (text == null) {
             return ConfigResult.invalid(List.of(
                     "未知模板: " + templateId + "（可用: " + DeviceTemplates.ids() + "）"));
@@ -324,47 +216,40 @@ public final class ConfigStore {
         return this.createFromTemplateText(name, text, templateId);
     }
 
-    /**
-     * 用任意模板文本新建配置：先补顶层 {@code template} 标记，再校验、落盘。
-     *
-     * @param name       设备文件名
-     * @param text       模板配置原文
-     * @param templateId 模板 id（写进配置供侧栏分组）
-     * @return 结果
-     */
+    /** 用任意模板文本新建配置：先补顶层 {@code template} 标记，再校验、入库。 */
     public ConfigResult createFromText(String name, String text, String templateId) {
-        Path file;
+        String stem;
         try {
-            file = this.workDir.resolve(requireFileName(name, "$.name"));
+            stem = stemOf(name);
         } catch (ConfigException e) {
             return ConfigResult.notFound(e.getMessage());
         }
-        if (Files.exists(file)) {
-            return ConfigResult.conflict("已经有同名的配置了: " + file.getFileName());
+        if (this.repository.findDevice(stem).isPresent()) {
+            return ConfigResult.conflict("已经有同名的配置了: " + name);
         }
         String marked = TemplateStore.withTemplate(text, templateId);
         List<String> problems = validate(marked);
         if (!problems.isEmpty()) {
-            Log.error("配置骨架生成失败: " + file.getFileName(), null);
+            Log.error("配置骨架生成失败: " + name, null);
             return ConfigResult.invalid(problems);
         }
         try {
-            writeAtomically(file, marked);
-            Log.info("已新建配置: " + file.getFileName());
+            this.repository.createDevice(stem, stem, templateId, marked, true, "ui");
+            Log.info("已新建配置: " + name);
             return ConfigResult.ok();
-        } catch (IOException e) {
-            Log.error("新建配置失败: " + file.getFileName(), e);
-            return ConfigResult.failed("写盘失败：" + e.getMessage());
+        } catch (StoreException e) {
+            Log.error("新建配置失败: " + name, e);
+            return ConfigResult.failed(e.getMessage());
         }
     }
 
-    /**
-     * 用自定义模板新建设备：把 session.id / equipment.name 改成文件名主名，保证设备名与文件名一致。
-     */
+    /** 用自定义模板新建设备：把 session.id / equipment.name 改成名 stem，保证设备名与文件名一致。 */
     public ConfigResult createFromTemplateText(String name, String text, String templateId) {
-        String base = name.trim();
-        if (base.toLowerCase(java.util.Locale.ROOT).endsWith(CONFIG_SUFFIX)) {
-            base = base.substring(0, base.length() - CONFIG_SUFFIX.length());
+        String stem;
+        try {
+            stem = stemOf(name);
+        } catch (ConfigException e) {
+            return ConfigResult.notFound(e.getMessage());
         }
         try {
             JsonHub root = JsonHub.fromJson(text);
@@ -379,7 +264,7 @@ public final class ConfigStore {
                         for (JsonString sessionKey : session.keySet()) {
                             String nameKey = sessionKey.unescaped();
                             sessionPairs.add("id".equals(nameKey)
-                                    ? b.pair("id", base)
+                                    ? b.pair("id", stem)
                                     : b.pair(nameKey, session.get(nameKey)));
                         }
                         pairs.add(b.pair("session", b.object(sessionPairs)));
@@ -389,7 +274,7 @@ public final class ConfigStore {
                         for (JsonString equipmentKey : equipment.keySet()) {
                             String nameKey = equipmentKey.unescaped();
                             equipmentPairs.add("name".equals(nameKey)
-                                    ? b.pair("name", base)
+                                    ? b.pair("name", stem)
                                     : b.pair(nameKey, equipment.get(nameKey)));
                         }
                         pairs.add(b.pair("equipment", b.object(equipmentPairs)));
@@ -405,18 +290,7 @@ public final class ConfigStore {
         return this.createFromText(name, text, templateId);
     }
 
-    /**
-     * 保存配置：先校验，通过后原子写盘。
-     *
-     * <p>文件可以<b>原本不存在</b>：模板编辑器要能从零建一份配置，
-     * 否则"新建"就得先在资源管理器里手搓一个 json。
-     * 名字的约束不变——仍是 {@code --work-dir} 下的一个文件名。
-     * </p>
-     *
-     * @param name 文件名
-     * @param text JSON 文本
-     * @return 校验/落盘结果，问题清单随结果带回
-     */
+    /** 保存配置：先校验，通过后入库（无并发检查）。 */
     public ConfigResult save(String name, String text) {
         return this.save(name, text, null);
     }
@@ -424,20 +298,18 @@ public final class ConfigStore {
     /**
      * 保存配置（带并发保护）。
      *
-     * <p>{@code expectedModifiedMs} 非空时（界面从 GET 响应里拿到的修改时间，
-     * 经 If-Match 头传回），若文件在这期间被别的窗口/进程改过，就拒绝覆盖并回
-     * CONFLICT——两个窗口同时编辑同一份配置时，后保存的一方不该悄悄抹掉先保存的。
-     * </p>
+     * <p>{@code expectedModifiedMs} 非空时（If-Match 带回的修改时间），与文档的
+     * {@code updated_at} 比对——不等说明别的窗口/进程改过，拒绝覆盖并回 CONFLICT。</p>
      *
      * @param name               文件名
      * @param text               JSON 文本
      * @param expectedModifiedMs 期望的最后修改时间；null 表示不检查
-     * @return 校验/落盘结果，问题清单随结果带回
+     * @return 校验/入库结果，问题清单随结果带回
      */
     public ConfigResult save(String name, String text, Long expectedModifiedMs) {
-        Path file;
+        String key;
         try {
-            file = this.workDir.resolve(requireFileName(name, "$.name"));
+            key = keyOf(name);
         } catch (ConfigException e) {
             return ConfigResult.notFound(e.getMessage());
         }
@@ -448,86 +320,56 @@ public final class ConfigStore {
             return ConfigResult.invalid(problems);
         }
 
-        FILE_LOCK.lock();
         try {
-            if (expectedModifiedMs != null) {
-                Long current = this.modifiedMs(name);
-                if (current != null && !current.equals(expectedModifiedMs)) {
-                    return ConfigResult.conflict("配置在编辑期间被其他操作修改过，请重新载入后再保存");
-                }
+            if (this.repository.findDevice(key).isEmpty()) {
+                /* v1 语义保留：save 可以从零建一份配置（模板编辑器场景） */
+                this.repository.createDevice(key, key, null, text, true, "ui");
+            } else {
+                this.repository.saveDocument(key, text, null, expectedModifiedMs, "ui", "");
             }
-
-            writeAtomically(file, text);
-            Log.info("配置已保存: " + file.getFileName());
+            Log.info("配置已保存: " + name);
             return ConfigResult.ok();
-        } catch (IOException e) {
-            Log.error("配置保存失败: " + file.getFileName(), e);
-            return ConfigResult.failed("写盘失败：" + e.getMessage());
-        } finally {
-            FILE_LOCK.unlock();
+        } catch (StoreException e) {
+            if (e.kind() == StoreException.Kind.CONFLICT) {
+                return ConfigResult.conflict(e.getMessage());
+            }
+            Log.error("配置保存失败: " + name, e);
+            return ConfigResult.failed(e.getMessage());
         }
     }
 
     /**
-     * 把设备常量写回配置文件。
+     * 把设备常量写回配置正文（S2F15 用）。
      *
-     * <p>用于 S2F15（主机写 ECV）：主机改的是设备的“调机参数”，现场预期是
-     * <b>重启/重载后仍然保留</b>，所以必须落盘，而不是只留在内存里。</p>
+     * <p>做法是「读正文 → 只替换 equipment.constants 节点 → 重新序列化 →
+     * {@link ConfigRepository#updateConstants}」：其余段、未知键、schemaVersion
+     * 全部原样保留。版本照常 +1，但不写快照、运行版本被追平——现场高频写常量
+     * 不该产生永久「配置待生效」，也不该撑爆版本历史（设计 §2.3.2）。</p>
      *
-     * <p>做法是「解析原文 → 只替换 equipment.constants 节点 → 重新序列化 → 原子替换」：
-     * 其它段（session / 单元 / 模板 / 编排）、未知键、schemaVersion 全部原样保留，
-     * 不会被模型往返悄悄改掉。唯一的变化是缩进/空行会统一成 2 空格——
-     * 这是保住“其余内容一个键都不丢”必须付的小代价。</p>
-     *
-     * @param file      配置文件
+     * @param name      配置名（文件名）
      * @param constants ECID → 常量（调用方传入的是快照）
      * @throws IOException 读不了、解析不了或写不了
      */
-    public static void writeConstants(Path file, Map<Integer, EquipmentConstantDef> constants) throws IOException {
-        FILE_LOCK.lock();
+    public void writeConstants(String name, Map<Integer, EquipmentConstantDef> constants) throws IOException {
+        String key;
         try {
-            writeConstantsLocked(file, constants);
-        } finally {
-            FILE_LOCK.unlock();
+            key = keyOf(name);
+        } catch (ConfigException e) {
+            throw new IOException(e.getMessage(), e);
         }
-    }
-
-    /**
-     * 常量落盘的实际执行体（调用方已持有 {@link #FILE_LOCK}）。
-     *
-     * <p>除了进程内互斥，这里还用 mtime 做一次乐观检查：读原文前后修改时间不一致，
-     * 说明有别的东西（另一个进程、手工编辑）动过它，此时<b>不覆盖</b>并报错，
-     * 让主机侧按 S2F16=2（不落盘）处理。</p>
-     */
-    private static void writeConstantsLocked(Path file, Map<Integer, EquipmentConstantDef> constants) throws IOException {
-        final long modifiedBefore;
-        try {
-            modifiedBefore = Files.getLastModifiedTime(file).toMillis();
-        } catch (IOException e) {
-            throw new IOException("读不了配置 " + file.getFileName() + ": " + e.getMessage(), e);
-        }
-
-        String text;
-        try {
-            text = Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new IOException("读不了配置 " + file.getFileName() + ": " + e.getMessage(), e);
-        }
-
-        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') {
-            text = text.substring(1);
-        }
+        String text = this.repository.readDocument(key)
+                .map(ConfigRepository.DocumentView::body)
+                .orElseThrow(() -> new IOException("读不了配置 " + name + ": 设备不存在"));
 
         JsonHub root;
         try {
             root = JsonHub.fromJson(text);
         } catch (RuntimeException e) {
             /* 解析失败就不覆盖：宁可写失败，也不要把原文弄丢 */
-            throw new IOException("配置无法解析，拒绝覆盖 " + file.getFileName() + ": " + e.getMessage(), e);
+            throw new IOException("配置无法解析，拒绝覆盖 " + name + ": " + e.getMessage(), e);
         }
-
         if (!root.isObject() || !root.containsKey("equipment") || !root.get("equipment").isObject()) {
-            throw new IOException("配置没有 equipment 段，拒绝覆盖 " + file.getFileName());
+            throw new IOException("配置没有 equipment 段，拒绝覆盖 " + name);
         }
 
         JsonHubBuilder b = JsonHub.getBuilder();
@@ -535,13 +377,13 @@ public final class ConfigStore {
         List<JsonObjectPair> equipmentPairs = new ArrayList<>();
         boolean replaced = false;
 
-        for (JsonString key : equipment.keySet()) {
-            String name = key.unescaped();
-            if ("constants".equals(name)) {
-                equipmentPairs.add(b.pair(name, SessionConfigJson.constantsJson(constants.values(), b)));
+        for (JsonString key2 : equipment.keySet()) {
+            String field = key2.unescaped();
+            if ("constants".equals(field)) {
+                equipmentPairs.add(b.pair(field, SessionConfigJson.constantsJson(constants.values(), b)));
                 replaced = true;
             } else {
-                equipmentPairs.add(b.pair(name, equipment.get(name)));
+                equipmentPairs.add(b.pair(field, equipment.get(field)));
             }
         }
         if (!replaced) {
@@ -550,54 +392,20 @@ public final class ConfigStore {
 
         JsonHub newEquipment = b.object(equipmentPairs);
         List<JsonObjectPair> rootPairs = new ArrayList<>();
-        for (JsonString key : root.keySet()) {
-            String name = key.unescaped();
-            rootPairs.add(b.pair(name, "equipment".equals(name) ? newEquipment : root.get(name)));
+        for (JsonString key2 : root.keySet()) {
+            String field = key2.unescaped();
+            rootPairs.add(b.pair(field, "equipment".equals(field) ? newEquipment : root.get(field)));
         }
-
-        if (Files.getLastModifiedTime(file).toMillis() != modifiedBefore) {
-            throw new IOException("配置文件在写入期间被其他操作修改，已放弃覆盖: " + file.getFileName());
-        }
-
-        writeAtomically(file, b.object(rootPairs).prettyPrint());
-    }
-
-    /**
-     * 原子写盘：先写临时文件再整体替换。
-     *
-     * <p>直接 {@code writeString} 到目标文件的话，中途崩掉会留下半截 JSON——
-     * 而这份配置正是设备启动时要读的东西。
-     * </p>
-     */
-    private static void writeAtomically(Path target, String text) throws IOException {
-        Path dir = target.getParent();
-        if (dir == null) {
-            throw new IOException("目标没有父目录: " + target);
-        }
-        /* 配置目录可能还没建出来：先建再写，免得"新建"因为目录不存在而失败 */
-        Files.createDirectories(dir);
-        Path temp = Files.createTempFile(dir, ".secs-config-", ".tmp");
 
         try {
-            Files.writeString(temp, text, StandardCharsets.UTF_8);
-            try {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                /* 某些文件系统（同目录跨卷、网络盘）不支持原子替换；
-                   退化成普通替换：仍然比直接写目标文件安全，因为临时文件是完整的 */
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temp);
+            this.repository.updateConstants(key, b.object(rootPairs).prettyPrint(), "device");
+        } catch (StoreException e) {
+            throw new IOException("常量落库失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 校验配置文件名，只允许文件名。
-     *
-     * <p>{@link SessionLauncher} 建会话时也要过这一关：两处各写一份，
-     * 迟早会出现"接口能读、命令行读不了"这种只在其中一条路径上复现的问题。
-     * </p>
+     * 校验配置文件名，只允许文件名（静态保留：SessionLauncher 共用这一份判据）。
      *
      * @param name  请求给的名字
      * @param field 出错时要指出的字段路径
@@ -618,25 +426,30 @@ public final class ConfigStore {
 
         try {
             Path.of(trimmed);
-        } catch (InvalidPathException e) {
+        } catch (java.nio.file.InvalidPathException e) {
             throw new ConfigException(field, "不是合法的文件名");
         }
         return trimmed;
     }
 
-    /**
-     * 校验名字并定位文件。
-     *
-     * <p>只允许文件名：挡住 {@code ../}、分隔符与盘符。
-     * </p>
-     */
-    Path resolve(String name) throws ConfigException {
-        String trimmed = requireFileName(name, "$.name");
-        Path file = this.workDir.resolve(trimmed);
-        if (!Files.isRegularFile(file)) {
-            throw new ConfigException("$.name", "配置不存在: " + trimmed);
+    /** 校验名字并定位设备 key（stem）；设备不存在抛 ConfigException。 */
+    String resolve(String name) throws ConfigException {
+        String key = keyOf(name);
+        if (this.repository.findDevice(key).isEmpty()) {
+            throw new ConfigException("$.name", "配置不存在: " + name);
         }
-        return file;
+        return key;
+    }
+
+    /** v1 文件名 → 设备 key（去掉 .json 的 stem）。 */
+    private static String keyOf(String name) throws ConfigException {
+        String trimmed = requireFileName(name, "$.name");
+        return trimmed.substring(0, trimmed.length() - CONFIG_SUFFIX.length());
+    }
+
+    private static String stemOf(String name) throws ConfigException {
+        String trimmed = requireFileName(name, "$.name");
+        return trimmed.substring(0, trimmed.length() - CONFIG_SUFFIX.length());
     }
 
     /** JSON 字符串转义；只处理会破坏 JSON 结构的字符，中文原样保留。 */

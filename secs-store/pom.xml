@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.shimizukenta</groupId>
+    <artifactId>secs-simulator-parent</artifactId>
+    <version>2.0.1</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>secs-store</artifactId>
+  <packaging>jar</packaging>
+  <name>SECS Simulator Store</name>
+  <description>SQLite 双库存储（config.db / runtime.db）：仓储门面、迁移与台账（ADR 0017）</description>
+
+  <!--
+    依赖纪律（3.0 设计 §2.1）：本模块只认识 secs-json + JDBC。
+    不 import secs-app / secs-api-http / secs-runtime 的任何类型——
+    配置解析（编译校验、投影）由上层注入，见 ConfigRepository.DocumentProjector。
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>com.shimizukenta</groupId>
+      <artifactId>secs-json</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+</project>

@@ -24,6 +24,7 @@
     <module>secs-json</module>
     <module>secs-protocol</module>
     <module>secs-core</module>
+    <module>secs-store</module>
     <module>secs-app</module>
     <module>secs-api-http</module>
     <module>secs-runtime</module>
@@ -44,6 +45,7 @@
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-json</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-protocol</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-core</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-store</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-app</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-api-http</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>com.shimizukenta</groupId><artifactId>secs-runtime</artifactId><version>${project.version}</version></dependency>

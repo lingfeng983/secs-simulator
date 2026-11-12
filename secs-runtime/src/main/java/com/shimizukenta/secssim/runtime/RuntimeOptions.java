@@ -28,13 +28,17 @@ import java.util.Set;
  * @param logLevel       日志级别（error/info/debug）
  * @param messagesRecent 报文日志内存保留条数（HTTP 历史回看窗口）
  * @param auditRecent    审计日志内存保留条数
+ * @param migrateConfig  显式执行 JSON → config.db 迁移（不传则按需自动）
+ * @param exportConfig   导出目录；非空时导出后直接退出（回滚通道）
+ * @param resetRuntime   启动前删除 runtime.db
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                              int hsmsPort, int deviceId, boolean demoSession,
                              Path configFile, Path webRoot, Path workDir,
                              Path tlsKeystore, String tlsPassword, boolean help,
                              com.shimizukenta.secssim.app.log.Log.Level logLevel,
-                             int messagesRecent, int auditRecent) {
+                             int messagesRecent, int auditRecent,
+                             boolean migrateConfig, Path exportConfig, boolean resetRuntime) {
 
     /** 便捷构造：日志级别用默认 INFO,保留条数用默认值（测试与既有调用点）。 */
     public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
@@ -44,7 +48,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
         this(mode, bindHost, httpPort, hsmsPort, deviceId, demoSession,
                 configFile, webRoot, workDir, tlsKeystore, tlsPassword, help,
                 com.shimizukenta.secssim.app.log.Log.Level.INFO, DEFAULT_MESSAGES_RECENT,
-                DEFAULT_AUDIT_RECENT);
+                DEFAULT_AUDIT_RECENT, false, null, false);
     }
 
 
@@ -125,7 +129,8 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
         Set<String> known = Set.of("mode", "bind", "port", "hsms-port",
                 "device-id", "demo-session", "config", "web-root", "work-dir",
                 "tls-keystore", "tls-password", "help", "log-level",
-                "messages-recent", "audit-recent");
+                "messages-recent", "audit-recent",
+                "migrate-config", "export-config", "reset-runtime");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -151,7 +156,10 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                 com.shimizukenta.secssim.app.log.Log.Level.parse(
                         values.getOrDefault("log-level", "INFO")),
                 intValue(values, "messages-recent", DEFAULT_MESSAGES_RECENT),
-                intValue(values, "audit-recent", DEFAULT_AUDIT_RECENT));
+                intValue(values, "audit-recent", DEFAULT_AUDIT_RECENT),
+                Boolean.parseBoolean(values.getOrDefault("migrate-config", "false")),
+                values.containsKey("export-config") ? Path.of(values.get("export-config")) : null,
+                Boolean.parseBoolean(values.getOrDefault("reset-runtime", "false")));
     }
 
     /**
@@ -177,6 +185,10 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                   --tls-password <s>                keystore 密码（默认空）
                   --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
                   --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
+                  --migrate-config                  把 work-dir 下的 JSON 配置导入 config.db（不传时检测到
+                                                    "有 JSON 且库里没设备"也会自动执行一次）
+                  --export-config <dir>             把库里的全部设备导出为 <dir>/<legacy>.json 后退出（回滚通道）
+                  --reset-runtime                   启动前删除 runtime.db（运行态可随时丢弃重建）
                   --help                            打印本帮助
 
                 访问：内部工具，不做鉴权——浏览器/脚本直连地址即可，没有令牌或账号。

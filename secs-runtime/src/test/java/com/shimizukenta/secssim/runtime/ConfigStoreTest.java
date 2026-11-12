@@ -35,22 +35,41 @@ import com.shimizukenta.secssim.core.domain.ValueType;
  */
 class ConfigStoreTest {
 
-    @TempDir
+    @TempDir(cleanup = org.junit.jupiter.api.io.CleanupMode.NEVER)
     Path workDir;
 
     private ConfigStore store;
+    private com.shimizukenta.secssim.store.Db db;
+    private com.shimizukenta.secssim.store.ConfigRepository repo;
 
     @BeforeEach
     void setUp() {
-        this.store = new ConfigStore(this.workDir);
+        this.db = com.shimizukenta.secssim.store.Db.open(this.workDir);
+        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
+                this.db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        this.store = new ConfigStore(this.repo,
+                new com.shimizukenta.secssim.store.TemplateRepository(this.db), this.workDir);
+    }
+
+    /** 从库读正文（等价于旧世界的"读文件"）。 */
+    private String read(String name) throws Exception {
+        return this.store.read(name);
+    }
+
+    /** 导入一份配置正文（3.0 里等价于"写文件"）。 */
+    private void write(String name, String body) throws Exception {
+        String stem = name.substring(0, name.length() - 5);
+        if (this.repo.findDevice(stem).isPresent()) {
+            this.repo.saveDocument(stem, body, null, "test", "");
+        } else {
+            this.repo.createDevice(stem, stem, null, body, true, "test");
+        }
     }
 
     @Test
     void listsOnlyJsonRegularFilesSortedByName() throws Exception {
         write("b.json", config("b"));
         write("a.json", config("a"));
-        Files.writeString(this.workDir.resolve("notes.txt"), "不是配置", StandardCharsets.UTF_8);
-        Files.createDirectory(this.workDir.resolve("backup.json"));
 
         assertEquals(List.of("a.json", "b.json"),
                 this.store.list().stream().map(ConfigStore.Entry::name).toList(),
@@ -80,8 +99,9 @@ class ConfigStoreTest {
         com.shimizukenta.secssim.api.http.ApiContext.ConfigSnapshot typed = this.store.readSnapshot("line1.json");
         assertTrue(typed != null, "存在的配置必须有快照");
         assertEquals(config("line1"), typed.text());
-        assertEquals(Long.valueOf(Files.getLastModifiedTime(this.workDir.resolve("line1.json")).toMillis()),
-                typed.modifiedMs());
+        /* 3.0：修改时间 = 文档 updated_at（毫秒），仍是同一次读里的一致快照 */
+        var doc = this.repo.readDocument("line1").orElseThrow();
+        assertEquals(Long.valueOf(doc.updatedAt()), typed.modifiedMs());
 
         assertNull(this.store.readSnapshot("missing.json"), "不存在时返回 null");
         assertNull(this.store.readSnapshot("../evil.json"), "非法名字不读文件");
@@ -155,7 +175,7 @@ class ConfigStoreTest {
 
         assertEquals(ConfigOutcome.INVALID, result.outcome());
         assertFalse(result.problems().isEmpty(), "必须带出问题清单，界面才有东西显示");
-        assertEquals(config("line1"), Files.readString(this.workDir.resolve("line1.json")),
+        assertEquals(config("line1"), read("line1.json"),
                 "校验不过时原文件必须原封不动");
     }
 
@@ -167,27 +187,25 @@ class ConfigStoreTest {
         var result = this.store.save("line1.json", edited);
 
         assertEquals(ConfigOutcome.OK, result.outcome());
-        assertEquals(edited, Files.readString(this.workDir.resolve("line1.json")));
+        assertEquals(edited, read("line1.json"));
     }
 
     @Test
     void savingLeavesNoTemporaryFilesBehind() throws Exception {
         assertEquals(ConfigOutcome.OK, this.store.save("line1.json", config("line1")).outcome());
 
-        try (var files = Files.list(this.workDir)) {
-            assertEquals(List.of("line1.json"),
-                    files.map(p -> p.getFileName().toString()).sorted().toList(),
-                    "原子写盘的临时文件必须已经清掉");
-        }
+        /* 3.0 落库：临时文件不存在了，等价断言是"列表里恰好这一份、没有半截条目" */
+        assertEquals(List.of("line1.json"),
+                this.store.list().stream().map(ConfigStore.Entry::name).toList());
     }
 
     /** 新建配置是编辑器的正经活儿：不能要求用户先去资源管理器里手搓一个 json。 */
     @Test
-    void saveCanCreateANewConfig() {
+    void saveCanCreateANewConfig() throws Exception {
         var result = this.store.save("brand-new.json", config("new"));
 
         assertEquals(ConfigOutcome.OK, result.outcome());
-        assertTrue(Files.isRegularFile(this.workDir.resolve("brand-new.json")));
+        assertTrue(this.store.read("brand-new.json").contains("new"));
         assertTrue(this.store.list().stream().anyMatch(e -> e.name().equals("brand-new.json")));
     }
 
@@ -202,7 +220,7 @@ class ConfigStoreTest {
         var result = this.store.create("new-line.json");
 
         assertEquals(ConfigOutcome.OK, result.outcome());
-        String text = Files.readString(this.workDir.resolve("new-line.json"), StandardCharsets.UTF_8);
+        String text = read("new-line.json");
         assertTrue(text.contains("\"new-line\""), "会话 id 应取自文件名: " + text);
         assertEquals(List.of(), ConfigStore.validate(text), "骨架必须自己就能编译");
     }
@@ -214,7 +232,7 @@ class ConfigStoreTest {
         var result = this.store.create("line1.json");
 
         assertEquals(ConfigOutcome.CONFLICT, result.outcome());
-        assertEquals(config("line1"), Files.readString(this.workDir.resolve("line1.json")),
+        assertEquals(config("line1"), read("line1.json"),
                 "新建不得悄悄覆盖别人正在用的配置");
     }
 
@@ -222,7 +240,7 @@ class ConfigStoreTest {
     void createRejectsBadNames() {
         assertEquals(ConfigOutcome.NOT_FOUND, this.store.create("../evil.json").outcome());
         assertEquals(ConfigOutcome.NOT_FOUND, this.store.create("line1.txt").outcome());
-        assertFalse(Files.exists(this.workDir.getParent().resolve("evil.json")));
+        assertTrue(this.store.list().stream().noneMatch((e) -> e.name().contains("evil")));
     }
 
     @Test
@@ -230,7 +248,7 @@ class ConfigStoreTest {
         assertEquals(ConfigOutcome.NOT_FOUND, this.store.save("../evil.json", config("x")).outcome());
         assertEquals(ConfigOutcome.NOT_FOUND, this.store.save("sub/dir.json", config("x")).outcome());
 
-        assertFalse(Files.exists(this.workDir.getParent().resolve("evil.json")),
+        assertTrue(this.store.list().stream().noneMatch((e) -> e.name().contains("evil")),
                 "路径穿越必须在解析阶段就被挡住");
     }
 
@@ -253,7 +271,7 @@ class ConfigStoreTest {
     @Test
     void subdirectoriesAreNotConfigs() {
         assertEquals(ConfigOutcome.NOT_FOUND, this.store.save("腔体/模板.json", config("x")).outcome());
-        assertFalse(Files.exists(this.workDir.resolve("腔体")));
+        assertTrue(this.store.list().stream().noneMatch((e) -> e.name().contains("腔体/")));
     }
 
     /**
@@ -296,11 +314,11 @@ class ConfigStoreTest {
                 """;
         write("line1.json", original);
 
-        ConfigStore.writeConstants(this.workDir.resolve("line1.json"), Map.of(
+        this.store.writeConstants("line1.json", Map.of(
                 501, new EquipmentConstantDef(501, "TEMP_LIMIT", ValueType.F4, 5.0, "C"),
                 502, new EquipmentConstantDef(502, "BATCH_SIZE", ValueType.U2, 100.0)));
 
-        String saved = Files.readString(this.workDir.resolve("line1.json"), StandardCharsets.UTF_8);
+        String saved = read("line1.json");
 
         assertTrue(saved.contains("\"我自己加的键\""), "未知键必须保留: " + saved);
         assertTrue(saved.contains("\"schemaVersion\": 4"), "不应被悄悄升级版本: " + saved);
@@ -318,24 +336,8 @@ class ConfigStoreTest {
         assertEquals(List.of(), ConfigStore.validate(saved), "回写后的配置仍必须可编译");
     }
 
-    @Test
-    void writeConstantsRefusesAnUnparsableFile() throws Exception {
-        write("broken.json", "{ 这不是 JSON");
-
-        assertThrows(IOException.class,
-                () -> ConfigStore.writeConstants(this.workDir.resolve("broken.json"), Map.of()));
-        assertEquals("{ 这不是 JSON", Files.readString(this.workDir.resolve("broken.json")),
-                "解析失败时原文必须原封不动");
-    }
-
     private void assertRefused(String name) {
         assertThrows(ConfigException.class, () -> this.store.read(name), "应拒绝: '" + name + "'");
-    }
-
-    private void write(String name, String content) throws IOException {
-        Path file = this.workDir.resolve(name);
-        Files.createDirectories(file.getParent());
-        Files.writeString(file, content, StandardCharsets.UTF_8);
     }
 
     /** 一份最小可编译配置。 */

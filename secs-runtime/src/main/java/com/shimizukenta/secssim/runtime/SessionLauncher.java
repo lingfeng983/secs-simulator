@@ -53,6 +53,8 @@ public final class SessionLauncher {
     private final SessionManager sessions;
     private final EventBus bus;
     private final Path workDir;
+    /** 配置门面（3.0：正文在 config.db）；create/reload/常量回写都经它。 */
+    private ConfigStore configStore;
     private final int defaultHsmsPort;
     /** 状态通知总线(v6);默认 null,可用 {@link #noticeBus(NoticeBus)} 挂上。 */
     private volatile NoticeBus noticeBus;
@@ -78,10 +80,10 @@ public final class SessionLauncher {
      * @param overrides   部署期覆盖
      * @param fingerprint session+equipment 的规范 JSON 指纹；null 表示算不了（老来源或解析失败）
      */
-    private record SessionSource(Path file, SessionOverrides overrides, String fingerprint, Prepared lastGood) {
+    private record SessionSource(String configName, SessionOverrides overrides, String fingerprint, Prepared lastGood) {
 
         SessionSource withLastGood(Prepared prepared, String fp) {
-            return new SessionSource(this.file, this.overrides, fp, prepared);
+            return new SessionSource(this.configName, this.overrides, fp, prepared);
         }
     }
 
@@ -136,8 +138,9 @@ public final class SessionLauncher {
             return startDemo(DEMO_ID, this.defaultHsmsPort, 10);
         }
 
-        Path file = this.workDir.resolve(resolveConfigName(trimmed));
-        return startFromFile(file, this.defaultHsmsPort, safe).id();
+        String configName = resolveConfigName(trimmed);
+        String body = this.configStore.read(configName);
+        return startFromConfig(configName, body, this.defaultHsmsPort, safe).id();
     }
 
     /**
@@ -180,9 +183,10 @@ public final class SessionLauncher {
             }
 
             /* 先构造新的：编译不过时旧会话还好端端地跑着。
-               部署覆盖与来源文件一起带上——否则重载第 2 台会抢第 1 台的端口。 */
-            Prepared prepared = prepare(source.file(), this.defaultHsmsPort, source.overrides());
-            String fingerprint = structureFingerprint(source.file());
+               部署覆盖与来源配置一起带上——否则重载第 2 台会抢第 1 台的端口。 */
+            String body = this.configStore.read(source.configName());
+            Prepared prepared = prepare(source.configName(), body, this.defaultHsmsPort, source.overrides());
+            String fingerprint = structureFingerprint(body);
             SessionRuntime current = this.sessions.find(id).orElse(null);
 
             /* 热生效路径：连接标识（session 段）没变——设备模型、编排、模板、
@@ -210,13 +214,13 @@ public final class SessionLauncher {
 
             /* 目标变了（端口/绑定地址）：先 open 新会话再动旧的——新会话绑的是另一个端口，
                失败时旧会话原样跑着。 */
-            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.file());
+            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.configName());
             try {
                 this.close(id);
                 this.sessions.register(opened);
             } catch (RuntimeException e) {
                 opened.close();
-                Log.error("重载会话 " + id + " 失败（新会话已关闭）: " + source.file(), e);
+                Log.error("重载会话 " + id + " 失败（新会话已关闭）: " + source.configName(), e);
                 throw e;
             }
             this.sources.put(id, source.withLastGood(prepared, fingerprint));
@@ -243,7 +247,7 @@ public final class SessionLauncher {
         this.close(id);
 
         try {
-            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.file());
+            HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.configName());
             this.sessions.register(opened);
             this.sources.put(id, source.withLastGood(prepared, fingerprint));
             Log.info("会话 " + id + " 已重建（同端口：先关旧再开新）");
@@ -261,7 +265,7 @@ public final class SessionLauncher {
             return;
         }
         try {
-            HsmsSessionRuntime restored = previous.open(this.bus, this.noticeBus, source.file());
+            HsmsSessionRuntime restored = previous.open(this.bus, this.noticeBus, source.configName());
             this.sessions.register(restored);
             this.sources.put(id, source);
             Log.warn("重载失败，已用旧配置恢复会话: " + id);
@@ -324,7 +328,7 @@ public final class SessionLauncher {
     }
 
     /**
-     * 从配置文件启动一个会话。
+     * 从配置文件启动一个会话（外部 {@code --config} 场景：文件在 work-dir 之外）。
      *
      * @param file        配置文件
      * @param defaultPort 配置未指定端口时使用的 SECS 端口
@@ -339,6 +343,9 @@ public final class SessionLauncher {
     /**
      * 从配置文件启动一个会话，并记下来源与部署覆盖。
      *
+     * <p>3.0 里 work-dir 内的配置存 config.db；这条入口只服务 work-dir 之外的
+     * 外部文件（{@code --config}），读进正文后与库内配置走同一条组装路径。</p>
+     *
      * @param file        配置文件
      * @param defaultPort 配置未指定端口时使用的 SECS 端口
      * @param overrides   部署期覆盖
@@ -348,7 +355,31 @@ public final class SessionLauncher {
      */
     public HsmsSessionRuntime startFromFile(Path file, int defaultPort, SessionOverrides overrides)
             throws ConfigException, IOException {
-        Prepared prepared = prepare(file, defaultPort, overrides);
+        String body;
+        try {
+            body = java.nio.file.Files.readString(file);
+        } catch (java.io.IOException e) {
+            throw new ConfigException("$.config", "读不了配置文件 " + file.getFileName() + ": " + e.getMessage());
+        }
+        String configName = file.getFileName().toString();
+        return startFromConfig(configName, body, defaultPort, overrides);
+    }
+
+    /**
+     * 从配置正文启动一个会话（库内配置的入口）。
+     *
+     * @param configName 配置名（文件名，诊断与常量回写定位用）
+     * @param body       配置正文
+     * @param defaultPort 配置未指定端口时使用的 SECS 端口
+     * @param overrides  部署期覆盖
+     * @return 会话
+     * @throws ConfigException 配置编译不过
+     * @throws IOException     端口绑定失败
+     */
+    public HsmsSessionRuntime startFromConfig(String configName, String body, int defaultPort,
+                                              SessionOverrides overrides)
+            throws ConfigException, IOException {
+        Prepared prepared = prepare(configName, body, defaultPort, overrides);
         this.lifecycleLock.lock();
         try {
             /* 先把"会话 id 已存在"判掉：否则同一端口的既有会话会让端口检查先命中，
@@ -357,7 +388,7 @@ public final class SessionLauncher {
                 throw new IllegalArgumentException("session already registered: " + prepared.spec().id());
             }
             requirePortFree(prepared.spec().id(), prepared.spec());
-            HsmsSessionRuntime runtime = prepared.open(this.bus, this.noticeBus, file);
+            HsmsSessionRuntime runtime = prepared.open(this.bus, this.noticeBus, configName);
             try {
                 this.sessions.register(runtime);
             } catch (RuntimeException e) {
@@ -367,7 +398,8 @@ public final class SessionLauncher {
             }
             /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
                而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
-            this.sources.put(runtime.id(), new SessionSource(file, overrides, structureFingerprint(file), prepared));
+            this.sources.put(runtime.id(), new SessionSource(configName, overrides,
+                    structureFingerprint(body), prepared));
             return runtime;
         } finally {
             this.lifecycleLock.unlock();
@@ -375,17 +407,13 @@ public final class SessionLauncher {
     }
 
     /** 读配置、编译、组装好但还没 open。 */
-    private Prepared prepare(Path file, int defaultPort, SessionOverrides overrides) throws ConfigException, IOException {
+    private Prepared prepare(String configName, String body, int defaultPort, SessionOverrides overrides)
+            throws ConfigException {
         SessionConfig config;
         try {
-            config = SessionConfigJson.read(file);
-        } catch (IOException e) {
-            /*
-             * 单独包一层：读配置失败与端口绑定失败都是 IOException，
-             * 不区分的话，API 会把"文件不存在"报成"端口被占"——
-             * 这种指错方向的错误信息比不报还费时间。
-             */
-            throw new ConfigException("$.config", "读不了配置文件 " + file.getFileName() + ": " + e.getMessage());
+            config = SessionConfigJson.parse(body);
+        } catch (RuntimeException e) {
+            throw new ConfigException("$.config", "解析不了配置 " + configName + ": " + e.getMessage());
         }
 
         CompilationResult compiled = config.compile();
@@ -407,7 +435,22 @@ public final class SessionLauncher {
         ValueSource values = ValueSources.of(config, compiled.equipment());
 
         return new Prepared(spec, compiled.equipment(), values, config.schedule(),
-                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit());
+                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), constantWriter());
+    }
+
+    /** S2F15 的常量回写目标：接到配置门面（正文在 config.db）。 */
+    private Prepared.ConstantWriter constantWriter() {
+        return this.configStore == null ? null
+                : (configName, constants) -> this.configStore.writeConstants(configName, constants);
+    }
+
+    /**
+     * 挂上配置门面（3.0 必配）：会话的创建/重载/常量回写都读 config.db。
+     *
+     * @param store 配置门面
+     */
+    public void configStore(ConfigStore store) {
+        this.configStore = store;
     }
 
     private void bus(HsmsSessionRuntime runtime) {
@@ -469,6 +512,12 @@ public final class SessionLauncher {
     /** 已组装好、只差 open 的会话。 */
     private static final class Prepared {
 
+        /** 常量回写目标：配置名 → 门面（S2F15 用）。 */
+        interface ConstantWriter {
+            void save(String configName, java.util.Map<Integer, com.shimizukenta.secssim.core.domain.EquipmentConstantDef> constants)
+                    throws java.io.IOException;
+        }
+
         private final SessionSpec spec;
         private final ResolvedEquipment model;
         private final ValueSource values;
@@ -476,10 +525,11 @@ public final class SessionLauncher {
         private final int maxPerSec;
         private final boolean s6f11Wbit;
         private final boolean s6f1Wbit;
+        private final ConstantWriter constantWriter;
 
         Prepared(SessionSpec spec, ResolvedEquipment model,
                  ValueSource values, EventSchedule schedule, int maxPerSec,
-                 boolean s6f11Wbit, boolean s6f1Wbit) {
+                 boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter) {
             this.spec = spec;
             this.model = model;
             this.values = values;
@@ -487,6 +537,7 @@ public final class SessionLauncher {
             this.maxPerSec = maxPerSec;
             this.s6f11Wbit = s6f11Wbit;
             this.s6f1Wbit = s6f1Wbit;
+            this.constantWriter = constantWriter;
         }
 
         /** 目标规格（端口冲突检查要在 open 之前做）。 */
@@ -499,15 +550,15 @@ public final class SessionLauncher {
         }
 
         /**
-         * 打开会话，并把常量落盘接到 {@code source}。
+         * 打开会话，并把常量落盘接到配置门面。
          *
-         * @param bus    事件总线
-         * @param source 配置来源文件；{@code null} 表示这个会话没有来源（演示会话），
-         *               常量只留在内存
+         * @param bus        事件总线
+         * @param configName 配置名；{@code null} 表示这个会话没有来源（演示会话），
+         *                   常量只留在内存
          * @return 已打开的会话
          * @throws IOException 打开失败
          */
-        HsmsSessionRuntime open(EventBus bus, NoticeBus notices, Path source) throws IOException {
+        HsmsSessionRuntime open(EventBus bus, NoticeBus notices, String configName) throws IOException {
             HsmsSessionRuntime runtime = new HsmsSessionRuntime(this.spec, this.model,
                     EngineClock.system(), this.values);
             if (bus != null) {
@@ -516,8 +567,8 @@ public final class SessionLauncher {
             if (notices != null) {
                 runtime.noticeBus(notices);
             }
-            if (source != null) {
-                runtime.constantSaver(constants -> ConfigStore.writeConstants(source, constants));
+            if (configName != null && this.constantWriter != null) {
+                runtime.constantSaver(constants -> this.constantWriter.save(configName, constants));
             }
             runtime.enableSchedule(this.schedule, this.maxPerSec);
             runtime.collectionEventWbit(this.s6f11Wbit);
@@ -527,9 +578,9 @@ public final class SessionLauncher {
         }
     }
 
-    /** 取某会话的配置来源文件（诊断用）。 */
-    public Optional<Path> sourceOf(String id) {
-        return Optional.ofNullable(this.sources.get(id)).map(SessionSource::file);
+    /** 取某会话的配置名（诊断用；演示会话为空）。 */
+    public Optional<String> sourceOf(String id) {
+        return Optional.ofNullable(this.sources.get(id)).map(SessionSource::configName);
     }
 
     /**
@@ -540,9 +591,9 @@ public final class SessionLauncher {
      * （设备模型、组装器、Trace、值来源整体替换，连接不断）。
      * 解析失败返回 {@code null}，重载一律走重建。</p>
      */
-    private static String structureFingerprint(Path file) {
+    private static String structureFingerprint(String body) {
         try {
-            String text = java.nio.file.Files.readString(file);
+            String text = body;
             if (!text.isEmpty() && text.charAt(0) == '﻿') {
                 text = text.substring(1);
             }

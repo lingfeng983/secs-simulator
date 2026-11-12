@@ -30,7 +30,14 @@ import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
+import com.shimizukenta.secssim.runtime.store.ConfigProjector;
 import com.shimizukenta.secssim.app.session.SessionState;
+import com.shimizukenta.secssim.store.ConfigMigrator;
+import com.shimizukenta.secssim.store.ConfigRepository;
+import com.shimizukenta.secssim.store.Db;
+import com.shimizukenta.secssim.store.PlanExecutionRepository;
+import com.shimizukenta.secssim.store.RuntimeStateRepository;
+import com.shimizukenta.secssim.store.TemplateRepository;
 
 /**
  * 启动装配（不负责进程退出码）。
@@ -125,25 +132,67 @@ public final class Bootstrap {
          */
         SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
         launcher.noticeBus(notices);
-        /* 内置模板开箱即用；demo 模式推迟到端口/deviceId 校验之后播种
-           （见 startDemoSession），越界时不在 workDir 里留下用不上的模板 */
-        if (!options.demoSession()) {
-            seedDefaultConfigs(options.workDir());
+
+        /*
+         * 3.0 存储（ADR 0017）：打开双库、按需迁移、播种，然后建门面。
+         * config.db 是权威配置；work-dir 下的 JSON 在迁移后归档进 legacy/。
+         * 运行态编辑表随库建立，M2 起写入。
+         */
+        if (options.resetRuntime()) {
+            deleteRuntimeDb(options.workDir());
+        }
+        Db db = Db.open(options.workDir());
+        ConfigRepository configRepo = new ConfigRepository(db, new ConfigProjector());
+        TemplateRepository templateRepo = new TemplateRepository(db);
+        PlanExecutionRepository planExecutions = new PlanExecutionRepository(db);
+        ConfigMigrator migrator = new ConfigMigrator(db, configRepo, templateRepo);
+
+        if (options.migrateConfig() || migrator.needed(options.workDir())) {
+            ConfigMigrator.Report report = migrator.migrate(options.workDir(), builtinTemplateBodies());
+            Log.info("配置迁移完成: devices=" + report.devices() + " templates=" + report.templates()
+                    + (report.archived() ? "（原文件已归档到 legacy/）" : "")
+                    + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
+        }
+        seedTemplates(templateRepo);
+        seedDefaultDevices(configRepo);
+
+        ConfigStore configStore = new ConfigStore(configRepo, templateRepo, options.workDir());
+        TemplateStore templates = new TemplateStore(options.workDir(), templateRepo);
+        launcher.configStore(configStore);
+
+        if (options.exportConfig() != null) {
+            int exported = migrator.exportTo(options.exportConfig());
+            Log.info("已导出 " + exported + " 台设备到 " + options.exportConfig());
+            System.out.println("EXPORT ok devices=" + exported + " dir=" + options.exportConfig().toAbsolutePath());
+            closeStorage(db, planExecutions);
+            return 0;
+        }
+
+        /* 启动对账（设计 §2.4.4 的存储侧）：清掉不属于存活设备的运行态残留、裁剪台账。
+           设备/主机的连接恢复在 M2 接线；现在只做数据收敛。 */
+        RuntimeStateRepository runtimeState = new RuntimeStateRepository(db);
+        List<String> liveDeviceIds = configRepo.listDevices().stream()
+                .map(ConfigRepository.DeviceView::id).toList();
+        long removed = runtimeState.cleanupOrphans(liveDeviceIds);
+        planExecutions.trim();
+        if (removed > 0) {
+            Log.info("启动对账清理运行态残留 " + removed + " 行");
         }
 
         /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
-        ConfigStore configStore = new ConfigStore(options.workDir());
 
         if (options.configFile() != null) {
             int code = startConfiguredSession(options, launcher);
             if (code != 0) {
+                closeStorage(db, planExecutions);
                 closeMessageLog(messageSubscription, messageLog);
                 closeAuditLog(auditLog);
                 return code;
             }
         } else if (options.demoSession()) {
-            int code = startDemoSession(options, launcher);
+            int code = startDemoSession(options, launcher, configStore);
             if (code != 0) {
+                closeStorage(db, planExecutions);
                 closeMessageLog(messageSubscription, messageLog);
                 closeAuditLog(auditLog);
                 return code;
@@ -161,8 +210,8 @@ public final class Bootstrap {
         }
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore, messageLog, auditLog,
-                bus);
+                extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
+                messageLog, auditLog, bus);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,
@@ -207,6 +256,7 @@ public final class Bootstrap {
             }
             closeMessageLog(readySubscription, readyMessageLog);
             closeAuditLog(readyAuditLog);
+            closeStorage(db, planExecutions);
         };
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -304,31 +354,25 @@ public final class Bootstrap {
         }
     }
 
-    private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher)
-            throws IOException {
+    private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher,
+                                        ConfigStore configStore) throws IOException {
         int basePort = options.hsmsPort();
         int baseDeviceId = options.deviceId();
         int lastPort = basePort + DEFAULT_CONFIGS.length - 1;
         int lastDeviceId = baseDeviceId + DEFAULT_CONFIGS.length - 1;
-        /* 两台演示会话的端口/deviceId 都要错开；越界时配置编译会失败并留下坏文件，
-           这里提前拒绝，避免"演示启动永久失败、只能手工删文件" */
+        /* 两台演示会话的端口/deviceId 都要错开；越界时配置编译会失败并留下坏数据，
+           这里提前拒绝 */
         if (basePort < 1 || lastPort > 65_535 || baseDeviceId < 0 || lastDeviceId > 32_767) {
             Log.error("演示会话参数越界: port " + basePort + ".." + lastPort
                     + "（1..65535）, deviceId " + baseDeviceId + ".." + lastDeviceId + "（0..32767）");
             return 3;
         }
 
-        /* v6:--demo-session 开两台内置演示设备（run() 已为 demo 模式跳过播种，
-           这里才是唯一播种点）；分散演示"事件驱动值变化"(etch)与"主机拉取采集"(cvd)。
-           播种必须在校验之后：越界时不能往 workDir 里落下两份用不了的模板 */
-        seedDefaultConfigs(options.workDir());
-
         for (int i = 0; i < DEFAULT_CONFIGS.length; i++) {
             String name = DEFAULT_CONFIGS[i];
             try {
-                /* 端口/deviceId 由启动参数覆盖（不写回文件）：每次启动都生效，
-                   不再依赖"只在首次播种时改写模板文本" */
-                launcher.startFromFile(options.workDir().resolve(name), basePort,
+                /* 端口/deviceId 由启动参数覆盖（不写回配置）：每次启动都生效 */
+                launcher.startFromConfig(name, configStore.read(name), basePort,
                         new SessionOverrides(null, null, basePort + i, baseDeviceId + i));
             } catch (com.shimizukenta.secssim.app.config.ConfigException e) {
                 Log.error("内置演示配置编译失败: " + name, e);
@@ -342,37 +386,85 @@ public final class Bootstrap {
     private static final String[] DEFAULT_CONFIGS = {"demo-etch.json", "demo-cvd.json"};
 
     /**
-     * 播种内置默认设备配置（schema v6 的需求:开箱即有两台可用设备）。
+     * 播种内置默认设备（schema v6 的需求:开箱即有两台可用设备）。
      *
-     * <p>幂等不覆盖:workDir 里已有同名文件（含用户改过的）一律不动,
-     * 删除文件重启即恢复默认。模板原样写入；端口/deviceId 由启动参数
-     * 通过 {@link SessionOverrides} 覆盖，不在这里改写文本——
-     * 改文本依赖精确格式，模板一美化就静默失效。</p>
+     * <p>3.0 起播种进 config.db（不再写 work-dir 文件）：幂等不覆盖——库里已有
+     * 同名 legacy（含迁移进来的、用户改过的）一律不动；要恢复默认就删除该设备。</p>
      */
-    private static void seedDefaultConfigs(java.nio.file.Path workDir) {
+    private static void seedDefaultDevices(ConfigRepository configs) {
         for (String name : DEFAULT_CONFIGS) {
-            java.nio.file.Path target = workDir.resolve(name);
-            if (java.nio.file.Files.exists(target)) {
+            String stem = name.substring(0, name.length() - ".json".length());
+            if (configs.findDevice(stem).isPresent()) {
                 continue;
             }
-            String text;
-            try (java.io.InputStream in = Bootstrap.class.getResourceAsStream("/defaults/" + name)) {
-                if (in == null) {
-                    Log.warn("内置默认配置缺失（不播种）: /defaults/" + name);
-                    continue;
-                }
-                text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                Log.error("读取内置默认配置失败: " + name, e);
+            String text = classpathDefaults(name);
+            if (text == null) {
                 continue;
             }
-
             try {
-                java.nio.file.Files.writeString(target, text, java.nio.charset.StandardCharsets.UTF_8);
-                Log.info("已播种默认设备配置: " + name);
-            } catch (IOException e) {
-                Log.error("播种默认配置失败: " + name, e);
+                configs.createDevice(stem, stem, "demo", text, true, "seed");
+                Log.info("已播种默认设备: " + name);
+            } catch (RuntimeException e) {
+                Log.error("播种默认设备失败: " + name, e);
             }
+        }
+    }
+
+    /** 读 classpath 里的内置默认配置；缺失返回 null（只警告一次）。 */
+    private static String classpathDefaults(String name) {
+        try (java.io.InputStream in = Bootstrap.class.getResourceAsStream("/defaults/" + name)) {
+            if (in == null) {
+                Log.warn("内置默认配置缺失（不播种）: /defaults/" + name);
+                return null;
+            }
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            Log.error("读取内置默认配置失败: " + name, e);
+            return null;
+        }
+    }
+
+    /** 播种内置设备模板（只填缺失的行；自定义模板由迁移导入）。 */
+    private static void seedTemplates(TemplateRepository templates) {
+        for (var entry : builtinTemplateBodies().entrySet()) {
+            DeviceTemplates.Entry meta = DeviceTemplates.catalog().stream()
+                    .filter((t) -> t.id().equals(entry.getKey()))
+                    .findFirst().orElse(null);
+            templates.seed(entry.getKey(),
+                    meta == null ? entry.getKey() : meta.label(),
+                    meta == null ? "内置模板" : meta.description(),
+                    true, entry.getValue());
+        }
+    }
+
+    /** 内置模板 id → 正文（迁移播种与模板表播种共用）。 */
+    private static java.util.Map<String, String> builtinTemplateBodies() {
+        java.util.Map<String, String> bodies = new java.util.LinkedHashMap<>();
+        for (DeviceTemplates.Entry entry : DeviceTemplates.catalog()) {
+            DeviceTemplates.json(entry.id(), "device.json")
+                    .ifPresent((body) -> bodies.put(entry.id(), body));
+        }
+        return bodies;
+    }
+
+    /** --reset-runtime：删掉 runtime.db 及其 WAL/SHM（配置库不动）。 */
+    private static void deleteRuntimeDb(Path workDir) {
+        for (String suffix : new String[] {"runtime.db", "runtime.db-wal", "runtime.db-shm"}) {
+            try {
+                Files.deleteIfExists(workDir.resolve(suffix));
+            } catch (IOException e) {
+                Log.error("删除运行态库失败: " + suffix, e);
+            }
+        }
+    }
+
+    /** 关闭存储（写连接、锁、台账写线程）。 */
+    private static void closeStorage(Db db, PlanExecutionRepository planExecutions) {
+        if (planExecutions != null) {
+            planExecutions.close();
+        }
+        if (db != null) {
+            db.close();
         }
     }
 

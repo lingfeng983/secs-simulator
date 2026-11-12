@@ -61,22 +61,27 @@ class DeviceTemplatesTest {
     void storeCreateWithTemplateWritesCompilableConfig() throws Exception {
         java.nio.file.Path workDir = java.nio.file.Files.createTempDirectory("devtpl-test");
         try {
-            ConfigStore store = new ConfigStore(workDir);
+            var db = com.shimizukenta.secssim.store.Db.open(workDir);
+            var repo = new com.shimizukenta.secssim.store.ConfigRepository(
+                    db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+            ConfigStore store = new ConfigStore(repo,
+                    new com.shimizukenta.secssim.store.TemplateRepository(db), workDir);
 
             var ok = store.create("etch-1.json", "etch");
             assertEquals(ConfigOutcome.OK, ok.outcome(), ok.problems().toString());
-            String text = java.nio.file.Files.readString(workDir.resolve("etch-1.json"));
+            String text = store.read("etch-1.json");
             assertEquals(List.of(), ConfigStore.validate(text));
 
             var unknown = store.create("bad.json", "no-such-device");
             assertEquals(ConfigOutcome.INVALID, unknown.outcome());
             assertFalse(unknown.problems().isEmpty(), "未知模板要带出可用模板清单");
-            assertFalse(java.nio.file.Files.exists(workDir.resolve("bad.json")),
-                    "失败的创建不许留下半截文件");
+            assertTrue(store.list().stream().noneMatch((e) -> e.name().equals("bad.json")),
+                    "失败的创建不许留下半截配置");
 
             /* 老的单参入口仍是骨架，行为不变 */
             var bare = store.create("bare-1.json");
             assertEquals(ConfigOutcome.OK, bare.outcome());
+            db.close();
         } finally {
             try (var files = java.nio.file.Files.list(workDir)) {
                 files.forEach(p -> p.toFile().delete());

@@ -1,87 +1,37 @@
 package com.shimizukenta.secssim.runtime;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
-import java.util.stream.Stream;
 
-import com.shimizukenta.jsonhub.JsonHub;
-import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.app.config.ConfigException;
-import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.log.Log;
+import com.shimizukenta.secssim.store.StoreException;
+import com.shimizukenta.secssim.store.TemplateRepository;
 
 /**
- * 设备模板仓库：内置模板 + {@code <work-dir>/templates/*.json} 自定义模板。
- *
- * <p>模板是完整设备配置：新建时复制成 {@code <设备名>.json}，再做会话 id/端口/设备号替换。
- * 自定义模板可增删改查；内置模板只读，避免用户把出厂起点删掉。</p>
+ * 设备模板门面（3.0 / ADR 0017）：v1 的「work-dir/templates/*.json」语义换成
+ * config.db 的 device_template 表（内置只读种子 + 自定义），公开方法签名不变。
  */
 public final class TemplateStore {
 
-    private static final String SUFFIX = ".json";
-
+    /** 模板目录（legacy 归档位置，仅为兼容保留 workDir 引用）。 */
     private final Path dir;
+    private final TemplateRepository repository;
 
-    public TemplateStore(Path workDir) {
-        this.dir = workDir.resolve("templates");
+    /**
+     * 创建模板门面。
+     *
+     * @param workDir    工作目录
+     * @param repository 模板仓储
+     */
+    public TemplateStore(Path workDir, TemplateRepository repository) {
+        this.dir = workDir == null ? null : workDir.resolve("templates");
+        this.repository = repository;
     }
 
-    public record Entry(String id, String label, String description, String source, long sizeBytes, long modifiedMs) {
-    }
-
-    /** 内置模板 + 自定义模板，按 id 排序。 */
-    public List<Entry> list() {
-        List<Entry> entries = new ArrayList<>();
-        for (DeviceTemplates.Entry builtin : DeviceTemplates.catalog()) {
-            entries.add(new Entry(builtin.id(), builtin.label(), builtin.description(), "builtin", 0L, 0L));
-        }
-        if (Files.isDirectory(this.dir)) {
-            try (Stream<Path> stream = Files.list(this.dir)) {
-                for (Path file : stream.filter(Files::isRegularFile)
-                        .filter((p) -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(SUFFIX))
-                        .sorted(Comparator.comparing((p) -> p.getFileName().toString()))
-                        .toList()) {
-                    String id = baseName(file);
-                    if (DeviceTemplates.catalog().stream().anyMatch((entry) -> entry.id().equals(id))) {
-                        continue;
-                    }
-                    String label = id;
-                    String description = "自定义模板";
-                    try {
-                        JsonHub root = JsonHub.fromJson(Files.readString(file, StandardCharsets.UTF_8));
-                        JsonHub equipment = root.get("equipment");
-                        if (equipment != null && equipment.isObject()) {
-                            String name = equipment.get("name").optionalString().orElse("");
-                            if (!name.isBlank()) {
-                                label = name;
-                            }
-                        }
-                    } catch (RuntimeException | IOException e) {
-                        description = "自定义模板（内容无法读取）";
-                    }
-                    try {
-                        entries.add(new Entry(id, label, description, "custom",
-                                Files.size(file), Files.getLastModifiedTime(file).toMillis()));
-                    } catch (IOException e) {
-                        entries.add(new Entry(id, label, description, "custom", 0L, 0L));
-                    }
-                }
-            } catch (IOException e) {
-                Log.error("读取模板目录失败: " + this.dir, e);
-            }
-        }
-        entries.sort(Comparator.comparing(Entry::id));
-        return entries;
-    }
-
+    /** 目录内容的 JSON 数组（形状与 v1 一致）。 */
     public String listJson() {
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
@@ -90,31 +40,39 @@ public final class TemplateStore {
                 sb.append(',');
             }
             first = false;
-            sb.append("{\"id\":\"").append(escape(entry.id()))
-                    .append("\",\"label\":\"").append(escape(entry.label()))
-                    .append("\",\"description\":\"").append(escape(entry.description()))
+            sb.append("{\"id\":\"").append(entry.id())
+                    .append("\",\"label\":\"").append(Json.escape(entry.label()))
+                    .append("\",\"description\":\"").append(Json.escape(entry.description()))
                     .append("\",\"source\":\"").append(entry.source())
                     .append("\",\"sizeBytes\":").append(entry.sizeBytes())
                     .append(",\"modifiedMs\":").append(entry.modifiedMs())
-                    .append('}');
+                    .append("}");
         }
         return sb.append(']').toString();
     }
 
-    /** 自定义模板原文；内置模板生成一份以 {@code device.json} 为名的可编辑副本。 */
+    /** 全部模板（内置在前，按 id 排序）。 */
+    public List<Entry> list() {
+        return this.repository.list().stream()
+                .map(view -> new Entry(view.id(), view.label(), view.description(), view.source(),
+                        view.body().getBytes(StandardCharsets.UTF_8).length, view.updatedAt()))
+                .toList();
+    }
+
+    /** 一个模板的元信息。 */
+    public record Entry(String id, String label, String description, String source,
+                        long sizeBytes, long modifiedMs) {
+    }
+
+    /** 模板原文；内置缺失时回退到代码内建的生成器。 */
     public Optional<String> text(String id) {
         String safe = sanitize(id);
         if (safe.isEmpty()) {
             return Optional.empty();
         }
-        Path file = this.dir.resolve(safe + SUFFIX);
-        if (Files.isRegularFile(file)) {
-            try {
-                return Optional.of(Files.readString(file, StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                Log.error("读取模板失败: " + file, e);
-                return Optional.empty();
-            }
+        Optional<String> body = this.repository.body(safe);
+        if (body.isPresent()) {
+            return body;
         }
         return DeviceTemplates.json(safe, "device.json");
     }
@@ -125,96 +83,119 @@ public final class TemplateStore {
         if (safe.isEmpty()) {
             return ConfigResult.invalid(List.of("模板 id 不能为空（只允许字母/数字/._-）"));
         }
-        if (DeviceTemplates.catalog().stream().anyMatch((entry) -> entry.id().equals(safe))) {
-            return ConfigResult.conflict("内置模板 " + safe + " 只读，请另存为新 id");
-        }
         List<String> problems = ConfigStore.validate(text);
         if (!problems.isEmpty()) {
             return ConfigResult.invalid(problems);
         }
         try {
-            Files.createDirectories(this.dir);
-            Path file = this.dir.resolve(safe + SUFFIX);
-            Files.writeString(file, text, StandardCharsets.UTF_8);
+            if (this.repository.find(safe).isPresent()) {
+                this.repository.saveCustom(safe, text);
+            } else {
+                this.repository.createCustom(safe, safe, "自定义模板", text);
+            }
             return ConfigResult.ok();
-        } catch (IOException e) {
+        } catch (StoreException e) {
+            if (e.kind() == StoreException.Kind.CONFLICT) {
+                return ConfigResult.conflict(e.getMessage());
+            }
             Log.error("保存模板失败: " + safe, e);
-            return ConfigResult.failed("写盘失败：" + e.getMessage());
+            return ConfigResult.failed("保存失败：" + e.getMessage());
         }
     }
 
+    /** 删除自定义模板；内置不能删。 */
     public ConfigResult delete(String id) {
         String safe = sanitize(id);
-        if (DeviceTemplates.catalog().stream().anyMatch((entry) -> entry.id().equals(safe))) {
-            return ConfigResult.conflict("内置模板不能删除");
-        }
-        Path file = this.dir.resolve(safe + SUFFIX);
         try {
-            if (!Files.isRegularFile(file)) {
-                return ConfigResult.notFound("模板不存在: " + safe);
-            }
-            Files.delete(file);
+            this.repository.deleteCustom(safe);
             return ConfigResult.ok();
-        } catch (IOException e) {
+        } catch (StoreException e) {
+            if (e.kind() == StoreException.Kind.CONFLICT) {
+                return ConfigResult.conflict(e.getMessage());
+            }
+            if (e.kind() == StoreException.Kind.NOT_FOUND) {
+                return ConfigResult.notFound(e.getMessage());
+            }
             Log.error("删除模板失败: " + safe, e);
             return ConfigResult.failed("删除失败：" + e.getMessage());
         }
     }
 
-    /** 自定义模板原文（用于新建设备）；不存在返回空。 */
+    /** 自定义模板原文（用于新建设备）；不存在或非自定义返回空。 */
     public Optional<String> customText(String id) {
         String safe = sanitize(id);
-        Path file = this.dir.resolve(safe + SUFFIX);
-        if (!Files.isRegularFile(file)) {
+        if (safe.isEmpty()) {
             return Optional.empty();
         }
-        try {
-            return Optional.of(Files.readString(file, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            return Optional.empty();
+        return this.repository.find(safe)
+                .filter(view -> "custom".equals(view.source()))
+                .map(TemplateRepository.TemplateView::body);
+    }
+
+    /**
+     * 模板 id 清洗：只留字母/数字/点/下划线/中划线，压掉首尾连接符。
+     *
+     * @param raw 原始 id
+     * @return 清洗后的 id；全被滤掉时返回空串
+     */
+    public static String sanitize(String raw) {
+        String cleaned = raw == null ? "" : raw.replaceAll("[^A-Za-z0-9._-]", "-");
+        while (cleaned.startsWith("-")) {
+            cleaned = cleaned.substring(1);
         }
+        while (cleaned.endsWith("-")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1);
+        }
+        return cleaned;
     }
 
-    public static String sanitize(String id) {
-        return id == null ? "" : id.trim().replaceAll("[^A-Za-z0-9._-]", "-");
-    }
-
-    private static String baseName(Path file) {
-        String name = file.getFileName().toString();
-        return name.toLowerCase(Locale.ROOT).endsWith(SUFFIX)
-                ? name.substring(0, name.length() - SUFFIX.length())
-                : name;
-    }
-
-    private static String escape(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    /** 给配置文本写入/替换顶层 template 标记。 */
+    /** 给模板正文补顶层 {@code template} 标记（v1 行为保留）。 */
     public static String withTemplate(String text, String templateId) {
+        if (templateId == null || templateId.isBlank()) {
+            return text;
+        }
         try {
-            JsonHub root = JsonHub.fromJson(text);
-            if (!root.isObject()) {
-                return text;
+            com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(text);
+            if (root.isObject() && !root.containsKey("template")) {
+                var b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+                var pairs = new java.util.ArrayList<com.shimizukenta.jsonhub.JsonObjectPair>();
+                pairs.add(b.pair("template", templateId));
+                for (com.shimizukenta.jsonhub.JsonString key : root.keySet()) {
+                    pairs.add(b.pair(key.unescaped(), root.get(key.unescaped())));
+                }
+                return b.object(pairs).prettyPrint();
             }
-            var b = JsonHub.getBuilder();
-            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
-            boolean replaced = false;
-            for (var key : root.keySet()) {
-                String name = key.unescaped();
-                if ("template".equals(name)) {
-                    pairs.add(b.pair("template", templateId));
-                    replaced = true;
-                } else {
-                    pairs.add(b.pair(name, root.get(name)));
+        } catch (RuntimeException e) {
+            /* 无法解析就原样返回，交给统一校验报错 */
+        }
+        return text;
+    }
+
+    /** JSON 转义工具（listJson 用）。 */
+    private static final class Json {
+        private Json() {
+        }
+
+        static String escape(String value) {
+            StringBuilder sb = new StringBuilder(value.length() + 8);
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                switch (c) {
+                    case '\\' -> sb.append("\\\\");
+                    case '"' -> sb.append("\\\"");
+                    case '\r' -> sb.append("\\r");
+                    case '\n' -> sb.append("\\n");
+                    case '\t' -> sb.append("\\t");
+                    default -> {
+                        if (c < 0x20) {
+                            sb.append(String.format(java.util.Locale.ROOT, "\\u%04x", (int) c));
+                        } else {
+                            sb.append(c);
+                        }
+                    }
                 }
             }
-            if (!replaced) {
-                pairs.add(b.pair("template", templateId));
-            }
-            return b.object(pairs).toJson();
-        } catch (RuntimeException e) {
-            return text;
+            return sb.toString();
         }
     }
 }

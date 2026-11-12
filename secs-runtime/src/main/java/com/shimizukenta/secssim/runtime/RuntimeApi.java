@@ -41,11 +41,12 @@ final class RuntimeApi {
     private final BurstRunner bursts;
 
     RuntimeApi(SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-            MessageLog messages, AuditLog audit, HostSimRegistry hosts, BurstRunner bursts) {
+            TemplateStore templates, MessageLog messages, AuditLog audit,
+            HostSimRegistry hosts, BurstRunner bursts) {
         this.sessions = sessions;
         this.launcher = launcher;
         this.configs = configs;
-        this.templates = new TemplateStore(configs.workDir());
+        this.templates = templates;
         this.messages = messages;
         this.audit = audit;
         this.hosts = hosts;
@@ -58,9 +59,7 @@ final class RuntimeApi {
         /* 包一层带配置名:配置页要用它自动打开本设备的配置文件 */
         List<SessionRuntime> decorated = new ArrayList<>();
         for (SessionRuntime session : this.sessions.list()) {
-            final String config = this.launcher.sourceOf(session.id())
-                    .map(path -> path.getFileName().toString())
-                    .orElse("");
+            final String config = this.launcher.sourceOf(session.id()).orElse("");
             decorated.add(new SessionRuntime() {
                 @Override public String id() { return session.id(); }
                 @Override public void open() throws IOException { session.open(); }
@@ -555,8 +554,8 @@ final class RuntimeApi {
      */
     private void warnStaleSessions(String name) {
         for (SessionRuntime session : this.sessions.list()) {
-            Path source = this.launcher.sourceOf(session.id()).orElse(null);
-            if (source != null && source.getFileName().toString().equals(name.trim())) {
+            String source = this.launcher.sourceOf(session.id()).orElse(null);
+            if (source != null && source.equals(name.trim())) {
                 Log.info("配置已改，但会话 " + session.id() + " 仍在用旧配置，重载后才生效");
             }
         }

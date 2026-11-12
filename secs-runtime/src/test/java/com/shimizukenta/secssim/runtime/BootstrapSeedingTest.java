@@ -13,58 +13,63 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.session.SessionManager;
+import com.shimizukenta.secssim.store.ConfigRepository;
+import com.shimizukenta.secssim.store.Db;
+import com.shimizukenta.secssim.store.TemplateRepository;
 
 /**
- * 内置默认配置的播种语义。
+ * 内置默认设备的播种语义（3.0：播种进 config.db，不再写 work-dir 文件）。
  *
- * <p>播种曾经靠"把模板文本里的 {@code "port": 5000} 替换成启动端口"来让
- * {@code --demo-session} 生效：模板一被格式化（空格/换行变化）替换就静默失效，
- * 演示端口永远是 5000。现在端口/deviceId 由 {@link SessionOverrides} 在启动时
- * 覆盖，播种只做"原样落盘 + 幂等不覆盖"。</p>
+ * <p>端口/deviceId 仍由 {@link SessionOverrides} 在启动时覆盖（历史教训见
+ * 2.x 的测试注释），播种只做「原样入库 + 幂等不覆盖」。</p>
  */
 class BootstrapSeedingTest {
 
     private static final String[] NAMES = {"demo-etch.json", "demo-cvd.json"};
 
-    @TempDir
+    @TempDir(cleanup = CleanupMode.NEVER)
     Path workDir;
 
     @Test
-    void seedsTemplatesVerbatim() throws Exception {
-        seed(workDir);
+    void seedsDefaultDevicesIntoDatabase() throws Exception {
+        ConfigRepository configs = repo();
+        seed(configs);
 
         for (String name : NAMES) {
-            Path file = workDir.resolve(name);
-            assertTrue(Files.exists(file), name + " 必须被播种");
-
-            String seeded = Files.readString(file, StandardCharsets.UTF_8);
-            assertEquals(resource(name), seeded, name + " 必须原样落盘（不得改写端口/deviceId）");
-            assertDoesNotThrow(() -> SessionConfigJson.parse(seeded), name + " 播种内容必须能解析");
+            String stem = name.substring(0, name.length() - 5);
+            var doc = configs.readDocument(stem);
+            assertTrue(doc.isPresent(), stem + " 必须被播种");
+            assertEquals(resource(name), doc.get().body(),
+                    name + " 必须原样入库（不得改写端口/deviceId）");
+            assertDoesNotThrow(() -> SessionConfigJson.parse(doc.get().body()),
+                    name + " 播种内容必须能解析");
         }
     }
 
     @Test
-    void doesNotOverwriteUserEditedFile() throws Exception {
-        Path edited = workDir.resolve("demo-etch.json");
-        Files.writeString(edited, "{\"user\":true}", StandardCharsets.UTF_8);
+    void doesNotOverwriteExistingDevice() throws Exception {
+        ConfigRepository configs = repo();
+        /* 用户已有的同名设备（迁移进来的、改过的）不能被播种覆盖 */
+        configs.createDevice("demo-etch", "demo-etch", null, "{\"user\":true}", true, "test");
 
-        seed(workDir);
+        seed(configs);
 
-        assertEquals("{\"user\":true}", Files.readString(edited, StandardCharsets.UTF_8),
-                "用户改过的配置不能被播种覆盖");
-        assertTrue(Files.exists(workDir.resolve("demo-cvd.json")), "缺失的模板仍应补齐");
+        assertEquals("{\"user\":true}", configs.readDocument("demo-etch").orElseThrow().body(),
+                "已有的同名设备不能被播种覆盖");
+        assertTrue(configs.readDocument("demo-cvd").isPresent(), "缺失的模板仍应补齐");
     }
 
     /** 播种是私有的启动步骤；用反射直接验证，避免为测试放宽生产 API。 */
-    private static void seed(Path dir) throws Exception {
-        Method method = Bootstrap.class.getDeclaredMethod("seedDefaultConfigs", Path.class);
+    private static void seed(ConfigRepository configs) throws Exception {
+        Method method = Bootstrap.class.getDeclaredMethod("seedDefaultDevices", ConfigRepository.class);
         method.setAccessible(true);
-        method.invoke(null, dir);
+        method.invoke(null, configs);
     }
 
     @Test
@@ -76,8 +81,6 @@ class BootstrapSeedingTest {
 
         assertEquals(3, startDemoSession(options, launcher), "第二台演示设备的端口会越界，必须提前拒绝");
         assertTrue(sessions.list().isEmpty(), "越界时不能留下半个演示会话");
-        assertFalse(Files.exists(this.workDir.resolve("demo-etch.json")),
-                "越界时不得落模板文件（否则下次启动要手工清理）");
     }
 
     @Test
@@ -89,15 +92,25 @@ class BootstrapSeedingTest {
 
         assertEquals(3, startDemoSession(options, launcher), "第二台演示设备的 device-id 会越界");
         assertTrue(sessions.list().isEmpty());
-        assertFalse(Files.exists(this.workDir.resolve("demo-cvd.json")),
-                "越界时不得落模板文件");
     }
 
     private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher) throws Exception {
         Method method = Bootstrap.class.getDeclaredMethod("startDemoSession",
-                RuntimeOptions.class, SessionLauncher.class);
+                RuntimeOptions.class, SessionLauncher.class, ConfigStore.class);
         method.setAccessible(true);
-        return ((Integer) method.invoke(null, options, launcher)).intValue();
+        try (Db db = Db.open(Path.of(options.workDir().toString(), "..storage-probe-")
+                .normalize())) {
+            /* 越界校验发生在读配置之前：给一个空库的门面即可 */
+            ConfigStore store = new ConfigStore(
+                    new ConfigRepository(db, new com.shimizukenta.secssim.runtime.store.ConfigProjector()),
+                    new TemplateRepository(db), options.workDir());
+            return ((Integer) method.invoke(null, options, launcher, store)).intValue();
+        }
+    }
+
+    private ConfigRepository repo() {
+        Db db = Db.open(this.workDir.resolve("seed-db").normalize());
+        return new ConfigRepository(db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
     }
 
     private static String resource(String name) throws IOException {

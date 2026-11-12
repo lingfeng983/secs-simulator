@@ -33,16 +33,23 @@ import com.shimizukenta.secssim.app.session.SessionState;
  */
 class SessionLauncherTest {
 
-    @TempDir
+    @TempDir(cleanup = org.junit.jupiter.api.io.CleanupMode.NEVER)
     Path workDir;
 
     private SessionManager sessions;
     private SessionLauncher launcher;
+    private com.shimizukenta.secssim.store.ConfigRepository repo;
 
     @BeforeEach
     void setUp() {
         this.sessions = new SessionManager();
         this.launcher = new SessionLauncher(this.sessions, new EventBus(), this.workDir, freePort());
+        /* 3.0：配置正文在 config.db，launcher 经门面读写 */
+        var db = com.shimizukenta.secssim.store.Db.open(this.workDir.resolve("db").normalize());
+        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
+                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        this.launcher.configStore(new ConfigStore(this.repo,
+                new com.shimizukenta.secssim.store.TemplateRepository(db), this.workDir));
     }
 
     @Test
@@ -81,11 +88,11 @@ class SessionLauncherTest {
      * </p>
      */
     @Test
-    void missingFileIsReportedAsConfigProblem() {
+    void missingConfigIsReportedAsConfigProblem() {
         ConfigException error = assertThrows(ConfigException.class,
                 () -> this.launcher.create("no-such.json"));
 
-        assertTrue(error.getMessage().contains("读不了配置文件"), error.getMessage());
+        assertTrue(error.getMessage().contains("不存在"), error.getMessage());
         assertTrue(this.sessions.list().isEmpty());
     }
 
@@ -255,7 +262,9 @@ class SessionLauncherTest {
         write("line1.json", config("line1", "V1"));
         this.launcher.create("line1.json");
 
-        Files.writeString(this.workDir.resolve("line1.json"), "{ 这不是 JSON", StandardCharsets.UTF_8);
+        /* 存一份 JSON 合法但配置非法的正文（仓库保证入库正文可解析，
+           所以"写坏"的现代形态是语义非法：版本号越界） */
+        this.repo.saveDocument("line1", "{\"schemaVersion\": 99}", null, "test", "");
 
         assertThrows(ConfigException.class, () -> this.launcher.reload("line1"));
         assertTrue(this.sessions.find("line1").isPresent(), "配置坏了旧会话必须还在");
@@ -277,8 +286,9 @@ class SessionLauncherTest {
             overridePort = freePort();
         }
         assertNotEquals(filePort, overridePort);
-        write("ov.json", configWithPort("ov", "OV", filePort));
+        /* startFromFile 是外部文件入口：这个用例的文件必须真实存在 */
         Path file = this.workDir.resolve("ov.json");
+        Files.writeString(file, configWithPort("ov", "OV", filePort), StandardCharsets.UTF_8);
         String before = Files.readString(file, StandardCharsets.UTF_8);
 
         var session = this.launcher.startFromFile(file, filePort,
@@ -311,7 +321,16 @@ class SessionLauncherTest {
     }
 
     private void write(String name, String content) throws IOException {
-        Files.writeString(this.workDir.resolve(name), content, StandardCharsets.UTF_8);
+        String stem = name.substring(0, name.length() - 5);
+        try {
+            if (this.repo.findDevice(stem).isPresent()) {
+                this.repo.saveDocument(stem, content, null, "test", "");
+            } else {
+                this.repo.createDevice(stem, stem, null, content, true, "test");
+            }
+        } catch (RuntimeException e) {
+            throw new IOException(e.getMessage(), e);
+        }
     }
 
     /** 同 config，但带一个周期事件计划（热生效测试用）。 */
