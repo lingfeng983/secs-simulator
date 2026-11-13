@@ -137,7 +137,7 @@ export function useConfigDraft(backend: BackendController, sessionId: string): C
         void backend.refreshConfigs();
       } else if (result.status === 422) {
         setProblems(result.problems);
-        setNotice('保存被拒：配置有问题，未落盘');
+        setNotice('保存被拒：配置有问题，文件没有改动');
       } else if (result.status === 409) {
         setNotice('保存被拒：配置在编辑期间被其他窗口修改过——请先「重新载入」');
       } else {

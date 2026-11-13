@@ -47,12 +47,14 @@ test('sidebar collapses to an icon rail and keeps navigation usable', async ({ p
   /* 折叠后设备项只剩"首字母徽标 + tooltip",仍要能点进设备页 */
   await expect(side.locator('.nav-monogram').first()).toHaveText('LI');
   await side.locator('.nav-item[title^="LINE1"]').click();
-  await expect(page.getByRole('tab', { name: '事件', exact: true })).toHaveAttribute('aria-selected', 'true');
+  /* 3.0 默认落运行区·事件与报告 */
+  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件与报告', exact: true }))
+    .toHaveAttribute('aria-selected', 'true');
 });
 
 test('form fields keep the label on the left and the control on the right', async ({ page }) => {
   /* 结构化表单已从「配置」移到「连接」；字段排布规则不变 */
-  await page.goto('/#/device/line1/connection');
+  await page.goto('/#/device/line1/config/connection');
   await page.waitForTimeout(800);
 
   const fields = page.locator('#panel-connection .field');

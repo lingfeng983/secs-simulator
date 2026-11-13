@@ -82,7 +82,7 @@ function SvidSparkline({ rows }: { rows: ExecutionRow[] }): JSX.Element | null {
   }, [rows]);
 
   if (chart === null) {
-    return <p className="hint">台账里还没有可绘制的 SVID 变化（效果为空或样本不足）。</p>;
+    return <p className="hint">执行记录里还没有可绘制的 SVID 变化（效果为空或样本不足）。</p>;
   }
   return (
     <div className="panel-section" style={{ marginTop: 4 }}>
@@ -136,7 +136,7 @@ export function PlanExecutionTimeline({ deviceId, plans, liveEvents, notifier }:
     try {
       const ok = await exec.step(planId);
       if (ok) {
-        notifier.success('已试跑一次', '台账记为试跑，不计入触发次数');
+        notifier.success('已试跑一次', '记为试跑，不计入触发次数');
       } else {
         notifier.error('试跑失败', exec.error);
       }
@@ -148,7 +148,7 @@ export function PlanExecutionTimeline({ deviceId, plans, liveEvents, notifier }:
   const runExport = async () => {
     const hint = await exec.exportCsv();
     if (hint !== '' && hint !== '没有可导出的执行记录') {
-      notifier.success('已导出执行台账', hint);
+      notifier.success('已导出执行记录', hint);
     } else {
       notifier.error('暂无可导出的记录');
     }
@@ -177,7 +177,7 @@ export function PlanExecutionTimeline({ deviceId, plans, liveEvents, notifier }:
           </label>
           <label className="field">
             条数
-            <select value={exec.limit} onChange={(event) => exec.setLimit(Number(event.target.value))} aria-label="台账条数">
+            <select value={exec.limit} onChange={(event) => exec.setLimit(Number(event.target.value))} aria-label="执行记录条数">
               {[50, 100, 200, 500].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
@@ -186,7 +186,7 @@ export function PlanExecutionTimeline({ deviceId, plans, liveEvents, notifier }:
         </div>
       </div>
 
-      {exec.error !== '' && <p className="hint" style={{ color: '#b42318' }}>台账读取失败：{exec.error}</p>}
+      {exec.error !== '' && <p className="hint" style={{ color: '#b42318' }}>执行记录读取失败：{exec.error}</p>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '10px 0' }}>
         {plans.length === 0 && <p className="hint">该设备还没有编排计划。</p>}
@@ -217,7 +217,7 @@ export function PlanExecutionTimeline({ deviceId, plans, liveEvents, notifier }:
                 style={{ marginTop: 8 }}
                 disabled={deviceId === '' || stepping !== ''}
                 onClick={() => void runStep(plan.id)}
-                title="触发一次，台账记为试跑，不推进倒计时"
+                title="触发一次，记为试跑，不推进倒计时"
               >
                 {stepping === plan.id ? '试跑中…' : '单步试跑'}
               </button>

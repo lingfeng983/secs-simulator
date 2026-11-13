@@ -144,9 +144,9 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
       </div>
 
       <p className="hint">
-        活动报警与终端消息的本地快照已移除（它们没有独立触发点，异步 ACK 失败时会误导）。
+        本页不保留活动报警与终端消息的历史（它们没有独立触发点，异步确认失败时会误导）。
         要确认报警/终端是否真的到达主机，去设备「消息」页按「报警」或「终端」类别看
-        S5F1/S5F2、S10F3/S10F4；完整记录仍在 <code>logs/messages.jsonl</code>。
+        S5F1/S5F2、S10F3/S10F4。
       </p>
     </Panel>
   );

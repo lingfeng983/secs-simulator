@@ -494,7 +494,8 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         </span>
         <button
           type="button"
-          disabled={selected.size === 0 || batchBusy}
+          /* 全选的前提是"有行可选"，不是"已经选了东西"：之前一进来按钮就是灰的 */
+          disabled={rows.length === 0 || batchBusy}
           onClick={() => setSelected(new Set(sessions.map((item) => item.id)))}
         >
           全选

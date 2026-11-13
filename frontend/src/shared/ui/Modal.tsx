@@ -42,17 +42,10 @@ export function Modal({ open, title, onClose, children, footer, width }: ModalPr
     if (!open) {
       return;
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
+    /* Esc 关闭由 Overlay 统一处理；这里只管锁背景滚动 */
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previous;
     };
   }, [open, onClose]);

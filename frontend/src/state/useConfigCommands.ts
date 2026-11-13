@@ -32,7 +32,7 @@ export function useConfigCommands({
         const status = await client.createConfig(name, templateId);
         if (status === 201) {
           const kind = templateId && templateId !== 'bare' ? `（模板: ${templateId}）` : '';
-          notifierRef.current.success(`已新建 ${name}${kind}，改完点「保存」才会落盘`);
+          notifierRef.current.success(`已新建 ${name}${kind}，改完点「保存」才会写入文件`);
         } else if (status === 409) {
           notifierRef.current.warn('已经有同名的配置了，直接从上面选它来改');
         } else {
@@ -91,7 +91,7 @@ export function useConfigCommands({
         } else if (result.status === 409) {
           notifierRef.current.warn('配置在编辑期间被其他窗口修改过，未覆盖；请点「重新载入」');
         } else if (result.status === 422) {
-          notifierRef.current.error('保存被拒：配置有问题，未落盘');
+          notifierRef.current.error('保存被拒：配置有问题，文件没有改动');
         } else {
           notifierRef.current.error(`保存失败（HTTP ${result.status}）`);
         }

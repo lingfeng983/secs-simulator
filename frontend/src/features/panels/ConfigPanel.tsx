@@ -205,7 +205,7 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
         setProblems(result.problems);
         setNotice(
           result.status === 422
-            ? '保存被拒：配置有问题，未落盘'
+            ? '保存被拒：配置有问题，文件没有改动'
             : result.status === 409
               ? '保存被拒：配置在编辑期间被其他窗口修改过，未覆盖——点「重新载入」拿到最新内容再改'
               : `保存失败（HTTP ${result.status}）`,
@@ -244,7 +244,7 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
       setProblems([]);
       setNotice(
         newTemplate === 'bare'
-          ? `已新建 ${name}，改完点「保存」才会落盘`
+          ? `已新建 ${name}，改完点「保存」才会写入文件`
           : `已新建 ${name}（内置模板: ${newTemplate}），照着改参数后点「保存」`,
       );
     } finally {
@@ -289,7 +289,7 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
             type="button"
             onClick={() => void onValidate()}
             disabled={configName === '' || busy}
-            title="只校验不落盘：确认改动能不能编译"
+            title="只做校验，不写文件：确认改动能不能编译"
           >
             校验
           </button>
@@ -297,7 +297,7 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
           <button
             type="button"
             onClick={() => importRef.current?.click()}
-            title="从本地 JSON 文件读入草稿（不落盘，仍需校验/保存）"
+            title="从本地 JSON 文件读入草稿（只进编辑器，仍需校验/保存）"
           >
             导入 JSON
           </button>
@@ -315,7 +315,7 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
             className="primary"
             onClick={() => void onSave()}
             disabled={configName === '' || busy}
-            title="校验通过后原子落盘"
+            title="校验通过后整份写回，不会写一半"
           >
             保存
           </button>

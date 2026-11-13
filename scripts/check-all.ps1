@@ -4,8 +4,9 @@
 #   1. mvn -B test                 后端单元/集成测试
 #   2. npm ci                      仅在前端缺 node_modules 时安装
 #   3. npx tsc --noEmit            前端类型检查
-#   4. npm test                    Vitest 单元/组件测试
-#   5. npx playwright test         Mock E2E（需要先装浏览器，见下）
+#   4. check-ui-words.ps1          界面文案门禁（设计 §3.5）
+#   5. npm test                    Vitest 单元/组件测试
+#   6. npx playwright test         Mock E2E（需要先装浏览器，见下）
 #
 # 任一步失败立即以该步的退出码结束，不会带着已知失败继续往下跑。
 param(
@@ -82,6 +83,10 @@ try {
         Write-Host '--- npm ci: skipped（frontend/node_modules 已存在）---'
     }
     Invoke-Step 'npx tsc --noEmit（类型检查）' { & npx tsc --noEmit }
+    # 文案门禁用子进程跑：它自己会 exit 1，直接 & 会把整个门禁会话一起带走。
+    Invoke-Step 'scripts/check-ui-words.ps1（界面文案）' {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/check-ui-words.ps1')
+    }
     Invoke-Step 'npm test（Vitest）' { & npm test }
     if (-not $SkipE2E) {
         Invoke-Step 'npx playwright test（Mock E2E）' { & npx playwright test }

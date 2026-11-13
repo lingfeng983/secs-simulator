@@ -21,7 +21,7 @@ test('工作台端口列只显示数字，不带冒号', async ({ page }) => {
 });
 
 test('配置页不再显示"与磁盘一致"', async ({ page }) => {
-  await page.goto('/#/device/line1/config');
+  await page.goto('/#/device/line1/config/document');
   await expect(page.locator('#panel-config')).toBeVisible();
 
   await expect(page.getByText('与磁盘一致')).toHaveCount(0);
@@ -29,14 +29,13 @@ test('配置页不再显示"与磁盘一致"', async ({ page }) => {
 
 test('设备子页顶部操作条统一：同高、有底、主按钮在最右', async ({ page }) => {
   const cases = [
-    { hash: '#/device/line1/connection', primary: '保存' },
-    { hash: '#/device/line1/structure', primary: '保存' },
-    { hash: '#/device/line1/config', primary: '保存' },
-    { hash: '#/device/line1/send', primary: '发送 SML' },
-    { hash: '#/device/line1/alarms', primary: '置位报警' },
-    { hash: '#/device/line1/ceids', primary: '新增事件' },
-    { hash: '#/device/line1/events', primary: '新增计划' },
-    { hash: '#/device/line1/svids', primary: '新增状态变量' },
+    { hash: '#/device/line1/config/connection', primary: '保存' },
+    { hash: '#/device/line1/config/structure', primary: '保存' },
+    { hash: '#/device/line1/config/document', primary: '保存' },
+    { hash: '#/device/line1/runtime/manual', primary: '发送 SML' },
+    { hash: '#/device/line1/runtime/catalog', primary: '新增事件' },
+    { hash: '#/device/line1/runtime/plans', primary: '新增计划' },
+    { hash: '#/device/line1/runtime/svids', primary: '新增状态变量' },
   ] as const;
 
   for (const item of cases) {
@@ -96,7 +95,7 @@ test('工作台在桌面宽度下没有横向溢出', async ({ page }) => {
 });
 
 test('事件编排的计划显示归属，并按 CEID 的归属过滤', async ({ page }) => {
-  await page.goto('/#/device/line1/events');
+  await page.goto('/#/device/line1/runtime/plans');
 
   const panel = page.locator('#panel-events');
   await expect(panel.locator('th', { hasText: '归属' })).toBeVisible();
@@ -123,7 +122,7 @@ test('导出会弹出保存位置，并在提示里说明存到哪里', async ({
     };
   });
 
-  await page.goto('/#/device/line1/config');
+  await page.goto('/#/device/line1/config/document');
   await page.getByRole('button', { name: '导出 JSON' }).click();
 
   await expect.poll(
@@ -150,7 +149,7 @@ test.describe('窄屏（390px）', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test('设备命令栏换行，页面不横向溢出', async ({ page }) => {
-    for (const hash of ['#/device/line1/config', '#/device/line1/send', '#/device/line1/connection']) {
+    for (const hash of ['#/device/line1/config/document', '#/device/line1/runtime/manual', '#/device/line1/config/connection']) {
       await page.goto(`/${hash}`);
       /* hash 导航是同文档切换：刷新一次，确保量到的是这一页自己的布局 */
       await page.reload();

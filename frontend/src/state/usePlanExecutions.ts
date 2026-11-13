@@ -198,7 +198,7 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
       { header: '错误', value: (row) => row.error },
     ]);
     const result = await saveTextFile('plan-executions.csv', csv, 'text/csv;charset=utf-8');
-    return result.saved ? (saveHint(result) || '已导出台账') : '';
+    return result.saved ? (saveHint(result) || '已导出执行记录') : '';
   }, [visible]);
 
   return {

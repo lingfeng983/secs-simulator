@@ -6,7 +6,7 @@ import { SmlResult } from '../../../shared/ui/SmlResult';
 import { VariableChart } from '../../charts/VariableChart';
 import type { PanelBaseProps } from '../types';
 import type { HostPage, HostZone } from '../../../app/router';
-import { HOST_PRESETS, PRESET_GROUPS } from './HostSimMessagesPanel';
+import { HOST_PRESETS, PRESET_GROUPS } from './hostPresets';
 import type { HostsV2State } from '../../../state/useHostsV2';
 import type { ApiClient, PreviewSeries, SentMessageResult } from '../../../api';
 
@@ -23,6 +23,7 @@ export function HostDetailPanels({
   hosts,
   goTo,
   client,
+  messages,
 }: {
   hostId: string;
   zone: HostZone;
@@ -31,6 +32,8 @@ export function HostDetailPanels({
   goTo?: (id: string) => void;
   /** 由页面经 PanelBaseProps.backend.client 正常传入，不做模块级注入。 */
   client: ApiClient | null;
+  /** 报文缓冲（App 的 SSE 合流），收发记录页只用本主机的那部分。 */
+  messages?: PanelBaseProps['messages'];
 }): JSX.Element {
   const base = { hosts, goTo, hostId, client };
   if (zone === 'config') {
@@ -59,7 +62,7 @@ export function HostDetailPanels({
     case 'collect':
       return <HostCollectPanel {...base} />;
     case 'monitor':
-      return <HostMonitorPanel {...base} />;
+      return <HostMonitorPanel {...base} messages={messages} />;
     case 'manual':
       return <HostManualPanel {...base} />;
     default:

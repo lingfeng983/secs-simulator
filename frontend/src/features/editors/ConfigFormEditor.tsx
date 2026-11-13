@@ -307,7 +307,7 @@ function TimeoutFields({ session, set }: { session: JsonObject; set: (key: strin
   const fields: ReadonlyArray<{ key: string; label: string; help: string }> = [
     { key: 't3', label: 'T3 回复', help: '发出 W 位报文后等回复的上限；超时记为失败。' },
     { key: 't5', label: 'T5 重连', help: '连接断开后再次尝试建连的间隔。' },
-    { key: 't6', label: 'T6 事务', help: '控制事务（Sx+Fy 多段交互）的整体超时。' },
+    { key: 't6', label: 'T6 多段交互', help: '一次多段交互（Sx+Fy 带多个数据块）从第一块到收尾的整体上限。' },
     { key: 't7', label: 'T7 选择', help: '连接建立后等待 Select/控制状态切换的超时。' },
     { key: 't8', label: 'T8 字符间', help: '单条报文内相邻字节允许的最大间隔。' },
   ];

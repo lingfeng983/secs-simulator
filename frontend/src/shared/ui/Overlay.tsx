@@ -37,6 +37,12 @@ export function Overlay({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        /* 浮层统一在这里响应 Esc：快捷键表、命令面板之外的浮层以前都没接 */
+        event.stopPropagation();
+        onClose();
+        return;
+      }
       if (event.key !== 'Tab') {
         return;
       }

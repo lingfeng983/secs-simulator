@@ -34,10 +34,12 @@ interface ReportRow {
  * 已设置的事件里选 CEID 做计划。压测上报也在这里——它测的就是某个
  * 事件定义。运行时改动不写回配置,重载会话后失效。</p>
  */
-export function CeidPanel({ backend, notifier, mode = 'events' }: PanelBaseProps & { mode?: 'events' | 'reports' }): JSX.Element {
+export function CeidPanel({ backend, notifier, mode = 'events' }: PanelBaseProps & { mode?: 'events' | 'reports' | 'both' }): JSX.Element {
   const { catalog, activeSession } = backend;
-  const showEvents = mode === 'events';
-  const showReports = mode === 'reports';
+  /** both = 一页两表（3.0 的「事件与报告」）：默认停在事件，报告一键切过去。 */
+  const [pane, setPane] = useState<'events' | 'reports'>('events');
+  const showEvents = mode === 'both' ? pane === 'events' : mode === 'events';
+  const showReports = mode === 'both' ? pane === 'reports' : mode === 'reports';
 
   const [ceidEditorOpen, setCeidEditorOpen] = useState(false);
   const [editingCeid, setEditingCeid] = useState<number | null>(null);
@@ -222,11 +224,13 @@ export function CeidPanel({ backend, notifier, mode = 'events' }: PanelBaseProps
   return (
     <Panel
       id={showEvents ? 'panel-ceids' : 'panel-reports'}
-      title={showEvents ? '事件' : '报告'}
+      title={mode === 'both' ? '事件与报告' : showEvents ? '事件' : '报告'}
       description={
-        showEvents
-          ? '定义采集事件(CEID)及它携带的报告;「事件编排」页从这里选事件做计划。'
-          : '定义报告(RPTID)包含哪些 SVID;事件通过 RPTID 携带变量。'
+        mode === 'both'
+          ? '事件的增删改查与它携带的报告;压测上报按某个事件循环上报。运行时改动不写回配置,重载后失效。'
+          : showEvents
+            ? '定义采集事件(CEID)及它携带的报告;「事件编排」页从这里选事件做计划。'
+            : '定义报告(RPTID)包含哪些 SVID;事件通过 RPTID 携带变量。'
       }
       actions={
         <button
@@ -240,6 +244,28 @@ export function CeidPanel({ backend, notifier, mode = 'events' }: PanelBaseProps
         </button>
       }
     >
+      {mode === 'both' && (
+        <div className="segmented" role="tablist" aria-label="事件 / 报告">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === 'events'}
+            className={pane === 'events' ? 'active' : ''}
+            onClick={() => setPane('events')}
+          >
+            事件（{ceidRows.length}）
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === 'reports'}
+            className={pane === 'reports' ? 'active' : ''}
+            onClick={() => setPane('reports')}
+          >
+            报告（{reportRows.length}）
+          </button>
+        </div>
+      )}
       {showEvents && (
         <>
       <DataTable

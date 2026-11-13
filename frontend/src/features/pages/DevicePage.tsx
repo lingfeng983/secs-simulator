@@ -28,7 +28,7 @@ export const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
   structure: '该设备的结构:设备名/单元/SVID 属性与曲线、组合、实例模板。',
   document: '该设备的配置原文:只保留 JSON 全覆盖编辑,保存逐字节写回。',
   constants: '设备常量(ECV):主机用 S2F13/F14 查询、S2F15/F16 写入的调机参数。',
-  revisions: '配置版本历史:每次保存留一份快照,可对比与回滚。',
+  revisions: '配置版本历史:每次保存留一个版本,可对比与回滚。',
   status: '当前运行的实时状态:链路相位、控制状态与计数。',
   plans: '该设备的事件编排:引用已设置的事件做计划(增删改/启停/触发)与实时上报。',
   catalog: '该设备的事件与报告:运行时临时增删改 CEID/RPTID,手动触发上报。',
@@ -193,7 +193,7 @@ export function DevicePage({
             </section>
           </div>
         )}
-        {zone === 'runtime' && page === 'catalog' && <CeidPanel key={sessionId} {...baseProps} mode="events" />}
+        {zone === 'runtime' && page === 'catalog' && <CeidPanel key={sessionId} {...baseProps} mode="both" />}
         {zone === 'runtime' && page === 'svids' && <SvidPanel key={sessionId} {...baseProps} />}
         {zone === 'runtime' && page === 'messages' && <MessagePanel key={sessionId} {...baseProps} />}
         {zone === 'runtime' && page === 'manual' && (
@@ -360,11 +360,14 @@ function DeviceRevisionsPanel({
       </div>
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {revisions.length === 0 && error === '' ? (
-        <p className="hint">还没有版本记录;在「配置原文」保存一次就会留一份快照(每设备保留最近 200 版)。</p>
+        <p className="hint">还没有版本记录;在「配置原文」保存一次就会留一个版本(每设备保留最近 200 版)。</p>
       ) : (
         <table className="effects-table">
           <thead>
-            <tr><th>版本</th><th>时间</th><th>操作者</th><th>备注</th><th>SHA-256</th></tr>
+            <tr>
+              <th>版本</th><th>时间</th><th>操作者</th><th>备注</th>
+              <th title="这次保存内容的校验值：两次保存的值相同，说明文件逐字节一致">校验值</th>
+            </tr>
           </thead>
           <tbody>
             {revisions.map((revision) => (

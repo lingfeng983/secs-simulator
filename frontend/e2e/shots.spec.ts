@@ -10,20 +10,25 @@ import { mockApi } from './fixtures';
 
 const VIEWS = [
   { name: 'workbench', hash: '#/workbench' },
-  { name: 'device-ceids', hash: '#/device/line1/ceids' },
-  { name: 'device-events', hash: '#/device/line1/events' },
-  { name: 'device-alarms', hash: '#/device/line1/alarms' },
-  { name: 'device-svids', hash: '#/device/line1/svids' },
-  { name: 'device-connection', hash: '#/device/line1/connection' },
-  { name: 'device-structure', hash: '#/device/line1/structure' },
-  { name: 'device-config', hash: '#/device/line1/config' },
-  { name: 'device-send', hash: '#/device/line1/send' },
-  { name: 'device-messages', hash: '#/device/line1/messages' },
-  { name: 'device-hostsim', hash: '#/device/line1/hostsim' },
+  { name: 'device-status', hash: '#/device/line1/runtime/status' },
+  { name: 'device-plans', hash: '#/device/line1/runtime/plans' },
+  { name: 'device-catalog', hash: '#/device/line1/runtime/catalog' },
+  { name: 'device-svids', hash: '#/device/line1/runtime/svids' },
+  { name: 'device-messages', hash: '#/device/line1/runtime/messages' },
+  { name: 'device-manual', hash: '#/device/line1/runtime/manual' },
+  { name: 'device-overview', hash: '#/device/line1/config/overview' },
+  { name: 'device-connection', hash: '#/device/line1/config/connection' },
+  { name: 'device-structure', hash: '#/device/line1/config/structure' },
+  { name: 'device-document', hash: '#/device/line1/config/document' },
+  { name: 'device-constants', hash: '#/device/line1/config/constants' },
+  { name: 'device-revisions', hash: '#/device/line1/config/revisions' },
+  { name: 'hosts', hash: '#/hosts' },
+  { name: 'host-overview', hash: '#/hosts/host-1/config/overview' },
+  { name: 'host-trace', hash: '#/hosts/host-1/runtime/trace' },
+  { name: 'host-monitor', hash: '#/hosts/host-1/runtime/monitor' },
+  { name: 'host-templates', hash: '#/host-templates' },
+  { name: 'templates', hash: '#/templates' },
   { name: 'audit', hash: '#/system/audit' },
-  { name: 'hostsim-hosts', hash: '#/hostsim/hosts' },
-  { name: 'hostsim-fdc', hash: '#/hostsim/fdc' },
-  { name: 'hostsim-collect', hash: '#/hostsim/collect' },
 ] as const;
 
 test.skip(!process.env.SHOTS, '视觉取样只在 SHOTS=1 时运行');
@@ -84,7 +89,7 @@ for (const theme of ['light', 'dark'] as const) {
 test.describe('mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  for (const view of ['workbench', 'device-ceids', 'device-svids'] as const) {
+  for (const view of ['workbench', 'device-catalog', 'device-svids', 'hosts'] as const) {
     const target = VIEWS.find((item) => item.name === view);
     test(`mobile ${view}`, async ({ page }) => {
       await page.goto(`/${target?.hash}`);

@@ -76,13 +76,13 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 
 ## 2. M3 遗留（设计 §3 未完全落地项）
 
-- [ ] **e2e 用例按 3.0 IA 重写**：`frontend/e2e/app.spec.ts` / `fixtures.ts` 仍引用旧结构（`.nav-group` 文案「设备」、设备扁平子页签、`#/hostsim/*`）；mockApi 缺 `/api/v2/*`。本地不跑 Playwright，但 CI（`check-all.ps1`）会跑。
-- [ ] **文案清理门禁**：`scripts/check-ui-words.ps1`（设计 §3.5：技术词按词边界 + 白名单）并挂进 `check-all.ps1`；同步清理前端字符串里的实现词（`hostId`、`logs/messages.jsonl`、接口路径等）。
+- [x] **e2e 用例按 3.0 IA 重写**：`frontend/e2e/fixtures.ts` 改为「可变状态假后端」（sessions/hosts/templates 可增删改，`calls`/`queries` 记调用与查询串，`mockApi()` 统一去掉 `showSaveFilePicker` 让导出走下载回退）；新增 `device.spec.ts`（21 例，设备域 12 页全覆盖）、`host.spec.ts`（20 例，主机域列表 + 详情 11 页 + 新建→连接→发送→采集→断开→删除整链）；重写 `app.spec.ts`（28 例，三组侧栏/设备树/筛选/批量/命令面板/主题密度/快捷键/连接设置/模板页/审计）。全量 **83 passed / 48 skipped**（截图用例需 `SHOTS=1`）。过程中修掉 4 个真实缺陷：`Overlay` 不响应 Esc（快捷键表关不掉）、`DeviceOpsPanel`「全选」永远禁用、设备「事件与报告」页缺报告表入口（`CeidPanel` 补 `both` 模式）、主机「收发记录」页拿不到报文缓冲。
+- [x] **文案清理门禁**：`scripts/check-ui-words.ps1` 已落地并挂进 `check-all.ps1`（tsc 之后、Vitest 之前）。不只看字面量：剔除注释/import、剥掉 `${...}` 拼出的 key/路由/选择器（`host-zone:${hostId}:${next}` 这类不再误报）、中文按词匹配 + 白名单（列表/表格/报表/图表/仪表/表达 放行）、英文按词边界且大小写敏感（`?sql=` 不会命中 `SQL`）、.tsx 才做 JSX 文本、顺带扫 `docs/design/frontend-panel.html`。清理了 25 处真实命中：`落盘`→写入文件、`台账`→执行记录、`快照`→版本、`T6 事务`→T6 多段交互、报警页的 `logs/messages.jsonl` 说明、版本历史表头 `SHA-256`→`校验值`。当前 **99 文件 / 5481 段文案全绿**；已用探针验证「注入 `数据表` / `SQLite` / `hostId` 会 exit 1 并给出文件:行号」。
 - [x] **HostDetailPanels 的 API 客户端注入是模块级 hack**（`setHostDetailClient`）：改为经 `PanelBaseProps` 正常传参，删除注入器。客户端由 `HostDetailPage` 用 `backend.client` 逐层下传；`requireClient` 在异步发送里兜底为空态；顺带修掉 `client ?? useHostsClient()` 的条件式伪 Hook。
 - [x] 主机详情·数据采集页：曲线视图补齐（复用 `VariableChart`，按样本 epoch 时间轴画每个 SVID）。
 - [ ] 主机详情·Trace 设置 / 采集设置（配置区）与运行区同名页当前复用同一实现（`readOnly` 只藏了发送按钮）；按设计拆「保存到设置」语义。
 - [ ] 设备·配置区「值模板」页未单列（曲线/组合/实例目前在「结构」页内）；按设计 §3.3.1 决定是否拆页。
-- [ ] v1 面板死代码收敛：`useHostSims`、`HostSimHostsPanel`、`HostSimFdcPanel`、`HostSimCollectPanel`、`HostSimMessagesPanel`、`HostSimMonitorPanel`、`HostTargetPicker`、`SvidCheckList` 已无页面挂载（仅 `HOST_PRESETS` 等被导出复用）——删除或标记过渡。
+- [x] v1 面板死代码收敛：删除 `useHostSims`、`HostSimHostsPanel`、`HostSimFdcPanel`、`HostSimCollectPanel`（连同其 `parseSvidList` 单测）、`HostSimMessagesPanel`、`HostSimMonitorPanel`、`HostTargetPicker`；`HOST_PRESETS` / `PRESET_GROUPS` / `HostPreset` 搬到新文件 `hostsim/hostPresets.ts`（主机「报文模板」「消息发送」两页仍在用）。`SvidCheckList` **保留**——它仍被设备「结构」页的 SVID 勾选列表使用（原清单把这条写错了）。tsc 与 Vitest 130 项全绿。
 - [ ] v1 端点语义收口（设计 §2.5 兼容表）：`DELETE /api/v1/sessions/{id}` 目前仍是「移除」；设计期望转 `disconnect` + Deprecation 头。M3 前端已不在用 v1 关闭流程，可安全切换（需同步改 v1 测试）。
 - [x] `frontend/e2e` 之外，检查 `frontend/src/**` 是否还有引用已删除 `HostSimPage` 的残留：已全量 grep `frontend/src` 与 `frontend/e2e`，无残留。
 - [ ] v1 端点语义收口的**依赖说明**：设计 §2.5 的 `DELETE /api/v1/sessions/{id}` → `link/disconnect` 需要设备侧 v2 断开能力（§3 M2 第 4 项），当前 `context.closeSession` 仍是「关闭并移除」。建议与 M2 一起做，避免先加废弃头却保留移除语义。
