@@ -36,6 +36,7 @@ import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
+import com.shimizukenta.secssim.core.event.PlanAction;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.template.Expression;
 import com.shimizukenta.secssim.core.template.ExpressionException;
@@ -466,6 +467,17 @@ public final class SessionConfigJson {
             if (!plan.effects().isEmpty()) {
                 planPairs.add(b.pair("effects", effectsJson(plan.effects(), b)));
             }
+            /* 3.0 需求 5：动作与策略按原样回写，配置保存往返不丢字段。
+               全缺省的计划不写这些键，保证 v4/v5/v6 旧配置零改动。 */
+            if (plan.hasCustomActions()) {
+                planPairs.add(b.pair("actions", actionsJson(plan.actions(), b)));
+            }
+            if (!EventPlan.OFFLINE_SKIP.equals(plan.offlinePolicy())) {
+                planPairs.add(b.pair("offlinePolicy", plan.offlinePolicy()));
+            }
+            if (!EventPlan.FAILURE_KEEP.equals(plan.onSendFailure())) {
+                planPairs.add(b.pair("onSendFailure", plan.onSendFailure()));
+            }
             plans.add(b.object(planPairs));
         }
 
@@ -477,6 +489,36 @@ public final class SessionConfigJson {
         pairs.add(b.pair("s6f1Wbit", config.s6f1Wbit()));
 
         return b.object(pairs);
+    }
+
+    /** 计划动作数组（kind/stream/function/wbit/sml/params，全可选的键不写）。 */
+    private static JsonHub actionsJson(List<PlanAction> actions, JsonHubBuilder b) {
+        List<JsonHub> items = new ArrayList<>(actions.size());
+        for (PlanAction action : actions) {
+            List<JsonObjectPair> pairs = new ArrayList<>();
+            pairs.add(b.pair("kind", action.kind()));
+            if (action.stream() != null) {
+                pairs.add(b.pair("stream", action.stream()));
+            }
+            if (action.function() != null) {
+                pairs.add(b.pair("function", action.function()));
+            }
+            if (action.wbit() != null) {
+                pairs.add(b.pair("wbit", action.wbit()));
+            }
+            if (action.sml() != null) {
+                pairs.add(b.pair("sml", action.sml()));
+            }
+            if (!action.params().isEmpty()) {
+                List<JsonObjectPair> params = new ArrayList<>();
+                for (Map.Entry<String, String> entry : action.params().entrySet()) {
+                    params.add(b.pair(entry.getKey(), entry.getValue()));
+                }
+                pairs.add(b.pair("params", b.object(params)));
+            }
+            items.add(b.object(pairs));
+        }
+        return b.array(items);
     }
 
     private static JsonHub effectsJson(List<EventEffect> effects, JsonHubBuilder b) {
@@ -829,15 +871,79 @@ public final class SessionConfigJson {
             String itemPath = path + ".plans[" + i + "]";
             JsonHub item = items.get(i);
 
-            plans.add(new EventPlan(
-                    JsonAccess.string(item, "id", itemPath),
-                    JsonAccess.integer(item, "ceid", itemPath),
-                    parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger"),
-                    parseEffects(item, itemPath)));
+            String offlinePolicy = JsonAccess.optionalString(item, "offlinePolicy", itemPath)
+                    .orElse(EventPlan.OFFLINE_SKIP);
+            if (!List.of(EventPlan.OFFLINE_SKIP, EventPlan.OFFLINE_QUEUE,
+                    EventPlan.OFFLINE_FAIL).contains(offlinePolicy)) {
+                throw new ConfigException(itemPath + ".offlinePolicy",
+                        "未知离线策略: " + offlinePolicy + "（可选 skip / queue / fail）");
+            }
+            String onSendFailure = JsonAccess.optionalString(item, "onSendFailure", itemPath)
+                    .orElse(EventPlan.FAILURE_KEEP);
+            if (!List.of(EventPlan.FAILURE_KEEP, EventPlan.FAILURE_ROLLBACK).contains(onSendFailure)) {
+                throw new ConfigException(itemPath + ".onSendFailure",
+                        "未知发送失败策略: " + onSendFailure + "（可选 keep / rollback）");
+            }
+            try {
+                plans.add(new EventPlan(
+                        JsonAccess.string(item, "id", itemPath),
+                        JsonAccess.integer(item, "ceid", itemPath),
+                        parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger"),
+                        parseEffects(item, itemPath),
+                        parseActions(item, itemPath),
+                        offlinePolicy, onSendFailure));
+            } catch (IllegalArgumentException e) {
+                throw new ConfigException(itemPath, e.getMessage());
+            }
         }
 
         validateChains(plans, path);
         return new EventSchedule(plans);
+    }
+
+    /**
+     * 解析计划动作数组（schema v7 / 3.0 需求 5，可选）。
+     *
+     * <p>缺省 = 一条默认 S6F11，保证旧配置行为不变；字段完整性（kind=sml
+     * 要 sml 原文）由 {@link PlanAction} 的构造器把关。</p>
+     */
+    private static List<PlanAction> parseActions(JsonHub item, String itemPath) {
+        if (!item.containsKey("actions")) {
+            return List.of();
+        }
+        String path = itemPath + ".actions";
+        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(item, "actions", itemPath), path);
+        List<PlanAction> actions = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            String at = path + "[" + i + "]";
+            JsonHub action = items.get(i);
+            OptionalInt stream = JsonAccess.optionalInt(action, "stream", at);
+            OptionalInt function = JsonAccess.optionalInt(action, "function", at);
+            Boolean wbit = action.containsKey("wbit")
+                    ? JsonAccess.bool(action, "wbit", false, at) : null;
+            Map<String, String> params = new LinkedHashMap<>();
+            if (action.containsKey("params")) {
+                JsonHub paramsJson = JsonAccess.object(action, "params", at + ".params");
+                for (JsonString key : paramsJson.keySet()) {
+                    String name = key.unescaped();
+                    String value = paramsJson.get(name).optionalString().orElseThrow(
+                            () -> new ConfigException(at + ".params." + name, "应为字符串"));
+                    params.put(name, value);
+                }
+            }
+            try {
+                actions.add(new PlanAction(
+                        JsonAccess.optionalString(action, "kind", at).orElse(PlanAction.KIND_S6F11),
+                        stream.isPresent() ? stream.getAsInt() : null,
+                        function.isPresent() ? function.getAsInt() : null,
+                        wbit,
+                        JsonAccess.optionalString(action, "sml", at).orElse(null),
+                        params));
+            } catch (IllegalArgumentException e) {
+                throw new ConfigException(at, e.getMessage());
+            }
+        }
+        return actions;
     }
 
     /**

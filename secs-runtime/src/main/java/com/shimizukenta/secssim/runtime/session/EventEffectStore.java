@@ -3,6 +3,7 @@ package com.shimizukenta.secssim.runtime.session;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,29 +28,84 @@ public final class EventEffectStore {
 
     private final Map<Integer, Deque<Applied>> applied = new ConcurrentHashMap<>();
 
+    /** 每个 SVID 的「触碰次数」：回滚用它判断本次之后有没有别的 fire 改过同一个 SVID。 */
+    private final Map<Integer, Long> versions = new ConcurrentHashMap<>();
+
     /** 一条已施加效果。 */
     public record Applied(long tAppliedMs, EventEffect effect) {
     }
 
     /**
-     * 施加一个效果。
+     * 施加一个效果（2.x 起就有的入口，返回类型保持 void 以兼容既有调用）。
      *
      * @param svid      目标 SVID
      * @param effect    效果
      * @param tNowMs    施加时刻（引擎时钟毫秒）
      */
     public void apply(int svid, EventEffect effect, long tNowMs) {
+        this.applyTracked(svid, effect, tNowMs);
+    }
+
+    /**
+     * 施加一个效果并返回条目句柄（供 3.0 执行器的发送失败回滚按引用摘除）。
+     *
+     * @param svid      目标 SVID
+     * @param effect    效果
+     * @param tNowMs    施加时刻（引擎时钟毫秒）
+     * @return 句柄；RESUME 清空队列时返回 {@code null}
+     */
+    public Applied applyTracked(int svid, EventEffect effect, long tNowMs) {
         Deque<Applied> queue = this.applied.computeIfAbsent(svid, key -> new ArrayDeque<>());
+        this.versions.merge(svid, 1L, Long::sum);
         synchronized (queue) {
             if (effect.op() == EventEffect.Op.RESUME) {
                 queue.clear();
-                return;
+                return null;
             }
-            queue.addLast(new Applied(tNowMs, effect));
+            Applied entry = new Applied(tNowMs, effect);
+            queue.addLast(entry);
             while (queue.size() > MAX_PER_SVID) {
                 queue.pollFirst();
             }
+            return entry;
         }
+    }
+
+    /** @return 该 SVID 自启动以来被施加效果的次数（回滚的代际快照） */
+    public long version(int svid) {
+        return this.versions.getOrDefault(svid, 0L);
+    }
+
+    /**
+     * 仅当「此后没有其它 fire 触碰过该 SVID」时按引用摘除本次施加的条目。
+     *
+     * <p>与设计 §2.7.2 的边界一致：撤销只针对本次的 set/add，且不能影响
+     * 别的计划/触发留下的效果。撤销本身也算一次触碰，防止重复回滚。</p>
+     *
+     * @param svid            目标 SVID
+     * @param handle          {@link #apply} 返回的句柄
+     * @param versionAtApply  施加前的 {@link #version(int)} 快照
+     * @return 已撤销返回 true；被别的 fire 触碰过或条目已被挤出返回 false
+     */
+    public boolean removeIfUntouched(int svid, Applied handle, long versionAtApply) {
+        if (handle == null || this.version(svid) != versionAtApply) {
+            return false;
+        }
+        Deque<Applied> queue = this.applied.get(svid);
+        if (queue == null) {
+            return false;
+        }
+        synchronized (queue) {
+            Iterator<Applied> iterator = queue.iterator();
+            while (iterator.hasNext()) {
+                if (iterator.next() == handle) {
+                    iterator.remove();
+                    this.versions.merge(svid, 1L, Long::sum);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

@@ -1,9 +1,14 @@
 package com.shimizukenta.secssim.app.session;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+
+import com.shimizukenta.secssim.app.log.Log;
 
 /**
  * 会话注册表。
@@ -16,8 +21,25 @@ public final class SessionManager {
 
     private final ConcurrentMap<String, SessionRuntime> sessions = new ConcurrentHashMap<>();
 
+    /** 注册观察者：启动装配用它给每个新会话挂执行器（3.0 M4）。 */
+    private final CopyOnWriteArrayList<Consumer<SessionRuntime>> registerObservers =
+            new CopyOnWriteArrayList<>();
+
     /** 关闭后不再接受注册（见 {@link #closeAll()}）。 */
     private volatile boolean closed;
+
+    /**
+     * 加一个注册观察者。
+     *
+     * <p>只监听<b>新注册</b>的会话；已存在的会话请直接遍历 {@link #list()}。
+     * 观察者异常不会回滚注册——会话已经在表里，回滚会造成"表里有会话、
+     * 创建方以为失败"的端口泄漏，只记日志。</p>
+     *
+     * @param observer 观察者
+     */
+    public void onRegister(Consumer<SessionRuntime> observer) {
+        this.registerObservers.add(Objects.requireNonNull(observer, "observer"));
+    }
 
     /**
      * 注册会话。
@@ -33,6 +55,13 @@ public final class SessionManager {
             SessionRuntime previous = this.sessions.putIfAbsent(runtime.id(), runtime);
             if (previous != null) {
                 throw new IllegalArgumentException("session already registered: " + runtime.id());
+            }
+        }
+        for (Consumer<SessionRuntime> observer : this.registerObservers) {
+            try {
+                observer.accept(runtime);
+            } catch (RuntimeException e) {
+                Log.error("会话注册观察者失败（会话已注册）: " + runtime.id(), e);
             }
         }
     }

@@ -5,6 +5,7 @@ import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { Modal } from '../../shared/ui/Modal';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
 import { EventPreview } from '../charts/EventPreview';
+import { PlanExecutionTimeline } from './PlanExecutionTimeline';
 import type { PreviewData } from '../../api';
 import type { PanelBaseProps } from './types';
 import { saveHint } from '../../shared/lib/saveFile';
@@ -56,7 +57,7 @@ const EMPTY_PLAN: EventPlanInput = {
  * (含效果)、启停、手动触发。这些改的是<b>运行时状态</b>,不写回配置;
  * 重载会话后按配置恢复。</p>
  */
-export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
+export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): JSX.Element {
   const { eventPlans, catalog, activeSession } = backend;
   const enabled = eventPlans.filter((plan) => plan.enabled).length;
 
@@ -309,6 +310,15 @@ export function EventsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
           { header: '状态', value: (row) => (row.enabled ? '启用' : '禁用') },
         ]}
       />
+
+      {/* 3.0 M4：执行时间轴（计划卡 + 台账明细 + SVID 变化与事件竖线） */}
+      <PlanExecutionTimeline
+        deviceId={activeSession}
+        plans={eventPlans}
+        liveEvents={liveEvents}
+        notifier={notifier}
+      />
+
       {/* 单计划预览：只回放这一条计划，效果归属清楚 */}
       {planPreview !== null && (
         <section className="panel-section block">

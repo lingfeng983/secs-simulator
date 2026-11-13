@@ -374,7 +374,7 @@ public final class HttpApiServer {
         http.createContext(ApiPaths.HOSTS_V2, withCors(this.hostSims::handleHostsV2));
         http.createContext(ApiPaths.HOST_V2_PREFIX, withCors(this.hostSims::handleHostV2Path));
         http.createContext(ApiPaths.HOST_TEMPLATES_V2, withCors(this.hostSims::handleHostTemplatesV2));
-        http.createContext(ApiPaths.DEVICE_REVISIONS_V2, withCors(this.configs::handleConfigRevisionsV2));
+        http.createContext(ApiPaths.DEVICE_V2_PREFIX, withCors(this.configs::handleDeviceV2));
         http.createContext(ApiPaths.HOST_TEMPLATE_V2_PREFIX, withCors(this.hostSims::handleHostTemplateV2Path));
 
         if (this.webRoot != null) {

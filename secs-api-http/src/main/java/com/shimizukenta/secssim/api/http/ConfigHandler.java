@@ -3,6 +3,8 @@ package com.shimizukenta.secssim.api.http;
 import java.io.IOException;
 import com.shimizukenta.secssim.app.log.Log;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.sun.net.httpserver.HttpExchange;
@@ -315,6 +317,132 @@ final class ConfigHandler extends HttpSupport {
         return rest;
     }
 
+
+    /**
+     * v2 设备域总入口（{@code /api/v2/devices/} 前缀）。
+     *
+     * <p>版本历史与运行态台账共用一个 HttpServer 上下文，按路径第二段分派：
+     * {@code config/**} 走原有版本历史，{@code runtime/**} 走 M4 的执行台账、
+     * 单步试跑与启用态。注册两个同前缀的上下文会被 HttpServer 按注册顺序吞掉，
+     * 所以分发只能放在同一个 handler 里。</p>
+     */
+    void handleDeviceV2(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+        if (!path.startsWith(ApiPaths.DEVICE_V2_PREFIX)) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        String rest = path.substring(ApiPaths.DEVICE_V2_PREFIX.length());
+        String[] parts = rest.split("/");
+        if (parts.length >= 3 && "runtime".equals(parts[1]) && !parts[0].isBlank()) {
+            if (parts.length == 3 && "executions".equals(parts[2])) {
+                this.handleExecutionsV2(ex, parts[0]);
+                return;
+            }
+            if (parts.length == 5 && "plans".equals(parts[2]) && !parts[3].isBlank()) {
+                if ("step".equals(parts[4])) {
+                    this.handleStepV2(ex, parts[0], parts[3]);
+                    return;
+                }
+                if ("enabled".equals(parts[4])) {
+                    this.handleEnabledV2(ex, parts[0], parts[3]);
+                    return;
+                }
+            }
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        this.handleConfigRevisionsV2(ex);
+    }
+
+    /** GET /api/v2/devices/{id}/runtime/executions：执行台账（缺省不含试跑）。 */
+    private void handleExecutionsV2(HttpExchange ex, String deviceId) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+        int limit = 50;
+        Integer requested = intParam(query, "limit");
+        if (requested != null) {
+            limit = requested;
+        }
+        if (limit < 1 || limit > 500) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+        String json = this.context.planExecutionsV2(deviceId, limit,
+                query.get("planId"), query.get("status"), query.get("dryRun"));
+        if (json == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            return;
+        }
+        audit(ex, "plan-executions", deviceId, "limit=" + limit);
+        respond(ex, 200, json);
+    }
+
+    /** POST /api/v2/devices/{id}/runtime/plans/{planId}/step：单步试跑。 */
+    private void handleStepV2(HttpExchange ex, String deviceId, String planId) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        TriggerOutcome outcome = this.context.stepPlanV2(deviceId, planId);
+        audit(ex, "plan-step", deviceId, "plan=" + planId + " outcome=" + outcome);
+        switch (outcome) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"planId\":\"" + json(planId) + "\"}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
+            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"plan-step-failed\"}");
+        }
+    }
+
+    /** POST/PUT /api/v2/devices/{id}/runtime/plans/{planId}/enabled：持久化启停。 */
+    private void handleEnabledV2(HttpExchange ex, String deviceId, String planId) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        if (!"POST".equals(method) && !"PUT".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+        boolean enabled = !"false".equalsIgnoreCase(query.get("enabled"));
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        if (!body.isBlank()) {
+            try {
+                JsonHub root = JsonHub.fromJson(body);
+                if (root.isObject() && root.containsKey("enabled")) {
+                    enabled = root.get("enabled").optionalBoolean().orElse(enabled);
+                } else if (!root.isObject()) {
+                    throw new IllegalArgumentException("expected object");
+                }
+            } catch (RuntimeException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+        }
+        SessionOutcome outcome = this.context.setPlanEnabledV2(deviceId, planId, enabled);
+        audit(ex, "plan-enabled", deviceId, "plan=" + planId + " enabled=" + enabled
+                + " outcome=" + outcome);
+        switch (outcome) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"planId\":\"" + json(planId)
+                    + "\",\"enabled\":" + enabled + "}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            default -> respond(ex, 400, "{\"ok\":false,\"error\":\"plan-not-found\"}");
+        }
+    }
 
     /**
      * v2:设备配置版本历史(GET /api/v2/devices/{name}/config/revisions)。

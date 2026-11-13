@@ -93,6 +93,37 @@ class HostAndExecutionStoreTest {
         }
     }
 
+    /**
+     * fire 计数与台账共用一条异步队列：批内按 (deviceId, planId) 聚合后一次 upsert，
+     * 发送线程既不 INSERT 台账也不抢写锁。
+     */
+    @Test
+    void fireRecordsAreAggregatedInTheSameBatchAsLedger() throws Exception {
+        try (Db db = Db.open(this.workDir);
+             PlanExecutionRepository repo = new PlanExecutionRepository(db)) {
+            long now = System.currentTimeMillis();
+            repo.append(new PlanExecutionRepository.Execution(
+                    "devF", "pf", 2001, "devF|pf|" + now, false, now, now, "SENT", "[]", "[]", ""));
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devF", "pf", true, ""));
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devF", "pf", true, ""));
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devF", "pf", false, "对端超时"));
+
+            for (int waited = 0; waited < 30
+                    && repo.query("devF", null, null, true, 10).isEmpty(); waited++) {
+                Thread.sleep(50);
+            }
+
+            assertEquals(1, repo.query("devF", null, null, true, 10).size());
+            List<RuntimeStateRepository.PlanStateRow> states =
+                    new RuntimeStateRepository(db).planStates("devF");
+            assertEquals(1, states.size(), "三条 fire 只产生一行运行态");
+            assertEquals(3, states.get(0).fireCount(), "按批聚合累加");
+            assertEquals(1, states.get(0).skippedCount(), "失败的一次计入 skipped");
+            assertEquals("对端超时", states.get(0).lastError());
+            assertTrue(states.get(0).lastFireAt() != null && states.get(0).lastFireAt() > 0);
+        }
+    }
+
     @Test
     void linkEventsAndOrphanCleanup() {
         try (Db db = Db.open(this.workDir)) {

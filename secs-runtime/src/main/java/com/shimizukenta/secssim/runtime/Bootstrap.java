@@ -29,6 +29,8 @@ import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
+import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
+import com.shimizukenta.secssim.runtime.session.PlanExecutor;
 import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
 import com.shimizukenta.secssim.runtime.store.ConfigProjector;
 import com.shimizukenta.secssim.app.session.SessionState;
@@ -165,10 +167,29 @@ public final class Bootstrap {
         HostSimRegistry hostRegistry = new HostSimRegistry(sessions, bus, hostRepo, linkState);
         hostRegistry.loadPersisted();
 
+        /*
+         * 3.0 M4（设计 §2.7.2）：会话一注册就接编排执行器。
+         * 注册观察者覆盖 CLI 启动、接口创建与重载重建的全部路径——
+         * 在 SessionLauncher 里逐条挂总会漏掉重建/回滚恢复出来的那个会话。
+         * 台账与触发计数都只进内存队列，由 plan-execution-writer 批量落库。
+         */
+        PlanFiredThrottle planFired = new PlanFiredThrottle(notices);
+        sessions.onRegister(runtime -> {
+            if (!(runtime instanceof HsmsSessionRuntime hsms)) {
+                return;
+            }
+            /* 台账归属用 config.db 的 ULID，不是 v1 的 legacy stem（设计 §2.5） */
+            String deviceId = configRepo.findDevice(runtime.id())
+                    .map(ConfigRepository.DeviceView::id).orElse(runtime.id());
+            hsms.planExecutor(new PlanExecutor(deviceId,
+                    planSink(deviceId, planExecutions, planFired)));
+        });
+
         if (options.exportConfig() != null) {
             int exported = migrator.exportTo(options.exportConfig());
             Log.info("已导出 " + exported + " 台设备到 " + options.exportConfig());
             System.out.println("EXPORT ok devices=" + exported + " dir=" + options.exportConfig().toAbsolutePath());
+            planFired.close();
             closeStorage(db, planExecutions);
             return 0;
         }
@@ -188,6 +209,7 @@ public final class Bootstrap {
         if (options.configFile() != null) {
             int code = startConfiguredSession(options, launcher);
             if (code != 0) {
+                planFired.close();
                 closeStorage(db, planExecutions);
                 closeMessageLog(messageSubscription, messageLog);
                 closeAuditLog(auditLog);
@@ -196,6 +218,7 @@ public final class Bootstrap {
         } else if (options.demoSession()) {
             int code = startDemoSession(options, launcher, configStore);
             if (code != 0) {
+                planFired.close();
                 closeStorage(db, planExecutions);
                 closeMessageLog(messageSubscription, messageLog);
                 closeAuditLog(auditLog);
@@ -215,7 +238,7 @@ public final class Bootstrap {
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
                 extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
-                messageLog, auditLog, bus, hostRepo, linkState);
+                messageLog, auditLog, bus, hostRepo, linkState, planExecutions, configRepo);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,
@@ -260,6 +283,7 @@ public final class Bootstrap {
             }
             closeMessageLog(readySubscription, readyMessageLog);
             closeAuditLog(readyAuditLog);
+            planFired.close();
             closeStorage(db, planExecutions);
         };
 
@@ -460,6 +484,38 @@ public final class Bootstrap {
                 Log.error("删除运行态库失败: " + suffix, e);
             }
         }
+    }
+
+    /**
+     * 执行台账落地（3.0 M4）：台账行与 fire 计数都只入异步批量写队列，
+     * SSE 摘要经节流器合并，发送线程不做任何同步 DB 写或网络推送。
+     *
+     * @param deviceId   设备 ULID
+     * @param executions 台账仓储（自带写线程）
+     * @param throttle   plan-fired 节流器
+     * @return 执行器 sink
+     */
+    private static PlanExecutor.Sink planSink(String deviceId,
+                                              PlanExecutionRepository executions,
+                                              PlanFiredThrottle throttle) {
+        return new PlanExecutor.Sink() {
+            @Override
+            public void commit(PlanExecutionRepository.Execution execution) {
+                executions.append(execution);
+            }
+
+            @Override
+            public void recordFire(String planId, boolean succeeded, String error) {
+                /* runtime_plan_state 的计数随台账同批 upsert，不在这里直接写盘 */
+                executions.appendFire(new PlanExecutionRepository.FireRecord(
+                        deviceId, planId, succeeded, error == null ? "" : error));
+            }
+
+            @Override
+            public void publish(String payloadJson, boolean immediate) {
+                throttle.publish(deviceId, payloadJson, immediate);
+            }
+        };
     }
 
     /** 关闭存储（写连接、锁、台账写线程）。 */

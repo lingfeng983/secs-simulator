@@ -1,9 +1,14 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -16,6 +21,8 @@ import com.shimizukenta.secs.SecsCommunicator;
 import com.shimizukenta.secs.SecsException;
 import com.shimizukenta.secs.SecsMessage;
 import com.shimizukenta.secs.SecsWaitReplyMessageException;
+import com.shimizukenta.secs.secs2.Secs2;
+import com.shimizukenta.secssim.app.sml.SmlParser;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.NoticeBus;
 import com.shimizukenta.secssim.app.event.NoticeEvent;
@@ -30,6 +37,7 @@ import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.EngineClock;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
+import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
@@ -37,6 +45,7 @@ import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.curve.Rng;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
+import com.shimizukenta.secssim.core.event.PlanAction;
 import com.shimizukenta.secssim.core.value.CurveValueSource;
 import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.core.value.ValueStore;
@@ -392,6 +401,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 () -> this.s6f11Wbit,
                 spec.id(),
                 this::recordError);
+        this.eventReporter.valueReader(
+                svid -> this.values.valueAt(svid, this.clock.nowMs()).orElse(Double.NaN));
     }
 
     private static ExecutorService newAckSender(String threadName) {
@@ -524,6 +535,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     private void changeControlState(EquipmentControlState next) {
         this.control.change(next);
+        /* 主机把控制状态切到 ONLINE 时，offlinePolicy=queue 攒下的触发按 FIFO 补跑。
+           只在状态迁移时调一次；队列为空时 flushPending 直接返回 0。 */
+        if (next == EquipmentControlState.ONLINE && this.eventReporter != null) {
+            this.eventReporter.replayPending();
+        }
     }
 
     /** 发布一条通知（无总线时no-op）。 */
@@ -727,6 +743,16 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * 单步试跑计划（3.0 v2 {@code runtime/plans/{planId}/step}）。
+     *
+     * @param planId 计划 id
+     * @throws IOException 计划不存在或发送失败
+     */
+    public void stepPlan(String planId) throws IOException {
+        this.eventReporter.step(planId);
+    }
+
+    /**
      * 上报/清除一个报警（S5F1）。
      *
      * <p>S5F1 默认带 W 位并等待 S5F2；发送放到 ACK 队列，HTTP 请求不会阻塞到 T3。
@@ -765,6 +791,139 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     @Override
     public String id() {
         return this.spec.id();
+    }
+
+    /** 编排台账落地(3.0 需求 5);Bootstrap 装配时接入。 */
+    private volatile PlanExecutor planExecutor;
+
+    /**
+     * 挂编排执行器(每次触发落一条台账并计入 runtime_plan_state)。
+     *
+     * @param executor 执行器
+     */
+    public void planExecutor(PlanExecutor executor) {
+        this.planExecutor = executor;
+        this.eventReporter.planExecutor(executor);
+        this.eventReporter.onlineCheck(() ->
+                this.control.state() == EquipmentControlState.ONLINE);
+        /* 执行器本身不碰会话内部：效果证据、动作组装、W 位 ACK 队列都在这里接线 */
+        executor.errorSink(this::recordError);
+        executor.ackSender(() -> this.ackSender);
+        executor.effectController(new PlanExecutor.EffectController() {
+            @Override
+            public PlanExecutor.EffectResult apply(int ceid, String planId) {
+                return HsmsSessionRuntime.this.eventReporter.applyTracked(ceid, planId);
+            }
+
+            @Override
+            public String rollback(Object token) {
+                return HsmsSessionRuntime.this.eventReporter.rollback(token);
+            }
+        });
+        executor.actionResolver(this::resolvePlanAction);
+    }
+
+    /** SML 动作里的运行时占位符：{@code {{svid.1001}}}。 */
+    private static final Pattern SVID_PLACEHOLDER = Pattern.compile("\\{\\{\\s*svid\\.(\\d+)\\s*\\}\\}");
+
+    /**
+     * 把一条计划动作解析成可发送报文（设计 §2.7.1 的五种类型）。
+     *
+     * <p>S6F11 / SML 直接复用组装器与解析器；alarm / terminal / trace 用
+     * 与 {@code AlarmReporter} / S10F1 / S6F1 相同的数据结构组装报文体，
+     * 参数从 {@code action.params()} 取，缺省值保持现有行为。</p>
+     */
+    private SmlParser.Message resolvePlanAction(PlanAction action, int ceid, long atMs)
+            throws Exception {
+        return switch (action.kind()) {
+            case PlanAction.KIND_S6F11 -> new SmlParser.Message(6, 11, this.s6f11Wbit,
+                    this.assembler.build(ceid, atMs));
+            case PlanAction.KIND_SML -> SmlParser.parse(resolvePlaceholders(action.sml(), atMs));
+            case PlanAction.KIND_ALARM -> alarmAction(action);
+            case PlanAction.KIND_TERMINAL -> terminalAction(action);
+            case PlanAction.KIND_TRACE -> traceAction(action, atMs);
+            default -> throw new IllegalArgumentException("未知动作类型: " + action.kind());
+        };
+    }
+
+    private static SmlParser.Message alarmAction(PlanAction action) {
+        int alid = actionInt(action, "alid", 1);
+        int category = Math.max(1, Math.min(7, actionInt(action, "category", 1)));
+        boolean set = !"false".equalsIgnoreCase(action.params().getOrDefault("set", "true"));
+        String text = action.params().getOrDefault("text", set ? "ALARM " + alid : "CLEAR " + alid);
+        if (!text.chars().allMatch(c -> c < 128)) {
+            throw new IllegalArgumentException("ALTX 只能包含 US-ASCII 字符");
+        }
+        byte alcd = (byte) ((set ? 0x80 : 0x00) | category);
+        var b = Secs2.getBuilder();
+        Secs2 body = b.list(b.binary(alcd), b.uint4(alid), b.ascii(text));
+        /* S5F1 与 AlarmReporter 一致：默认带 W，等 S5F2 */
+        return new SmlParser.Message(5, 1, true, body);
+    }
+
+    private static SmlParser.Message terminalAction(PlanAction action) {
+        int tid = actionInt(action, "tid", 0);
+        String text = action.params().getOrDefault("text", "");
+        var b = Secs2.getBuilder();
+        Secs2 body = b.list(b.binary((byte) tid), b.ascii(text));
+        return new SmlParser.Message(10, 1, false, body);
+    }
+
+    private SmlParser.Message traceAction(PlanAction action, long atMs) {
+        int trid = actionInt(action, "trid", 1);
+        List<Secs2> sampled = new ArrayList<>();
+        String rawSvids = action.params().get("svids");
+        if (rawSvids != null && !rawSvids.isBlank()) {
+            for (String piece : rawSvids.split(",")) {
+                if (piece.isBlank()) {
+                    continue;
+                }
+                int svid;
+                try {
+                    svid = Integer.parseInt(piece.trim());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("trace 动作 svids 含非法编号: " + piece.trim());
+                }
+                double value = this.values.valueAt(svid, atMs).orElse(0.0);
+                sampled.add(Secs2Mapper.of(ValueType.F8, value));
+            }
+        }
+        var b = Secs2.getBuilder();
+        String stime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMddHHmmss"));
+        Secs2 body = b.list(b.uint4(trid), b.uint4(1L), b.ascii(stime), b.list(sampled));
+        return new SmlParser.Message(6, 1, this.s6f1Wbit, body);
+    }
+
+    private String resolvePlaceholders(String sml, long atMs) {
+        if (sml == null || sml.indexOf('{') < 0) {
+            return sml;
+        }
+        Matcher matcher = SVID_PLACEHOLDER.matcher(sml);
+        StringBuilder sb = new StringBuilder();
+        while (matcher.find()) {
+            int svid = Integer.parseInt(matcher.group(1));
+            double value = this.values.valueAt(svid, atMs).orElse(0.0);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(formatNumber(value)));
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static String formatNumber(double value) {
+        return value == Math.rint(value) && Math.abs(value) < 1e15
+                ? Long.toString((long) value) : Double.toString(value);
+    }
+
+    private static int actionInt(PlanAction action, String key, int fallback) {
+        String raw = action.params().get(key);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("动作参数 " + key + " 应为整数: " + raw);
+        }
     }
 
     /** 链路相位（3.0 需求 1）；变化经 {@code linkListener} 通知（持久化 + SSE 在装配层接）。 */

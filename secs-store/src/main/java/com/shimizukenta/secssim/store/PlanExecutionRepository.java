@@ -6,7 +6,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -43,12 +45,27 @@ public final class PlanExecutionRepository implements Closeable {
                                String messageJson, String effectJson, String error) {
     }
 
+    /**
+     * 一次计划触发的计数（fire_count / skipped_count / last_error）。
+     *
+     * <p>与台账同走异步批量写队列：发送线程只入内存队列，计数在写线程里
+     * 按 {@code (deviceId, planId)} 聚合后一次 upsert，避免每次 fire 抢写锁。</p>
+     *
+     * @param deviceId  设备 id
+     * @param planId    计划 id
+     * @param succeeded 是否真的发出去了
+     * @param error     错误描述；无则空串
+     */
+    public record FireRecord(String deviceId, String planId, boolean succeeded, String error) {
+    }
+
     private static final int FLUSH_THRESHOLD = 64;
     private static final long FLUSH_INTERVAL_MS = 50;
     private static final int QUEUE_CAPACITY = 4_096;
 
     private final Db db;
-    private final BlockingQueue<Execution> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+    /** 台账行与触发计数共用一条队列，保证「台账 + 计数」落在同一批事务里。 */
+    private final BlockingQueue<Object> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final Thread writer;
     private volatile boolean closed;
 
@@ -65,68 +82,161 @@ public final class PlanExecutionRepository implements Closeable {
      * @param execution 台账
      */
     public void append(Execution execution) {
-        Objects.requireNonNull(execution, "execution");
-        while (!this.queue.offer(execution)) {
+        enqueue(Objects.requireNonNull(execution, "execution"));
+    }
+
+    /**
+     * 入队一次触发计数（非阻塞；与 {@link #append} 同队列、同批落库）。
+     *
+     * @param fire 触发计数
+     */
+    public void appendFire(FireRecord fire) {
+        enqueue(Objects.requireNonNull(fire, "fire"));
+    }
+
+    private void enqueue(Object item) {
+        while (!this.queue.offer(item)) {
+            /* 队列满时丢最旧：台账是证据不是业务数据，绝不能让发送线程阻塞 */
             this.queue.poll();
         }
     }
 
     private void drainLoop() {
-        List<Execution> batch = new ArrayList<>(FLUSH_THRESHOLD);
         while (!this.closed) {
             try {
-                Execution first = this.queue.poll(FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                Object first = this.queue.poll(FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
                 if (first == null) {
                     continue;
                 }
+                List<Object> batch = new ArrayList<>(FLUSH_THRESHOLD);
                 batch.add(first);
                 this.queue.drainTo(batch, FLUSH_THRESHOLD - 1);
-                insertBatch(batch);
-                batch.clear();
+                flush(batch);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             } catch (RuntimeException e) {
-                /* 单批失败不终止写线程；台账号丢弃但进程继续 */
+                /* 单批失败不终止写线程；台账丢弃但进程继续 */
             }
         }
         /* 关闭前把剩余的冲完 */
-        List<Execution> remaining = new ArrayList<>(this.queue);
+        List<Object> remaining = new ArrayList<>();
+        this.queue.drainTo(remaining);
         if (!remaining.isEmpty()) {
             try {
-                insertBatch(remaining);
+                flush(remaining);
             } catch (RuntimeException e) {
                 /* 停机路径，尽力而为 */
             }
         }
     }
 
-    private void insertBatch(List<Execution> batch) {
+    /** 台账行 + 触发计数落在同一个写事务里（按计划聚合计数，一次 upsert）。 */
+    private void flush(List<Object> batch) {
+        List<Execution> executions = new ArrayList<>(batch.size());
+        List<FireRecord> fires = new ArrayList<>(batch.size());
+        for (Object item : batch) {
+            if (item instanceof Execution execution) {
+                executions.add(execution);
+            } else if (item instanceof FireRecord fire) {
+                fires.add(fire);
+            }
+        }
+        if (executions.isEmpty() && fires.isEmpty()) {
+            return;
+        }
         this.db.writeRuntime(connection -> {
-            try (PreparedStatement st = connection.prepareStatement(
-                    "INSERT INTO plan_execution(device_id, plan_id, ceid, idempotency_key, dry_run, "
-                            + "scheduled_at, fired_at, status, message_json, effect_json, error) "
-                            + "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING")) {
-                for (Execution e : batch) {
-                    st.setString(1, e.deviceId());
-                    st.setString(2, e.planId());
-                    st.setLong(3, e.ceid());
-                    st.setString(4, e.idempotencyKey());
-                    st.setInt(5, e.dryRun() ? 1 : 0);
-                    st.setLong(6, e.scheduledAt());
-                    st.setLong(7, e.firedAt());
-                    st.setString(8, e.status());
-                    st.setString(9, e.messageJson());
-                    st.setString(10, e.effectJson());
-                    st.setString(11, e.error());
-                    st.addBatch();
-                }
-                st.executeBatch();
-            } catch (SQLException err) {
-                throw new StoreException("台账批量落库失败: " + err.getMessage(), err);
+            if (!executions.isEmpty()) {
+                insertBatch(connection, executions);
+            }
+            if (!fires.isEmpty()) {
+                upsertFires(connection, fires);
             }
             return null;
         });
+    }
+
+    private static void insertBatch(Connection connection, List<Execution> batch) {
+        try (PreparedStatement st = connection.prepareStatement(
+                "INSERT INTO plan_execution(device_id, plan_id, ceid, idempotency_key, dry_run, "
+                        + "scheduled_at, fired_at, status, message_json, effect_json, error) "
+                        + "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING")) {
+            for (Execution e : batch) {
+                st.setString(1, e.deviceId());
+                st.setString(2, e.planId());
+                st.setLong(3, e.ceid());
+                st.setString(4, e.idempotencyKey());
+                st.setInt(5, e.dryRun() ? 1 : 0);
+                st.setLong(6, e.scheduledAt());
+                st.setLong(7, e.firedAt());
+                st.setString(8, e.status());
+                st.setString(9, e.messageJson());
+                st.setString(10, e.effectJson());
+                st.setString(11, e.error());
+                st.addBatch();
+            }
+            st.executeBatch();
+        } catch (SQLException err) {
+            throw new StoreException("台账批量落库失败: " + err.getMessage(), err);
+        }
+    }
+
+    /** 按 (deviceId, planId) 聚合：fire_count += 条数，skipped_count += 失败条数。 */
+    private static void upsertFires(Connection connection, List<FireRecord> fires) {
+        Map<String, Aggregated> aggregated = new LinkedHashMap<>();
+        for (FireRecord fire : fires) {
+            if (fire.deviceId() == null || fire.planId() == null) {
+                continue;
+            }
+            String key = fire.deviceId() + '\u0000' + fire.planId();
+            Aggregated agg = aggregated.computeIfAbsent(key,
+                    ignored -> new Aggregated(fire.deviceId(), fire.planId()));
+            agg.count++;
+            if (!fire.succeeded()) {
+                agg.skipped++;
+            }
+            agg.lastError = fire.error() == null ? "" : fire.error();
+        }
+        if (aggregated.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        try (PreparedStatement st = connection.prepareStatement(
+                "INSERT INTO runtime_plan_state(device_id, plan_id, enabled, start_at, last_fire_at, "
+                        + "fire_count, skipped_count, last_error) VALUES(?,?,1,?,?,?,?,?) "
+                        + "ON CONFLICT(device_id, plan_id) DO UPDATE SET "
+                        + "last_fire_at=excluded.last_fire_at, "
+                        + "fire_count=fire_count+excluded.fire_count, "
+                        + "skipped_count=skipped_count+excluded.skipped_count, "
+                        + "last_error=excluded.last_error")) {
+            for (Aggregated agg : aggregated.values()) {
+                st.setString(1, agg.deviceId);
+                st.setString(2, agg.planId);
+                st.setLong(3, now);
+                st.setLong(4, now);
+                st.setInt(5, agg.count);
+                st.setInt(6, agg.skipped);
+                st.setString(7, agg.lastError);
+                st.addBatch();
+            }
+            st.executeBatch();
+        } catch (SQLException err) {
+            throw new StoreException("计划触发计数落库失败: " + err.getMessage(), err);
+        }
+    }
+
+    /** 批内聚合累加器。 */
+    private static final class Aggregated {
+        private final String deviceId;
+        private final String planId;
+        private int count;
+        private int skipped;
+        private String lastError = "";
+
+        private Aggregated(String deviceId, String planId) {
+            this.deviceId = deviceId;
+            this.planId = planId;
+        }
     }
 
     /**

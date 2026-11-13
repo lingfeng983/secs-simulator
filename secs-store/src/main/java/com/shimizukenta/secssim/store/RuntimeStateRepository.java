@@ -326,6 +326,31 @@ public final class RuntimeStateRepository {
         }
     }
 
+    /** 记一次计划触发(fire_count+1 / last_fire_at=now;行不存在则建)。 */
+    public void recordPlanFire(String deviceId, String planId, boolean succeeded, String error) {
+        this.db.writeRuntime(connection -> {
+            try (PreparedStatement st = connection.prepareStatement(
+                    "INSERT INTO runtime_plan_state(device_id, plan_id, enabled, start_at, last_fire_at, "
+                            + "fire_count, skipped_count, last_error) VALUES(?,?,1,?,?,1,0,?) "
+                            + "ON CONFLICT(device_id, plan_id) DO UPDATE SET last_fire_at=excluded.last_fire_at, "
+                            + "fire_count=fire_count+1, "
+                            + "skipped_count=skipped_count+CASE WHEN ?=0 THEN 1 ELSE 0 END, "
+                            + "last_error=excluded.last_error")) {
+                long now = System.currentTimeMillis();
+                st.setString(1, deviceId);
+                st.setString(2, planId);
+                st.setLong(3, now);
+                st.setLong(4, now);
+                st.setString(5, error == null ? "" : error);
+                st.setInt(6, succeeded ? 1 : 0);
+                st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("记计划触发失败: " + e.getMessage(), e);
+            }
+            return null;
+        });
+    }
+
     /** 写运行时计划正文覆盖（add/update/delete）。 */
     public void savePlanOverride(String deviceId, String planId, String op, String bodyJson) {
         this.db.writeRuntime(connection -> {

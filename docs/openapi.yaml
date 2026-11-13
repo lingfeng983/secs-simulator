@@ -21,6 +21,7 @@ tags:
   - name: preview
   - name: messages
   - name: configs
+  - name: devices
   - name: audit
   - name: admin
   - name: system
@@ -872,6 +873,76 @@ paths:
         '200': { description: 已停止 }
         '404': { description: 主机模拟未开启（host-sim-not-open） }
         '409': { description: 还没有采集配置（collector-not-configured，原因在 message） }
+  /api/v2/devices/{id}/config/revisions:
+    get:
+      tags: [devices]
+      summary: 设备配置版本历史
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        '200': { description: 版本历史数组 }
+        '404': { description: 设备不存在 }
+  /api/v2/devices/{id}/runtime/executions:
+    get:
+      tags: [devices]
+      summary: 事件计划执行台账（新→旧；缺省不含单步试跑）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 500 } }
+        - { name: planId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [SENT, PARTIAL, FAILED, SKIPPED] } }
+        - { name: dryRun, in: query, schema: { type: string, enum: ['0', '1', 'all'] } }
+      responses:
+        '200': { description: 台账数组（items/count；含 messages 与 effects） }
+        '400': { description: limit 越界 }
+  /api/v2/devices/{id}/runtime/plans/{planId}/step:
+    post:
+      tags: [devices]
+      summary: 单步试跑计划（台账 dry_run=1，不计 fire_count、不推进倒计时）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已触发一次 }
+        '404': { description: 设备不存在 }
+        '409': { description: 设备离线 }
+        '500': { description: 计划不存在或发送失败 }
+  /api/v2/devices/{id}/runtime/plans/{planId}/enabled:
+    post:
+      tags: [devices]
+      summary: 运行时启停计划并持久化到 runtime.db
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean, default: true }
+      responses:
+        '200': { description: 已更新（内存调度器 + runtime_plan_state） }
+        '400': { description: 计划不存在或请求体非法 }
+        '404': { description: 设备不存在 }
+    put:
+      tags: [devices]
+      summary: 同 POST（设计 §2.5 GET/PUT 契约的写路径）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean, default: true }
+      responses:
+        '200': { description: 已更新 }
+        '400': { description: 计划不存在或请求体非法 }
+        '404': { description: 设备不存在 }
   /api/v2/hosts:
     get:
       tags: [host-sims]

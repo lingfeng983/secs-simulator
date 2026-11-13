@@ -4,8 +4,8 @@ import type { ApiClient, WireMessage } from '../api';
 /** 事件流状态。 */
 export type StreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
-/** SSE 类型化通知（schema v6:s6f11/alarm/session）。 */
-export type NoticeType = 's6f11' | 'alarm' | 'session';
+/** SSE 类型化通知（schema v6:s6f11/alarm/session；3.0 M4 增加 plan-fired）。 */
+export type NoticeType = 's6f11' | 'alarm' | 'session' | 'plan-fired';
 
 export interface NoticeWire {
   type: NoticeType;
@@ -152,8 +152,9 @@ export function useEventStream(
           handlersRef.current.onFlush([parsed]);
         });
 
-        /* schema v6 类型化通知:同一条 SSE 通道上的 s6f11/alarm/session 帧 */
-        for (const type of ['s6f11', 'alarm', 'session'] as const) {
+        /* schema v6 类型化通知:同一条 SSE 通道上的 s6f11/alarm/session 帧；
+           3.0 M4 的 plan-fired 是 200ms 合并帧（items 数组），只当刷新信号。 */
+        for (const type of ['s6f11', 'alarm', 'session', 'plan-fired'] as const) {
           source.addEventListener(type, (event) => {
             let data: Record<string, unknown>;
             try {

@@ -476,6 +476,46 @@ public interface ApiContext {
         return null;
     }
 
+    /* ---------- 3.0 M4：事件编排执行台账（设计 §2.5 / §2.7） ---------- */
+
+    /**
+     * v2：执行台账查询。
+     *
+     * @param deviceId 设备 id（ULID 或 legacy stem）
+     * @param limit    条数上限
+     * @param planId   计划过滤；null = 全部
+     * @param status   状态过滤；null = 全部
+     * @param dryRun   {@code all} / {@code 1} / {@code true} 才含单步试跑记录
+     * @return JSON 文本；设备不存在返回 null
+     */
+    default String planExecutionsV2(String deviceId, int limit, String planId,
+                                    String status, String dryRun) {
+        return null;
+    }
+
+    /**
+     * v2：单步试跑一条计划（台账 dry_run=1，不计 fire_count、不推进倒计时）。
+     *
+     * @param deviceId 设备 id
+     * @param planId   计划 id
+     * @return 结果
+     */
+    default TriggerOutcome stepPlanV2(String deviceId, String planId) {
+        return TriggerOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：运行时启停计划，并持久化到 runtime.db。
+     *
+     * @param deviceId 设备 id
+     * @param planId   计划 id
+     * @param enabled  是否启用
+     * @return 结果
+     */
+    default SessionOutcome setPlanEnabledV2(String deviceId, String planId, boolean enabled) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     /** v2：主机实例列表（含持久行与内存相位）。 */

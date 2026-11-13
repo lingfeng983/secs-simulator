@@ -78,6 +78,39 @@ http.createServer(async (req, res) => {
   if (path.startsWith('/api/v2/host-templates/')) {
     return json(res, { ok: true });
   }
+  /* 3.0 M4：事件计划执行台账（含 SVID before→after、报文摘要、试跑记录） */
+  const v2Executions = [
+    { id: 4, deviceId: 'line1', planId: 'beat', ceid: 2001, dryRun: false,
+      scheduledAt: Date.now() - 900, firedAt: Date.now() - 880, status: 'SENT',
+      messages: [{ kind: 's6f11', stream: 6, function: 11, wbit: true, elapsedMs: 3 }],
+      effects: [{ svid: 1001, op: 'add', before: 24.5, after: 25.0 }], error: '' },
+    { id: 3, deviceId: 'line1', planId: 'beat', ceid: 2001, dryRun: false,
+      scheduledAt: Date.now() - 1900, firedAt: Date.now() - 1880, status: 'FAILED',
+      messages: [{ kind: 'sml', error: 'SML 解析失败: 缺少结束符' }],
+      effects: { items: [{ svid: 1001, op: 'set', before: 23.0, after: 24.5 }], rollback: 'rollback_skipped' },
+      error: 'SML 解析失败: 缺少结束符; rollback_skipped' },
+    { id: 2, deviceId: 'line1', planId: 'beat', ceid: 2001, dryRun: false,
+      scheduledAt: Date.now() - 2900, firedAt: Date.now() - 2880, status: 'SKIPPED',
+      messages: [], effects: [], error: '设备离线（skip）' },
+    { id: 1, deviceId: 'line1', planId: 'beat', ceid: 2001, dryRun: true,
+      scheduledAt: Date.now() - 60000, firedAt: Date.now() - 59980, status: 'SENT',
+      messages: [{ kind: 's6f11', stream: 6, function: 11, wbit: true, elapsedMs: 2 }],
+      effects: [{ svid: 1001, op: 'set', before: 20.0, after: 23.0 }], error: '' },
+  ];
+  if (/^\/api\/v2\/devices\/[^/]+\/runtime\/executions$/.test(path)) {
+    const dryRun = url.searchParams.get('dryRun') ?? '0';
+    const status = url.searchParams.get('status');
+    let items = v2Executions.filter((item) => dryRun === 'all' || dryRun === '1' || !item.dryRun);
+    if (status !== null) items = items.filter((item) => item.status === status);
+    const limit = Number(url.searchParams.get('limit') ?? '100');
+    return json(res, { items: items.slice(0, Number.isFinite(limit) ? limit : 100), count: items.length });
+  }
+  if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/step$/.test(path)) {
+    return json(res, { ok: true, planId: 'beat' });
+  }
+  if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/enabled$/.test(path)) {
+    return json(res, { ok: true, enabled: true });
+  }
   if (/^\/api\/v2\/devices\/[^/]+\/config\/revisions$/.test(path)) {
     return json(res, { revisions: [
       { revision: 2, sha256: 'aabbccddeeff00112233', createdAt: Date.now() - 600000, createdBy: 'ui', note: '修改超时' },

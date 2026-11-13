@@ -80,8 +80,11 @@ final class ApiPaths {
     /** v2 主机模板集合。 */
     static final String HOST_TEMPLATES_V2 = "/api/v2/host-templates";
 
-    /** v2 设备配置版本历史前缀。 */
-    static final String DEVICE_REVISIONS_V2 = "/api/v2/devices/";
+    /** v2 设备域统一前缀（配置版本历史 + 运行态台账共用一个 HttpServer 上下文）。 */
+    static final String DEVICE_V2_PREFIX = "/api/v2/devices/";
+
+    /** v2 设备配置版本历史前缀（与 {@link #DEVICE_V2_PREFIX} 同值，保留原名以减小改动面）。 */
+    static final String DEVICE_REVISIONS_V2 = DEVICE_V2_PREFIX;
 
     /** v2 单个主机模板前缀。 */
     static final String HOST_TEMPLATE_V2_PREFIX = "/api/v2/host-templates/";

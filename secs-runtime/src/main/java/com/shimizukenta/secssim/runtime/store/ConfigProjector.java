@@ -317,6 +317,30 @@ public final class ConfigProjector implements ConfigRepository.DocumentProjector
                 st.setInt(8, ordinal++);
                 st.executeUpdate();
             }
+            /* 3.0 需求 5：动作列表按序投影（空 = 旧语义「一条默认 S6F11」）。
+               投影表只用于查询与展示，执行路径读的是解析后的配置正文。 */
+            JsonHub actions = plan.get("actions");
+            if (actions != null && actions.isArray()) {
+                int actionOrdinal = 0;
+                for (JsonHub action : actions.values()) {
+                    try (PreparedStatement st = connection.prepareStatement(
+                            "INSERT INTO plan_action(device_id, plan_id, ordinal, kind, stream, function, "
+                                    + "wbit, sml, params_json) VALUES(?,?,?,?,?,?,?,?,?)")) {
+                        st.setString(1, deviceId);
+                        st.setString(2, str(plan, "id"));
+                        st.setInt(3, actionOrdinal++);
+                        String kind = str(action, "kind");
+                        st.setString(4, kind == null || kind.isBlank() ? "s6f11" : kind);
+                        setNullableLong(st, 5, action.get("stream"));
+                        setNullableLong(st, 6, action.get("function"));
+                        setNullableBool(st, 7, action.get("wbit"));
+                        st.setString(8, str(action, "sml"));
+                        JsonHub params = action.get("params");
+                        st.setString(9, params == null || !params.isObject() ? "{}" : params.toJson());
+                        st.executeUpdate();
+                    }
+                }
+            }
             JsonHub effects = plan.get("effects");
             if (effects != null && effects.isArray()) {
                 int effectOrdinal = 0;
@@ -416,6 +440,15 @@ public final class ConfigProjector implements ConfigRepository.DocumentProjector
             st.setNull(index, java.sql.Types.INTEGER);
         } else {
             st.setLong(index, value.longValue());
+        }
+    }
+
+    /** wbit 列是 INTEGER：未配置写 NULL（执行时用动作/会话默认值）。 */
+    private static void setNullableBool(PreparedStatement st, int index, JsonHub value) throws SQLException {
+        if (value == null || value.isNull() || value.optionalBoolean().isEmpty()) {
+            st.setNull(index, java.sql.Types.INTEGER);
+        } else {
+            st.setInt(index, value.optionalBoolean().get() ? 1 : 0);
         }
     }
 }

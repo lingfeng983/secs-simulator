@@ -1,16 +1,20 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import com.shimizukenta.jsonhub.JsonHub;
+import com.shimizukenta.jsonhub.JsonString;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
+import com.shimizukenta.secssim.core.event.PlanAction;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.template.Expression;
 
@@ -62,10 +66,53 @@ public final class RuntimeEdits {
                 effects.add(parseEffect(item));
             }
         }
+        List<PlanAction> actions = new ArrayList<>();
+        if (root.containsKey("actions") && root.get("actions").isArray()) {
+            for (JsonHub item : root.get("actions")) {
+                actions.add(parseAction(item));
+            }
+        }
+        String offlinePolicy = root.containsKey("offlinePolicy")
+                ? requireString(root, "offlinePolicy") : EventPlan.OFFLINE_SKIP;
+        if (!List.of(EventPlan.OFFLINE_SKIP, EventPlan.OFFLINE_QUEUE,
+                EventPlan.OFFLINE_FAIL).contains(offlinePolicy)) {
+            throw new IllegalArgumentException("未知离线策略: " + offlinePolicy
+                    + "（可选 skip / queue / fail）");
+        }
+        String onSendFailure = root.containsKey("onSendFailure")
+                ? requireString(root, "onSendFailure") : EventPlan.FAILURE_KEEP;
+        if (!List.of(EventPlan.FAILURE_KEEP, EventPlan.FAILURE_ROLLBACK).contains(onSendFailure)) {
+            throw new IllegalArgumentException("未知发送失败策略: " + onSendFailure
+                    + "（可选 keep / rollback）");
+        }
         try {
-            return new EventPlan(id, ceid, t, effects);
+            return new EventPlan(id, ceid, t, effects, actions, offlinePolicy, onSendFailure);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("计划不合法: " + e.getMessage());
+        }
+    }
+
+    /** 解析一条计划动作（3.0 需求 5）；kind 缺省为 s6f11。 */
+    private static PlanAction parseAction(JsonHub item) {
+        String kind = item.containsKey("kind")
+                ? requireString(item, "kind") : PlanAction.KIND_S6F11;
+        Integer stream = item.containsKey("stream") ? (int) item.get("stream").longValue() : null;
+        Integer function = item.containsKey("function") ? (int) item.get("function").longValue() : null;
+        Boolean wbit = item.containsKey("wbit") ? item.get("wbit").booleanValue() : null;
+        String sml = item.containsKey("sml") ? item.get("sml").optionalString().orElse("") : null;
+        Map<String, String> params = new LinkedHashMap<>();
+        if (item.containsKey("params") && item.get("params").isObject()) {
+            JsonHub paramsJson = item.get("params");
+            for (JsonString key : paramsJson.keySet()) {
+                String name = key.unescaped();
+                String value = paramsJson.get(name).optionalString().orElse("");
+                params.put(name, value);
+            }
+        }
+        try {
+            return new PlanAction(kind, stream, function, wbit, sml, params);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("动作不合法(kind=" + kind + "): " + e.getMessage());
         }
     }
 

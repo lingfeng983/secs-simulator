@@ -12,7 +12,11 @@ import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.audit.AuditLog;
 import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.session.SessionManager;
+import com.shimizukenta.secssim.app.session.SessionRuntime;
+import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
+import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.HostRepository;
+import com.shimizukenta.secssim.store.PlanExecutionRepository;
 import com.shimizukenta.secssim.store.RuntimeStateRepository;
 
 /**
@@ -40,6 +44,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final HostSimRegistry hosts;
     private final com.shimizukenta.secssim.store.HostRepository hostRepository;
     private final MessageLog messageLog;
+    private final ConfigStore configs;
+    private final SessionManager sessions;
+    private final ConfigRepository configRepository;
+    private final PlanExecutionRepository planExecutions;
+    private final RuntimeStateRepository linkState;
     private volatile String lastCreatedHostId = "";
     private final BurstRunner bursts;
 
@@ -48,14 +57,20 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
             TemplateStore templates, MessageLog messages, AuditLog audit,
             com.shimizukenta.secssim.app.event.EventBus eventBus,
             com.shimizukenta.secssim.store.HostRepository hostRepository,
-            RuntimeStateRepository linkState) {
+            RuntimeStateRepository linkState,
+            PlanExecutionRepository planExecutions, ConfigRepository configRepository) {
         this.mode = mode;
         this.version = version;
         this.extraHealthJson = extraHealthJson;
         this.shutdown = shutdown;
+        this.sessions = sessions;
+        this.configRepository = configRepository;
+        this.planExecutions = planExecutions;
+        this.linkState = linkState;
         this.hosts = new HostSimRegistry(sessions, eventBus, hostRepository, linkState);
         this.hostRepository = hostRepository;
         this.messageLog = messages;
+        this.configs = configs;
         this.bursts = new BurstRunner(sessions, this.hosts);
         this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit, this.hosts, this.bursts);
     }
@@ -390,6 +405,133 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.configs.revisionsJson(name, limit);
     }
 
+    /* ---------- 3.0 M4：事件编排执行台账 ---------- */
+
+    @Override
+    public String planExecutionsV2(String deviceId, int limit, String planId,
+                                   String status, String dryRun) {
+        String canonical = canonicalDeviceId(deviceId);
+        boolean includeDryRun = dryRun != null && ("all".equalsIgnoreCase(dryRun)
+                || "1".equals(dryRun) || "true".equalsIgnoreCase(dryRun));
+        int capped = Math.max(1, Math.min(500, limit));
+        String statusFilter = status == null || status.isBlank() ? null
+                : status.trim().toUpperCase(java.util.Locale.ROOT);
+        List<PlanExecutionRepository.ExecutionRow> rows = this.planExecutions.query(
+                canonical, blankToNull(planId), statusFilter, includeDryRun, capped);
+
+        StringBuilder sb = new StringBuilder(128 + rows.size() * 256);
+        sb.append("{\"items\":[");
+        for (int i = 0; i < rows.size(); i++) {
+            PlanExecutionRepository.ExecutionRow row = rows.get(i);
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"id\":").append(row.id())
+                    .append(",\"deviceId\":").append(quote(row.deviceId()))
+                    .append(",\"planId\":").append(quote(row.planId()))
+                    .append(",\"ceid\":").append(row.ceid())
+                    .append(",\"dryRun\":").append(row.dryRun())
+                    .append(",\"scheduledAt\":").append(row.scheduledAt())
+                    .append(",\"firedAt\":").append(row.firedAt())
+                    .append(",\"status\":").append(quote(row.status()))
+                    .append(",\"messages\":").append(safeArray(row.messageJson()))
+                    .append(",\"effects\":").append(safeArray(row.effectJson()))
+                    .append(",\"error\":").append(quote(row.error()))
+                    .append('}');
+        }
+        return sb.append("],\"count\":").append(rows.size()).append('}').toString();
+    }
+
+    @Override
+    public TriggerOutcome stepPlanV2(String deviceId, String planId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return TriggerOutcome.UNKNOWN_SESSION;
+        }
+        try {
+            session.stepPlan(planId);
+            return TriggerOutcome.OK;
+        } catch (java.io.IOException | RuntimeException e) {
+            com.shimizukenta.secssim.app.log.Log.error("单步试跑计划失败: " + planId, e);
+            return TriggerOutcome.FAILED;
+        }
+    }
+
+    @Override
+    public SessionOutcome setPlanEnabledV2(String deviceId, String planId, boolean enabled) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        if (!session.setEventEnabled(planId, enabled)) {
+            return SessionOutcome.FAILED;
+        }
+        /* next_fire_at 由调度器在下一次扫描时推进；这里只持久化启停态，
+           不写死一个可能与 OnCondition / AfterEvent 冲突的时刻（设计 §2.7.3）。 */
+        this.linkState.savePlanState(canonicalDeviceId(deviceId), planId, enabled, null, "");
+        return SessionOutcome.OK;
+    }
+
+    /** v2 设备 id 与 v1 legacy stem 都归一到 config.db 的 ULID（台账按它归属）。 */
+    private String canonicalDeviceId(String key) {
+        if (key == null || key.isBlank()) {
+            return key;
+        }
+        try {
+            return this.configRepository.findDevice(key)
+                    .map(ConfigRepository.DeviceView::id).orElse(key);
+        } catch (RuntimeException e) {
+            /* 配置库临时不可读时按原 key 查，不让台账查询整条挂掉 */
+            return key;
+        }
+    }
+
+    /** 按归一后的设备 id 找会话：v1 会话 id 是 legacy stem，v2 设备 id 是 ULID。 */
+    private HsmsSessionRuntime sessionFor(String deviceId) {
+        String canonical = canonicalDeviceId(deviceId);
+        for (SessionRuntime runtime : this.sessions.list()) {
+            if (runtime instanceof HsmsSessionRuntime hsms
+                    && canonical.equals(canonicalDeviceId(hsms.id()))) {
+                return hsms;
+            }
+        }
+        return null;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String safeArray(String json) {
+        return json == null || json.isBlank() ? "[]" : json;
+    }
+
+    /** JSON 字符串转义（设备 id / 计划 id / 错误文本可能带引号或换行）。 */
+    private static String quote(String text) {
+        if (text == null) {
+            return "\"\"";
+        }
+        StringBuilder sb = new StringBuilder(text.length() + 2).append('"');
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.append('"').toString();
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     @Override
@@ -421,9 +563,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
             return SessionOutcome.UNKNOWN_SESSION;
         }
         sim.saveSettings(name, new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId));
-        this.hostRepository.save(hostId, sim.name(), sim.target().bindHost(), sim.target().port(),
-                sim.target().deviceId(), sim.collectorConfigJson() == null ? "{}" : sim.collectorConfigJson(),
-                sim.autoReconnect(), "");
+        var view = this.hostRepository.find(hostId).orElse(null);
+        if (view != null) {
+            this.hostRepository.save(hostId, sim.name(), host, port, deviceId,
+                    view.collectorJson(), view.autoReconnect(), view.note());
+        }
         return SessionOutcome.OK;
     }
 
