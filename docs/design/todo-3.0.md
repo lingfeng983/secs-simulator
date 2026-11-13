@@ -154,7 +154,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 
 | 层 | 命令 | 结果 |
 |---|---|---|
-| 后端 | `mvn -B test` | 677 项通过（json 44 / protocol 56 / core 95 / store 20 / app 75 / api-http 109 / runtime 129 / cli 85） |
+| 后端 | `mvn -B test` | 688 项通过（json 110 / protocol 56 / core 95 / store 20 / app 75 / api-http 118 / runtime 129 / cli 85） |
 | 契约 | `python scripts/check-openapi.py` | 72 个 path，`$ref` 全部可解析 |
 | 类型 | `npx tsc --noEmit` | 0 错误 |
 | 文案 | `scripts/check-ui-words.ps1` | 99 文件 / 5491 段 |

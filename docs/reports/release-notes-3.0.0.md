@@ -116,13 +116,24 @@
 
 | 层 | 结果 |
 |---|---|
-| 后端单元/集成 | 677 项通过 |
+| 后端单元/集成 | 688 项通过（json 110 / protocol 56 / core 95 / store 20 / app 75 / api-http 118 / runtime 129 / cli 85） |
 | OpenAPI 结构 | 72 个 path，`$ref` 全部可解析 |
 | 前端类型 | 0 错误 |
 | 前端组件 | 131 项通过 |
 | 界面文案门禁 | 99 文件 / 5491 段通过 |
 | 端到端 | 83 passed / 48 skipped（截图用例需 `SHOTS=1`） |
 | 质量总闸 | `scripts/check-all.ps1` 全绿 |
+
+### 产物与冒烟
+
+| 产物 | 大小 | 冒烟结论 |
+|---|---|---|
+| `SECS Simulator_3.0.0_x64-setup.exe` | 19.7 MB | 桌面壳（前端内嵌）+ `secs-sim.exe` 原生后端 |
+| `secs-sim-server-3.0.0-linux.zip` | 15.3 MB | 解压后 JDK 25 起服务：`/api/v1/health` 回 `version=3.0.0, vm=jvm`，`/` 回 200（前端由服务端托管），`config.db` / `runtime.db` 正常建立并播种两台演示设备 |
+
+另外在活体服务上逐条验过本次评审修的状态码：`POST /api/v2/hosts` 传 `[]` → 400、
+`GET /api/v2/hosts/h1/messages?limit=abc` → 400 `bad-limit`、
+`DELETE /api/v1/sessions/s1/svids/abc` → 400 `bad-id`。
 
 ## 升级步骤
 
