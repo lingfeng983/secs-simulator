@@ -460,8 +460,10 @@ export interface ApiClient {
   /** 新建会话；config 为 demo 或配置目录下的文件名。 */
   createSession(config: string, overrides?: SessionOverrides): Promise<number>;
   bulkSessions(params: SessionBulkParams): Promise<SessionBulkResult>;
-  /** 关闭并移除会话。 */
+  /** 断开链路：端口释放、主机连接断开，但设备仍留在列表里可再连（3.0「关闭」语义）。 */
   closeSession(sessionId: string): Promise<number>;
+  /** 重新建链（断开态的会话对象复用，模型/钉值/计划启用态原样恢复）。 */
+  connectDevice(deviceId: string): Promise<number>;
   /** 按配置重载会话。 */
   reloadSession(sessionId: string): Promise<number>;
   trigger(sessionId: string, ceid: number): Promise<number>;

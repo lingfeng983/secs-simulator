@@ -883,6 +883,206 @@ paths:
       responses:
         '200': { description: 版本历史数组 }
         '404': { description: 设备不存在 }
+  /api/v2/devices/{id}/runtime/plans:
+    get:
+      tags: [devices]
+      summary: 计划列表 + 运行统计（启用态、触发次数、上次触发/跳过原因）
+      description: |
+        计划正文来自配置与运行时覆盖（runtime_plan_override）；fireCount / skippedCount /
+        lastFireAt / lastError 来自 runtime_plan_state。两个时刻字段为 0 表示「没有记录」，
+        不用 null——前端按 > 0 判断，少一条空值分支。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{events:[{id, ceid, owner, enabled, fireCount, skippedCount, lastFireAt, nextFireAt, lastError, triggerType, ...}]}' }
+        '404': { description: 设备不存在 }
+    post:
+      tags: [devices]
+      summary: 运行时新增计划（只落运行时覆盖，不回写配置）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201': { description: 已新增 }
+        '400': { description: 计划正文不合法 }
+        '404': { description: 设备不存在 }
+        '409': { description: 计划 id 已存在 }
+  /api/v2/devices/{id}/runtime/plans/{planId}:
+    put:
+      tags: [devices]
+      summary: 运行时改写计划正文
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: 已更新 }
+        '400': { description: 计划正文不合法 }
+        '404': { description: 设备或计划不存在 }
+    delete:
+      tags: [devices]
+      summary: 运行时删除计划
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已删除 }
+        '404': { description: 设备或计划不存在 }
+  /api/v2/devices/{id}/runtime/catalog/{kind}:
+    post:
+      tags: [devices]
+      summary: 运行时新增目录条目（kind = ceid | report | svid）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: kind
+          in: path
+          required: true
+          schema: { type: string, enum: [ceid, report, svid] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201': { description: 已新增 }
+        '400': { description: kind 未知或条目正文不合法 }
+        '404': { description: 设备不存在 }
+        '409': { description: 编号已存在 }
+  /api/v2/devices/{id}/runtime/catalog/{kind}/{key}:
+    put:
+      tags: [devices]
+      summary: 运行时改写目录条目（key = CEID / RPTID / SVID）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: kind
+          in: path
+          required: true
+          schema: { type: string, enum: [ceid, report, svid] }
+        - { name: key, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: 已更新 }
+        '400': { description: kind / key / 正文不合法 }
+        '404': { description: 设备或条目不存在 }
+    delete:
+      tags: [devices]
+      summary: 运行时删除目录条目
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: kind
+          in: path
+          required: true
+          schema: { type: string, enum: [ceid, report, svid] }
+        - { name: key, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 已删除 }
+        '400': { description: kind / key 不合法 }
+        '404': { description: 设备或条目不存在 }
+  /api/v2/devices/{id}/runtime/svids/{svid}/pin:
+    put:
+      tags: [devices]
+      summary: 钉住一个 SVID 的值（落 runtime_svid_pin，重连与重启后恢复）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: svid, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: 已钉值 }
+        '400': { description: svid 或值不合法 }
+        '404': { description: 设备或 SVID 不存在 }
+    delete:
+      tags: [devices]
+      summary: 取消钉值（值回到曲线/常量来源）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: svid, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 已取消 }
+        '404': { description: 设备或 SVID 不存在 }
+  /api/v2/devices/{id}/runtime/message:
+    post:
+      tags: [devices]
+      summary: 手动发送 SML（请求体就是 SML 原文，不包 JSON）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '200': { description: '{ok, stream, function, wbit, sentSml, reply…}' }
+        '400': { description: SML 为空、过大或解析失败 }
+        '404': { description: 设备不存在 }
+        '409': { description: 链路未建立 }
+        '502': { description: 协议层发送失败 }
+  /api/v2/devices/{id}/runtime/alarm/{alid}:
+    post:
+      tags: [devices]
+      summary: 报警置位（S5F1）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: alid, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: text, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: integer, minimum: 1, maximum: 7, default: 1 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, description: 只允许 US-ASCII }
+                category: { type: integer, minimum: 1, maximum: 7 }
+      responses:
+        '202': { description: 已受理 }
+        '400': { description: alid / category / text 不合法 }
+        '404': { description: 设备不存在 }
+        '409': { description: 设备离线 }
+        '500': { description: 发送失败 }
+    delete:
+      tags: [devices]
+      summary: 报警清除（S5F1，ALCD 置 0）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: alid, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: text, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: integer, minimum: 1, maximum: 7, default: 1 } }
+      responses:
+        '202': { description: 已受理 }
+        '400': { description: alid / category / text 不合法 }
+        '404': { description: 设备不存在 }
+        '409': { description: 设备离线 }
+        '500': { description: 发送失败 }
+  /api/v2/devices/{id}/runtime/ceid/{ceid}:
+    post:
+      tags: [devices]
+      summary: 手动触发一次采集事件上报（台账 plan_id=manual、dry_run=0）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: ceid, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '202': { description: 已受理 }
+        '400': { description: ceid 不合法 }
+        '404': { description: 设备不存在 }
+        '409': { description: 设备离线 }
+        '500': { description: 发送失败 }
   /api/v2/devices/{id}/runtime/executions:
     get:
       tags: [devices]

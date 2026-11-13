@@ -516,6 +516,153 @@ public interface ApiContext {
         return SessionOutcome.UNKNOWN_SESSION;
     }
 
+    /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
+
+    /**
+     * v2：计划列表 + 运行统计（启用态、触发次数、上次触发/跳过原因）。
+     *
+     * @param deviceId 设备 id
+     * @return JSON 文本；设备不存在返回 {@code null}
+     */
+    default String plansV2Json(String deviceId) {
+        return null;
+    }
+
+    /**
+     * v2：运行时新增计划（写 {@code runtime_plan_override}，不动配置）。
+     *
+     * @param deviceId 设备 id
+     * @param planJson 计划正文
+     * @return HTTP 状态码：201 / 404 / 409 / 400
+     */
+    default int addPlanV2(String deviceId, String planJson) {
+        return 404;
+    }
+
+    /**
+     * v2：运行时改写计划正文。
+     *
+     * @param deviceId 设备 id
+     * @param planId   计划 id
+     * @param planJson 计划正文
+     * @return HTTP 状态码：200 / 404 / 400
+     */
+    default int updatePlanV2(String deviceId, String planId, String planJson) {
+        return 404;
+    }
+
+    /**
+     * v2：运行时删除计划。
+     *
+     * @param deviceId 设备 id
+     * @param planId   计划 id
+     * @return HTTP 状态码：200 / 404
+     */
+    default int removePlanV2(String deviceId, String planId) {
+        return 404;
+    }
+
+    /**
+     * v2：目录新增（{@code kind = ceid | report | svid}）。
+     *
+     * @param deviceId 设备 id
+     * @param kind     目录种类
+     * @param bodyJson 条目正文
+     * @return HTTP 状态码：201 / 400 / 404 / 409
+     */
+    default int addCatalogV2(String deviceId, String kind, String bodyJson) {
+        return 404;
+    }
+
+    /**
+     * v2：目录改写。
+     *
+     * @param deviceId 设备 id
+     * @param kind     目录种类
+     * @param key      CEID / RPTID / SVID
+     * @param bodyJson 条目正文
+     * @return HTTP 状态码：200 / 400 / 404
+     */
+    default int updateCatalogV2(String deviceId, String kind, int key, String bodyJson) {
+        return 404;
+    }
+
+    /**
+     * v2：目录删除。
+     *
+     * @param deviceId 设备 id
+     * @param kind     目录种类
+     * @param key      CEID / RPTID / SVID
+     * @return HTTP 状态码：200 / 404
+     */
+    default int removeCatalogV2(String deviceId, String kind, int key) {
+        return 404;
+    }
+
+    /**
+     * v2：钉住一个 SVID 的值。
+     *
+     * @param deviceId  设备 id
+     * @param svid      状态变量号
+     * @param valueJson 值正文
+     * @return HTTP 状态码：200 / 400 / 404
+     */
+    default int pinSvidV2(String deviceId, int svid, String valueJson) {
+        return 404;
+    }
+
+    /**
+     * v2：取消钉值。
+     *
+     * @param deviceId 设备 id
+     * @param svid     状态变量号
+     * @return HTTP 状态码：200 / 404
+     */
+    default int unpinSvidV2(String deviceId, int svid) {
+        return 404;
+    }
+
+    /**
+     * v2：手动发送 SML。
+     *
+     * @param deviceId 设备 id
+     * @param sml      SML 原文
+     * @return 发送结果 JSON；设备不存在返回 {@code null}
+     * @throws IllegalArgumentException SML 解析失败
+     * @throws IllegalStateException    链路未建立
+     * @throws java.io.IOException      协议层发送失败
+     */
+    default String sendSmlV2(String deviceId, String sml)
+            throws java.io.IOException {
+        return null;
+    }
+
+    /**
+     * v2：手动触发采集事件（台账记 {@code plan_id='manual'}、{@code dry_run=0}）。
+     *
+     * @param deviceId 设备 id
+     * @param ceid     采集事件号
+     * @return 结果
+     */
+    default TriggerOutcome triggerCeidV2(String deviceId, int ceid) {
+        return TriggerOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：报警置位 / 清除。
+     *
+     * @param deviceId 设备 id
+     * @param alid     报警号
+     * @param set      true = 置位，false = 清除
+     * @param text     报警文本（US-ASCII）
+     * @param category 报警类别 1..7
+     * @return 结果
+     */
+    default TriggerOutcome triggerAlarmV2(String deviceId, int alid, boolean set,
+                                          String text, int category) {
+        return TriggerOutcome.UNKNOWN_SESSION;
+    }
+
     /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
 
     /**

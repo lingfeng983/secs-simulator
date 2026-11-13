@@ -61,6 +61,7 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
     trigger: vi.fn().mockResolvedValue(undefined),
     reloadSession: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn().mockResolvedValue(undefined),
+    connectSession: vi.fn().mockResolvedValue(undefined),
   } as unknown as BackendController;
 }
 
@@ -88,7 +89,7 @@ function renderPanel(backend: BackendController): string {
 describe('DeviceOpsPanel 渲染契约', () => {
   it('merges overview and session data into one table', () => {
     const html = renderPanel(makeBackend());
-    /* 一张表:读数(端口/速率)与操作(上报/重载/关闭)同处一行 */
+    /* 一张表:读数(端口/速率)与操作(重载/断开)同处一行 */
     expect(html).toContain('设备与会话');
     expect((html.match(/<table/g) ?? []).length).toBe(1);
     expect(html).toContain('>5001<');
@@ -104,7 +105,7 @@ describe('DeviceOpsPanel 渲染契约', () => {
     /* 但信息没丢:控制徽标的 title 里带着状态与单元数 */
     expect(html).toContain('OPEN · 1 个单元');
     expect(html).toContain('重载');
-    expect(html).toContain('关闭');
+    expect(html).toContain('断开');
     expect(html).not.toContain('>上报</button>');
     expect(html).toContain('>3</td>');
     /* 两台设备各占一行 */
@@ -118,7 +119,7 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).toContain('已选 0 台');
     expect(html).toContain('批量同步配置');
     expect(html).toContain('批量重载');
-    expect(html).toContain('批量关闭');
+    expect(html).toContain('批量断开');
     expect(html).not.toContain('批量上报');
     expect(html).not.toContain('批量新建');
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(3);
@@ -137,5 +138,17 @@ describe('DeviceOpsPanel 渲染契约', () => {
     const html = renderPanel(backend);
     /* 总览缺行时端口显示 0,不渲染 NaN 或空单元格 */
     expect(html).toContain('>0<');
+  });
+
+  it('offers connect instead of disconnect once a device is closed', () => {
+    const backend = makeBackend();
+    /* 3.0：关闭 = 断开链路，设备留在列表里。断开态那一行要能连回去，
+       而且不能同时出现「断开」——两个相反动作并排会让人不敢点。 */
+    backend.sessions = [
+      { id: 'dev-a', state: 'CLOSED', controlState: 'OFFLINE', device: 'DEV-A', units: 1, lastError: '', counters: {} },
+    ] as never;
+    const html = renderPanel(backend);
+    expect(html).toContain('>连接</button>');
+    expect(html).not.toContain('>断开</button>');
   });
 });

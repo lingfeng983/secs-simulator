@@ -346,25 +346,402 @@ final class ConfigHandler extends HttpSupport {
             respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
-        if (parts.length >= 3 && "runtime".equals(parts[1]) && !parts[0].isBlank()) {
-            if (parts.length == 3 && "executions".equals(parts[2])) {
-                this.handleExecutionsV2(ex, parts[0]);
+        if (parts.length >= 3 && !parts[0].isBlank() && "runtime".equals(parts[1])) {
+            this.handleDeviceRuntimeV2(ex, parts);
+            return;
+        }
+        this.handleConfigRevisionsV2(ex);
+    }
+
+    /**
+     * v2 设备运行时：{@code /api/v2/devices/{id}/runtime/**}（设计 §2.5）。
+     *
+     * <p>读写分权：GET 只要求 VIEWER，任何改动都要 OPERATOR。这里的所有增删改都
+     * 只落运行态（{@code runtime_plan_override} / {@code runtime_catalog_edit} /
+     * {@code runtime_svid_pin}），不回写配置——配置仍是「设备真实长什么样」的唯一来源，
+     * 运行态覆盖只在重载/重启时按顺序重放。</p>
+     *
+     * @param ex    交换
+     * @param parts 路径段（已去掉前缀：{@code [deviceId, "runtime", 资源, ...]}）
+     * @throws IOException 写响应失败
+     */
+    private void handleDeviceRuntimeV2(HttpExchange ex, String[] parts) throws IOException {
+        String deviceId = parts[0];
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        String resource = parts.length > 2 ? parts[2] : "";
+
+        switch (resource) {
+            case "executions" -> {
+                if (parts.length != 3) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+                    return;
+                }
+                this.handleExecutionsV2(ex, deviceId);
+            }
+            case "plans" -> this.handlePlansV2(ex, deviceId, method, parts);
+            case "catalog" -> this.handleCatalogEditV2(ex, deviceId, method, parts);
+            case "svids" -> this.handleSvidPinV2(ex, deviceId, method, parts);
+            case "message" -> this.handleDeviceMessageV2(ex, deviceId, method);
+            case "alarm" -> this.handleDeviceAlarmV2(ex, deviceId, method, parts);
+            case "ceid" -> this.handleDeviceCeidV2(ex, deviceId, method, parts);
+            default -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+        }
+    }
+
+    /**
+     * {@code /runtime/plans[/{planId}]} 与 {@code .../{planId}/{step|enabled}}。
+     *
+     * <p>{@code step} 与 {@code enabled} 沿用已发布的处理器：它们的鉴权、
+     * 请求体解析与状态码已经和界面联调过，不在这里重写一遍。</p>
+     */
+    private void handlePlansV2(HttpExchange ex, String deviceId, String method,
+                               String[] parts) throws IOException {
+        if (parts.length == 5) {
+            String planId = parts[3];
+            if ("step".equals(parts[4])) {
+                this.handleStepV2(ex, deviceId, planId);
                 return;
             }
-            if (parts.length == 5 && "plans".equals(parts[2]) && !parts[3].isBlank()) {
-                if ("step".equals(parts[4])) {
-                    this.handleStepV2(ex, parts[0], parts[3]);
-                    return;
-                }
-                if ("enabled".equals(parts[4])) {
-                    this.handleEnabledV2(ex, parts[0], parts[3]);
-                    return;
-                }
+            if ("enabled".equals(parts[4])) {
+                this.handleEnabledV2(ex, deviceId, planId);
+                return;
             }
             respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
-        this.handleConfigRevisionsV2(ex);
+        if (parts.length < 3 || parts.length > 4) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        boolean read = "GET".equals(method);
+        if (!requireRole(ex, read ? ApiRole.VIEWER : ApiRole.OPERATOR)) {
+            return;
+        }
+
+        if (parts.length == 3) {
+            if (read) {
+                String body = this.context.plansV2Json(deviceId);
+                if (body == null) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+                    return;
+                }
+                audit(ex, "plan-list", deviceId, "");
+                respond(ex, 200, body);
+                return;
+            }
+            if ("POST".equals(method)) {
+                String body = readBody(ex, MAX_CONFIG_BYTES);
+                if (body == null || body.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                int status = this.context.addPlanV2(deviceId, body);
+                audit(ex, "plan-add", deviceId, "status=" + status);
+                respondEditStatus(ex, status);
+                return;
+            }
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+
+        String planId = parts[3];
+        if ("PUT".equals(method)) {
+            String body = readBody(ex, MAX_CONFIG_BYTES);
+            if (body == null || body.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            int status = this.context.updatePlanV2(deviceId, planId, body);
+            audit(ex, "plan-update", deviceId, "plan=" + planId + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        if ("DELETE".equals(method)) {
+            int status = this.context.removePlanV2(deviceId, planId);
+            audit(ex, "plan-delete", deviceId, "plan=" + planId + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /** {@code /runtime/catalog/{kind}[/{key}]}，{@code kind = ceid | report | svid}。 */
+    private void handleCatalogEditV2(HttpExchange ex, String deviceId, String method,
+                                     String[] parts) throws IOException {
+        String kind = parts.length > 3 ? parts[3] : "";
+        if (!"ceid".equals(kind) && !"report".equals(kind) && !"svid".equals(kind)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-kind\"}");
+            return;
+        }
+        if (parts.length < 4 || parts.length > 5) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+
+        if (parts.length == 4) {
+            if (!"POST".equals(method)) {
+                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+                return;
+            }
+            String body = readBody(ex, MAX_CONFIG_BYTES);
+            if (body == null || body.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            int status = this.context.addCatalogV2(deviceId, kind, body);
+            audit(ex, kind + "-add", deviceId, "status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+
+        Integer key = intOrNull(parts[4]);
+        if (key == null || key < 1) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-key\"}");
+            return;
+        }
+        if ("PUT".equals(method)) {
+            String body = readBody(ex, MAX_CONFIG_BYTES);
+            if (body == null || body.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            int status = this.context.updateCatalogV2(deviceId, kind, key, body);
+            audit(ex, kind + "-update", deviceId, "key=" + key + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        if ("DELETE".equals(method)) {
+            int status = this.context.removeCatalogV2(deviceId, kind, key);
+            audit(ex, kind + "-delete", deviceId, "key=" + key + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /** {@code PUT|DELETE /runtime/svids/{svid}/pin}：钉值 / 取消钉值。 */
+    private void handleSvidPinV2(HttpExchange ex, String deviceId, String method,
+                                 String[] parts) throws IOException {
+        if (parts.length != 5 || !"pin".equals(parts[4])) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        Integer svid = intOrNull(parts[3]);
+        if (svid == null || svid < 1) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-svid\"}");
+            return;
+        }
+        if ("PUT".equals(method)) {
+            String body = readBody(ex, MAX_CONFIG_BYTES);
+            if (body == null || body.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            int status = this.context.pinSvidV2(deviceId, svid, body);
+            audit(ex, "svid-pin", deviceId, "svid=" + svid + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        if ("DELETE".equals(method)) {
+            int status = this.context.unpinSvidV2(deviceId, svid);
+            audit(ex, "svid-unpin", deviceId, "svid=" + svid + " status=" + status);
+            respondEditStatus(ex, status);
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /** {@code POST /runtime/message}：手动 SML 原文，不套 JSON 外壳。 */
+    private void handleDeviceMessageV2(HttpExchange ex, String deviceId, String method)
+            throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        if (!"POST".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        String sml = readBody(ex, MAX_SML_BYTES);
+        if (sml == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            return;
+        }
+        if (sml.isBlank()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"empty-sml\"}");
+            return;
+        }
+        try {
+            String result = this.context.sendSmlV2(deviceId, sml);
+            if (result == null) {
+                audit(ex, "send-sml", deviceId, "outcome=unknown-device bytes=" + sml.length());
+                respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+                return;
+            }
+            audit(ex, "send-sml", deviceId, "outcome=ok bytes=" + sml.length());
+            respond(ex, 200, result);
+        } catch (IllegalArgumentException e) {
+            audit(ex, "send-sml", deviceId, "outcome=bad-sml bytes=" + sml.length());
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-sml\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
+        } catch (IllegalStateException e) {
+            audit(ex, "send-sml", deviceId, "outcome=not-open bytes=" + sml.length());
+            respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
+        } catch (IOException e) {
+            audit(ex, "send-sml", deviceId, "outcome=failed bytes=" + sml.length());
+            Log.error("手动发送 SML 失败（v2 设备 " + deviceId + "）", e);
+            respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
+        }
+    }
+
+    /** {@code POST|DELETE /runtime/alarm/{alid}}：置位 / 清除。 */
+    private void handleDeviceAlarmV2(HttpExchange ex, String deviceId, String method,
+                                     String[] parts) throws IOException {
+        if (parts.length != 4) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        boolean set;
+        if ("POST".equals(method)) {
+            set = true;
+        } else if ("DELETE".equals(method)) {
+            set = false;
+        } else {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        Integer alid = intOrNull(parts[3]);
+        if (alid == null || alid < 1) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
+            return;
+        }
+
+        /* 文本与类别既可以放 JSON body，也可以放 query：v1 用的是 query，
+           这里两种都认，免得调用方为一元值再包一层 JSON */
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+        String text = query.getOrDefault("text", "");
+        String categoryRaw = query.getOrDefault("category", "1");
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            return;
+        }
+        if (!body.isBlank()) {
+            try {
+                JsonHub root = JsonHub.fromJson(body);
+                if (!root.isObject()) {
+                    throw new IllegalArgumentException("expected object");
+                }
+                if (root.containsKey("text")) {
+                    text = root.get("text").optionalString().orElse(text);
+                }
+                if (root.containsKey("category")) {
+                    /* 只认数字：字符串形式的类别交给 query 传，省掉一层隐式转换 */
+                    categoryRaw = String.valueOf(root.get("category").optionalInt()
+                            .orElseThrow(() -> new IllegalArgumentException("category")));
+                }
+            } catch (RuntimeException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+        }
+
+        Integer category = intOrNull(categoryRaw);
+        if (category == null || category < 1 || category > 7) {
+            /* ALCD 低 3 位是类别，0 无定义：入口就拒，别等 AlarmReporter 抛 IOException 变 500 */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
+            return;
+        }
+        if (!isAscii(text)) {
+            /* SECS-II 的 A 是 US-ASCII（ALTX 含中文编码会失败） */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-text\"}");
+            return;
+        }
+
+        TriggerOutcome outcome = this.context.triggerAlarmV2(deviceId, alid, set, text, category);
+        audit(ex, "alarm", deviceId, "alid=" + alid + " set=" + set
+                + " category=" + category + " outcome=" + outcome);
+        respondTrigger(ex, outcome);
+    }
+
+    /** {@code POST /runtime/ceid/{ceid}}：手动触发一次采集事件上报。 */
+    private void handleDeviceCeidV2(HttpExchange ex, String deviceId, String method,
+                                    String[] parts) throws IOException {
+        if (parts.length != 4) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        if (!"POST".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        Integer ceid = intOrNull(parts[3]);
+        if (ceid == null || ceid < 1) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
+            return;
+        }
+        TriggerOutcome outcome = this.context.triggerCeidV2(deviceId, ceid);
+        audit(ex, "trigger-ceid", deviceId, "ceid=" + ceid + " outcome=" + outcome);
+        respondTrigger(ex, outcome);
+    }
+
+    /**
+     * 编辑类状态码的响应映射。
+     *
+     * <p>v2 把资源拆到了不同路径，但语义与 v1 编辑路径一致：
+     * 201 新建、200 改/删、404 设备或条目不存在、409 冲突、400 请求体不合法。</p>
+     */
+    private static void respondEditStatus(HttpExchange ex, int status) throws IOException {
+        switch (status) {
+            case 200, 201 -> respond(ex, status, "{\"ok\":true}");
+            case 400 -> respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\"}");
+            case 404 -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            case 409 -> respond(ex, 409, "{\"ok\":false,\"error\":\"conflict\"}");
+            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"edit-failed\"}");
+        }
+    }
+
+    /** 触发类结果的状态码映射（与 v1 手动触发保持一致：202 受理、409 未在线）。 */
+    private static void respondTrigger(HttpExchange ex, TriggerOutcome outcome) throws IOException {
+        switch (outcome) {
+            case OK -> respond(ex, 202, "{\"ok\":true}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
+            case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+        }
+    }
+
+    /** 路径段转整数；非数字返回 {@code null}（调用方按 400 处理）。 */
+    private static Integer intOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** SECS-II 的 A 类型只允许 US-ASCII。 */
+    private static boolean isAscii(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) > 0x7F) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** GET /api/v2/devices/{id}/runtime/executions：执行台账（缺省不含试跑）。 */

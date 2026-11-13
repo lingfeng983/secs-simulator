@@ -242,6 +242,19 @@ final class EventScheduler {
         return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans, ceidOwner);
     }
 
+    /**
+     * 编排列表 + 每条计划的运行统计（v2 计划页用）。
+     *
+     * @param ceidOwner CEID → 归属单元名
+     * @param stats     planId → 运行统计
+     * @return JSON 文本
+     */
+    String eventsJson(java.util.function.IntFunction<String> ceidOwner,
+                      java.util.Map<String, PlanRuntimeStat> stats) {
+        return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans,
+                ceidOwner, stats);
+    }
+
 
     /**
      * 运行时启用/禁用一个计划。

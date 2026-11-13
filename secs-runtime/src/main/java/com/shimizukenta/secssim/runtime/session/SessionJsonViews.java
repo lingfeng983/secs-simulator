@@ -67,6 +67,25 @@ final class SessionJsonViews {
      */
     static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
                              java.util.function.IntFunction<String> ceidOwner) {
+        return eventsJson(plans, disabledPlans, ceidOwner, null);
+    }
+
+    /**
+     * 同 {@link #eventsJson(Iterable, Set, java.util.function.IntFunction)}，
+     * 额外带上每条计划的运行统计（v2 计划页用）。
+     *
+     * <p>统计来自 {@code runtime_plan_state}，与计划正文分属两处；只有界面
+     * 需要它们时才传，v1 的编排视图保持原样（多出的字段会让契约对不上）。</p>
+     *
+     * @param plans         编排表
+     * @param disabledPlans 运行时禁用的计划 id
+     * @param ceidOwner     CEID → 归属单元名
+     * @param stats         planId → 运行统计；null = 不带统计
+     * @return JSON 文本
+     */
+    static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
+                             java.util.function.IntFunction<String> ceidOwner,
+                             Map<String, PlanRuntimeStat> stats) {
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> events = new ArrayList<>();
 
@@ -77,6 +96,14 @@ final class SessionJsonViews {
             String owner = ceidOwner == null ? "" : ceidOwner.apply(plan.ceid());
             pairs.add(b.pair("owner", owner == null ? "" : owner));
             pairs.add(b.pair("enabled", !disabledPlans.contains(plan.id())));
+            if (stats != null) {
+                PlanRuntimeStat stat = stats.getOrDefault(plan.id(), PlanRuntimeStat.EMPTY);
+                pairs.add(b.pair("fireCount", stat.fireCount()));
+                pairs.add(b.pair("skippedCount", stat.skippedCount()));
+                pairs.add(b.pair("lastFireAt", stat.lastFireAt()));
+                pairs.add(b.pair("nextFireAt", stat.nextFireAt()));
+                pairs.add(b.pair("lastError", stat.lastError() == null ? "" : stat.lastError()));
+            }
             triggerJson(plan.trigger(), pairs, b);
             if (!plan.effects().isEmpty()) {
                 pairs.add(b.pair("effects", effectsJson(plan.effects(), b)));

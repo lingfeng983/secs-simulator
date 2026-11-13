@@ -45,7 +45,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
   const [configTemplates, setConfigTemplates] = useState<ConfigTemplateEntry[]>([]);
   const [bulkTplId, setBulkTplId] = useState('etch');
   const [bulkTplName, setBulkTplName] = useState('');
-  /** 待确认的关闭目标:null = 不弹;label 是确认文案里的人话描述。 */
+  /** 待确认的断开目标:null = 不弹;label 是确认文案里的人话描述。 */
   const [closeTarget, setCloseTarget] = useState<{ ids: readonly string[]; label: string } | null>(null);
   const [bulkTplBusy, setBulkTplBusy] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -217,25 +217,40 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     {
       key: 'actions',
       header: '',
-      render: (row) => (
-        <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => void backend.reloadSession(row.id)}
-            title="按配置文件重新装载(配置有问题时旧会话不受影响)"
-          >
-            重载
-          </button>
-          <button
-            type="button"
-            className="danger"
-            onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
-            title="关闭并移除该会话(端口立即解绑)"
-          >
-            关闭
-          </button>
-        </div>
-      ),
+      render: (row) => {
+        /* 3.0：关闭 = 断开链路（设备保留），所以断开态要能一键连回去。
+           「连接」与「断开」互斥，同一行不会同时出现两个相反的动作。 */
+        const disconnected = row.state === 'CLOSED';
+        return (
+          <div className="row-actions" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => void backend.reloadSession(row.id)}
+              title="按配置文件重新装载(配置有问题时旧会话不受影响)"
+            >
+              重载
+            </button>
+            {disconnected ? (
+              <button
+                type="button"
+                onClick={() => void backend.connectSession(row.id)}
+                title="按当前配置重新建链(模型/设定值/事件启停原样恢复)"
+              >
+                连接
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
+                title="断开链路:端口立即释放,设备保留在列表里"
+              >
+                断开
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -529,10 +544,10 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           type="button"
           className="danger"
           disabled={selected.size === 0 || batchBusy}
-          title="关闭并移除选中的设备(端口立即解绑,不可恢复)"
+          title="断开选中的设备链路(端口立即释放;设备保留,可再连)"
           onClick={() => setCloseTarget({ ids: [...selected], label: `选中的 ${selected.size} 台设备` })}
         >
-          批量关闭
+          批量断开
         </button>
       </div>
 
@@ -585,10 +600,10 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
 
       <ConfirmModal
         open={closeTarget !== null}
-        title="关闭会话"
+        title="断开连接"
         danger
-        confirmLabel="关闭"
-        message={closeTarget === null ? '' : `确定关闭${closeTarget.label}？端口会立即解绑,主机连接断开。`}
+        confirmLabel="断开"
+        message={closeTarget === null ? '' : `确定断开${closeTarget.label}？端口会立即释放、主机连接断开，设备仍保留在列表里，可随时再连。`}
         onClose={() => setCloseTarget(null)}
         onConfirm={() => {
           if (closeTarget === null) {
@@ -601,7 +616,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
             return;
           }
           setBatchBusy(true);
-          void batchClose(new Set(ids), (done, total) => setBatchProgress(`关闭 ${done}/${total}`))
+          void batchClose(new Set(ids), (done, total) => setBatchProgress(`断开 ${done}/${total}`))
             .finally(() => {
               setSelected(new Set());
               setBatchBusy(false);

@@ -1,7 +1,9 @@
 package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
@@ -15,6 +17,7 @@ import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
+import com.shimizukenta.secssim.runtime.session.PlanRuntimeStat;
 import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.HostRepository;
 import com.shimizukenta.secssim.store.PlanExecutionRepository;
@@ -56,6 +59,9 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final RuntimePersister persister;
     /** 状态通知（SSE 的第二条数据源：设备/主机链路相位、配置变更）。 */
     private final com.shimizukenta.secssim.app.event.NoticeBus notices;
+    /** 手工触发台账的序号：同一毫秒内连点两次也不能撞幂等键。 */
+    private static final java.util.concurrent.atomic.AtomicLong MANUAL_TRIGGER_SEQ =
+            new java.util.concurrent.atomic.AtomicLong();
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
@@ -483,6 +489,130 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
            不写死一个可能与 OnCondition / AfterEvent 冲突的时刻（设计 §2.7.3）。 */
         this.linkState.savePlanState(canonicalDeviceId(deviceId), planId, enabled, null, "");
         return SessionOutcome.OK;
+    }
+
+    /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
+
+    @Override
+    public String plansV2Json(String deviceId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return null;
+        }
+        /* 统计缺失的计划按「没跑过」处理：配置里有、runtime_plan_state 里没有很正常 */
+        Map<String, PlanRuntimeStat> stats = new LinkedHashMap<>();
+        for (RuntimeStateRepository.PlanStateRow row : this.linkState.planStates(canonicalDeviceId(deviceId))) {
+            stats.put(row.planId(), new PlanRuntimeStat(row.fireCount(), row.skippedCount(),
+                    row.lastFireAt() == null ? 0L : row.lastFireAt(),
+                    row.nextFireAt() == null ? 0L : row.nextFireAt(),
+                    row.lastError() == null ? "" : row.lastError()));
+        }
+        return session.eventsJson(stats);
+    }
+
+    @Override
+    public int addPlanV2(String deviceId, String planJson) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? 404 : this.api.addEventPlan(session.id(), planJson);
+    }
+
+    @Override
+    public int updatePlanV2(String deviceId, String planId, String planJson) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? 404 : this.api.updateEventPlan(session.id(), planId, planJson);
+    }
+
+    @Override
+    public int removePlanV2(String deviceId, String planId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? 404 : this.api.removeEventPlan(session.id(), planId);
+    }
+
+    @Override
+    public int addCatalogV2(String deviceId, String kind, String bodyJson) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return 404;
+        }
+        return switch (kind) {
+            case "ceid" -> this.api.addCeid(session.id(), bodyJson);
+            case "report" -> this.api.addReport(session.id(), bodyJson);
+            case "svid" -> this.api.addSvid(session.id(), bodyJson);
+            default -> 400;
+        };
+    }
+
+    @Override
+    public int updateCatalogV2(String deviceId, String kind, int key, String bodyJson) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return 404;
+        }
+        return switch (kind) {
+            case "ceid" -> this.api.updateCeid(session.id(), key, bodyJson);
+            case "report" -> this.api.updateReport(session.id(), key, bodyJson);
+            case "svid" -> this.api.updateSvid(session.id(), key, bodyJson);
+            default -> 400;
+        };
+    }
+
+    @Override
+    public int removeCatalogV2(String deviceId, String kind, int key) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return 404;
+        }
+        return switch (kind) {
+            case "ceid" -> this.api.removeCeid(session.id(), key);
+            case "report" -> this.api.removeReport(session.id(), key);
+            case "svid" -> this.api.removeSvid(session.id(), key);
+            default -> 400;
+        };
+    }
+
+    @Override
+    public int pinSvidV2(String deviceId, int svid, String valueJson) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? 404 : this.api.pinSvidValue(session.id(), svid, valueJson);
+    }
+
+    @Override
+    public int unpinSvidV2(String deviceId, int svid) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? 404 : this.api.unpinSvidValue(session.id(), svid);
+    }
+
+    @Override
+    public String sendSmlV2(String deviceId, String sml) throws IOException {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? null : this.api.sendSml(session.id(), sml);
+    }
+
+    @Override
+    public TriggerOutcome triggerCeidV2(String deviceId, int ceid) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return TriggerOutcome.UNKNOWN_SESSION;
+        }
+        TriggerOutcome outcome = this.api.triggerCeid(session.id(), ceid);
+        /* 台账要留证据（设计 §2.5）：手工触发也记一行，plan_id 固定 manual，
+           这样「谁在什么时候手动发过一次」能直接查出来，不用翻报文日志 */
+        long now = System.currentTimeMillis();
+        String key = canonicalDeviceId(deviceId) + "|manual|" + ceid + "|" + now
+                + "|" + MANUAL_TRIGGER_SEQ.incrementAndGet();
+        this.planExecutions.append(new PlanExecutionRepository.Execution(
+                canonicalDeviceId(deviceId), "manual", ceid, key, false, now, now,
+                outcome == TriggerOutcome.OK ? "SENT" : outcome.name(), "", "",
+                outcome == TriggerOutcome.OK ? "" : "手动触发未发出: " + outcome));
+        return outcome;
+    }
+
+    @Override
+    public TriggerOutcome triggerAlarmV2(String deviceId, int alid, boolean set,
+                                         String text, int category) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        return session == null ? TriggerOutcome.UNKNOWN_SESSION
+                : this.api.triggerAlarm(session.id(), alid, set, text, category);
     }
 
     /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */

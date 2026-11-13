@@ -217,9 +217,25 @@ export async function mockApi(page: Page): Promise<MockState> {
       return ok({ created: ['dev-1'], failed: [] }, 201);
     }
     if (/^\/api\/v1\/sessions\/[^/]+$/.test(path) && method === 'DELETE') {
+      /* 3.0：DELETE 的语义是断开链路，设备留在列表里（列表行不能消失） */
       const id = decodeURIComponent(path.split('/').pop() ?? '');
-      state.sessions = state.sessions.filter((item) => item.id !== id);
-      return ok({ ok: true });
+      const session = state.sessions.find((item) => item.id === id);
+      if (session === undefined) {
+        return ok({ ok: false, error: 'unknown-session' }, 404);
+      }
+      session.state = 'CLOSED';
+      session.controlState = 'OFFLINE';
+      return ok({ ok: true, phase: 'DISCONNECTED' });
+    }
+    if (/^\/api\/v2\/devices\/[^/]+\/link\/connect$/.test(path) && method === 'POST') {
+      const id = decodeURIComponent(path.split('/')[4] ?? '');
+      const session = state.sessions.find((item) => item.id === id);
+      if (session === undefined) {
+        return ok({ ok: false, error: 'device-not-found' }, 404);
+      }
+      session.state = 'OPEN';
+      session.controlState = 'ONLINE';
+      return ok({ ok: true, phase: 'LISTENING' });
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/reload$/.test(path)) {
       return ok({ ok: true });

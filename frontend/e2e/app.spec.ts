@@ -137,7 +137,7 @@ test('工作台搜索与状态筛选', async ({ page }) => {
   await panel.getByRole('button', { name: '全部', exact: true }).click();
 });
 
-test('批量工具条：全选 / 清空 / 重载 / 关闭确认', async ({ page }) => {
+test('批量工具条：全选 / 清空 / 重载 / 断开确认', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
 
@@ -153,12 +153,12 @@ test('批量工具条：全选 / 清空 / 重载 / 关闭确认', async ({ page 
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(2);
 
-  /* 批量关闭要弹确认；确认后两台都从表里消失 */
-  await batch.getByRole('button', { name: '批量关闭' }).click();
-  await expect(page.getByRole('dialog')).toContainText('确定关闭选中的 2 台设备');
-  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '关闭' }).click();
-  await expect.poll(() => state.sessions.length).toBe(0);
-  await expect(page.locator('#panel-sessions')).toContainText('暂无会话');
+  /* 批量断开要弹确认；3.0 起是断链不是删除：行还在，状态变「离线」，可再连 */
+  await batch.getByRole('button', { name: '批量断开' }).click();
+  await expect(page.getByRole('dialog')).toContainText('确定断开选中的 2 台设备');
+  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '断开' }).click();
+  await expect.poll(() => state.sessions.filter((item) => item.state === 'CLOSED').length).toBe(2);
+  await expect(page.locator('#panel-sessions tbody tr')).toHaveCount(2);
 
   /* 全选在"有行"时可用；清空后归零 */
   await expect(batch).toContainText('已选 0 台');
@@ -176,7 +176,7 @@ test('批量同步配置弹窗能打开并给出目标台数', async ({ page }) 
   await expect(dialog).toHaveCount(0);
 });
 
-test('单行「重载」直接打后端，「关闭」先确认再移除', async ({ page }) => {
+test('单行「重载」直接打后端，「断开」先确认再改状态，「连接」能连回去', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
   const row = page.locator('#panel-sessions tbody tr', { hasText: 'line1' }).first();
@@ -184,10 +184,17 @@ test('单行「重载」直接打后端，「关闭」先确认再移除', async
   await row.getByRole('button', { name: '重载' }).click();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(1);
 
-  await row.getByRole('button', { name: '关闭' }).click();
+  await row.getByRole('button', { name: '断开' }).click();
   /* 弹窗右上角的 × 也叫「关闭」，取底部的确认按钮 */
-  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '关闭' }).click();
-  await expect.poll(() => state.sessions.some((item) => item.id === 'line1')).toBe(false);
+  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '断开' }).click();
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line1')?.state).toBe('CLOSED');
+
+  /* 断开后行不消失，按钮换成「连接」；连回去打到 v2 的 link/connect */
+  const closedRow = page.locator('#panel-sessions tbody tr', { hasText: 'line1' }).first();
+  await expect(closedRow).toContainText('line1');
+  await closedRow.getByRole('button', { name: '连接' }).click();
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line1')?.state).toBe('OPEN');
+  await expect.poll(() => state.calls.some((call) => call.endsWith('/link/connect'))).toBe(true);
 });
 
 test('按模板新建设备：只选模板就建出配置与会话', async ({ page }) => {

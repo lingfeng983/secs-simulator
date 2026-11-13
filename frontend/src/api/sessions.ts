@@ -26,6 +26,7 @@ type SessionApi = Pick<
   | 'createSession'
   | 'bulkSessions'
   | 'closeSession'
+  | 'connectDevice'
   | 'reloadSession'
   | 'trigger'
   | 'alarm'
@@ -85,10 +86,20 @@ export const sessionApi: SessionApi = {
     return JSON.parse(text) as SessionBulkResult;
   },
   async closeSession(sessionId) {
+    /* 3.0 起这条 v1 端点的语义是「断开链路」：设备不消失，可再连。
+       后端会带 Deprecation 头，迁移到 v2 的 link/disconnect 放在下一轮。 */
     return commandStatus(
       await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}`), {
         method: 'DELETE',
       }),
+    );
+  },
+  async connectDevice(deviceId) {
+    /* 建链可能要等主机 SELECT（被动监听则只绑端口），8 秒容易误判 */
+    return commandStatus(
+      await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/link/connect`), {
+        method: 'POST',
+      }, LONG_REQUEST_TIMEOUT_MS),
     );
   },
   async reloadSession(sessionId) {

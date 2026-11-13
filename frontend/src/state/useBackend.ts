@@ -129,6 +129,8 @@ export interface BackendController {
   /** 校验通过后落盘;expectedModifiedMs 非空时 If-Match 并发保护,被改过回 409。 */
   saveConfig: (name: string, text: string, expectedModifiedMs?: number | null) => Promise<ConfigSaveResult | null>;
   closeSession: (sessionId: string) => Promise<void>;
+  /** 重新建链：断开态的设备对象复用，模型/钉值/计划启用态原样恢复。 */
+  connectSession: (deviceId: string) => Promise<void>;
   reloadSession: (sessionId: string) => Promise<void>;
   trigger: (sessionId: string, ceid: number) => Promise<void>;
   setAlarm: (sessionId: string, alid: number, set: boolean, text: string, category: number) => Promise<void>;

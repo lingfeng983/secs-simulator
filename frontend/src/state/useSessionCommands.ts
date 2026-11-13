@@ -149,7 +149,7 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
 
   const batchClose = useCallback(
     (ids: ReadonlySet<string>, onProgress?: (done: number, total: number) => void) =>
-      batchRun(ids, '关闭', (id) => client === null ? Promise.resolve(0) : client.closeSession(id), 'info', onProgress),
+      batchRun(ids, '断开', (id) => client === null ? Promise.resolve(0) : client.closeSession(id), 'info', onProgress),
     [batchRun, client],
   );
 
@@ -160,15 +160,37 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       }
       try {
         const status = await client.closeSession(sessionId);
-        const text = lifecycleMessage(status, `关闭会话 ${sessionId}`);
+        /* 3.0 起这是「断开」不是「删除」：设备仍在列表里，随时能再连 */
+        const text = lifecycleMessage(status, `断开设备 ${sessionId}`);
         if (status === 200 || status === 204) {
-          notifierRef.current.success(text);
+          notifierRef.current.success(text, '端口已释放，设备保留在列表里，可随时再连');
         } else {
           notifierRef.current.error(text);
         }
         await refreshSessions();
       } catch (error) {
-        notifierRef.current.error('关闭会话失败', (error as Error).message);
+        notifierRef.current.error('断开设备失败', (error as Error).message);
+      }
+    },
+    [client, refreshSessions],
+  );
+
+  const connectSession = useCallback(
+    async (deviceId: string) => {
+      if (client === null) {
+        return;
+      }
+      try {
+        const status = await client.connectDevice(deviceId);
+        const text = lifecycleMessage(status, `连接设备 ${deviceId}`);
+        if (status === 200 || status === 201) {
+          notifierRef.current.success(text, '设定值与事件启停已按上次保留');
+        } else {
+          notifierRef.current.error(text);
+        }
+        await refreshSessions();
+      } catch (error) {
+        notifierRef.current.error('连接设备失败', (error as Error).message);
       }
     },
     [client, refreshSessions],
@@ -224,9 +246,11 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       batchReload,
       batchClose,
       closeSession,
+      connectSession,
       reloadSession,
       trigger,
     }),
-    [createSession, bulkCreateSessions, batchTrigger, batchReload, batchClose, closeSession, reloadSession, trigger],
+    [createSession, bulkCreateSessions, batchTrigger, batchReload, batchClose,
+      closeSession, connectSession, reloadSession, trigger],
   );
 }

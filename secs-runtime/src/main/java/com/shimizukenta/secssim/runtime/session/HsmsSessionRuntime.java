@@ -555,11 +555,24 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /** 运行时编排表视图（界面用）。 */
     public String eventsJson() {
         /* 计划的归属 = 它引用的 CEID 的归属：按设备模型反查，不另存一份 */
-        return this.scheduler.eventsJson(ceid -> {
-            ResolvedEquipment current = this.model;
-            ResolvedCeid resolved = current == null ? null : current.ceids().get(ceid);
-            return resolved == null ? "" : resolved.owner();
-        });
+        return this.scheduler.eventsJson(this::ceidOwner);
+    }
+
+    /**
+     * 编排表 + 运行统计（v2 计划页：倒计时与「启用后确实在跑」的证据）。
+     *
+     * @param stats planId → 运行统计；null = 不带统计
+     * @return JSON 文本
+     */
+    public String eventsJson(java.util.Map<String, PlanRuntimeStat> stats) {
+        return this.scheduler.eventsJson(this::ceidOwner, stats);
+    }
+
+    /** CEID → 归属单元名；查不到（被主机的 S2F33 覆盖掉、或模型已换）返回空串。 */
+    private String ceidOwner(int ceid) {
+        ResolvedEquipment current = this.model;
+        ResolvedCeid resolved = current == null ? null : current.ceids().get(ceid);
+        return resolved == null ? "" : resolved.owner();
     }
 
     /** 运行时启停一个计划。 */

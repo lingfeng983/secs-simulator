@@ -24,6 +24,14 @@ final class SessionHandler extends HttpSupport {
      */
     private static final String BURST_STATUS_REQUEST = "{\"status\":true}";
 
+    /**
+     * 废弃端点的下线日期（{@code Sunset} 头，RFC 8594）。
+     *
+     * <p>给一个明确日期而不是「以后」：客户端与脚本能据此排迁移计划。
+     * 3.0 保留整个 3.x 周期，4.0 起移除。</p>
+     */
+    private static final String DEPRECATION_SUNSET = "Wed, 30 Jun 2027 00:00:00 GMT";
+
     SessionHandler(ApiContext context, AccessControl access, AuditSink audit) {
         super(context, access, audit);
     }
@@ -299,10 +307,15 @@ final class SessionHandler extends HttpSupport {
 
 
     /**
-     * DELETE /api/v1/sessions/{id}：关闭并移除会话。
+     * {@code DELETE /api/v1/sessions/{id}}：3.0 起语义是<b>断开链路</b>，不是移除会话。
      *
-     * <p>响应等真正关完才发：客户端拿到 200 就应当认为端口已经解绑了。
-     * </p>
+     * <p>设计 §2.5：这条 v1 端点保留一个版本做兼容别名，内部转成
+     * {@code POST /api/v2/devices/{id}/link/disconnect}。行为上看得见的变化是
+     * <b>设备不再从列表消失</b>——模型、钉值、计划启用态、目录编辑全部保留，
+     * 只是端口释放、可随时再连（需求 1「关闭 = 断链不删实体」）。</p>
+     *
+     * <p>响应带 {@code Deprecation: true} 与 {@code Sunset}，客户端据此提示迁移；
+     * body 里的 {@code hint} 直接给出替代端点，省得对着变更日志找。</p>
      */
     void closeSession(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
@@ -325,10 +338,13 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
-        SessionOutcome outcome = this.context.closeSession(id);
-        audit(ex, "session-close", id, "outcome=" + outcome);
+        SessionOutcome outcome = this.context.deviceDisconnectV2(id);
+        audit(ex, "session-close", id, "outcome=" + outcome + " via=link/disconnect");
+        ex.getResponseHeaders().set("Deprecation", "true");
+        ex.getResponseHeaders().set("Sunset", DEPRECATION_SUNSET);
         switch (outcome) {
-            case OK -> respond(ex, 200, "{\"ok\":true}");
+            case OK -> respond(ex, 200, "{\"ok\":true,\"phase\":\"DISCONNECTED\","
+                    + "\"hint\":\"use POST /api/v2/devices/{id}/link/disconnect\"}");
             default -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
         }
     }

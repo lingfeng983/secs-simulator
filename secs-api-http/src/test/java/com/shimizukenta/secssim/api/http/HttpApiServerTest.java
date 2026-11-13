@@ -40,7 +40,7 @@ class HttpApiServerTest {
     private final List<String> alarms = new ArrayList<>();
     private TriggerOutcome outcome = TriggerOutcome.OK;
     private final List<String> created = new ArrayList<>();
-    private final List<String> closed = new ArrayList<>();
+    private final List<String> disconnected = new ArrayList<>();
     private final List<String> reloaded = new ArrayList<>();
     private final List<String> messageQueries = new ArrayList<>();
     private final List<String> sentSml = new ArrayList<>();
@@ -245,8 +245,14 @@ class HttpApiServerTest {
 
             @Override
             public SessionOutcome closeSession(String sessionId) {
-                HttpApiServerTest.this.closed.add(sessionId);
                 return "missing".equals(sessionId) ? SessionOutcome.UNKNOWN_SESSION : SessionOutcome.OK;
+            }
+
+            @Override
+            public SessionOutcome deviceDisconnectV2(String deviceId) {
+                /* v1 的 DELETE 现在走这里：断开不删实体（设计 §2.5） */
+                HttpApiServerTest.this.disconnected.add(deviceId);
+                return this.closeSession(deviceId);
             }
 
             @Override
@@ -414,7 +420,15 @@ class HttpApiServerTest {
         HttpResponse<String> response = delete("/api/v1/sessions/s1", null);
 
         assertEquals(200, response.statusCode(), response.body());
-        assertEquals(List.of("s1"), this.closed);
+        /* 3.0：DELETE 的语义是断开链路，内部转 v2 的 link/disconnect，设备不消失 */
+        assertEquals(List.of("s1"), this.disconnected);
+        assertTrue(response.body().contains("DISCONNECTED"), response.body());
+        assertTrue(response.body().contains("link/disconnect"), "要给迁移提示: " + response.body());
+        assertEquals("true",
+                response.headers().firstValue("Deprecation").orElse(""),
+                "旧端点要能被客户端识别为已废弃");
+        assertTrue(response.headers().firstValue("Sunset").isPresent(),
+                "Sunset 缺失：客户端排不出迁移日期");
         assertEquals(404, delete("/api/v1/sessions/missing", null).statusCode());
     }
 

@@ -96,12 +96,21 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
   - **主机实例装回内存**（顺带修掉一个真 bug）：`loadPersisted()` 原来在 `Bootstrap` 里调，装进的却是一个随后就被丢弃的 `HostSimRegistry`——真正对外服务的那个注册表是空的，重启后 `GET /api/v2/hosts` 为空、详情/连接/发送全 404。现在挪到 `RuntimeContext` 构造里，装进正在用的注册表。
   - **会话运行态重放**：`sessions.onRegister` 对新会话按依赖顺序恢复 runtime.db 里的编辑：目录编辑（重建模型）→ 计划正文覆盖 → 钉值 → 计划启用态。反过来就会丢东西：先恢复钉值的话，运行时新增 SVID 还没进模型，那次钉值会被拒绝。单条失败只跳过这一条（配置改过 / SVID 被删 / JSON 坏了），不让一条脏数据把设备带崩。
   - **相位收敛**：`resetStaleDevicePhases()` 启动时把上次进程留下的 `CONNECTED / LISTENING / STARTING` 改成 `DISCONNECTED`（保留行，配置版本不动），否则界面会显示一堆"连着的死设备"。
-  - **销毁 vs 重载**：销毁（v1 关闭）与重载都 `clearRuntimeEdits`，但**都不清 `runtime_plan_state`**——启停是用户明确的开关选择，重连后照旧。重载先清库再重建会话，否则注册观察者会把刚清掉的钉值又装回来。
+  - **销毁 vs 重载**：销毁（`RuntimeApi.closeSession`，3.0 起没有 HTTP 入口——v1 `DELETE /sessions/{id}` 已改成断开，真删除留给 §2.5 的 `DELETE /devices/{id}`）与重载都 `clearRuntimeEdits`，但**都不清 `runtime_plan_state`**——启停是用户明确的开关选择，重连后照旧。重载先清库再重建会话，否则注册观察者会把刚清掉的钉值又装回来。
 - [x] **SSE 生命周期帧**：`event: device-link`（`HsmsSessionRuntime.onLinkPhase` 钩子 → 落 `device_link` + 追加 `link_event` + 推帧）、`event: host-link`（`HostSimulator.onPhase`）、`event: config-changed`（保存/新建成功后）。SSE 侧不用改：`StreamHandler` 本来就把 `NoticeEvent.type()` 直接当 `event:` 名。
 - [x] **设备侧 v2 链路端点**：`GET /api/v2/devices/{id}/link`（相位 + 控制状态 + 时间戳，内存相位优先）、`POST|PUT /api/v2/devices/{id}/link/{connect|disconnect|reload}`。connect 幂等（已连上直接 200）、disconnect 只断链（`HsmsSessionRuntime.disconnect()`：关 communicator 与 ACK 池，模型/钉值/计划启用态全留，`reconnect()` 复用同一对象）、reload 复用会话重载（会先清运行态编辑）。状态码：404 设备不存在/动作未知、405 方法不对、409 不可重载、502 连接失败。openapi 已补（64 path 全绿），HTTP 契约测试 `DeviceLinkApiTest`（5 项）。
-- [ ] **设备侧 v2 运行态端点**：`/devices/{id}/runtime/{plans,catalog,svids/pin,message,alarm}` 仍未建；前端这类操作还走 v1 `/sessions/**`（功能可用，只是命名空间没切）。
-- [ ] v1 `DELETE /api/v1/sessions/{id}` → `disconnect` + `Deprecation` 头：依赖上一项完成后再切，否则前端拿不到重连入口，删除就变成"设备消失且找不回来"。
-- [ ] 断开展示：v1 会话关闭后设备从列表消失（v1 语义），设计期望「已断开」行保留——等设备 v2 端点落地后由 M3 前端切过去。
+- [x] **设备侧 v2 运行态端点**：`/devices/{id}/runtime/**` 全部落地（设计 §2.5）。
+  - `GET /runtime/plans` 返回计划正文 + 运行证据：`fireCount / skippedCount / lastFireAt / nextFireAt / lastError` 来自 `runtime_plan_state`，时刻字段 `0` 表示「没有记录」（不用 null）。
+  - `POST|PUT|DELETE /runtime/plans[/{planId}]`：运行时增删改计划正文 → `runtime_plan_override`。
+  - `POST|PUT|DELETE /runtime/catalog/{kind}[/{key}]`：`kind = ceid | report | svid`，承接 `CeidPanel` 的运行时编辑。
+  - `PUT|DELETE /runtime/svids/{svid}/pin`：钉值 → `runtime_svid_pin`。
+  - `POST /runtime/message`：手动 SML 原文，400/404/409/502 分别对应解析失败 / 设备不存在 / 未连 / 发送失败。
+  - `POST|DELETE /runtime/alarm/{alid}`：置位 / 清除，`text` 与 `category` 可放 body 也可放 query；类别 0 与非 ASCII 文本在入口就 400。
+  - `POST /runtime/ceid/{ceid}`：手动触发，台账记 `plan_id='manual'`、`dry_run=0`，幂等键带毫秒时间戳 + 序号（同毫秒连点两次不撞键）。
+  - 状态码统一：新增 201、改/删 200、设备或条目不存在 404、冲突 409、请求体不合法 400。
+  - openapi 已补 8 个 path（72 全绿），HTTP 契约测试 `DeviceRuntimeApiTest`（11 项）。
+- [x] v1 `DELETE /api/v1/sessions/{id}` → `link/disconnect`：响应带 `Deprecation: true` + `Sunset`（2027-06-30），body 回 `{ok, phase:"DISCONNECTED", hint}`。旧语义「关闭并移除」不再存在；测试改为断言内部去向与弃用头。
+- [x] **断开展示**：设备列表保留「已断开」行——`DELETE` 只断链，行还在（`state=CLOSED`、`controlState=OFFLINE`），行操作把「断开」换成「连接」，走 `POST /api/v2/devices/{id}/link/connect`。e2e 覆盖「断开 → 行仍在 → 连接 → 回 OPEN」整链。
 
 ---
 
@@ -126,6 +135,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 | 台账保留 | 5000 条 / 7 天裁剪在启动时跑一次；每小时增量清理任务未挂 |
 | `runtime_host_report` 表 | 建了但没用：主机动态报告实际存在 `host.variable_catalog`（重启照样恢复）。二选一时留了这个方案，表待下个版本删 |
 | 迁移来源标记 | `meta.migration_source` 只写日期；原绝对路径（`--config` 外部文件）未记 |
+| 前端仍走 v1 编辑端点 | 计划/目录/钉值/报文/报警的界面操作还打 `/api/v1/sessions/**`；v2 同名端点已就绪且语义一致，切过去属于纯改路径，留到下个版本与 v1 退役一起做 |
 
 ---
 
