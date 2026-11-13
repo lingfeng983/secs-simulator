@@ -104,6 +104,8 @@ public final class PlanExecutor {
     private final String deviceId;
     private final Sink sink;
     private final ConcurrentMap<String, Long> reserved = new ConcurrentHashMap<>();
+    /** 幂等表清理节拍（每 256 次执行扫一次，见 {@code executeInternal}）。 */
+    private final AtomicLong pruneTick = new AtomicLong();
     private final AtomicLong stepSequence = new AtomicLong();
     private final AtomicLong replaySequence = new AtomicLong();
     private final Deque<Pending> pending = new ArrayDeque<>();
@@ -187,13 +189,30 @@ public final class PlanExecutor {
                                  long buildAtMs) throws IOException {
         String baseKey = this.deviceId + "|" + (planId == null ? "manual" : planId) + "|" + atMs;
         final String key = keySuffix == null ? baseKey : baseKey + "|" + keySuffix;
-        final Long previous = this.reserved.put(key, System.currentTimeMillis());
-        if (previous != null && System.currentTimeMillis() - previous < IDEMPOTENT_WINDOW_MS) {
+        final long now = System.currentTimeMillis();
+        /* 幂等判定必须是原子的：先 put 再回读会出现"两个线程都看到窗口外的时间戳、
+           都往下执行"的重复发送。compute 里一次决定，并把时间戳的推进也限定在
+           真正执行的那一次上。 */
+        final boolean[] reservedNow = new boolean[1];
+        this.reserved.compute(key, (ignored, previous) -> {
+            if (previous != null && now - previous < IDEMPOTENT_WINDOW_MS) {
+                reservedNow[0] = false;
+                return previous;
+            }
+            reservedNow[0] = true;
+            return now;
+        });
+        if (!reservedNow[0]) {
             /* 幂等命中：直接跳过，不重复发、不重复记 */
             return;
         }
-        this.reserved.entrySet().removeIf(entry ->
-                System.currentTimeMillis() - entry.getValue() > IDEMPOTENT_WINDOW_MS * 2);
+        /* 清理改成批量做：原先每次执行都 removeIf 全表扫，而计划周期最小 1ms，
+           条目数随运行时长线性增长，摊到每次执行就是 O(n²)，且 removeIf 期间
+           整张表被锁住。 */
+        long ticks = this.pruneTick.incrementAndGet();
+        if ((ticks & 0xFF) == 0 || this.reserved.size() > 8192) {
+            this.reserved.entrySet().removeIf(entry -> now - entry.getValue() > IDEMPOTENT_WINDOW_MS * 2);
+        }
 
         final String ledgerPlanId = planId == null ? "manual" : planId;
 

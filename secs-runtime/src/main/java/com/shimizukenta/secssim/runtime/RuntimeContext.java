@@ -53,7 +53,6 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final ConfigRepository configRepository;
     private final PlanExecutionRepository planExecutions;
     private final RuntimeStateRepository linkState;
-    private volatile String lastCreatedHostId = "";
     private final BurstRunner bursts;
     /** 运行态改动写穿到 runtime.db（钉值、计划启用态、目录编辑、链路相位）。 */
     private final RuntimePersister persister;
@@ -756,20 +755,15 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
-    public SessionOutcome openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
+    public HostOpenResult openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
         if (host == null || host.isBlank() || port < 1 || port > 65535) {
-            return SessionOutcome.FAILED;
+            return HostOpenResult.failed(SessionOutcome.FAILED);
         }
         var result = this.hosts.open(name == null || name.isBlank() ? "host" : name,
                 new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId),
                 autoReconnect);
-        this.lastCreatedHostId = result.hostId();
-        return result.outcome();
-    }
-
-    @Override
-    public String lastCreatedHostId() {
-        return this.lastCreatedHostId;
+        /* id 随结果返回，不再落到共享字段上（并发创建会串号） */
+        return new HostOpenResult(result.outcome(), result.hostId() == null ? "" : result.hostId());
     }
 
     @Override

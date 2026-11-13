@@ -2,7 +2,8 @@
 
 - 日期：2026-11-13
 - 依据：[3.0 重新设计说明书](./redesign-2026-11-12.md)（含三轮修订）、[ADR 0017](../adr/0017-sqlite-config-store.md)
-- 已提交里程碑：M0 `d138a56` → M1 `f7aab67` → M2 `8e1f56b` → M3 `f556c12` → M4 `a29fc22`
+- 已提交里程碑：M0 `d138a56` → M1 `f7aab67` → M2 `8e1f56b` → M3 `f556c12` → M4 `a29fc22` → M2 深水区 `343ecf9`
+- **3.0.0 已收口**：M3 遗留、M2 深水区、全量测试与全量代码评审修复均已落地（见 §7），版本号统一 3.0.0
 - **M4 编排执行器已完成并验收全绿**：后端接线、策略字段往返、执行器缺口、v2 台账/试跑/启用态、SSE 节流、前端时间轴与单测均已落地。当前剩余工作从 **§2 M3 遗留** 开始。
 
 ---
@@ -116,11 +117,11 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 
 ## 4. 打包 / CI / 发布（M5）
 
-- [ ] **Linux 包缺 secs-store**：`scripts/package-linux.ps1` 的 `$modules` 与 `packaging/start-server.sh` 的 classpath 都要加 `secs-store.jar`（否则 JVM 形态起不来 SQLite）。
+- [x] **Linux 包补 secs-store**：`scripts/package-linux.ps1` 的 `$modules` 与 `packaging/start-server.sh` 的 classpath 都加了 `secs-store.jar`（漏了的话打包脚本自己能过、启动时才 `NoClassDefFoundError`）。
 - [ ] Windows 安装包：原生 exe 构建 `-am` 已含 secs-store；安装后首次启动会释放 `native/sqlitejdbc.dll` 到工作目录——在干净机器上实测一次首启。
-- [ ] 版本号：`pom.xml`（2.0.1）→ 3.0.0；`gui/src-tauri/tauri.conf.json`、`Cargo.toml` 同步（打包脚本会校验三者一致）。
-- [ ] 文档：README / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy 段）/ ADR 0017 状态改为「已接受」/ `docs/openapi.yaml` v2 全量校对。
-- [ ] `scripts/check-all.ps1` 全绿（含 openapi、BOM、mvn、vitest、Playwright、启动自检）。
+- [x] 版本号统一 3.0.0：`pom.xml` 及 8 个子模块、`frontend/package.json`、`gui/package.json`、`gui/src-tauri/tauri.conf.json`、`Cargo.toml` + `Cargo.lock`、两个 `package-lock.json`、`BuildInfo.VERSION`。
+- [x] 文档：README / `docs/README.md` / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy/运行态写透段）/ ADR 0017 状态「已接受」/ `docs/openapi.yaml` 错误响应补齐（72 path 全绿）。
+- [x] `scripts/check-all.ps1` 全绿（mvn、openapi、tsc、文案门禁、Vitest、Playwright 83 passed / 48 skipped）。
 - [ ] 发布说明 + 打 tag `v3.0.0`。
 
 ---
@@ -144,3 +145,57 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 - 设备运行区当前 6 页：实时状态 / **事件计划（含台账时间轴，M4）** / 事件与报告 / 状态变量 / 报文收发 / 手动操作；设计稿为 实时状态 / 事件执行 / 事件与报告 / 状态变量 / 报文收发 / 手动操作（事件计划在配置区）。当前把「计划 CRUD + 执行台账」合并在一页，等 M4 落地后再评估是否拆。
 - 设备配置区当前 6 页：概览 / 连接 / 结构 / 配置原文 / 设备常量 / 版本历史；设计稿为 8 页（含独立的「值模板」「事件计划」）。见 §2 对应条目。
 - 主机配置区 5 页已按设计落地（概览 / 连接 / 报文模板 / Trace 设置 / 采集设置）。
+
+---
+
+## 7. 3.0.0 全量测试与全量评审（发版前最后一轮）
+
+### 7.1 验收结果（全绿）
+
+| 层 | 命令 | 结果 |
+|---|---|---|
+| 后端 | `mvn -B test` | 677 项通过（json 44 / protocol 56 / core 95 / store 20 / app 75 / api-http 109 / runtime 129 / cli 85） |
+| 契约 | `python scripts/check-openapi.py` | 72 个 path，`$ref` 全部可解析 |
+| 类型 | `npx tsc --noEmit` | 0 错误 |
+| 文案 | `scripts/check-ui-words.ps1` | 99 文件 / 5491 段 |
+| 组件 | `npm test` | 18 文件 / 131 项 |
+| 端到端 | `npx playwright test` | 83 passed / 48 skipped（截图用例需 `SHOTS=1`） |
+| 总闸 | `scripts/check-all.ps1` | 全绿（此前 exit 1 是外层 `Tee-Object` 管道吞掉了退出码，脚本本身没问题） |
+
+### 7.2 评审修复（并发，26 处中 5 处高危全修）
+
+- `HsmsSessionRuntime`：`open/disconnect/close` 加生命周期锁（原来并发调用会泄漏 socket、双心跳双发）；相位读-改-写加锁并把通知移到锁外；接收回调不再持锁派发（原来回调里再进 open 会自锁）。
+- `HostSimulator`：`connect/disconnect/reconnect` 加锁、退避定时器双检；新增 `failConnect` 统一善后——旧版连接失败只 close 不清字段，`autoReconnect` 从此永久失效且 opener 线程泄漏。
+- `MessageLog.selectHostMessages`：`ArrayDeque` 遍历与 `append` 互斥（报文流动时查收发记录会 CME → 500）。
+- `PlanExecutionRepository`：`enqueue` 不再自旋（满队丢当前条目并计数）；`drainLoop` 的 `InterruptedException` 从 `return` 改 `break`（否则关停前"把剩余冲完"永远被跳过，最多丢 4096 条）；`trim()` 的标量子查询改 `IN`（只取未定义顺序的首行，会误删保留窗口内的最新行）。
+- `BurstRunner.close` 补 `hostStates`（原来只取消会话级压测，主机级会继续往已断的链路发到预算耗尽）。
+- `PlanFiredThrottle`：窗口冲刷改"锁内先摘表再取快照"，`publish` 拿到被摘走的窗口时重取（原来会丢一条摘要）；停机后的 `publish` 直接推而不是攒进永不巡检的窗口。
+- `PlanExecutor` 幂等表：`compute` 原子判重（原来 `put` 后再回读，两个线程可能都判为窗口外而重复发送）；清理从"每次执行全表 `removeIf`"改为批量（计划周期最小 1ms，摊到每次执行是 O(n²) 且锁全表）。
+- `EventTicker` / `TracePump` / `SessionLauncher.restore` / `StreamHandler.abort`：心跳线程幂等、新 TRID 不再装进即将丢弃的旧管理器、注册失败补 `close()`（否则端口与 3 个 ACK 池泄漏）、`abort` 从每次起裸线程改为共享固定线程池。
+
+### 7.3 评审修复（API 契约，22 处中 4 处高危全修）
+
+- 新增 `HttpSupport.readJsonObject`：空正文 / 超限 / 语法非法 / **合法 JSON 但不是对象**（`[]`、`"x"`、`null`）统一 400。此前 `JsonHub.fromJson("[]")` 成功、紧接着 `get()` 抛 `UnsupportedOperationException` 落在 `try` 外 → 500。
+- `HostSimHandler` 全部 v2 端点改用 `readJsonObject`，字段取值也包进 `try`；新增 `statusOf(SessionOutcome)`——
+  - `POST /hosts/{id}/connect|disconnect|apply` 原来无论成败都回 200（客户端按状态码判断会把"连接失败"当成功）；现在 200 / 404 / 409 / 502。
+  - `PUT /hosts/{id}`、`DELETE /hosts/{id}`、模板建删的 `FAILED` 不再一律报 404「不存在」，冲突回 409。
+- `openHostV2` 改返回 `HostOpenResult(outcome, hostId)`，删掉共享字段 `lastCreatedHostId`——并发创建时先返回的请求会读到后一个的 id。
+- `GET /api/v2/hosts/{id}/messages` 按文档支持 GET（原来只挂在 POST 分支，curl 按文档发 GET 得 404），`limit` 非法/越界 400（原来 `parseInt` 抛异常变 500 或静默用默认值）。
+- `runtime/executions?limit=abc` 从静默用默认值改为 400；v1 路径里的非数字 CEID/SVID/RPTID 从"404 不存在"改为 400 `bad-id`（`validSecsId`）。
+- `POST /sessions/{id}/host-sim` 请求体超限从"当成没给目标、静默连本机"改为 400 `body-too-large`；`host-sim/send` 与 `host-sims/{id}/send` 的 SML 上限统一 64 KiB（原来 4 KiB vs 64 KiB，长报文只有一条路径能发）。
+- 发送失败的 500 与 502 统一为 502（v1 手动发送、触发、v2 手动发送、主机发送）。
+- `HttpApiServer` 静态资源路径里的 `%00` 走 `InvalidPathException` → 500，改为 400。
+
+### 7.4 新增回归测试
+
+- `ApiContractHardeningTest`（9 项）：非对象请求体、超限请求体、主机动作状态码、模板冲突、`hostId` 随结果返回、`messages` 的 GET 与 limit、非数字 SECS id、`%00` 静态路径。
+- `PlanFiredThrottleTest` 增 2 项：停机后发布不丢、并发发布与窗口冲刷交错不丢摘要。
+
+### 7.5 记录但本轮不改
+
+| 项 | 理由 |
+|---|---|
+| `RuntimePersister` 同步写库 | 写点集中在 HTTP 请求线程（钉值/计划/目录编辑），只有链路相位与主机报告随生命周期走；单行 UPDATE 在 WAL 下的代价远小于引入异步队列带来的顺序与测试复杂度（`RuntimeRestoreTest` 依赖"写完即可读"）。若将来把台账也搬进来再评估。 |
+| 前端仍走 v1 编辑端点 | 见 §5 债务表，v2 同名端点已就绪，与 v1 退役一起做。 |
+| Trace / 采集设置「保存到设置」语义拆分 | 产品口径待定：建议配置区 = 编辑条件 + 「保存到设置」，运行区 = 看生效条件 + 「立即抓取/导出」。 |
+| 「值模板」是否单列 | 结论：不单列。曲线/组合/实例是同一份 SVID 模型的三种编辑视角，共用校验与保存路径，留在「结构」页做页内分段。 |

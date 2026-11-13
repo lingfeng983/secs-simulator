@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import com.shimizukenta.jsonhub.JsonHub;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
@@ -257,6 +258,84 @@ abstract class HttpSupport {
             throw new IllegalArgumentException("请求体为空");
         }
         return body;
+    }
+
+    /**
+     * 读请求体并解析成 JSON 对象；失败时已写出 400，调用方直接返回。
+     *
+     * <p>这里把三件以前各写各的事收到一处：</p>
+     * <ul>
+     *   <li>空正文 / 超过上限 → 400（而不是抛出去变 500）</li>
+     *   <li>语法非法 → 400</li>
+     *   <li>合法 JSON 但不是对象（{@code [1,2]} / {@code "x"} / {@code null}）→ 400</li>
+     * </ul>
+     *
+     * <p>第三条尤其容易漏：{@code JsonHub.fromJson("[]")} 是成功的，紧接着
+     * {@code root.get("name")} 抛 {@code JsonHubUnsupportedOperationException}，
+     * 如果取值不在 {@code try} 内，客户端看到的就是 500「服务器出错」，
+     * 而实际问题只是它发了个数组。</p>
+     *
+     * @param ex 交换
+     * @return 解析出的对象；失败返回 {@code null}（响应已写出）
+     * @throws IOException 写响应失败
+     */
+    protected JsonHub readJsonObject(HttpExchange ex) throws IOException {
+        return readJsonObject(ex, MAX_BODY_BYTES);
+    }
+
+    /**
+     * 读请求体并解析成 JSON 对象，正文上限由调用方指定。
+     *
+     * @param ex    交换
+     * @param limit 字节上限
+     * @return 解析出的对象；失败返回 {@code null}（响应已写出）
+     * @throws IOException 写响应失败
+     */
+    protected JsonHub readJsonObject(HttpExchange ex, int limit) throws IOException {
+        String raw = readBody(ex, limit);
+        if (raw == null || raw.isBlank()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return null;
+        }
+        JsonHub request;
+        try {
+            request = JsonHub.fromJson(raw);
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return null;
+        }
+        if (request == null || !request.isObject()) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return null;
+        }
+        return request;
+    }
+
+    /**
+     * 解析 {@code limit} 查询参数，缺省给 {@code dflt}，越界或非法返回 {@code -1}。
+     *
+     * <p>以前是手写 {@code Integer.parseInt(pair.substring(6))}：{@code ?limit=abc}
+     * 直接抛 {@code NumberFormatException} 变 500；不设上限则一次查询就能把整张
+     * 报文表拉进内存。非法值返回哨兵而不是悄悄用默认值——静默兜底会让调用方
+     * 以为自己传对了。</p>
+     *
+     * @param ex   交换
+     * @param dflt 缺省值
+     * @param max  允许的最大值
+     * @return 解析结果；非法或越界返回 {@code -1}
+     */
+    protected static int limitOrBad(HttpExchange ex, int dflt, int max) {
+        Map<String, String> query = parseQuery(ex.getRequestURI().getQuery());
+        String raw = query.get("limit");
+        if (raw == null || raw.isBlank()) {
+            return dflt;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value < 1 || value > max ? -1 : value;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     /** 解析查询串为键值表。 */

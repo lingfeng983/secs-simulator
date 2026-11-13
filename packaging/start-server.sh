@@ -30,7 +30,7 @@ done
 mkdir -p "$WORK_DIR" "$WORK_DIR/logs"
 LOG="$WORK_DIR/logs/server.out"
 
-CP="$ROOT/secs-cli.jar:$ROOT/secs-runtime.jar:$ROOT/secs-api-http.jar:$ROOT/secs-app.jar:$ROOT/secs-core.jar:$ROOT/secs-protocol.jar:$ROOT/secs-json.jar:$ROOT/thirdparty/sqlite-jdbc.jar"
+CP="$ROOT/secs-cli.jar:$ROOT/secs-runtime.jar:$ROOT/secs-api-http.jar:$ROOT/secs-app.jar:$ROOT/secs-store.jar:$ROOT/secs-core.jar:$ROOT/secs-protocol.jar:$ROOT/secs-json.jar:$ROOT/thirdparty/sqlite-jdbc.jar"
 
 # 内部工具不做鉴权：浏览器/脚本直连地址即可，没有令牌或账号
 java -cp "$CP" com.shimizukenta.secssim.cli.CliMain \

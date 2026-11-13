@@ -92,6 +92,62 @@ class PlanFiredThrottleTest {
         }
     }
 
+    /**
+     * 停机之后再 publish 也要发出去。
+     *
+     * <p>窗口巡检线程已经停了，此时把摘要塞进新窗口就等于永久攒着：进程退出的
+     * 最后几秒发生的执行会在时间轴上凭空消失。</p>
+     */
+    @Test
+    void publishAfterCloseIsEmittedImmediately() {
+        NoticeBus bus = new NoticeBus();
+        List<NoticeEvent> frames = new CopyOnWriteArrayList<>();
+        bus.subscribe(frames::add);
+        PlanFiredThrottle throttle = new PlanFiredThrottle(bus);
+        throttle.close();
+
+        throttle.publish("devA", SENT, false);
+
+        assertEquals(1, frames.size(), "停机后的摘要不能静默丢弃");
+        assertTrue(frames.get(0).payload().contains("\"status\":\"SENT\""));
+    }
+
+    /**
+     * 并发 publish 与窗口冲出交错时不丢摘要。
+     *
+     * <p>曾经的实现是"先清空、再摘表"：publish 正好落在两步之间时，会把新摘要
+     * 写进一个马上要被丢弃的窗口，那一条执行就从时间轴上消失了。丢一条摘要
+     * 不报错、不打日志，只能靠对账发现。</p>
+     */
+    @Test
+    void concurrentPublishNeverLosesItems() throws Exception {
+        NoticeBus bus = new NoticeBus();
+        List<NoticeEvent> frames = new CopyOnWriteArrayList<>();
+        bus.subscribe(frames::add);
+        final int threads = 4;
+        final int perThread = 400;
+        try (PlanFiredThrottle throttle = new PlanFiredThrottle(bus)) {
+            Thread[] workers = new Thread[threads];
+            for (int t = 0; t < threads; t++) {
+                workers[t] = new Thread(() -> {
+                    for (int i = 0; i < perThread; i++) {
+                        throttle.publish("devA", SENT, false);
+                    }
+                }, "pub-" + t);
+                workers[t].start();
+            }
+            for (Thread worker : workers) {
+                worker.join();
+            }
+        }
+
+        int total = 0;
+        for (NoticeEvent frame : frames) {
+            total += count(frame.payload(), "\"status\":\"SENT\"");
+        }
+        assertEquals(threads * perThread, total, "窗口冲出与 publish 交错时丢了摘要");
+    }
+
     /** 设备 id 里的引号/反斜杠不能破坏 SSE 载荷 JSON。 */
     @Test
     void deviceIdIsEscaped() throws Exception {

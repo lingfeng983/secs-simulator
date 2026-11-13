@@ -1,6 +1,6 @@
 # ADR 0017 · 配置存储改用 SQLite（取代 ADR 0015 §4）
 
-- 状态：提案（待评审）
+- 状态：已接受（3.0.0 落地，M0–M4 全部完成并验收）
 - 日期：2026-11-12
 - 影响范围：新增 `secs-store` 模块；`secs-app` / `secs-api-http` / `secs-runtime` / `secs-cli`；打包脚本；`NativeRuntimeIT`；前端配置相关 API
 - 关联：[3.0 重新设计说明书](../design/redesign-2026-11-12.md) §2.2–§2.3

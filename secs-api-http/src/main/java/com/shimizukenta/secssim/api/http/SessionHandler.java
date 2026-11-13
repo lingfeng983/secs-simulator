@@ -486,7 +486,13 @@ final class SessionHandler extends HttpSupport {
             if (parts.length == 2) {
                 /* v6:请求体可选携带远程目标 {"host":..,"port":..,"deviceId":..};空体连本机 */
                 String targetBody = readBody(ex, MAX_CONFIG_BYTES);
-                if (targetBody != null && targetBody.isBlank()) {
+                if (targetBody == null) {
+                    /* 超限被 readBody 吞成 null：以前这里落到"空体"，于是一个超大的
+                       远程目标请求被静默当成"连本机设备"，连到了完全不同的地方 */
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+                    return;
+                }
+                if (targetBody.isBlank()) {
                     targetBody = null;
                 }
                 /* 目标字段在入口校验：非法目标属于 400，不能和"连不上"共用 502 */
@@ -518,7 +524,10 @@ final class SessionHandler extends HttpSupport {
                 return;
             }
             if (parts.length == 3 && "send".equals(parts[2])) {
-                String body = readBody(ex);
+                /* 与 /host-sims/{id}/send 对齐：SML 上限 64 KiB，不是默认的 4 KiB。
+                   两条路径同义却给不同上限，短报文走哪条都行、长报文只有一条能发，
+                   排查起来毫无线索。 */
+                String body = readBody(ex, MAX_SML_BYTES);
                 if (body == null || body.trim().isEmpty()) {
                     respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
                     return;
@@ -689,7 +698,8 @@ final class SessionHandler extends HttpSupport {
             case OK -> respond(ex, 202, "{\"ok\":true}");
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
             case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
-            case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+            /* 与其他发送路径对齐：链路级失败是 502，不是 500 */
+            case FAILED -> respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 
@@ -730,10 +740,25 @@ final class SessionHandler extends HttpSupport {
         } catch (IOException e) {
             audit(ex, "send-sml", sessionId, "outcome=failed bytes=" + sml.length());
             Log.error("手动发送 SML 失败", e);
-            respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+            /* 与 v2 手动发送（POST /devices/{id}/runtime/message）统一：502 */
+            respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 
+
+    /**
+     * SECS ID 是否合法：CEID / SVID / RPTID 都是 1..65535 的无符号值。
+     *
+     * <p>{@link HttpSupport#pathInt(String)} 对非数字路径段返回 {@code -1}，
+     * 旧实现直接拿这个哨兵去查表：客户端拼错 URL（{@code /svids/abc}）拿到的是
+     * 404「没有这个 SVID」，看起来像数据丢失，其实是请求本身非法。</p>
+     *
+     * @param id 路径段解析出的整数
+     * @return {@code true} 表示可继续处理
+     */
+    private static boolean validSecsId(int id) {
+        return id >= 1 && id <= 65535;
+    }
 
     /** 压测响应里的 accepted 标志（解析失败按 false 处理）。 */
     private static boolean burstFlag(String result) {
@@ -826,6 +851,10 @@ final class SessionHandler extends HttpSupport {
                 if (parts.length == 3 && "PUT".equals(method)) {
                     String body = requireBody(ex, MAX_CONFIG_BYTES);
                     int rptid = pathInt(parts[2]);
+                    if (!validSecsId(rptid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.updateReport(sessionId, rptid, body);
                     audit(ex, "report-update", sessionId, "rptid=" + rptid + " status=" + status);
                     respondStatus(ex, status);
@@ -833,6 +862,10 @@ final class SessionHandler extends HttpSupport {
                 }
                 if (parts.length == 3 && "DELETE".equals(method)) {
                     int rptid = pathInt(parts[2]);
+                    if (!validSecsId(rptid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.removeReport(sessionId, rptid);
                     audit(ex, "report-delete", sessionId, "rptid=" + rptid + " status=" + status);
                     respondStatus(ex, status);
@@ -852,6 +885,10 @@ final class SessionHandler extends HttpSupport {
                 if (parts.length == 3 && "PUT".equals(method)) {
                     String body = requireBody(ex, MAX_CONFIG_BYTES);
                     int ceid = pathInt(parts[2]);
+                    if (!validSecsId(ceid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.updateCeid(sessionId, ceid, body);
                     audit(ex, "ceid-update", sessionId, "ceid=" + ceid + " status=" + status);
                     respondStatus(ex, status);
@@ -859,6 +896,10 @@ final class SessionHandler extends HttpSupport {
                 }
                 if (parts.length == 3 && "DELETE".equals(method)) {
                     int ceid = pathInt(parts[2]);
+                    if (!validSecsId(ceid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.removeCeid(sessionId, ceid);
                     audit(ex, "ceid-delete", sessionId, "ceid=" + ceid + " status=" + status);
                     respondStatus(ex, status);
@@ -878,6 +919,10 @@ final class SessionHandler extends HttpSupport {
                 if (parts.length == 3 && "PUT".equals(method)) {
                     String body = requireBody(ex, MAX_CONFIG_BYTES);
                     int svid = pathInt(parts[2]);
+                    if (!validSecsId(svid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.updateSvid(sessionId, svid, body);
                     audit(ex, "svid-update", sessionId, "svid=" + svid + " status=" + status);
                     respondStatus(ex, status);
@@ -885,6 +930,10 @@ final class SessionHandler extends HttpSupport {
                 }
                 if (parts.length == 3 && "DELETE".equals(method)) {
                     int svid = pathInt(parts[2]);
+                    if (!validSecsId(svid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.removeSvid(sessionId, svid);
                     audit(ex, "svid-delete", sessionId, "svid=" + svid + " status=" + status);
                     respondStatus(ex, status);
@@ -893,6 +942,10 @@ final class SessionHandler extends HttpSupport {
                 if (parts.length == 4 && "value".equals(parts[3]) && "PUT".equals(method)) {
                     String body = requireBody(ex, MAX_CONFIG_BYTES);
                     int svid = pathInt(parts[2]);
+                    if (!validSecsId(svid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.pinSvidValue(sessionId, svid, body);
                     audit(ex, "svid-pin", sessionId, "svid=" + svid + " status=" + status);
                     respondStatus(ex, status);
@@ -900,6 +953,10 @@ final class SessionHandler extends HttpSupport {
                 }
                 if (parts.length == 4 && "value".equals(parts[3]) && "DELETE".equals(method)) {
                     int svid = pathInt(parts[2]);
+                    if (!validSecsId(svid)) {
+                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
+                        return;
+                    }
                     int status = this.context.unpinSvidValue(sessionId, svid);
                     audit(ex, "svid-unpin", sessionId, "svid=" + svid + " status=" + status);
                     respondStatus(ex, status);
@@ -913,9 +970,13 @@ final class SessionHandler extends HttpSupport {
                 | com.shimizukenta.jsonhub.JsonHubBuildException
                 | com.shimizukenta.jsonhub.JsonHubIndexOutOfBoundsException e) {
             /* jsonhub 的解析/取值异常都是"请求体不合法"，不能漏到最外层变成 500 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\",\"message\":" + json(e.getMessage()) + "}");
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
         } catch (IllegalArgumentException e) {
-            respond(ex, 400, "{\"ok\":false,\"error\":" + json(e.getMessage()) + "}");
+            /* 错误码与消息分开：以前把 message 直接塞进 error 字段且没加引号，
+               一旦 message 为 null（json(null) 返回空串）就拼出非法 JSON */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
         }
     }
 

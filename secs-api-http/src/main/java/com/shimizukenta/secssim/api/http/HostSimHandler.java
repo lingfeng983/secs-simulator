@@ -52,28 +52,31 @@ final class HostSimHandler extends HttpSupport {
         }
         /* 请求体:{ "session":"line1", "host":"...", "port":5000, "deviceId":0, "hostId":"h1" }
            session 必填;host/port 给了就是远程目标,不给就连本机设备。 */
-        String raw = readBody(ex, MAX_CONFIG_BYTES);
-        if (raw == null || raw.isBlank()) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+        JsonHub request = this.readJsonObject(ex, MAX_CONFIG_BYTES);
+        if (request == null) {
             return;
         }
-        com.shimizukenta.jsonhub.JsonHub request;
+        String sessionId;
+        String host;
+        int port;
+        int deviceId;
+        String hostId;
         try {
-            request = com.shimizukenta.jsonhub.JsonHub.fromJson(raw);
+            sessionId = str(request, "session");
+            host = str(request, "host");
+            port = num(request, "port");
+            deviceId = num(request, "deviceId");
+            hostId = str(request, "hostId").trim();
         } catch (RuntimeException e) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
             return;
         }
-        String sessionId = str(request, "session");
         if (sessionId.isBlank()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"missing-session\"}");
             return;
         }
-        String host = str(request, "host");
         String targetJson = null;
         if (!host.isBlank()) {
-            int port = num(request, "port");
-            int deviceId = num(request, "deviceId");
             if (port < 1 || port > 65535) {
                 respond(ex, 400, "{\"ok\":false,\"error\":\"bad-port\"}");
                 return;
@@ -82,7 +85,6 @@ final class HostSimHandler extends HttpSupport {
             targetJson = "{\"host\":\"" + json(host) + "\",\"port\":" + port
                     + ",\"deviceId\":" + deviceId + "}";
         }
-        String hostId = str(request, "hostId").trim();
         if (!hostId.isEmpty() && (hostId.contains("/") || hostId.contains("\\"))) {
             /* 实例 id 会进 URL 路径，斜杠会让它变成不可寻址的资源 */
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-host-id\"}");
@@ -274,6 +276,28 @@ final class HostSimHandler extends HttpSupport {
         }
     }
 
+    /**
+     * 把 {@link SessionOutcome} 映射成 HTTP 状态码。
+     *
+     * <p>以前各处的写法是 {@code outcome == OK ? 200 : 404}：连接失败、端口被占、
+     * 模板 id 重复统统报「不存在」，用户会去重建一个明明还在的实例；POST 连接更是
+     * 无论成败都回 200，客户端按状态码判断就会把失败当成功，界面显示已连接、
+     * 实际一条链路都没建起来。</p>
+     *
+     * @param outcome 结果
+     * @return 状态码
+     */
+    private static int statusOf(SessionOutcome outcome) {
+        return switch (outcome) {
+            case OK -> 200;
+            case UNKNOWN_SESSION -> 404;
+            /* 对象在，但当前状态不允许（链路还连着 / 内置不可删 / 不可重载） */
+            case CONFLICT, NOT_RELOADABLE -> 409;
+            /* 端口被占、编译不过：不是调用方的错，更不是"不存在" */
+            default -> 502;
+        };
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     /** v2 主机集合：GET 列表 / POST 新建。 */
@@ -293,31 +317,40 @@ final class HostSimHandler extends HttpSupport {
         if (!requireRole(ex, ApiRole.OPERATOR)) {
             return;
         }
-        String raw = readBody(ex, MAX_CONFIG_BYTES);
-        JsonHub request;
+        JsonHub request = this.readJsonObject(ex);
+        if (request == null) {
+            return;
+        }
+        String name;
+        String host;
+        int port;
+        int deviceId;
+        boolean autoReconnect;
         try {
-            request = JsonHub.fromJson(raw == null ? "" : raw);
+            name = str(request, "name");
+            host = str(request, "host");
+            port = num(request, "port");
+            deviceId = num(request, "deviceId");
+            /* optionalBoolean：字段存在但是字符串时 booleanValue() 会抛，最终变 500 */
+            autoReconnect = request.containsKey("autoReconnect")
+                    && request.get("autoReconnect").optionalBoolean().orElse(false);
         } catch (RuntimeException e) {
+            /* 字段存在但类型不对（{"name":[]}）同样是请求体非法 */
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
             return;
         }
-        String name = str(request, "name");
-        String host = str(request, "host");
-        int port = num(request, "port");
-        int deviceId = num(request, "deviceId");
-        boolean autoReconnect = request.containsKey("autoReconnect")
-                && request.get("autoReconnect").booleanValue();
         if (host.isBlank() || port < 1 || port > 65535) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
             return;
         }
-        SessionOutcome outcome = this.context.openHostV2(name, host, port, deviceId, autoReconnect);
-        audit(ex, "host-v2-open", host + ":" + port, "outcome=" + outcome);
-        if (outcome == SessionOutcome.OK) {
-            respond(ex, 201, "{\"ok\":true,\"hostId\":\"" + json(this.context.lastCreatedHostId()) + "\"}");
+        ApiContext.HostOpenResult result = this.context.openHostV2(name, host, port, deviceId, autoReconnect);
+        audit(ex, "host-v2-open", host + ":" + port, "outcome=" + result.outcome());
+        if (result.ok()) {
+            respond(ex, 201, "{\"ok\":true,\"hostId\":\"" + json(result.hostId()) + "\"}");
             return;
         }
-        respond(ex, 502, "{\"ok\":false,\"error\":\"open-failed\"}");
+        respond(ex, statusOf(result.outcome()),
+                "{\"ok\":false,\"error\":\"open-failed\"}");
     }
 
     /** v2 单主机：GET 状态 / DELETE 删除 / POST 子动作。 */
@@ -348,26 +381,31 @@ final class HostSimHandler extends HttpSupport {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;
             }
-            String raw = readBody(ex, MAX_CONFIG_BYTES);
-            JsonHub request;
+            JsonHub request = this.readJsonObject(ex);
+            if (request == null) {
+                return;
+            }
+            String name;
+            String host;
+            int port;
+            int deviceId;
             try {
-                request = JsonHub.fromJson(raw == null ? "" : raw);
+                name = str(request, "name");
+                host = str(request, "host");
+                port = num(request, "port");
+                deviceId = num(request, "deviceId");
             } catch (RuntimeException e) {
                 respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
                 return;
             }
-            String name = str(request, "name");
-            String host = str(request, "host");
-            int port = num(request, "port");
-            int deviceId = num(request, "deviceId");
             if (host.isBlank() || port < 1 || port > 65535) {
                 respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
                 return;
             }
             SessionOutcome outcome = this.context.saveHostV2(hostId, name, host, port, deviceId);
             audit(ex, "host-v2-save", hostId, "outcome=" + outcome);
-            respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
-                    "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            /* 写库失败以前一律报 404「主机不存在」，用户会去重建一个已经存在的实例 */
+            respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
             return;
         }
         if ("DELETE".equals(method) && action.isEmpty()) {
@@ -376,8 +414,26 @@ final class HostSimHandler extends HttpSupport {
             }
             SessionOutcome outcome = this.context.destroyHostV2(hostId);
             audit(ex, "host-v2-destroy", hostId, "outcome=" + outcome);
-            respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
-                    "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            /* 删除只在断开态允许（设计 §2.5）：链路还连着时要回 409，不能报"不存在" */
+            respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            return;
+        }
+        /* 报文记录是只读查询：文档口径是 GET，早先的实现只挂在 POST 分支里，
+           curl 按文档发 GET 会拿到 404。两种方法都认，语义完全一样。 */
+        if (parts.length == 2 && "messages".equals(action)) {
+            if (!"GET".equals(method) && !"POST".equals(method)) {
+                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+                return;
+            }
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            int limit = limitOrBad(ex, 500, 5000);
+            if (limit < 0) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+                return;
+            }
+            respond(ex, 200, this.context.hostMessagesV2(hostId, limit));
             return;
         }
         if ("POST".equals(method)) {
@@ -392,19 +448,23 @@ final class HostSimHandler extends HttpSupport {
             };
             if (outcome != null) {
                 audit(ex, "host-v2-" + action, hostId, "outcome=" + outcome);
-                respond(ex, 200, "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+                /* 以前无论成败都回 200：客户端按状态码判断会把"连接失败"当成功，
+                   界面显示已连接、实际一条链路都没建起来 */
+                respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
                 return;
             }
             if ("send".equals(action)) {
-                String raw = readBody(ex, MAX_CONFIG_BYTES);
-                JsonHub request;
+                JsonHub request = this.readJsonObject(ex);
+                if (request == null) {
+                    return;
+                }
+                String sml;
                 try {
-                    request = JsonHub.fromJson(raw == null ? "" : raw);
+                    sml = str(request, "sml");
                 } catch (RuntimeException e) {
                     respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
                     return;
                 }
-                String sml = str(request, "sml");
                 if (sml.isBlank()) {
                     respond(ex, 400, "{\"ok\":false,\"error\":\"missing-sml\"}");
                     return;
@@ -421,22 +481,6 @@ final class HostSimHandler extends HttpSupport {
                 String reply = this.context.hostVariablesRefreshV2(hostId);
                 audit(ex, "host-v2-vars-refresh", hostId, "");
                 respond(ex, 200, reply);
-                return;
-            }
-            if ("messages".equals(action)) {
-                if (!requireRole(ex, ApiRole.VIEWER)) {
-                    return;
-                }
-                int limit = 500;
-                String query = ex.getRequestURI().getQuery();
-                if (query != null) {
-                    for (String pair : query.split("&")) {
-                        if (pair.startsWith("limit=")) {
-                            limit = java.lang.Integer.parseInt(pair.substring(6));
-                        }
-                    }
-                }
-                respond(ex, 200, this.context.hostMessagesV2(hostId, limit));
                 return;
             }
         }
@@ -460,20 +504,27 @@ final class HostSimHandler extends HttpSupport {
         if (!requireRole(ex, ApiRole.OPERATOR)) {
             return;
         }
-        String raw = readBody(ex, MAX_CONFIG_BYTES);
-        JsonHub request;
+        JsonHub request = this.readJsonObject(ex);
+        if (request == null) {
+            return;
+        }
+        String id;
+        String name;
+        String host;
+        int port;
+        int deviceId;
+        String note;
         try {
-            request = JsonHub.fromJson(raw == null ? "" : raw);
+            id = str(request, "id");
+            name = str(request, "name");
+            host = str(request, "host");
+            port = num(request, "port");
+            deviceId = num(request, "deviceId");
+            note = str(request, "note");
         } catch (RuntimeException e) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
             return;
         }
-        String id = str(request, "id");
-        String name = str(request, "name");
-        String host = str(request, "host");
-        int port = num(request, "port");
-        int deviceId = num(request, "deviceId");
-        String note = str(request, "note");
         if (name.isBlank() || host.isBlank() || port < 1 || port > 65535) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-template\"}");
             return;
@@ -481,7 +532,9 @@ final class HostSimHandler extends HttpSupport {
         SessionOutcome outcome = this.context.createHostTemplateV2(
                 id.isBlank() ? null : id, name, host, port, deviceId, note);
         audit(ex, "host-template-save", name, "outcome=" + outcome);
-        respond(ex, outcome == SessionOutcome.OK ? 201 : 502,
+        /* id 重复是 CONFLICT（409），不是"网关错误"：以前统一回 502，
+           客户端会当成对端故障去重试，其实改个名字就好 */
+        respond(ex, outcome == SessionOutcome.OK ? 201 : statusOf(outcome),
                 "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
     }
 
@@ -499,7 +552,7 @@ final class HostSimHandler extends HttpSupport {
         }
         SessionOutcome outcome = this.context.deleteHostTemplateV2(id);
         audit(ex, "host-template-delete", id, "outcome=" + outcome);
-        respond(ex, outcome == SessionOutcome.OK ? 200 : 404,
-                "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+        /* 内置模板不可删是 409（不是"不存在"），客户端据此提示而不是重试 */
+        respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
     }
 }

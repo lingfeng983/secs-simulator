@@ -2,7 +2,7 @@
 name = "secs-sim-gui"
 # 与 pom.xml / tauri.conf.json 保持同一字符串：版本只有一个来源（pom.xml），
 # scripts/package-windows.ps1 会核对三处是否一致。
-version = "2.0.1"
+version = "3.0.0"
 edition = "2021"
 # tauri-plugin-single-instance 2.5 起需要 1.90（edition 2024）
 rust-version = "1.90"

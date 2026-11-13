@@ -235,3 +235,61 @@ SVID 直配值来源（`svids[].curve | svids[].template`）。v4/v5 配置零�
 - 采集器：`PUT/POST /api/v1/sessions/{id}/host-sim/collector`（配置
   startCeid/stopCeid/intervalMs/svids）、`.../collector/start|stop`（手动）、
   `GET .../collector`（状态 + series 数据,按应答项格式码解码,零元数据可画图）。
+
+## 3.0 增补（仍属 v6，字段全可选）
+
+3.0 没有提升 `schemaVersion`：新增字段都有缺省语义，v4/v5 配置零改动照样合法。
+但**存储形态变了**——配置不再是一个设备一个 JSON 文件，而是 `config.db`（SQLite，
+ADR 0017）。首次启动会把 `<work-dir>/*.json` 与 `templates/*.json` 迁进库，
+原文件移到 `legacy/` 保留；之后不再回写 JSON。
+
+### 事件计划的多动作与失败策略
+
+`events.plans[]` 在原有 `effects` 之外新增三个可选字段：
+
+```jsonc
+{
+  "id": "p1", "ceid": 2001, "periodicMs": 5000,
+  "actions": [
+    { "kind": "s6f11" },
+    { "kind": "sml", "stream": 6, "function": 11, "wbit": true, "sml": "<S6F11 ...>" },
+    { "kind": "alarm", "alid": 1001, "set": true, "text": "temperature high" },
+    { "kind": "terminal", "tid": "OP1", "text": "plan p1 fired" },
+    { "kind": "trace", "trid": 1 }
+  ],
+  "offlinePolicy": "queue",       // skip(默认) | queue | fail
+  "onSendFailure": "rollback"     // keep(默认) | rollback
+}
+```
+
+| 字段 | 缺省 | 语义 |
+|---|---|---|
+| `actions[]` | `[{kind:"s6f11"}]` | 一次触发依次执行的动作。`kind` 取 `s6f11` / `sml` / `alarm` / `terminal` / `trace`；`s6f11` 与 `sml` 可用 `wbit` 覆盖会话默认 W 位 |
+| `offlinePolicy` | `skip` | 设备不在线时：`skip` 记 SKIPPED、`queue` 进有界内存队列（≤256，重连按 FIFO 补跑，**不是 Spooling**，进程重启即丢）、`fail` 记 FAILED |
+| `onSendFailure` | `keep` | 动作发送失败时是否回滚本次改动。`rollback` 只在「本次全为 set/add 且此后未被其它触发触碰」时生效，否则记 `rollback_skipped` 并保留改动 |
+
+动作是**顺序执行**的：前一个失败按 `onSendFailure` 处理，后一个照常尝试（`PARTIAL`）。
+每次触发在 `runtime.db` 的 `plan_execution` 留一条台账（状态、报文条数、
+SVID before→after、耗时、幂等键），界面「事件计划」页的时间轴读的就是它。
+
+### 运行态改动不回写配置
+
+钉值、计划启用态、运行时计划正文覆盖、运行时目录编辑（CEID/报告/SVID）都写进
+`runtime.db`，**不产生配置版本**。这是有意的：配置代表"我定义了什么"，
+运行态代表"现在正在发生什么"。要固化某个运行时改动，去配置区显式保存一次。
+
+启动恢复顺序（不能反）：目录编辑（重建模型）→ 计划正文覆盖 → 钉值 → 计划启用态。
+反过来会丢东西：先恢复钉值的话，运行时新增的 SVID 还没进模型，那次钉值会被拒绝。
+
+### 主机实例
+
+主机实例与模板从"会话上的一个附属"变成独立实体（`host` / `host_template` 表）：
+
+```jsonc
+{ "id": "h1", "name": "host-1", "host": "192.168.1.50", "port": 5000,
+  "deviceId": 0, "autoReconnect": true, "note": "上道刻蚀" }
+```
+
+- 连接目标必填（`host` + `port`），`deviceId` 缺省 0；
+- `autoReconnect` 打开时按 T5 退避重连；
+- 断链不影响实例：设置保留，改完 `POST /api/v2/hosts/{id}/apply` 即可按新设置重连。

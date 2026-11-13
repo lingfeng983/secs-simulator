@@ -1205,8 +1205,10 @@ paths:
                 deviceId: { type: integer }
                 autoReconnect: { type: boolean }
       responses:
-        '201': { description: 已创建（body 带 hostId） }
-        '400': { description: 目标非法 }
+        '201': { description: 已创建（body 带 hostId，即本次请求创建的实例） }
+        '400': { description: 请求体非法（空、超限、非对象、目标不合法） }
+        '409': { description: 标识冲突 }
+        '502': { description: 端口被占 / 编译不过等创建失败 }
   /api/v2/hosts/{hostId}:
     get:
       tags: [host-sims]
@@ -1224,6 +1226,8 @@ paths:
       responses:
         '200': { description: 已删除 }
         '404': { description: 主机不存在 }
+        '409': { description: 链路还连着，需先断开 }
+        '502': { description: 删除失败 }
   /api/v2/hosts/{hostId}/connect:
     post:
       tags: [host-sims]
@@ -1231,7 +1235,10 @@ paths:
       parameters:
         - { name: hostId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 结果 }
+        '200': { description: 已连上 }
+        '404': { description: 主机不存在 }
+        '409': { description: 相位不允许（已在连接中） }
+        '502': { description: 连不上（对端拒绝 / 超时 / 目标非法） }
   /api/v2/hosts/{hostId}/disconnect:
     post:
       tags: [host-sims]
@@ -1239,7 +1246,10 @@ paths:
       parameters:
         - { name: hostId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 结果 }
+        '200': { description: 已断开 }
+        '404': { description: 主机不存在 }
+        '409': { description: 相位不允许 }
+        '502': { description: 断开失败 }
   /api/v2/hosts/{hostId}/apply:
     post:
       tags: [host-sims]
@@ -1247,7 +1257,10 @@ paths:
       parameters:
         - { name: hostId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 结果 }
+        '200': { description: 已生效 }
+        '404': { description: 主机不存在 }
+        '409': { description: 相位不允许 }
+        '502': { description: 重连失败 }
   /api/v2/hosts/{hostId}/send:
     post:
       tags: [host-sims]
@@ -1271,9 +1284,10 @@ paths:
       summary: 该实例独立的收发记录（perspective=host）
       parameters:
         - { name: hostId, in: path, required: true, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, default: 500 } }
+        - { name: limit, in: query, schema: { type: integer, default: 500, minimum: 1, maximum: 5000 } }
       responses:
         '200': { description: 报文数组 }
+        '400': { description: limit 非整数或越界 }
   /api/v2/hosts/{hostId}/variables:
     post:
       tags: [host-sims]

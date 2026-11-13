@@ -518,7 +518,15 @@ public final class HttpApiServer {
             return;
         }
 
-        Path target = this.webRoot.resolve(path.substring(1)).normalize();
+        Path target;
+        try {
+            target = this.webRoot.resolve(path.substring(1)).normalize();
+        } catch (java.nio.file.InvalidPathException e) {
+            /* 百分号解码后可能留下 NUL 等非法字符（%00）：resolve 直接抛
+               RuntimeException，落到最外层就是 500。这是路径非法，不是服务端故障。 */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
         if (!target.startsWith(this.webRoot)) {
             respond(ex, 403, "{\"ok\":false,\"error\":\"forbidden\"}");
             return;

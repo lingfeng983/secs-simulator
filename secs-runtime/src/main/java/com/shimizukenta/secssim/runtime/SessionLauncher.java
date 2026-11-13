@@ -264,14 +264,25 @@ public final class SessionLauncher {
             Log.error("重载失败，且没有可恢复的旧快照: " + id, failure);
             return;
         }
+        HsmsSessionRuntime restored = null;
         try {
-            HsmsSessionRuntime restored = previous.open(this.bus, this.noticeBus, source.configName());
+            restored = previous.open(this.bus, this.noticeBus, source.configName());
             this.sessions.register(restored);
             this.sources.put(id, source);
             Log.warn("重载失败，已用旧配置恢复会话: " + id);
         } catch (IOException | RuntimeException rollback) {
             failure.addSuppressed(rollback);
             Log.error("重载失败，旧会话也无法恢复: " + id, rollback);
+            /* 已经 open 出来但没注册成功（管理器已关 / id 冲突）时，端口、
+               三个 ACK 池与心跳线程都还活着；不关就再没人能关它——那个端口
+               在本进程剩余生命周期里都绑不上了。 */
+            if (restored != null) {
+                try {
+                    restored.close();
+                } catch (RuntimeException closeError) {
+                    rollback.addSuppressed(closeError);
+                }
+            }
         }
     }
 

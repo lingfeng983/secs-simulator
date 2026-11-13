@@ -59,6 +59,21 @@ final class StreamHandler extends HttpSupport {
      */
     private static final long SSE_STALL_TIMEOUT_DEFAULT_MS = 60_000L;
 
+    /**
+     * 强制断开的执行器。
+     *
+     * <p>{@code exchange.close()} 在写线程被 TCP 卡住时自己也可能阻塞，所以不能
+     * 在看门狗线程上做。但「每个订阅者起一根裸线程」等于把泄漏点从连接搬到线程：
+     * 反复连上又卡住，线程数只增不减。固定 2 根 daemon 线程足够——卡住的 close
+     * 迟早会返回，其余排队等着，也不会和写线程池（可能已满）互相饿死。</p>
+     */
+    private static final ExecutorService ABORT_EXECUTOR =
+            java.util.concurrent.Executors.newFixedThreadPool(2, runnable -> {
+                Thread thread = new Thread(runnable, "sse-abort");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     /** 看门狗巡检间隔。 */
     private static final long SSE_WATCHDOG_TICK_MS = 5_000L;
 
@@ -374,8 +389,8 @@ final class StreamHandler extends HttpSupport {
          * 强制断开。
          *
          * <p>{@code exchange.close()} 在写线程被 TCP 卡住时可能也会阻塞，
-         * 所以放到独立线程里做，不能拖住看门狗。
-         * </p>
+         * 所以放到别的线程里做，不能拖住看门狗。执行器是固定大小的共享池，
+         * 不随连接数增长。</p>
          */
         void abort() {
             if (this.closed) {
@@ -383,15 +398,22 @@ final class StreamHandler extends HttpSupport {
             }
             this.closed = true;
 
-            Thread closer = new Thread(() -> {
+            try {
+                ABORT_EXECUTOR.execute(() -> {
+                    try {
+                        this.exchange.close();
+                    } catch (RuntimeException ignored) {
+                        /* 关闭失败不影响清理 */
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                /* 执行器已关（停机阶段）：同步关一次，尽力而为 */
                 try {
                     this.exchange.close();
                 } catch (RuntimeException ignored) {
-                    /* 关闭失败不影响清理 */
+                    /* 同上 */
                 }
-            }, "sse-abort");
-            closer.setDaemon(true);
-            closer.start();
+            }
         }
     }
 

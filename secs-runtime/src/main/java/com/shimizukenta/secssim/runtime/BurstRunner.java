@@ -357,10 +357,16 @@ final class BurstRunner {
 
     /** 停机：取消全部在跑的压测并关闭执行器。 */
     void close() {
+        /* 两张表都要取消：只清会话表的话，正在跑的主机级压测会在执行器关掉后
+           继续往一条已经断开的链路上发报文，直到 5 分钟预算耗尽 */
         for (BurstState state : this.states.values()) {
             state.cancelRequested = true;
         }
         this.states.clear();
+        for (BurstState state : this.hostStates.values()) {
+            state.cancelRequested = true;
+        }
+        this.hostStates.clear();
         this.executor.shutdownNow();
     }
 

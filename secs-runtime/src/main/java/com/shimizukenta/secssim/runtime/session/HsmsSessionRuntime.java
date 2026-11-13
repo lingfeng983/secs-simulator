@@ -943,17 +943,42 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private volatile SessionRuntime.LinkPhase linkPhase = SessionRuntime.LinkPhase.STOPPED;
     private volatile java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> linkListener;
 
+    /**
+     * 生命周期锁：{@code open / disconnect / close} 互斥。
+     *
+     * <p>没有这把锁时，两个并发「连接」（HTTP 两次点击、或 connect 撞上 reload）
+     * 都能通过 {@code communicator == null} 的检查，各建一条链路；后写者覆盖字段，
+     * 先建的那条失去唯一引用，socket、协议线程、端口全部泄漏，而且两套心跳会
+     * 同时推进调度器（同一事件被重复发出）。</p>
+     */
+    private final Object lifecycleLock = new Object();
+
+    /**
+     * 相位跳变锁：只保护 {@code linkPhase} 的读-改-写。
+     *
+     * <p>相位来自三条线程（协议回调、心跳、HTTP 命令），裸 volatile 上的读改写会丢更新：
+     * 例如 {@code close()} 写入 STOPPED 后，迟到的 {@code communicatable(false)}
+     * 又把它改回 DISCONNECTED，界面上就出现「已销毁但显示已断开」。通知放在锁外发，
+     * 避免持锁做持久化与 SSE 广播。</p>
+     */
+    private final Object phaseLock = new Object();
+
     /** 挂链路相位监听（幂等覆盖）。 */
     public void onLinkPhase(java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> listener) {
         this.linkListener = listener;
     }
 
     private void changeLinkPhase(SessionRuntime.LinkPhase next) {
-        SessionRuntime.LinkPhase previous = this.linkPhase;
-        if (previous == next) {
+        boolean changed;
+        synchronized (this.phaseLock) {
+            changed = this.linkPhase != next;
+            if (changed) {
+                this.linkPhase = next;
+            }
+        }
+        if (!changed) {
             return;
         }
-        this.linkPhase = next;
         var listener = this.linkListener;
         if (listener != null) {
             try {
@@ -971,6 +996,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public void disconnect() {
+        synchronized (this.lifecycleLock) {
+            this.disconnectLocked();
+        }
+    }
+
+    private void disconnectLocked() {
         /* 只断链：模型 / 值来源 / 编排 / 钉值 / 计划启用态全留在对象里，
            reconnect() 后原样恢复（3.0 设计 §2.4.1）。 */
         this.stopTicker();
@@ -983,6 +1014,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         SecsCommunicator comm = this.communicator;
         this.communicator = null;
         this.dispatcher = null;
+        this.terminalInbox = null;
         if (comm != null) {
             try {
                 comm.close();
@@ -1003,6 +1035,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public void open() throws IOException {
+        synchronized (this.lifecycleLock) {
+            this.openLocked();
+        }
+    }
+
+    private void openLocked() throws IOException {
         if (this.communicator != null) {
             throw new IOException("session already opened: " + this.spec.id());
         }
@@ -1027,13 +1065,18 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             this.communicator = this.connector.open(
                     message -> {
                         this.publish("in", message);
+                        PrimaryDispatcher ready;
                         synchronized (gate) {
-                            if (this.dispatcher == null) {
+                            /* 取到局部变量再出锁用：出锁后 dispatcher 可能被
+                               disconnect() 置空（旧写法会在读线程里 NPE，或把旧连接的
+                               在途报文投给重连后的新 dispatcher） */
+                            ready = this.dispatcher;
+                            if (ready == null) {
                                 early.add(message);
                                 return;
                             }
                         }
-                        this.dispatcher.dispatch(message);
+                        ready.dispatch(message);
                     },
                     message -> this.publish("out", message),
                     value -> {
@@ -1068,9 +1111,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 early.clear();
             }
             this.state.set(SessionState.OPEN);
-            this.changeLinkPhase(this.spec.passive()
-                    ? SessionRuntime.LinkPhase.LISTENING
-                    : SessionRuntime.LinkPhase.CONNECTED);
+            /* 只有被动端在这里推进到 LISTENING（端口已绑、等主机 SELECT）。
+               主动端的 CONNECTED 交给 communicatable(true) 回调：在这里强写会盖掉
+               "连不上"那次回调写的 DISCONNECTED，界面上就成了假的已连接。 */
+            if (this.spec.passive() && this.linkPhase == SessionRuntime.LinkPhase.STARTING) {
+                this.changeLinkPhase(SessionRuntime.LinkPhase.LISTENING);
+            }
             this.startTicker();
         } catch (IOException | RuntimeException e) {
             recordError(e);
@@ -1094,6 +1140,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public void close() {
+        synchronized (this.lifecycleLock) {
+            this.closeLocked();
+        }
+    }
+
+    private void closeLocked() {
         this.stopTicker();
         ExecutorService sender = this.ackSender;
         if (sender != null) {
@@ -1123,6 +1175,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         } finally {
             this.communicator = null;
             this.dispatcher = null;
+            this.terminalInbox = null;
             this.state.set(SessionState.CLOSED);
             this.changeLinkPhase(SessionRuntime.LinkPhase.STOPPED);
         }

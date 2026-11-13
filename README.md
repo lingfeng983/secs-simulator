@@ -14,6 +14,7 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 | `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |
 | `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |
 | `secs-core` | 领域模型、ID 规划、曲线、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |
+| `secs-store` | 持久化层：`config.db`（设备/主机/模板/计划动作/报告/报警）与 `runtime.db`（钉值/计划启用态/目录编辑/链路相位/执行台账），含 2.x JSON 的一次性迁移 | core + json + sqlite-jdbc |
 | `secs-app` | 应用服务：会话、配置、日志、SML 文本层（`app.sml`） | core + json + protocol |
 | `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |
 | `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |
@@ -558,6 +559,7 @@ scripts\package-linux.ps1
 - [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
+- [3.0.0 发布说明](docs/reports/release-notes-3.0.0.md)
 - [2.0.1 发布说明](docs/reports/release-notes-2.0.1.md)
 - [2.0.0 发布说明](docs/reports/release-notes-2.0.0.md)
 - [OpenAPI 3.0 契约](docs/openapi.yaml)

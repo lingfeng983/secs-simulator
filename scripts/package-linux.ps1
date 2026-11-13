@@ -35,7 +35,9 @@ if (-not $SkipJars) {
 }
 
 # secs-cli 提供进程入口 CliMain，必须进包；classpath 顺序见 start-server.sh
-$modules = 'secs-cli','secs-runtime','secs-api-http','secs-app','secs-core','secs-protocol','secs-json'
+# secs-store 是 3.0 的配置/运行态持久化层（config.db + runtime.db，ADR 0017），
+# 漏了它打包脚本自己能跑通、启动时才 NoClassDefFoundError
+$modules = 'secs-cli','secs-runtime','secs-api-http','secs-app','secs-store','secs-core','secs-protocol','secs-json'
 foreach ($module in $modules) {
     if (-not (Test-Path (Join-Path $root "$module/target/$module-$version.jar"))) {
         throw "缺少 $module-$version.jar（先构建，或去掉 -SkipJars）"

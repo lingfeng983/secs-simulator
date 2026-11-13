@@ -57,12 +57,25 @@ public final class PlanFiredThrottle implements AutoCloseable {
             emit(deviceId, List.of(payload), false);
             return;
         }
-        Window window = this.windows.computeIfAbsent(deviceId, ignored -> new Window());
-        synchronized (window) {
-            if (window.items.isEmpty()) {
-                window.firstAt = System.currentTimeMillis();
+        if (this.closed) {
+            /* 窗口巡检线程已经停了：再建窗口只会攒下永远发不出去的摘要 */
+            emit(deviceId, List.of(payload), false);
+            return;
+        }
+        /* 循环而不是单次：flush 会把窗口从表里摘走，如果当前线程在等锁的这段时间里
+           被摘走了，往这个"孤儿窗口"里加就等于丢数据，必须重新取一个新窗口。 */
+        while (true) {
+            Window window = this.windows.computeIfAbsent(deviceId, ignored -> new Window());
+            synchronized (window) {
+                if (this.windows.get(deviceId) != window) {
+                    continue;
+                }
+                if (window.items.isEmpty()) {
+                    window.firstAt = System.currentTimeMillis();
+                }
+                window.items.add(payload);
+                return;
             }
-            window.items.add(payload);
         }
     }
 
@@ -86,6 +99,7 @@ public final class PlanFiredThrottle implements AutoCloseable {
     private void flush(boolean force) {
         long now = System.currentTimeMillis();
         for (var entry : this.windows.entrySet()) {
+            String deviceId = entry.getKey();
             Window window = entry.getValue();
             List<String> snapshot;
             synchronized (window) {
@@ -93,11 +107,14 @@ public final class PlanFiredThrottle implements AutoCloseable {
                         || (!force && now - window.firstAt < WINDOW_MS)) {
                     continue;
                 }
+                /* 先摘表再取快照（都在锁内）：反过来做的话，publish 会在
+                   "清空"与"移除"之间把新摘要塞进这个即将被丢弃的窗口，
+                   那一条摘要就永久消失了。 */
+                this.windows.remove(deviceId, window);
                 snapshot = List.copyOf(window.items);
                 window.items.clear();
             }
-            this.windows.remove(entry.getKey(), window);
-            emit(entry.getKey(), snapshot, snapshot.size() > 1);
+            emit(deviceId, snapshot, snapshot.size() > 1);
         }
     }
 

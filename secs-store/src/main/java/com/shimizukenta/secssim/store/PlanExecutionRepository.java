@@ -68,6 +68,12 @@ public final class PlanExecutionRepository implements Closeable {
     private final BlockingQueue<Object> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final Thread writer;
     private volatile boolean closed;
+    /** 队列满丢掉的条数（诊断用：丢得多说明触发频率已经压过落库速度）。 */
+    private final java.util.concurrent.atomic.AtomicLong dropped =
+            new java.util.concurrent.atomic.AtomicLong();
+    /** 批写失败次数（诊断用：非 0 说明台账与实际执行已经对不上）。 */
+    private final java.util.concurrent.atomic.AtomicLong flushFailures =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /** @param db 双库门面 */
     public PlanExecutionRepository(Db db) {
@@ -95,9 +101,15 @@ public final class PlanExecutionRepository implements Closeable {
     }
 
     private void enqueue(Object item) {
-        while (!this.queue.offer(item)) {
-            /* 队列满时丢最旧：台账是证据不是业务数据，绝不能让发送线程阻塞 */
-            this.queue.poll();
+        if (this.queue.offer(item)) {
+            return;
+        }
+        /* 满队丢当前条目，绝不自旋：入队发生在发送线程（事件心跳）上，自旋
+           等于把 CPU 烧在"给别人腾位置"上，还会把别人刚入队的行挤掉。
+           台账是证据不是业务数据，丢一行不影响已发出的报文。 */
+        long count = this.dropped.incrementAndGet();
+        if (count == 1L || count % 1000L == 0L) {
+            System.err.println("[plan-execution] 台账队列已满，累计丢弃 " + count + " 条");
         }
     }
 
@@ -113,10 +125,17 @@ public final class PlanExecutionRepository implements Closeable {
                 this.queue.drainTo(batch, FLUSH_THRESHOLD - 1);
                 flush(batch);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+                /* 停机打断：break 而不是 return——下面还有"把剩余的冲完"，
+                   直接返回会静默丢掉最后一个窗口（最多 4096 条）的台账与同批 fire_count */
+                break;
             } catch (RuntimeException e) {
-                /* 单批失败不终止写线程；台账丢弃但进程继续 */
+                /* 单批失败不终止写线程；台账丢弃但进程继续。
+                   必须留痕：写失败意味着 GET /runtime/executions 与计划页统计
+                   会长期对不上，静默吞掉就完全没人知道。 */
+                long count = this.flushFailures.incrementAndGet();
+                if (count == 1L || count % 100L == 0L) {
+                    System.err.println("[plan-execution] 台账批写失败（累计 " + count + " 次）: " + e);
+                }
             }
         }
         /* 关闭前把剩余的冲完 */
@@ -295,7 +314,10 @@ public final class PlanExecutionRepository implements Closeable {
     public void trim() {
         this.db.writeRuntime(connection -> {
             try (var st = connection.createStatement()) {
-                st.executeUpdate("DELETE FROM plan_execution WHERE id <= ("
+                /* 用 IN 而不是 `id <= (子查询)`：后者把多行结果当标量，
+                   SQLite 只取未定义顺序的第一行，裁剪阈值会忽大忽小——
+                   运气差时把保留窗口内的最新行一起删掉。 */
+                st.executeUpdate("DELETE FROM plan_execution WHERE id IN ("
                         + "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY device_id "
                         + "ORDER BY id DESC) AS rn FROM plan_execution) WHERE rn > " + RETENTION_ROWS + ")");
                 st.executeUpdate("DELETE FROM plan_execution WHERE fired_at < "
@@ -305,6 +327,16 @@ public final class PlanExecutionRepository implements Closeable {
             }
             return null;
         });
+    }
+
+    /** 因队列满被丢弃的台账条数（诊断用；正常应为 0）。 */
+    public long droppedCount() {
+        return this.dropped.get();
+    }
+
+    /** 批写失败次数（诊断用；非 0 说明台账已经落后于实际执行）。 */
+    public long flushFailureCount() {
+        return this.flushFailures.get();
     }
 
     @Override

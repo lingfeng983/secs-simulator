@@ -30,10 +30,16 @@ final class EventTicker {
     /**
      * 启动心跳。
      *
+     * <p>幂等：先停掉可能还活着的那一条，再起新的。旧写法无条件
+     * {@code newSingleThreadScheduledExecutor} 并覆盖字段——重复 open（并发连接、
+     * 断开与重连交错）时先起的那条失去引用，daemon 线程继续每 100ms 推进
+     * 一个已关闭会话的调度器，直到进程退出。</p>
+     *
      * @param manualClock 是否是手动时钟；手动时钟下不启动线程
      * @param pump        心跳回调
      */
-    void start(boolean manualClock, Runnable pump) {
+    synchronized void start(boolean manualClock, Runnable pump) {
+        this.stopLocked();
         if (manualClock) {
             return;
         }
@@ -43,12 +49,21 @@ final class EventTicker {
             thread.setDaemon(true);
             return thread;
         });
-        created.scheduleAtFixedRate(pump, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS);
+        try {
+            created.scheduleAtFixedRate(pump, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            created.shutdownNow();
+            throw e;
+        }
         this.service = created;
     }
 
     /** 停掉心跳。 */
-    void stop() {
+    synchronized void stop() {
+        this.stopLocked();
+    }
+
+    private void stopLocked() {
         ScheduledExecutorService current = this.service;
         this.service = null;
         if (current != null) {

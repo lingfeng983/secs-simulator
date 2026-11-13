@@ -20,8 +20,15 @@ import com.shimizukenta.secs.secs2.Secs2;
  */
 final class TracePump {
 
-    /** 采样与分条（热重载换模型时要重建）。 */
-    private TraceManager traces;
+    /**
+     * 采样与分条（热重载换模型时要重建）。
+     *
+     * <p>{@code volatile}：{@link #reset} 在 HTTP 线程（热生效/目录编辑）替换，
+     * {@code pump} 在心跳线程读。非 volatile 时心跳可能一直用着旧实例——
+     * 更糟的是 {@code handleInitialize} 把新 TRID 装进即将被丢弃的旧管理器，
+     * S2F24 回成功但永远不推 S6F1。</p>
+     */
+    private volatile TraceManager traces;
 
     /** W 位 ACK 专用队列：阻塞等 S6F2 不能占住采样线程。 */
     private final ExecutorService ackSender;
@@ -157,8 +164,8 @@ final class TracePump {
      * @param model 新模型
      * @param values 值来源
      */
-    void reset(com.shimizukenta.secssim.core.compile.ResolvedEquipment model,
-               com.shimizukenta.secssim.core.value.ValueSource values) {
+    synchronized void reset(com.shimizukenta.secssim.core.compile.ResolvedEquipment model,
+                            com.shimizukenta.secssim.core.value.ValueSource values) {
         this.traces.stopAll();
         /* 容量限制跟随会话配置：热重载换模型时原样带到新管理器 */
         this.traces = new TraceManager(model, values, java.time.Instant.now(),

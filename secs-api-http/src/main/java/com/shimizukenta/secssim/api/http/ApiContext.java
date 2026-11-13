@@ -715,14 +715,33 @@ public interface ApiContext {
         return "{\"ok\":false,\"error\":\"not-supported\"}";
     }
 
-    /** v2：新建主机。 */
-    default SessionOutcome openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
-        return SessionOutcome.FAILED;
+    /**
+     * v2 新建主机的返回值：状态 + 新实例 id。
+     *
+     * <p>早先的签名只回 {@code SessionOutcome}，新 id 靠
+     * {@code lastCreatedHostId()} 这个共享字段带出来——两个请求并发创建时，
+     * 先返回的那个会读到后一个的 id，客户端拿错 id 去连接，等到"主机不存在"
+     * 再回头查已经无从复现。id 必须随结果一起返回。</p>
+     *
+     * @param outcome 结果
+     * @param hostId  新实例 id；失败时为空串
+     */
+    record HostOpenResult(SessionOutcome outcome, String hostId) {
+
+        /** 失败结果（无 id）。 */
+        public static HostOpenResult failed(SessionOutcome outcome) {
+            return new HostOpenResult(outcome, "");
+        }
+
+        /** 是否创建成功。 */
+        public boolean ok() {
+            return outcome == SessionOutcome.OK;
+        }
     }
 
-    /** v2：新主机 id（openHostV2 成功后读取；进程内最新一次创建）。 */
-    default String lastCreatedHostId() {
-        return "";
+    /** v2：新建主机。 */
+    default HostOpenResult openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
+        return HostOpenResult.failed(SessionOutcome.FAILED);
     }
 
     /** v2：单主机状态。 */

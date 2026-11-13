@@ -513,7 +513,12 @@ public final class MessageLog implements AutoCloseable {
      * @param perspective 视角（device/host）；null 不过滤
      */
     public Snapshot selectHostMessages(int limit, String hostId, String perspective) {
-        return this.select(limit, null, null, 0L, null, null, hostId, perspective);
+        synchronized (this) {
+            /* recent 是 ArrayDeque：遍历必须与 append 的 addLast/removeFirst 互斥。
+               少这把锁时，报文正在流动的瞬间查主机收发记录会抛
+               ConcurrentModificationException（整页 500），即使不抛也是撕裂快照。 */
+            return this.select(limit, null, null, 0L, null, null, hostId, perspective);
+        }
     }
 
     private Snapshot select(int limit, String sessionId, String direction,

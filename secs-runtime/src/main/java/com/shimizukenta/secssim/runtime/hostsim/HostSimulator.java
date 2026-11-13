@@ -107,6 +107,20 @@ public final class HostSimulator {
     private volatile SecsCommunicator communicator;
     private volatile String lastError = "";
 
+    /**
+     * 建链/断链互斥锁。
+     *
+     * <p>{@code connect()} 里要在最多 6 秒的等待后才能确定成败，这段时间
+     * {@code communicator} 已经非空；没有互斥时第二次 connect（用户连点、
+     * HTTP 与退避重试撞在一起）会看到非空就抛「已连接」，或者更糟——两条
+     * 线程都通过检查各建一条链路，后写者覆盖字段，先建的那条真实连接
+     * 既不在字段里也无处关闭，socket 与协议线程直接泄漏。</p>
+     */
+    private final Object connectLock = new Object();
+
+    /** 退避重试的创建/取消互斥：并发观察同一次断链会建出两个定时器，被覆盖的那个永不关闭。 */
+    private final Object retryLock = new Object();
+
     /* ===== S1F3 采集器状态 ===== */
     private volatile CollectorConfig collectorConfig;
     private volatile boolean collectorRunning;
@@ -284,11 +298,14 @@ public final class HostSimulator {
     }
 
     private void cancelRetry() {
-        ScheduledExecutorService retry = this.retryExecutor;
-        if (retry != null) {
-            retry.shutdownNow();
+        synchronized (this.retryLock) {
+            ScheduledExecutorService retry = this.retryExecutor;
+            if (retry != null) {
+                retry.shutdownNow();
+            }
+            this.retryExecutor = null;
+            this.nextRetryAt = 0;
         }
-        this.nextRetryAt = 0;
     }
 
     /** autoReconnect 开启时按指数退避排一次重连(5s 起、上限 60s)。 */
@@ -296,26 +313,32 @@ public final class HostSimulator {
         if (!this.autoReconnect || this.communicator != null || this.manualDisconnect) {
             return;
         }
-        if (this.retryExecutor == null || this.retryExecutor.isShutdown()) {
-            this.retryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "hostsim-retry-" + this.hostId);
-                thread.setDaemon(true);
-                return thread;
-            });
-        }
-        long attempt = this.retryCount.incrementAndGet();
-        long delay = Math.min(60_000L, 5_000L * (1L << Math.min(4, attempt - 1)));
-        this.nextRetryAt = System.currentTimeMillis() + delay;
-        Log.info("主机 " + this.hostId + " 将在 " + delay / 1000 + " 秒后重试（第 " + attempt + " 次）");
-        this.retryExecutor.schedule(() -> {
-            if (this.communicator == null && !this.manualDisconnect) {
-                try {
-                    this.connect();
-                } catch (IOException | RuntimeException e) {
-                    /* connect 内部已置 FAILED 并排下一次退避 */
-                }
+        synchronized (this.retryLock) {
+            /* 双检：等锁期间可能已经连上了，或另一个线程刚排过同一次退避 */
+            if (this.communicator != null || this.manualDisconnect) {
+                return;
             }
-        }, delay, TimeUnit.MILLISECONDS);
+            if (this.retryExecutor == null || this.retryExecutor.isShutdown()) {
+                this.retryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "hostsim-retry-" + this.hostId);
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+            long attempt = this.retryCount.incrementAndGet();
+            long delay = Math.min(60_000L, 5_000L * (1L << Math.min(4, attempt - 1)));
+            this.nextRetryAt = System.currentTimeMillis() + delay;
+            Log.info("主机 " + this.hostId + " 将在 " + delay / 1000 + " 秒后重试（第 " + attempt + " 次）");
+            this.retryExecutor.schedule(() -> {
+                if (this.communicator == null && !this.manualDisconnect) {
+                    try {
+                        this.connect();
+                    } catch (IOException | RuntimeException e) {
+                        /* connect 内部已置 FAILED 并排下一次退避 */
+                    }
+                }
+            }, delay, TimeUnit.MILLISECONDS);
+        }
     }
 
     /**
@@ -363,6 +386,12 @@ public final class HostSimulator {
     }
 
     public void connect() throws IOException {
+        synchronized (this.connectLock) {
+            this.connectLocked();
+        }
+    }
+
+    private void connectLocked() throws IOException {
         if (this.communicator != null) {
             throw new IOException("主机已连接: " + this.hostId);
         }
@@ -412,20 +441,17 @@ public final class HostSimulator {
             opener.join(CONNECT_TIMEOUT_MS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            comm.close();
+            this.failConnect(comm, "等待通信建立被中断", e);
             throw new IOException("主机模拟器等待通信建立被中断", e);
         }
         if (opener.isAlive()) {
-            comm.close();
+            this.failConnect(comm, "连接超时（" + CONNECT_TIMEOUT_MS + " ms 内未建立通信）", null);
             throw new IOException("主机模拟器连接超时（" + CONNECT_TIMEOUT_MS + " ms 内未建立通信）");
         }
         if (failure.get() != null) {
-            comm.close();
             /* FAILED 是终态：必须真的销毁 communicator——ACTIVE 侧内部是
                for(;;)+T5 无限重连，留着它会静默重试并抢链路（设计约束 5） */
-            this.changePhase(HostLinkPhase.FAILED);
-            this.lastError = failure.get().getMessage();
-            scheduleRetryIfEnabled();
+            this.failConnect(comm, "主机连接失败: " + failure.get().getMessage(), failure.get());
             throw new IOException("主机连接失败: " + failure.get().getMessage(), failure.get());
         }
         this.open.set(true);
@@ -441,9 +467,47 @@ public final class HostSimulator {
     }
 
     /**
+     * 建链失败的统一收尾：关连接、清字段、置 FAILED、排一次退避。
+     *
+     * <p>字段必须清空。旧写法只 {@code comm.close()} 而把已关闭对象留在
+     * {@code communicator} 里，后果是三重的：下一次 {@code connect()} 直接抛
+     * 「主机已连接」；{@code scheduleRetryIfEnabled()} 的 {@code communicator != null}
+     * 判断永远为真，autoReconnect 静默失效（界面还显示着已开启）；超时分支的
+     * {@code opener} 线程也还挂在 {@code openAndWaitUntilCommunicating()} 里。</p>
+     *
+     * @param comm    这次建链用的连接
+     * @param message 记进 lastError 的人话原因
+     * @param cause   原始异常；可为 null
+     */
+    private void failConnect(SecsCommunicator comm, String message, Exception cause) {
+        try {
+            comm.close();
+        } catch (IOException | RuntimeException e) {
+            Log.warn("关闭建链失败的连接出错: " + this.hostId + ": " + e);
+        } finally {
+            if (this.communicator == comm) {
+                this.communicator = null;
+            }
+        }
+        this.open.set(false);
+        this.changePhase(HostLinkPhase.FAILED);
+        this.lastError = message;
+        if (cause != null) {
+            Log.warn("主机 " + this.hostId + " 建链失败: " + message);
+        }
+        this.scheduleRetryIfEnabled();
+    }
+
+    /**
      * 只断链（断开 = 保留实例、目标与采集设置，设计 §2.4.1）。
      */
     public void disconnect() {
+        synchronized (this.connectLock) {
+            this.disconnectLocked();
+        }
+    }
+
+    private void disconnectLocked() {
         this.manualDisconnect = true;
         this.cancelRetry();
         this.collectorStop("手动断开");
@@ -473,12 +537,17 @@ public final class HostSimulator {
     /**
      * 断线重连（保留原目标；= disconnect + connect）。
      *
+     * <p>两段在同一把锁里做完：分开调用会留下「已断开、还没连」的窗口，
+     * 并发请求或退避定时器能挤进来再建一条链路。</p>
+     *
      * @throws IOException 重连失败
      */
     public void reconnect() throws IOException {
-        this.disconnect();
-        this.manualDisconnect = false;
-        this.connect();
+        synchronized (this.connectLock) {
+            this.disconnectLocked();
+            this.manualDisconnect = false;
+            this.connectLocked();
+        }
     }
 
     /**

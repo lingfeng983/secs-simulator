@@ -366,6 +366,25 @@ final class ConfigHandler extends HttpSupport {
      * @throws IOException 写响应失败
      */
     private void handleDeviceRuntimeV2(HttpExchange ex, String[] parts) throws IOException {
+        try {
+            this.dispatchDeviceRuntimeV2(ex, parts);
+        } catch (com.shimizukenta.jsonhub.JsonHubParseException
+                | com.shimizukenta.jsonhub.JsonHubUnsupportedOperationException
+                | com.shimizukenta.jsonhub.JsonHubBuildException
+                | com.shimizukenta.jsonhub.JsonHubIndexOutOfBoundsException e) {
+            /* 请求体不是合法 JSON、或缺字段/类型不对（`root.get("ceid").longValue()`
+               在缺键时 NPE、在字符串值时抛 UnsupportedOperation）：这是调用方的错。
+               v1 的编辑路径早就这么兜了，v2 之前漏了——一个截断的 body 就能打出 500。 */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
+        } catch (IllegalArgumentException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":\""
+                    + json(e.getMessage()) + "\"}");
+        }
+    }
+
+    /** 运行时资源的实际分派（异常由 {@link #handleDeviceRuntimeV2} 统一收敛成 4xx）。 */
+    private void dispatchDeviceRuntimeV2(HttpExchange ex, String[] parts) throws IOException {
         String deviceId = parts[0];
         String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
         String resource = parts.length > 2 ? parts[2] : "";
@@ -718,7 +737,9 @@ final class ConfigHandler extends HttpSupport {
             case OK -> respond(ex, 202, "{\"ok\":true}");
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
             case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
-            case FAILED -> respond(ex, 500, "{\"ok\":false,\"error\":\"send-failed\"}");
+            /* 发送失败是链路/对端的问题，不是本进程的 bug：与 v2 手动发送、
+               主机模拟发送统一用 502，客户端据此提示"重试/检查链路"而不是"报 bug" */
+            case FAILED -> respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 
@@ -756,6 +777,12 @@ final class ConfigHandler extends HttpSupport {
         Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
         int limit = 50;
         Integer requested = intParam(query, "limit");
+        /* 写了 limit 但不是整数也算 400：以前静默用默认值，调用方以为
+           "只取 10 条"，实际拿到 50 条，翻页错位还查不出原因 */
+        if (query.containsKey("limit") && requested == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
         if (requested != null) {
             limit = requested;
         }
@@ -883,30 +910,37 @@ final class ConfigHandler extends HttpSupport {
      * v2:设备配置版本历史(GET /api/v2/devices/{name}/config/revisions)。
      */
     void handleConfigRevisionsV2(HttpExchange ex) throws IOException {
-        if (!"GET".equals(ex.getRequestMethod().toUpperCase(java.util.Locale.ROOT))) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
         String rest = ex.getRequestURI().getPath()
                 .substring(ApiPaths.DEVICE_REVISIONS_V2.length());
-        /* 形如 {name}/config/revisions */
         String[] parts = rest.split("/");
-        if (parts.length < 1 || parts[0].isBlank()) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+        /* 只认 {id}/config/revisions 这一种形状。以前这里是 handleDeviceV2 的兜底分支，
+           任何没认出来的路径（`/devices/{id}/runtime`、`/devices/{id}/config/xyz`）
+           都会静默返回该设备的版本历史——200 + 另一个资源，比 404 更难查。 */
+        if (parts.length != 3 || parts[0].isBlank()
+                || !"config".equals(parts[1]) || !"revisions".equals(parts[2])) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!"GET".equals(ex.getRequestMethod().toUpperCase(Locale.ROOT))) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
         }
         String name = parts[0];
         int limit = 50;
-        String query = ex.getRequestURI().getQuery();
-        if (query != null) {
-            for (String pair : query.split("&")) {
-                if (pair.startsWith("limit=")) {
-                    limit = java.lang.Integer.parseInt(pair.substring(6));
-                }
-            }
+        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
+        Integer requested = intParam(query, "limit");
+        /* 写了 limit 但不是整数 / 越界都算 400：以前 parse 直接抛 NumberFormatException
+           变成 500，负数则被下游 Math.max 静默改成 1 条 */
+        if (query.containsKey("limit")
+                && (requested == null || requested < 1 || requested > 500)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
+            return;
+        }
+        if (requested != null) {
+            limit = requested;
         }
         String body = this.context.configRevisionsV2(name, limit);
         if (body == null) {
