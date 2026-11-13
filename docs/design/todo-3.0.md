@@ -91,10 +91,14 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 
 ## 3. M2 遗留（生命周期/运行态持久化的深水区）
 
-- [ ] **runtime.db 写透**：钉值（`pin/unpin`）、计划启用态、运行时计划正文覆盖、目录编辑、主机动态报告**尚未写入** `runtime.db`（仓储方法已就绪，运行路径未接）；「断开保留、重连恢复」目前靠内存对象存活，进程重启即丢。
-- [ ] **启动恢复**：启动对账只做了 `cleanupOrphans` + 台账裁剪；`device_link` 相位回填、`runtime_svid_pin` / `runtime_plan_state` 等恢复路径未接。
-- [ ] **SSE 生命周期帧**：`device-link` / `host-link` / `config-changed` 三类未加（`message` 已带 `perspective`）；主机相位变化目前靠详情页 2s 轮询。
-- [ ] 设备侧 v2 端点：`/devices/{id}/link/{connect|disconnect|reload}`、`/devices/{id}/runtime/{plans,catalog,svids/pin,message,alarm}` 未建（设计 §2.5）；当前仍走 v1 `/sessions/**`。
+- [x] **runtime.db 写透**：新增 `RuntimePersister`（runtime 包）——钉值 / 取消钉值 / 计划启用态 / 运行时计划正文覆盖 / 目录编辑（ceid·report·svid）在**成功那一刻**落库，写失败只记日志、不影响正在处理的请求（runtime.db 掉了也不该让界面 500）。接线的入口：`RuntimeApi` 的 v1 编辑方法（pin/unpin/plan/report/ceid/svid CRUD、`setEventEnabled`）与 `RuntimeContext.setPlanEnabledV2`。主机动态报告本来就走 `host.variable_catalog`（`HostSimRegistry` 每次目录变更 `saveVariableCatalog`），重启照样恢复，`runtime_host_report` 表不再重复写（记入 §5 债务）。
+- [x] **启动恢复**：
+  - **主机实例装回内存**（顺带修掉一个真 bug）：`loadPersisted()` 原来在 `Bootstrap` 里调，装进的却是一个随后就被丢弃的 `HostSimRegistry`——真正对外服务的那个注册表是空的，重启后 `GET /api/v2/hosts` 为空、详情/连接/发送全 404。现在挪到 `RuntimeContext` 构造里，装进正在用的注册表。
+  - **会话运行态重放**：`sessions.onRegister` 对新会话按依赖顺序恢复 runtime.db 里的编辑：目录编辑（重建模型）→ 计划正文覆盖 → 钉值 → 计划启用态。反过来就会丢东西：先恢复钉值的话，运行时新增 SVID 还没进模型，那次钉值会被拒绝。单条失败只跳过这一条（配置改过 / SVID 被删 / JSON 坏了），不让一条脏数据把设备带崩。
+  - **相位收敛**：`resetStaleDevicePhases()` 启动时把上次进程留下的 `CONNECTED / LISTENING / STARTING` 改成 `DISCONNECTED`（保留行，配置版本不动），否则界面会显示一堆"连着的死设备"。
+  - **销毁 vs 重载**：销毁（v1 关闭）与重载都 `clearRuntimeEdits`，但**都不清 `runtime_plan_state`**——启停是用户明确的开关选择，重连后照旧。重载先清库再重建会话，否则注册观察者会把刚清掉的钉值又装回来。
+- [x] **SSE 生命周期帧**：`event: device-link`（`HsmsSessionRuntime.onLinkPhase` 钩子 → 落 `device_link` + 追加 `link_event` + 推帧）、`event: host-link`（`HostSimulator.onPhase`）、`event: config-changed`（保存/新建成功后）。SSE 侧不用改：`StreamHandler` 本来就把 `NoticeEvent.type()` 直接当 `event:` 名。
+- [ ] 设备侧 v2 端点：`/devices/{id}/link/{connect|disconnect|reload}`、`/devices/{id}/runtime/{plans,catalog,svids/pin,message,alarm}` 未建（设计 §2.5）；当前仍走 v1 `/sessions/**`。**注**：`HsmsSessionRuntime` 已实现 `disconnect()`（只断链、保对象、`reconnect()` 复用）与 `open()` 重入，端点只差 HTTP 接线。
 - [ ] 断开展示：v1 会话关闭后设备从列表消失（v1 语义），设计期望「已断开」行保留——等设备 v2 端点落地后由 M3 前端切过去。
 
 ---
@@ -118,6 +122,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 | v1 兼容字段 | `HostSimulator.stateJson` 恒返回 `session:"" / mode:"target" / remote:true`，前端 M3 已不依赖；待 v1 端点退役时删 |
 | 设备常量页 | 客户端解析配置原文（只读展示）；ECV 的写入口仍是主机 S2F15 |
 | 台账保留 | 5000 条 / 7 天裁剪在启动时跑一次；每小时增量清理任务未挂 |
+| `runtime_host_report` 表 | 建了但没用：主机动态报告实际存在 `host.variable_catalog`（重启照样恢复）。二选一时留了这个方案，表待下个版本删 |
 | 迁移来源标记 | `meta.migration_source` 只写日期；原绝对路径（`--config` 外部文件）未记 |
 
 ---

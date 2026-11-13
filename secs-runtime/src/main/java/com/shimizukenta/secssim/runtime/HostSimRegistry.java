@@ -35,16 +35,20 @@ final class HostSimRegistry {
     private final com.shimizukenta.secssim.app.event.EventBus eventBus;
     private final HostRepository hosts;
     private final RuntimeStateRepository linkState;
+    /** 相位变化即时推给界面（{@code event: host-link}）。 */
+    private final com.shimizukenta.secssim.app.event.NoticeBus notices;
 
     /** 主机实例注册表：hostId → 模拟器。 */
     private final ConcurrentMap<String, HostSimulator> hostSims = new ConcurrentHashMap<>();
 
     HostSimRegistry(SessionManager sessions, com.shimizukenta.secssim.app.event.EventBus eventBus,
-                    HostRepository hosts, RuntimeStateRepository linkState) {
+                    HostRepository hosts, RuntimeStateRepository linkState,
+                    com.shimizukenta.secssim.app.event.NoticeBus notices) {
         this.sessions = sessions;
         this.eventBus = eventBus;
         this.hosts = hosts;
         this.linkState = linkState;
+        this.notices = notices;
     }
 
     /**
@@ -84,10 +88,17 @@ final class HostSimRegistry {
             return null;
         }
         HostSimulator sim = HostSimulator.fromView(view.get(), this.eventBus);
-        sim.onPhase((phaseId, phase) ->
-                this.linkState.upsertHostLink(phaseId, phase.name(),
-                        view.get().targetHost() + ":" + view.get().targetPort(),
-                        view.get().settingRevision()));
+        sim.onPhase((phaseId, phase) -> {
+            this.linkState.upsertHostLink(phaseId, phase.name(),
+                    view.get().targetHost() + ":" + view.get().targetPort(),
+                    view.get().settingRevision());
+            /* 相位变化即时推（SSE event: host-link）：详情页原来靠 2s 轮询，
+               手动点「连接」后要等两秒才变色，像是没反应。 */
+            this.notices.publish(new com.shimizukenta.secssim.app.event.NoticeEvent(
+                    phaseId, com.shimizukenta.secssim.app.event.NoticeEvent.HOST_LINK,
+                    "{\"hostId\":\"" + phaseId + "\",\"phase\":\"" + phase.name() + "\"}",
+                    System.currentTimeMillis()));
+        });
         HostSimulator previous = this.hostSims.putIfAbsent(hostId, sim);
         return previous == null ? sim : previous;
     }

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.List;
 
 import com.shimizukenta.secssim.api.http.ApiContext;
+import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
@@ -51,11 +52,16 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final RuntimeStateRepository linkState;
     private volatile String lastCreatedHostId = "";
     private final BurstRunner bursts;
+    /** 运行态改动写穿到 runtime.db（钉值、计划启用态、目录编辑、链路相位）。 */
+    private final RuntimePersister persister;
+    /** 状态通知（SSE 的第二条数据源：设备/主机链路相位、配置变更）。 */
+    private final com.shimizukenta.secssim.app.event.NoticeBus notices;
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, MessageLog messages, AuditLog audit,
             com.shimizukenta.secssim.app.event.EventBus eventBus,
+            com.shimizukenta.secssim.app.event.NoticeBus notices,
             com.shimizukenta.secssim.store.HostRepository hostRepository,
             RuntimeStateRepository linkState,
             PlanExecutionRepository planExecutions, ConfigRepository configRepository) {
@@ -67,12 +73,19 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         this.configRepository = configRepository;
         this.planExecutions = planExecutions;
         this.linkState = linkState;
-        this.hosts = new HostSimRegistry(sessions, eventBus, hostRepository, linkState);
+        this.notices = notices;
+        this.hosts = new HostSimRegistry(sessions, eventBus, hostRepository, linkState, notices);
+        /* 主机实例从配置库装回内存。这一步以前写在 Bootstrap 里，装进了一个随后就被
+           丢掉的注册表——真正对外提供服务的这个注册表是空的，重启后主机详情 404、
+           连接/发送全都找不到实例。放在这里才算真的装上。 */
+        this.hosts.loadPersisted();
         this.hostRepository = hostRepository;
         this.messageLog = messages;
         this.configs = configs;
         this.bursts = new BurstRunner(sessions, this.hosts);
-        this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit, this.hosts, this.bursts);
+        this.persister = new RuntimePersister(linkState, this::canonicalDeviceId);
+        this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit,
+                this.hosts, this.bursts, this.persister);
     }
 
     /**
@@ -747,12 +760,33 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public ConfigResult saveConfig(String name, String text) {
-        return this.api.saveConfig(name, text);
+        ConfigResult result = this.api.saveConfig(name, text);
+        this.announceConfig(name, "save", result);
+        return result;
     }
 
     @Override
     public ConfigResult saveConfig(String name, String text, Long expectedModifiedMs) {
-        return this.api.saveConfig(name, text, expectedModifiedMs);
+        ConfigResult result = this.api.saveConfig(name, text, expectedModifiedMs);
+        this.announceConfig(name, "save", result);
+        return result;
+    }
+
+    /**
+     * 配置改了要让别的窗口知道（{@code event: config-changed}）。
+     *
+     * <p>3.0 有「同一份配置在设备页与配置页各开一个编辑器」的用法，
+     * 没有这条通知就只能靠用户自己点「重新载入」发现内容变了。</p>
+     */
+    private void announceConfig(String name, String action, ConfigResult result) {
+        if (result == null || result.outcome() != ConfigOutcome.OK || name == null) {
+            return;
+        }
+        this.notices.publish(new com.shimizukenta.secssim.app.event.NoticeEvent(
+                name, com.shimizukenta.secssim.app.event.NoticeEvent.CONFIG_CHANGED,
+                "{\"name\":\"" + name.replace("\\", "\\\\").replace("\"", "\\\"")
+                        + "\",\"action\":\"" + action + "\"}",
+                System.currentTimeMillis()));
     }
 
     @Override
@@ -762,12 +796,16 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public ConfigResult createConfig(String name) {
-        return this.api.createConfig(name);
+        ConfigResult result = this.api.createConfig(name);
+        this.announceConfig(name, "create", result);
+        return result;
     }
 
     @Override
     public ConfigResult createConfig(String name, String templateId) {
-        return this.api.createConfig(name, templateId);
+        ConfigResult result = this.api.createConfig(name, templateId);
+        this.announceConfig(name, "create", result);
+        return result;
     }
 
     @Override

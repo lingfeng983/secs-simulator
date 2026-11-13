@@ -164,8 +164,7 @@ public final class Bootstrap {
         launcher.configStore(configStore);
         HostRepository hostRepo = new HostRepository(db);
         RuntimeStateRepository linkState = new RuntimeStateRepository(db);
-        HostSimRegistry hostRegistry = new HostSimRegistry(sessions, bus, hostRepo, linkState);
-        hostRegistry.loadPersisted();
+        /* 主机实例在 RuntimeContext 构造时从配置库装回内存（注册表在那儿建） */
 
         /*
          * 3.0 M4（设计 §2.7.2）：会话一注册就接编排执行器。
@@ -179,10 +178,27 @@ public final class Bootstrap {
                 return;
             }
             /* 台账归属用 config.db 的 ULID，不是 v1 的 legacy stem（设计 §2.5） */
-            String deviceId = configRepo.findDevice(runtime.id())
-                    .map(ConfigRepository.DeviceView::id).orElse(runtime.id());
+            ConfigRepository.DeviceView device = configRepo.findDevice(runtime.id()).orElse(null);
+            String deviceId = device == null ? runtime.id() : device.id();
             hsms.planExecutor(new PlanExecutor(deviceId,
                     planSink(deviceId, planExecutions, planFired)));
+            /* device_link 行：会话一生效就有相位可查（断开展示、重连恢复都读它） */
+            linkState.upsertDeviceLink(deviceId, RuntimeApi.phaseName(hsms.linkPhase()),
+                    device == null ? 0L : device.revision());
+            /* 相位每次变化都落库 + 推 SSE（event: device-link）：界面上「连上/断开」
+               要立刻变；顺带留一条链路事件，排障时能回答"什么时候断的"。 */
+            hsms.onLinkPhase((sessionId, phase) -> {
+                String phaseName = RuntimeApi.phaseName(phase);
+                linkState.updateDevicePhase(deviceId, phaseName, null);
+                linkState.appendLinkEvent("device", deviceId, "", phaseName, "");
+                notices.publish(new com.shimizukenta.secssim.app.event.NoticeEvent(
+                        sessionId, com.shimizukenta.secssim.app.event.NoticeEvent.DEVICE_LINK,
+                        "{\"deviceId\":\"" + deviceId + "\",\"phase\":\"" + phaseName + "\"}",
+                        System.currentTimeMillis()));
+            });
+            /* 「断开保留、重启恢复」：上一次进程留下的钉值/计划启用态/计划正文/目录编辑，
+               在新会话上原样重放。重载路径会先清库再注册，所以不会把旧编辑装回来。 */
+            restoreRuntimeEdits(hsms, deviceId, linkState);
         });
 
         if (options.exportConfig() != null) {
@@ -199,9 +215,13 @@ public final class Bootstrap {
         List<String> liveDeviceIds = configRepo.listDevices().stream()
                 .map(ConfigRepository.DeviceView::id).toList();
         long removed = linkState.cleanupOrphans(liveDeviceIds);
+        long reset = linkState.resetStaleDevicePhases();
         planExecutions.trim();
         if (removed > 0) {
             Log.info("启动对账清理运行态残留 " + removed + " 行");
+        }
+        if (reset > 0) {
+            Log.info("启动对账把 " + reset + " 台设备的链路相位收敛为已断开");
         }
 
         /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
@@ -238,7 +258,7 @@ public final class Bootstrap {
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
                 extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
-                messageLog, auditLog, bus, hostRepo, linkState, planExecutions, configRepo);
+                messageLog, auditLog, bus, notices, hostRepo, linkState, planExecutions, configRepo);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,
@@ -310,6 +330,101 @@ public final class Bootstrap {
             cleanup.run();
         }
         return 0;
+    }
+
+    /**
+     * 会话注册时把 runtime.db 里的运行态编辑重放到新会话上（设计 §2.4.4）。
+     *
+     * <p>顺序按依赖排：目录编辑先落（它会重建模型）→ 计划正文覆盖（计划要先存在）
+     * → 钉值（变量要先存在）→ 计划启用态（计划要先存在）。反过来就会互相打架：
+     * 先恢复钉值的话，运行时新增的 SVID 还没进模型，那次钉值就被丢掉了。</p>
+     *
+     * <p>单条失败（配置改过、SVID 被删、JSON 坏了）只跳过这一条，不整体放弃：
+     * 恢复是尽力而为，宁可少恢复一项，也不能因为一条脏数据让设备起不来。</p>
+     *
+     * @param hsms     新注册的会话
+     * @param deviceId config.db 的 ULID
+     * @param state    运行态仓储
+     */
+    static void restoreRuntimeEdits(HsmsSessionRuntime hsms, String deviceId,
+                                    RuntimeStateRepository state) {
+        try {
+            for (RuntimeStateRepository.OverrideRow row : state.catalogEdits(deviceId)) {
+                String raw = row.key();
+                int colon = raw.indexOf(':');
+                if (colon <= 0) {
+                    continue;
+                }
+                String kind = raw.substring(0, colon);
+                int key = Integer.parseInt(raw.substring(colon + 1));
+                restoreCatalogEdit(hsms, kind, key, row.op(), row.bodyJson());
+            }
+        } catch (RuntimeException e) {
+            Log.error("恢复目录编辑失败（跳过）: " + deviceId + " " + e.getMessage(), e);
+        }
+        try {
+            for (RuntimeStateRepository.OverrideRow row : state.planOverrides(deviceId)) {
+                switch (row.op()) {
+                    case "add" -> hsms.addEventPlan(RuntimeEdits.parseEventPlan(row.bodyJson()));
+                    case "update" -> hsms.updateEventPlan(row.key(),
+                            RuntimeEdits.parseEventPlan(row.bodyJson()));
+                    case "remove" -> hsms.removeEventPlan(row.key());
+                    default -> Log.error("忽略未知计划覆盖 op=" + row.op() + "(" + row.key() + ")", null);
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.error("恢复计划覆盖失败（跳过）: " + deviceId + " " + e.getMessage(), e);
+        }
+        try {
+            state.pinnedSvids(deviceId).forEach((svid, value) ->
+                    hsms.pinSvidValue(svid.intValue(), value));
+        } catch (RuntimeException e) {
+            Log.error("恢复钉值失败（跳过）: " + deviceId + " " + e.getMessage(), e);
+        }
+        try {
+            /* 停用也要恢复：配置里默认启用、用户上次手动停掉的计划，重连后不该自己跑起来 */
+            for (RuntimeStateRepository.PlanStateRow row : state.planStates(deviceId)) {
+                hsms.setEventEnabled(row.planId(), row.enabled());
+            }
+        } catch (RuntimeException e) {
+            Log.error("恢复计划启用态失败（跳过）: " + deviceId + " " + e.getMessage(), e);
+        }
+    }
+
+    private static void restoreCatalogEdit(HsmsSessionRuntime hsms, String kind, int key,
+                                           String op, String bodyJson) {
+        try {
+            switch (kind) {
+                case "ceid" -> {
+                    switch (op) {
+                        case "add" -> hsms.addCeid(RuntimeEdits.parseCeid(bodyJson));
+                        case "update" -> hsms.updateCeid(RuntimeEdits.parseCeid(bodyJson));
+                        case "remove" -> hsms.removeCeid(key);
+                        default -> { }
+                    }
+                }
+                case "report" -> {
+                    switch (op) {
+                        case "add" -> hsms.addReport(RuntimeEdits.parseReport(bodyJson));
+                        case "update" -> hsms.updateReport(RuntimeEdits.parseReport(bodyJson));
+                        case "remove" -> hsms.removeReport(key);
+                        default -> { }
+                    }
+                }
+                case "svid" -> {
+                    switch (op) {
+                        case "add" -> hsms.addSvid(RuntimeEdits.parseSvid(bodyJson));
+                        case "update" -> hsms.updateSvid(RuntimeEdits.parseSvid(bodyJson));
+                        case "remove" -> hsms.removeSvid(key);
+                        default -> { }
+                    }
+                }
+                default -> Log.error("忽略未知目录编辑 kind=" + kind + " key=" + key, null);
+            }
+        } catch (RuntimeException e) {
+            Log.error("恢复目录编辑失败（跳过）: " + kind + ":" + key + " op=" + op
+                    + " " + e.getMessage(), e);
+        }
     }
 
     /**

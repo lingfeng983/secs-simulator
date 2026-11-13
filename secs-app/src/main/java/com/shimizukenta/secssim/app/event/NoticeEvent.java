@@ -22,4 +22,18 @@ public record NoticeEvent(String sessionId, String type, String payload, long at
 
     /** 会话状态迁移（载荷：state?, controlState?）。 */
     public static final String SESSION = "session";
+
+    /**
+     * 设备链路相位（载荷：deviceId, phase）。
+     *
+     * <p>3.0 的侧栏与设备卡要"连上/断开立刻变"，靠 2s 轮询会看起来卡顿；
+     * phase 取值同 {@code SessionRuntime.LinkPhase}。</p>
+     */
+    public static final String DEVICE_LINK = "device-link";
+
+    /** 主机链路相位（载荷：hostId, phase）。 */
+    public static final String HOST_LINK = "host-link";
+
+    /** 配置变更（载荷：name, action=save|create|delete）。 */
+    public static final String CONFIG_CHANGED = "config-changed";
 }

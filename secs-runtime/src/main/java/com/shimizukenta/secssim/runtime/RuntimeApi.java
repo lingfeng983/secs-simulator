@@ -40,9 +40,12 @@ final class RuntimeApi {
     private final HostSimRegistry hosts;
     private final BurstRunner bursts;
 
+    /** 运行态改动写穿到 runtime.db；失败只记日志，不影响请求结果。 */
+    private final RuntimePersister persister;
+
     RuntimeApi(SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, MessageLog messages, AuditLog audit,
-            HostSimRegistry hosts, BurstRunner bursts) {
+            HostSimRegistry hosts, BurstRunner bursts, RuntimePersister persister) {
         this.sessions = sessions;
         this.launcher = launcher;
         this.configs = configs;
@@ -51,6 +54,7 @@ final class RuntimeApi {
         this.audit = audit;
         this.hosts = hosts;
         this.bursts = bursts;
+        this.persister = persister;
     }
 
     /* ---------- 会话查询 ---------- */
@@ -177,7 +181,13 @@ final class RuntimeApi {
         if (session == null) {
             return EventOutcome.UNKNOWN_SESSION;
         }
-        return session.setEventEnabled(planId, enabled) ? EventOutcome.OK : EventOutcome.UNKNOWN_PLAN;
+        if (!session.setEventEnabled(planId, enabled)) {
+            return EventOutcome.UNKNOWN_PLAN;
+        }
+        /* 启用态是「断开保留、重启恢复」的一部分：v1 与 v2 两条路径都在这里落库，
+           next_fire_at 交给调度器推进，不写死一个可能与 OnCondition 冲突的时刻。 */
+        this.persister.planState(sessionId, planId, enabled);
+        return EventOutcome.OK;
     }
 
     /* ---------- 报文与审计 ---------- */
@@ -223,7 +233,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.addEventPlan(RuntimeEdits.parseEventPlan(planJson)) ? 201 : 409;
+        com.shimizukenta.secssim.core.event.EventPlan plan = RuntimeEdits.parseEventPlan(planJson);
+        if (!session.addEventPlan(plan)) {
+            return 409;
+        }
+        this.persister.planOverride(sessionId, plan.id(), "add", planJson);
+        return 201;
     }
 
     int updateEventPlan(String sessionId, String planId, String planJson) {
@@ -231,7 +246,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.updateEventPlan(planId, RuntimeEdits.parseEventPlan(planJson)) ? 200 : 404;
+        if (!session.updateEventPlan(planId, RuntimeEdits.parseEventPlan(planJson))) {
+            return 404;
+        }
+        this.persister.planOverride(sessionId, planId, "update", planJson);
+        return 200;
     }
 
     int removeEventPlan(String sessionId, String planId) {
@@ -239,7 +258,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.removeEventPlan(planId) ? 200 : 404;
+        if (!session.removeEventPlan(planId)) {
+            return 404;
+        }
+        this.persister.planOverride(sessionId, planId, "remove", "{}");
+        return 200;
     }
 
     int addReport(String sessionId, String reportJson) {
@@ -247,7 +270,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.addReport(RuntimeEdits.parseReport(reportJson)) ? 201 : 409;
+        com.shimizukenta.secssim.core.compile.ResolvedReport report = RuntimeEdits.parseReport(reportJson);
+        if (!session.addReport(report)) {
+            return 409;
+        }
+        this.persister.catalogEdit(sessionId, "report", report.id(), "add", reportJson);
+        return 201;
     }
 
     int updateReport(String sessionId, int rptid, String reportJson) {
@@ -255,7 +283,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.updateReport(RuntimeEdits.parseReport(reportJson)) ? 200 : 404;
+        com.shimizukenta.secssim.core.compile.ResolvedReport report = RuntimeEdits.parseReport(reportJson);
+        if (!session.updateReport(report)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "report", rptid, "update", reportJson);
+        return 200;
     }
 
     int addCeid(String sessionId, String ceidJson) {
@@ -263,7 +296,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.addCeid(RuntimeEdits.parseCeid(ceidJson)) ? 201 : 409;
+        com.shimizukenta.secssim.core.compile.ResolvedCeid def = RuntimeEdits.parseCeid(ceidJson);
+        if (!session.addCeid(def)) {
+            return 409;
+        }
+        this.persister.catalogEdit(sessionId, "ceid", def.id(), "add", ceidJson);
+        return 201;
     }
 
     int updateCeid(String sessionId, int ceid, String ceidJson) {
@@ -271,7 +309,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.updateCeid(RuntimeEdits.parseCeid(ceidJson)) ? 200 : 404;
+        com.shimizukenta.secssim.core.compile.ResolvedCeid def = RuntimeEdits.parseCeid(ceidJson);
+        if (!session.updateCeid(def)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "ceid", ceid, "update", ceidJson);
+        return 200;
     }
 
     int removeCeid(String sessionId, int ceid) {
@@ -279,7 +322,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.removeCeid(ceid) ? 200 : 404;
+        if (!session.removeCeid(ceid)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "ceid", ceid, "remove", "{}");
+        return 200;
     }
 
     int removeReport(String sessionId, int rptid) {
@@ -287,7 +334,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.removeReport(rptid) ? 200 : 404;
+        if (!session.removeReport(rptid)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "report", rptid, "remove", "{}");
+        return 200;
     }
 
     int addSvid(String sessionId, String svidJson) {
@@ -295,7 +346,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.addSvid(RuntimeEdits.parseSvid(svidJson)) ? 201 : 409;
+        com.shimizukenta.secssim.core.compile.ResolvedSvid def = RuntimeEdits.parseSvid(svidJson);
+        if (!session.addSvid(def)) {
+            return 409;
+        }
+        this.persister.catalogEdit(sessionId, "svid", def.id(), "add", svidJson);
+        return 201;
     }
 
     int updateSvid(String sessionId, int svid, String svidJson) {
@@ -303,7 +359,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.updateSvid(RuntimeEdits.parseSvid(svidJson)) ? 200 : 404;
+        com.shimizukenta.secssim.core.compile.ResolvedSvid def = RuntimeEdits.parseSvid(svidJson);
+        if (!session.updateSvid(def)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "svid", svid, "update", svidJson);
+        return 200;
     }
 
     int removeSvid(String sessionId, int svid) {
@@ -311,7 +372,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.removeSvid(svid) ? 200 : 404;
+        if (!session.removeSvid(svid)) {
+            return 404;
+        }
+        this.persister.catalogEdit(sessionId, "svid", svid, "remove", "{}");
+        return 200;
     }
 
     int pinSvidValue(String sessionId, int svid, String valueJson) {
@@ -319,7 +384,12 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.pinSvidValue(svid, RuntimeEdits.parsePinnedValue(valueJson)) ? 200 : 404;
+        double value = RuntimeEdits.parsePinnedValue(valueJson);
+        if (!session.pinSvidValue(svid, value)) {
+            return 404;
+        }
+        this.persister.pin(sessionId, svid, value);
+        return 200;
     }
 
     int unpinSvidValue(String sessionId, int svid) {
@@ -327,7 +397,11 @@ final class RuntimeApi {
         if (session == null) {
             return 404;
         }
-        return session.unpinSvidValue(svid) ? 200 : 404;
+        if (!session.unpinSvidValue(svid)) {
+            return 404;
+        }
+        this.persister.unpin(sessionId, svid);
+        return 200;
     }
 
     String sendSml(String sessionId, String sml) throws IOException {
@@ -344,6 +418,10 @@ final class RuntimeApi {
             String id = this.launcher.create(request.config(),
                     overrides.isEmpty() ? SessionOverrides.NONE : overrides);
             Log.info("新建会话 " + id + "（配置 " + request.config() + "）");
+            /* 会话一注册就有 device_link 行（Bootstrap 的注册观察者写的），
+               这里补一次相位：刚建好可能已经 bind 成功（LISTENING）或失败（FAILED）。 */
+            this.sessions.find(id).ifPresent(session ->
+                    this.persister.devicePhase(id, phaseName(session.linkPhase()), session.lastError()));
             return SessionOutcome.OK;
         } catch (ConfigException e) {
             /* 配置名非法、文件读不了、内容编译不过——都是"这台设备起不来" */
@@ -365,7 +443,16 @@ final class RuntimeApi {
         /* 先收掉这台设备的主机模拟器：会话都删了，主机实例不该继续挂在列表里、
            占着一条已经死掉的连接。 */
         this.hosts.closeAllOf(sessionId);
-        return this.launcher.close(sessionId) ? SessionOutcome.OK : SessionOutcome.UNKNOWN_SESSION;
+        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
+        String lastError = session == null ? null : session.lastError();
+        boolean closed = this.launcher.close(sessionId);
+        if (closed) {
+            /* 关闭 = 销毁（v1 语义）：按设计 §2.4「destroy 才清」把运行态编辑一起清掉。
+               行本身留着并标 STOPPED，界面据此显示「已断开」而不是凭空消失。 */
+            this.persister.clearEdits(sessionId);
+            this.persister.devicePhase(sessionId, phaseName(SessionRuntime.LinkPhase.STOPPED), lastError);
+        }
+        return closed ? SessionOutcome.OK : SessionOutcome.UNKNOWN_SESSION;
     }
 
     SessionOutcome reloadSession(String sessionId) {
@@ -377,8 +464,13 @@ final class RuntimeApi {
         }
 
         try {
+            /* 重载 = 按配置恢复（设计 §2.4）：内存里的运行时编辑先清库再重建会话，
+               否则注册观察者会把刚清掉的钉值/计划覆盖又装回来。 */
+            this.persister.clearEdits(sessionId);
             this.launcher.reload(sessionId);
             Log.info("会话 " + sessionId + " 已按配置重载");
+            this.sessions.find(sessionId).ifPresent(session ->
+                    this.persister.devicePhase(sessionId, phaseName(session.linkPhase()), session.lastError()));
             return SessionOutcome.OK;
         } catch (ConfigException e) {
             /* 配置有问题时旧会话原样跑着，这里只是如实报告失败 */
@@ -388,6 +480,11 @@ final class RuntimeApi {
             Log.error("重载失败（端口绑定）: " + e.getMessage(), null);
             return SessionOutcome.FAILED;
         }
+    }
+
+    /** 链路相位落库用的字符串（与 device_link.phase 的约定一致）。 */
+    static String phaseName(SessionRuntime.LinkPhase phase) {
+        return phase == null ? SessionRuntime.LinkPhase.STOPPED.name() : phase.name();
     }
 
     /* ---------- 总览 ---------- */

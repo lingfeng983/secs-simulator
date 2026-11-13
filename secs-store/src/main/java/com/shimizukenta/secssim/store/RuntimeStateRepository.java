@@ -90,6 +90,29 @@ public final class RuntimeStateRepository {
         });
     }
 
+    /**
+     * 启动对账：把上次进程留下的「还连着」的相位改成已断开。
+     *
+     * <p>进程重启后没有任何链路是活的，但 {@code device_link} 里仍写着
+     * {@code CONNECTED}／{@code LISTENING}／{@code STARTING}。界面上这叫
+     * 「显示连着的死设备」，重启恢复要先把它们收敛成 {@code DISCONNECTED}
+     * （保留行，断开展示与重连恢复都靠它）。</p>
+     *
+     * @return 改写的行数
+     */
+    public long resetStaleDevicePhases() {
+        return this.db.writeRuntime(connection -> {
+            try (PreparedStatement st = connection.prepareStatement(
+                    "UPDATE device_link SET phase='DISCONNECTED', disconnected_at=? "
+                            + "WHERE phase IN ('CONNECTED','LISTENING','STARTING')")) {
+                st.setLong(1, System.currentTimeMillis());
+                return (long) st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("重置设备链路相位失败: " + e.getMessage(), e);
+            }
+        });
+    }
+
     /** 读设备链路行。 */
     public Optional<LinkRow> deviceLink(String deviceId) {
         try (Connection connection = this.db.readRuntime();
@@ -112,8 +135,7 @@ public final class RuntimeStateRepository {
     }
 
     /** 读全部设备链路行。 */
-    public List<LinkRow> allDeviceLinks() {
-        try (Connection connection = this.db.readRuntime();
+    public List<LinkRow> allDeviceLinks() {        try (Connection connection = this.db.readRuntime();
              PreparedStatement st = connection.prepareStatement(
                      "SELECT device_id, phase, config_revision, control_state, last_error, "
                              + "overrides_json, last_good_json, connected_at, disconnected_at FROM device_link")) {
