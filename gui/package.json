@@ -1,7 +1,7 @@
 {
   "name": "secs-sim-gui",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "SECS Simulator desktop shell",
   "scripts": {
     "dev": "tauri dev",

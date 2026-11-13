@@ -363,6 +363,11 @@ final class SessionHandler extends HttpSupport {
             return null;
         }
         String rest = path.substring(ApiPaths.SESSION_PREFIX.length());
+        /* 末尾斜杠是路径噪音（`DELETE /sessions/s1/`），不是 id 的一部分——
+           id 本身不允许含斜杠，先归一再校验，两个写法才会同语义 */
+        while (rest.endsWith("/")) {
+            rest = rest.substring(0, rest.length() - 1);
+        }
         if (rest.isEmpty() || rest.contains("/")) {
             return null;
         }
