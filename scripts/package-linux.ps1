@@ -14,6 +14,47 @@ $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
+# Maven 本地仓库路径不能写死 `%USERPROFILE%\.m2\repository`：很多机器在
+# settings.xml 里把 localRepository 指到别处（本机就在 E:\Apache\apache-maven-3.6.3\m2），
+# 写死会让打包脚本报“缺 jar”，而那个 jar 明明已经装好了。
+#
+# 注意 `$ErrorActionPreference='Stop'` 下原生命令往 stderr 写会变成
+# NativeCommandError 直接抛，所以这里临时放宽并逐行过滤（mvn 的 [INFO]/[ERROR]
+# 行不能当路径用）。
+function Get-MavenRepoCandidates {
+    $list = @()
+    if ($env:MAVEN_REPO) { $list += $env:MAVEN_REPO }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & mvn.cmd -B -q -o help:evaluate '-Dexpression=settings.localRepository' '-DforceStdout' 2>&1
+        foreach ($line in @($out)) {
+            $text = ([string]$line).Trim()
+            if ($text.Length -gt 0 -and -not $text.StartsWith('[') -and (Test-Path -LiteralPath $text)) {
+                $list += $text
+            }
+        }
+    } catch {
+        # mvn 不可用时继续试默认位置
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($env:M2_HOME) { $list += (Join-Path $env:M2_HOME 'm2') }
+    $list += (Join-Path $env:USERPROFILE '.m2/repository')
+    return $list | Select-Object -Unique
+}
+
+# 在候选仓库里找某个依赖 jar；找不到返回 $null（调用方给出可读的报错）。
+function Find-MavenArtifact {
+    param([string]$RelativePath)
+    foreach ($repo in Get-MavenRepoCandidates) {
+        $candidate = Join-Path $repo $RelativePath
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+
 $version = (Select-String -Path (Join-Path $root 'pom.xml') -Pattern '<version>([^<]+)</version>' |
     Select-Object -First 1).Matches.Groups[1].Value
 
@@ -51,8 +92,8 @@ if ($pomText -notmatch 'sqlite-jdbc</artifactId>\s*<version>([^<]+)</version>') 
     throw 'pom.xml 里找不到 sqlite-jdbc 的版本号（依赖管理段被改动了？）'
 }
 $sqliteVersion = $Matches[1]
-$sqliteJar = Join-Path $env:USERPROFILE ".m2/repository/org/xerial/sqlite-jdbc/$sqliteVersion/sqlite-jdbc-$sqliteVersion.jar"
-if (-not (Test-Path $sqliteJar)) { throw "缺少 sqlite-jdbc-$sqliteVersion.jar（先 mvn package 拉取依赖）" }
+$sqliteJar = Find-MavenArtifact "org/xerial/sqlite-jdbc/$sqliteVersion/sqlite-jdbc-$sqliteVersion.jar"
+if ($null -eq $sqliteJar) { throw "缺少 sqlite-jdbc-$sqliteVersion.jar（先 mvn package 拉取依赖）" }
 
 # ---- 3. 组装（产物统一收到 build/installer）----
 $packageDir = Join-Path $root 'build/installer'
