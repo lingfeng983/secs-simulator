@@ -8,7 +8,7 @@ import type { PanelBaseProps } from '../types';
 import type { HostPage, HostZone } from '../../../app/router';
 import { HOST_PRESETS, PRESET_GROUPS } from './HostSimMessagesPanel';
 import type { HostsV2State } from '../../../state/useHostsV2';
-import type { PreviewSeries, SentMessageResult } from '../../../api';
+import type { ApiClient, PreviewSeries, SentMessageResult } from '../../../api';
 
 /**
  * 主机详情子页分发（设计 §3.4.2 归位表）。
@@ -22,14 +22,17 @@ export function HostDetailPanels({
   page,
   hosts,
   goTo,
+  client,
 }: {
   hostId: string;
   zone: HostZone;
   page: HostPage;
   hosts: HostsV2State;
   goTo?: (id: string) => void;
+  /** 由页面经 PanelBaseProps.backend.client 正常传入，不做模块级注入。 */
+  client: ApiClient | null;
 }): JSX.Element {
-  const base = { hosts, goTo, hostId };
+  const base = { hosts, goTo, hostId, client };
   if (zone === 'config') {
     switch (page) {
       case 'overview':
@@ -69,6 +72,7 @@ type PanelArgs = {
   hosts: HostsV2State;
   goTo?: (id: string) => void;
   readOnly?: boolean;
+  client: ApiClient | null;
 };
 
 /* ---------- 配置区 ---------- */
@@ -274,13 +278,12 @@ function HostRuntimeStatusPanel({ hostId, hosts }: PanelArgs): JSX.Element {
 }
 
 /** 消息发送(单主机):预设 + SML 编辑 + 发送 + 压测。 */
-function HostSendPanel({ hostId, hosts, client }: PanelArgs & { client?: PanelBaseProps['backend']['client'] }): JSX.Element {
+function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
   const [draft, setDraft] = useState('S1F13 W');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
   const [error, setError] = useState('');
-  void client;
 
   if (host === null) {
     return <p className="hint">主机不存在。</p>;
@@ -338,9 +341,8 @@ function HostSendPanel({ hostId, hosts, client }: PanelArgs & { client?: PanelBa
 }
 
 /** Trace 采集(S2F23 → S6F1):表单生成 + 发送。 */
-function HostTracePanel({ hostId, hosts, readOnly }: PanelArgs): JSX.Element {
+function HostTracePanel({ hostId, hosts, readOnly, client }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
-  const client = useHostsClient();
   const [trid, setTrid] = useState(1);
   const [dsper, setDsper] = useState(1000);
   const [totsmp, setTotsmp] = useState(100);
@@ -378,7 +380,7 @@ function HostTracePanel({ hostId, hosts, readOnly }: PanelArgs): JSX.Element {
     setBusy(true);
     setError('');
     try {
-      setResult(await client.sendHostV2(hostId, buildS2f23()));
+      setResult(await requireClient(client).sendHostV2(hostId, buildS2f23()));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -437,9 +439,9 @@ function HostTracePanel({ hostId, hosts, readOnly }: PanelArgs): JSX.Element {
 }
 
 /** 数据采集(S1F3 轮询):配置下发 + 手动启停 + 曲线。 */
-function HostCollectPanel({ hostId, hosts, client }: PanelArgs & { client?: PanelBaseProps['backend']['client'] }): JSX.Element {
+function HostCollectPanel({ hostId, hosts, client }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
-  const realClient = client ?? useHostsClient();
+  const realClient = client;
   const [startCeid, setStartCeid] = useState('2001');
   const [stopCeid, setStopCeid] = useState('2002');
   const [intervalMs, setIntervalMs] = useState('1000');
@@ -486,7 +488,7 @@ function HostCollectPanel({ hostId, hosts, client }: PanelArgs & { client?: Pane
     try {
       const parsed = svids.split(/[\s,;]+/).filter((piece) => piece !== '').map(Number)
         .filter((value) => Number.isInteger(value) && value >= 1);
-      await realClient.setHostInstanceCollector(hostId, {
+      await requireClient(realClient).setHostInstanceCollector(hostId, {
         startCeid: Number(startCeid) || 0,
         stopCeid: Number(stopCeid) || 0,
         intervalMs: Number(intervalMs) || 1000,
@@ -503,7 +505,7 @@ function HostCollectPanel({ hostId, hosts, client }: PanelArgs & { client?: Pane
     setBusy(true);
     setError('');
     try {
-      await realClient.hostInstanceCollectorCommand(hostId, start);
+      await requireClient(realClient).hostInstanceCollectorCommand(hostId, start);
       await loadState();
     } catch (e) {
       setError((e as Error).message);
@@ -512,14 +514,26 @@ function HostCollectPanel({ hostId, hosts, client }: PanelArgs & { client?: Pane
     }
   };
 
-  const series: PreviewSeries[] = (state?.series ?? []).map((item) => ({
-    svid: item.svid,
-    owner: 'CH1',
-    unit: item.unit ?? '',
-    min: item.v,
-    max: item.v,
-    avg: item.v,
-  }));
+  /* 采集样本是逐点值(min=max=avg);时间轴用样本自带的 epoch 毫秒,timeOriginMs 保持 0。 */
+  const charts = (state?.series ?? []).map((item) => {
+    const times = item.t ?? [];
+    const from = times.length > 0 ? times[0] : 0;
+    const to = times.length > 1 ? times[times.length - 1] : from + 1000;
+    const chartSeries: PreviewSeries = {
+      svid: item.svid,
+      owner: item.name ?? 'CH1',
+      unit: item.unit ?? '',
+      min: item.v,
+      max: item.v,
+      avg: item.v,
+    };
+    return {
+      svid: item.svid,
+      series: chartSeries,
+      fromMs: from,
+      bucketMs: Math.max(1, Math.round((to - from) / Math.max(1, item.v.length - 1))),
+    };
+  });
 
   return (
     <Panel
@@ -559,8 +573,36 @@ function HostCollectPanel({ hostId, hosts, client }: PanelArgs & { client?: Pane
           {state?.running ? `采集中 · ${state.samples ?? 0} 点 · 解码错误 ${state.decodeErrors ?? 0}` : '未采集'}
         </span>
       </div>
-      {series.length > 0 && (
-        <p className="hint">当前采集 {state?.samples ?? 0} 点;曲线视图沿用设备页·状态变量的图表(下一步接入)。</p>
+      {charts.length === 0 ? (
+        <p className="hint">还没有采集数据;下发配置并开始后,这里会画出每个变量的曲线。</p>
+      ) : (
+        <div className="collector-charts">
+          {charts.map((chart) => (
+            <div className="collector-chart collector-chart-large" key={chart.svid}>
+              <div className="collector-chart-head">
+                <span className="mono">{chart.svid}</span>
+                <span>{chart.series.owner}</span>
+                {(chart.series.unit ?? '') !== '' && (
+                  <span className="hint-inline">{chart.series.unit}</span>
+                )}
+                <span className="spacer" />
+                <span className="hint-inline">
+                  {chart.series.avg.length} 点 · 最近{' '}
+                  {chart.series.avg.length > 0
+                    ? chart.series.avg[chart.series.avg.length - 1].toFixed(2)
+                    : '—'}
+                </span>
+              </div>
+              <VariableChart
+                series={chart.series}
+                fromMs={chart.fromMs}
+                bucketMs={chart.bucketMs}
+                height={200}
+                eventLabel="事件"
+              />
+            </div>
+          ))}
+        </div>
       )}
     </Panel>
   );
@@ -675,9 +717,8 @@ function HostMonitorPanel({ hostId, hosts, messages = [] }: PanelArgs & { messag
 }
 
 /** 手动操作:连接/断开/使设置生效 + 快捷命令。 */
-function HostManualPanel({ hostId, hosts }: PanelArgs): JSX.Element {
+function HostManualPanel({ hostId, hosts, client }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
-  const client = useHostsClient();
   const [draft, setDraft] = useState('S1F3 W\n<L\n  <U4 1001>\n  <U4 1003>\n>.');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
@@ -687,7 +728,7 @@ function HostManualPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   const send = async () => {
     setBusy(true);
     try {
-      setResult(await client.sendHostV2(hostId, draft));
+      setResult(await requireClient(client).sendHostV2(hostId, draft));
     } finally {
       setBusy(false);
     }
@@ -740,23 +781,10 @@ function HostManualPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   );
 }
 
-/** HostDetailPanels 内部没有 PanelBaseProps;客户端经由 props.client 传入。 */
-function useHostsClient(): NonNullable<PanelBaseProps['backend']['client']> {
-  /* 通过 React Context 注入会引入层级;这里用模块级注入(Bootstrap 由 App 设置) */
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-  return getInjectedClient();
-}
-
-let injectedClient: NonNullable<PanelBaseProps['backend']['client']> | null = null;
-
-/** App 挂载时注入一次(避免 Context 层级;模块内私有)。 */
-export function setHostDetailClient(client: NonNullable<PanelBaseProps['backend']['client']> | null): void {
-  injectedClient = client;
-}
-
-function getInjectedClient(): NonNullable<PanelBaseProps['backend']['client']> {
-  if (injectedClient === null) {
-    throw new Error('主机详情面板的 API 客户端未注入');
+/** 需要直接发报文的子页共用：后端未就绪时在异步 send 里抛错，由各面板转成行内提示。 */
+function requireClient(client: ApiClient | null): ApiClient {
+  if (client === null) {
+    throw new Error('后端未连接');
   }
-  return injectedClient;
+  return client;
 }

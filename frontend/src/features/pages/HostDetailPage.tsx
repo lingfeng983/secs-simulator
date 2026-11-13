@@ -22,6 +22,7 @@ export function HostDetailPage({
   page,
   hosts,
   goTo,
+  backend,
 }: PanelBaseProps & {
   hostId: string;
   zone: HostZone;
@@ -151,6 +152,7 @@ export function HostDetailPage({
         page={page}
         hosts={hosts}
         goTo={goTo}
+        client={backend.client}
       />
     </div>
   );
@@ -163,17 +165,19 @@ function HostDetailBody({
   page,
   hosts,
   goTo,
+  client,
 }: {
   hostId: string;
   zone: HostZone;
   page: HostPage;
   hosts: HostsV2State;
   goTo?: (id: string) => void;
+  client: PanelBaseProps['backend']['client'];
 }): JSX.Element {
   const host = hosts.find(hostId);
   if (host === null) {
     return <Panel id="panel-host-missing-inner" title="主机不存在" description="" ><p className="hint">实例可能已被删除。</p></Panel>;
   }
   /* 子页实现见 HostDetailPanels;这里保持骨架文件可读 */
-  return <HostDetailPanels hostId={hostId} zone={zone} page={page} hosts={hosts} goTo={goTo} />;
+  return <HostDetailPanels hostId={hostId} zone={zone} page={page} hosts={hosts} goTo={goTo} client={client} />;
 }

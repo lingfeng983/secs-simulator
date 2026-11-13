@@ -20,7 +20,6 @@ import { Topbar } from './layout/Topbar';
 
 import { useRoute, type DevicePage, type DeviceZone, type HostPage, type HostZone } from './router';
 import { useHostsV2, hostPhaseLabel, hostPhaseTone } from '../state/useHostsV2';
-import { setHostDetailClient } from '../features/panels/hostsim/HostDetailPanels';
 import { WorkbenchPage } from '../features/pages/WorkbenchPage';
 import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from '../features/pages/DevicePage';
 import {
@@ -83,7 +82,6 @@ export function App(): JSX.Element {
 
   const [route, navigate] = useRoute(preferences.activeTab);
   const hostV2 = useHostsV2(client);
-  setHostDetailClient(client);
 
   /** 打开「连接设置」：桌面壳内显示当前模式并预填远程地址；浏览器环境维持 localStorage 编辑。 */
   const openConnection = useCallback(() => {
