@@ -97,7 +97,20 @@ export function mergeMessages(
     seen.add(key);
     merged.push(message);
   }
-  merged.sort((left, right) => left.at - right.at);
+  /* 增量追加时（SSE 有序、补拉历史也按时间升序）数组本来就是有序的，
+     只有时钟回拨或乱序补拉才需要真排。这里是 4000+5000 条、150 ms 一次
+     的高频路径，为了排序每次全量比较 O(n log n) 纯属白烧 CPU——改成先花
+     O(n) 扫一遍确认有序，无序才排。 */
+  let ordered = true;
+  for (let index = 1; index < merged.length; index += 1) {
+    if (merged[index - 1].at > merged[index].at) {
+      ordered = false;
+      break;
+    }
+  }
+  if (!ordered) {
+    merged.sort((left, right) => left.at - right.at);
+  }
   return merged.length > max ? merged.slice(merged.length - max) : merged;
 }
 

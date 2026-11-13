@@ -115,6 +115,7 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
           报警文本
           <input
             value={alarmText}
+            maxLength={120}
             onChange={(event) => setAlarmText(event.target.value)}
             disabled={disabled}
             title="SECS-II 的 A 类型只接受 US-ASCII"

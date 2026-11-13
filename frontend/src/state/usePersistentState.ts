@@ -24,26 +24,39 @@ export function usePersistentState<T>(key: string, initial: T): [T, (value: T | 
     }
   });
 
+  const initialRef = useRef(initial);
+
   const update = useCallback(
     (next: T | ((previous: T) => T)) => {
-      setValue((previous) => {
-        const resolved =
-          typeof next === 'function' ? (next as (previous: T) => T)(previous) : next;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(resolved));
-        } catch {
-          /* 隐私模式或配额满：状态照常用，只是不落盘 */
-        }
-        return resolved;
-      });
+      /* 只改状态，落盘放到 effect 里：setState 的 updater 必须是纯函数，
+         在并发渲染下可能被调用多次、也可能算出一个最终没被提交的结果。
+         把 localStorage 写在里面会出现"写了一个界面上并不存在的值"。 */
+      setValue((previous) => (
+        typeof next === 'function' ? (next as (previous: T) => T)(previous) : next
+      ));
     },
-    [key],
+    [],
   );
+
+  /* 提交之后再落盘（读回来的与界面上看到的一定是同一个值） */
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* 隐私模式或配额满：状态照常用，只是不落盘 */
+    }
+  }, [key, value]);
 
   /* 多标签页：别的标签页改了同一个键，这里跟着换 */
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== key || event.newValue === null) {
+      if (event.key !== key) {
+        return;
+      }
+      if (event.newValue === null) {
+        /* 另一个标签页把这个键删了：跟着回默认值。以前这里直接 return，
+           结果本标签页会一直停在一个已经不存在的设置上。 */
+        setValue(initialRef.current);
         return;
       }
       try {

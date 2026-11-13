@@ -10,6 +10,9 @@ import { HOST_PRESETS, PRESET_GROUPS } from './hostPresets';
 import type { HostsV2State } from '../../../state/useHostsV2';
 import type { ApiClient, PreviewSeries, SentMessageResult } from '../../../api';
 
+/** 收发记录一次最多挂多少行 DOM（缓冲上限是 5000，全量渲染会卡住页面）。 */
+const HOST_MONITOR_ROWS = 500;
+
 /**
  * 主机详情子页分发（设计 §3.4.2 归位表）。
  *
@@ -650,6 +653,13 @@ function HostMonitorPanel({ hostId, hosts, messages = [] }: PanelArgs & { messag
     return <p className="hint">主机不存在。</p>;
   }
 
+  /* 只渲染最近 500 行。缓冲是 5000 条，一次压测就能把它填满：全量挂 DOM
+     会让报文还在滚的时候页面直接卡住（滚动、输入框都在掉帧）。过滤与计数
+     仍按全量算，只是"看得见的那部分"有上限，和「消息」面板的做法一致。 */
+  const visible = filtered.length > HOST_MONITOR_ROWS
+    ? filtered.slice(-HOST_MONITOR_ROWS)
+    : filtered;
+
   return (
     <Panel
       id="panel-host-monitor"
@@ -698,7 +708,7 @@ function HostMonitorPanel({ hostId, hosts, messages = [] }: PanelArgs & { messag
             <tr><th>时间</th><th>方向</th><th>SxFy</th><th>报文体</th></tr>
           </thead>
           <tbody>
-            {filtered.slice().reverse().map((message, index) => (
+            {visible.slice().reverse().map((message, index) => (
               <tr key={`${message.seq ?? index}`}>
                 <td className="mono">{new Date(message.at).toLocaleTimeString()}</td>
                 <td>{message.direction === 'in' ? '发 → 设备' : '收 ← 设备'}</td>
@@ -713,7 +723,8 @@ function HostMonitorPanel({ hostId, hosts, messages = [] }: PanelArgs & { messag
         </table>
       </div>
       <p className="hint">
-        显示 {filtered.length} / 合计 {mine.length} 条(仅本主机;界面缓冲最近 5000 条)。
+        显示 {visible.length} / 合计 {mine.length} 条(仅本主机;界面缓冲最近 5000 条
+        {visible.length < filtered.length ? `，为流畅只渲染最近 ${HOST_MONITOR_ROWS} 条` : ''})。
       </p>
     </Panel>
   );

@@ -30,8 +30,15 @@ final class TracePump {
      */
     private volatile TraceManager traces;
 
-    /** W 位 ACK 专用队列：阻塞等 S6F2 不能占住采样线程。 */
-    private final ExecutorService ackSender;
+    /**
+     * W 位 ACK 专用队列：阻塞等 S6F2 不能占住采样线程。
+     *
+     * <p>必须是 supplier 而不是固定引用：断开时这套池会被 {@code shutdownNow()}，
+     * 重连时 {@code openLocked} 会新建一个。抓着一个已关闭的池，重连后
+     * 每次 {@code execute} 都抛 {@link RejectedExecutionException}，
+     * 结果是"能收 S2F23、S2F24 也回成功，但 S6F1 再也发不出来"。</p>
+     */
+    private final java.util.function.Supplier<ExecutorService> ackSenders;
 
     /** 当前时钟（毫秒）。 */
     private final java.util.function.LongSupplier clock;
@@ -89,9 +96,10 @@ final class TracePump {
     /** S6F1 是否带 W 位。 */
     private boolean s6f1Wbit;
 
-    TracePump(TraceManager traces, ExecutorService ackSender, java.util.function.LongSupplier clock) {
+    TracePump(TraceManager traces, java.util.function.Supplier<ExecutorService> ackSenders,
+              java.util.function.LongSupplier clock) {
         this.traces = traces;
-        this.ackSender = ackSender;
+        this.ackSenders = ackSenders;
         this.clock = clock;
     }
 
@@ -255,8 +263,15 @@ final class TracePump {
                         Secs2.getBuilder().list(frame.values()));
 
                 if (this.s6f1Wbit) {
-                    /* W 位会阻塞到 S6F2 或 T3，放到独立队列，Trace 采样照常推进 */
-                    this.ackSender.execute(() -> {
+                    /* W 位会阻塞到 S6F2 或 T3，放到独立队列，Trace 采样照常推进。
+                       队列每次现取：断开时旧池已被 shutdownNow，抓着旧引用就永久发不出去了。 */
+                    ExecutorService pool = this.ackSenders.get();
+                    if (pool == null || pool.isShutdown()) {
+                        this.wbitDropped.incrementAndGet();
+                        Log.warn("会话 " + this.sessionId + " S6F1 ACK 队列不可用（链路已断），丢弃一帧 W 位抓取");
+                        continue;
+                    }
+                    pool.execute(() -> {
                         try {
                             this.sendTraceFrame(body, true);
                         } catch (InterruptedException e) {

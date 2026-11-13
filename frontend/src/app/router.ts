@@ -159,7 +159,15 @@ export function parseHash(hash: string, legacyTab?: string): Route {
     if (parts[0] === 'device' && parts[1] !== undefined && parts[1] !== '') {
       const sessionId = decodeURIComponent(parts[1]);
       if (isDeviceZone(parts[2]) && parts[3] !== undefined) {
-        return { name: 'device', sessionId, zone: parts[2], page: parts[3] as DevicePage };
+        /* 子页名要按该区的合法清单收口：手输/旧书签里的
+           `#/device/line1/run/whatever` 以前会原样塞进路由，DevicePage 一个
+           分支都匹配不上，页面就只剩页签、下面是空的（看起来像坏了）。
+           注意只在"给了子页名"时收口：`#/device/line1/config` 这种 2.x 旧深链
+           要继续走下面的 LEGACY_DEVICE_PAGE 映射。 */
+        const zone = parts[2];
+        const known = zone === 'config' ? DEVICE_CONFIG_PAGES : DEVICE_RUNTIME_PAGES;
+        const page = known.find((id) => id === parts[3]) ?? known[0];
+        return { name: 'device', sessionId, zone, page };
       }
       /* 2.x 旧深链：#/device/{id}/{page} → 一次性映射 */
       const legacy = parts[2] ?? 'ceids';
@@ -176,8 +184,11 @@ export function parseHash(hash: string, legacyTab?: string): Route {
     }
     if (parts[0] === 'hosts' && parts[1] !== undefined && parts[1] !== '') {
       const hostId = decodeURIComponent(parts[1]);
-      if (isHostZone(parts[2]) && parts[3] !== undefined) {
-        return { name: 'host', hostId, zone: parts[2], page: parts[3] as HostPage };
+      if (isHostZone(parts[2])) {
+        const zone = parts[2];
+        const known = zone === 'config' ? HOST_CONFIG_PAGES : HOST_RUNTIME_PAGES;
+        const page = known.find((id) => id === parts[3]) ?? known[0];
+        return { name: 'host', hostId, zone, page };
       }
       return { name: 'host', hostId, zone: 'config', page: 'overview' };
     }

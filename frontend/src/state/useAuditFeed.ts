@@ -42,6 +42,10 @@ export function useAuditFeed(client: ApiClient | null, notifier: Notifier): Audi
   const filterRef = useRef(filter);
   filterRef.current = filter;
   const seqRef = useRef(createRequestSeq());
+  /* 翻页单独一个序号：轮询每 2 秒就会抢一次主序号，如果共用，
+     用户刚点的「载入更早」会被轮询顺手作废。但改过滤条件时必须作废它——
+     否则旧过滤的更早记录会追加到新过滤的列表下面。 */
+  const olderSeqRef = useRef(createRequestSeq());
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
 
@@ -76,6 +80,9 @@ export function useAuditFeed(client: ApiClient | null, notifier: Notifier): Audi
       filterRef.current = merged;
       setFilterState(merged);
       setOlder([]);
+      /* 让还在路上的「载入更早」作废：它拿的是旧过滤的游标，
+         回来以后会把旧条件的记录夹进新列表 */
+      olderSeqRef.current.begin();
       if (client === null) {
         return;
       }
@@ -110,14 +117,23 @@ export function useAuditFeed(client: ApiClient | null, notifier: Notifier): Audi
     if (!Number.isFinite(oldest)) {
       return;
     }
+    const token = olderSeqRef.current.begin();
     try {
       const page = await client.audit(AUDIT_PAGE, { ...filterRef.current, before: oldest });
+      /* 期间改过过滤（older 已清空）或又点了一次翻页：这一页不能再追加，
+         否则列表里会混进不属于当前过滤条件的记录 */
+      if (!olderSeqRef.current.isCurrent(token)) {
+        return;
+      }
       setOlder((previous) => {
         const seen = new Set(previous.map(auditEntryKey));
         const fresh = page.filter((entry) => !seen.has(auditEntryKey(entry)));
         return [...previous, ...fresh].sort((left, right) => right.at - left.at);
       });
     } catch (caught) {
+      if (!olderSeqRef.current.isCurrent(token)) {
+        return;
+      }
       notifierRef.current.error('载入更早的审计失败', (caught as Error).message);
     }
   }, [client, entries, older]);

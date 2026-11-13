@@ -304,7 +304,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.catalog.store(this.store);
         this.tracePump = new TracePump(new TraceManager(model, this.values, Instant.now(),
                 this.traceLimits.maxTracesOrDefault(), this.traceLimits.maxSvidCountOrDefault()),
-                this.traceAckSender, () -> this.clock.nowMs());
+                () -> this.traceAckSender, () -> this.clock.nowMs());
         this.tracePump.sessionId(spec.id());
         this.tracePump.errorSink(this::recordError);
         this.tracePump.canSend(this::canSendUnsolicited);

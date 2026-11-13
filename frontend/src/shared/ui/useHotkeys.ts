@@ -63,7 +63,17 @@ export function useHotkeys(bindings: readonly HotkeyBinding[], enabled = true): 
 
       const inInput = isEditableTarget(event.target);
 
+      /* 有模态浮层（确认框、模板编辑、命令面板…）时只放行 Esc：
+         浮层里的 Esc 由 Overlay 自己处理并 stopPropagation，这里放行也不会重复触发。
+         以前只靠 App 传的 enabled 挡住命令面板/帮助/连接设置，确认框没算在内——
+         对话框开着的时候按 1..9 会在背后跳页、按 r 会触发全量刷新，用户在框里
+         完全看不到这些动作发生了。 */
+      const modalOpen = document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+
       for (const binding of bindingsRef.current) {
+        if (modalOpen && binding.combo !== 'escape') {
+          continue;
+        }
         if (inInput && binding.allowInInput !== true) {
           continue;
         }

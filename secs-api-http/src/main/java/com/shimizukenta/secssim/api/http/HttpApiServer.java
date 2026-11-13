@@ -341,6 +341,16 @@ public final class HttpApiServer {
         api.startWatchdog();
 
         http.start();
+
+        /* 本工具没有账号体系（{@code AccessControl.open()} 恒返回管理员）：
+           绑到非回环地址等于把设备控制、报文历史、审计全部暴露给同网段。
+           默认只监听 127.0.0.1，用 --bind 0.0.0.0 是显式选择，但必须让人看见风险。 */
+        java.net.InetSocketAddress boundAddress = http.getAddress();
+        java.net.InetAddress boundIp = boundAddress == null ? null : boundAddress.getAddress();
+        if (boundIp != null && !boundIp.isLoopbackAddress()) {
+            Log.warn("HTTP 绑定在非回环地址 " + boundAddress
+                    + "：本工具没有登录鉴权，同网段任何人都能读写设备配置与报文。请仅在可信网络使用。");
+        }
         return api;
     }
 
@@ -377,10 +387,10 @@ public final class HttpApiServer {
         http.createContext(ApiPaths.DEVICE_V2_PREFIX, withCors(this.configs::handleDeviceV2));
         http.createContext(ApiPaths.HOST_TEMPLATE_V2_PREFIX, withCors(this.hostSims::handleHostTemplateV2Path));
 
-        if (this.webRoot != null) {
-            /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/* */
-            http.createContext("/", withCors(this::handleStatic));
-        }
+        /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/*。
+           没有前端目录（纯 API 模式）时也要注册：否则拼错的路径会落到 JDK
+           自带的 HTML 404 页面，调用方拿到一坨 HTML 还得自己猜状态。 */
+        http.createContext("/", withCors(this::handleStatic));
     }
 
     /** 启动 SSE 看门狗：巡检写停滞的连接。 */
@@ -468,13 +478,24 @@ public final class HttpApiServer {
         long uptime = Duration.between(this.startedAt, Instant.now()).toMillis();
         AccessControl.Principal principal = this.access.authenticate(null);
 
+        /* 这段是拼进 JSON 对象的片段，必须以逗号开头。实现方写错（或塞了裸换行、
+           引号）时整份 health 就不是合法 JSON 了，调用方连版本号都读不到——
+           宁可丢掉这段附加字段，也不能把健康检查弄坏。 */
+        String extra = this.context.extraHealthJson();
+        if (extra == null || extra.isEmpty()) {
+            extra = "";
+        } else if (!extra.startsWith(",")) {
+            Log.error("extraHealthJson 必须以逗号开头，已忽略: " + extra);
+            extra = "";
+        }
+
         respond(ex, 200, "{\"ok\":true"
                 + ",\"version\":\"" + json(this.context.version()) + "\""
                 + ",\"mode\":\"" + json(this.context.mode()) + "\""
                 + ",\"user\":\"" + json(principal.name()) + "\""
                 + ",\"role\":\"" + json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
                 + ",\"uptimeMs\":" + uptime
-                + this.context.extraHealthJson()
+                + extra
                 + "}");
     }
 
@@ -509,6 +530,12 @@ public final class HttpApiServer {
         String path = ex.getRequestURI().getPath();
         if (path == null || path.isEmpty() || "/".equals(path)) {
             path = "/index.html";
+        }
+
+        if (this.webRoot == null) {
+            /* 纯 API 模式（没有 --web-root）：任何非 API 路径都按 JSON 404 回 */
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
         }
 
         /* /api 下没有注册的路径不能回落到 index.html：客户端把端点拼错了

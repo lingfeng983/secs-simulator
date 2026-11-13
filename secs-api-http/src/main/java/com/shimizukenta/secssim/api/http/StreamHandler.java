@@ -192,6 +192,39 @@ final class StreamHandler extends HttpSupport {
 
 
     /**
+     * 拼一帧 SSE。
+     *
+     * <p>不能让数据里的裸换行直接进帧：{@code data: {"a":"x\n\nevent: device-link"}}
+     * 会被浏览器解析成「一行 data + 一个新事件」，等于伪造服务端事件。SSE 的规矩是
+     * 多行数据每行都要带 {@code data:} 前缀（客户端会用 {@code \n} 拼回去，JSON 不变），
+     * 这样任何字节都逃不出 data 字段。事件名同样只留安全字符。</p>
+     *
+     * @param event 事件名（非法字符会被丢掉）
+     * @param data  数据（可含换行，逐行加前缀）
+     * @return 完整帧，以空行结尾
+     */
+    static String sseFrame(String event, String data) {
+        StringBuilder frame = new StringBuilder(64);
+        String name = event == null ? "" : event.replaceAll("[^A-Za-z0-9_-]", "");
+        frame.append("event: ").append(name.isEmpty() ? "message" : name).append('\n');
+        String text = data == null ? "" : data;
+        int start = 0;
+        while (true) {
+            int newline = text.indexOf('\n', start);
+            String line = newline < 0 ? text.substring(start) : text.substring(start, newline);
+            if (line.endsWith("\r")) {
+                line = line.substring(0, line.length() - 1);
+            }
+            frame.append("data: ").append(line).append('\n');
+            if (newline < 0) {
+                break;
+            }
+            start = newline + 1;
+        }
+        return frame.append('\n').toString();
+    }
+
+    /**
      * 把一条报文事件推给所有 SSE 订阅者。
      *
      * <p>订阅者队列满了就丢最旧的一帧：界面宁可缺几条，也不能把内存拖爆或阻塞会话。
@@ -202,8 +235,8 @@ final class StreamHandler extends HttpSupport {
             return;
         }
 
-        String frame = "event: message\ndata: "
-                + "{\"seq\":" + event.seq() + ",\"sessionId\":\"" + json(event.sessionId()) + "\""
+        String frame = sseFrame("message",
+                "{\"seq\":" + event.seq() + ",\"sessionId\":\"" + json(event.sessionId()) + "\""
                 + ",\"hostId\":\"" + json(event.hostId()) + "\""
                 + ",\"perspective\":\"" + json(event.perspective()) + "\""
                 + ",\"direction\":\"" + json(event.direction()) + "\""
@@ -212,7 +245,7 @@ final class StreamHandler extends HttpSupport {
                 + ",\"wbit\":" + event.wbit()
                 + ",\"body\":\"" + json(event.body()) + "\""
                 + ",\"at\":" + event.atMillis()
-                + "}\n\n";
+                + "}");
 
         for (Subscriber subscriber : this.subscribers) {
             subscriber.enqueue(frame);
@@ -242,7 +275,7 @@ final class StreamHandler extends HttpSupport {
                     + ",\"payload\":" + payload + "}";
         }
 
-        String frame = "event: " + event.type() + "\ndata: " + merged + "\n\n";
+        String frame = sseFrame(event.type(), merged);
         for (Subscriber subscriber : this.subscribers) {
             subscriber.enqueue(frame);
         }
@@ -329,8 +362,7 @@ final class StreamHandler extends HttpSupport {
                 }
 
                 if (frame == null) {
-                    frame = "event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n";
-                }
+                    frame = "event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n";                }
 
                 out.write(frame.getBytes(StandardCharsets.UTF_8));
                 out.flush();

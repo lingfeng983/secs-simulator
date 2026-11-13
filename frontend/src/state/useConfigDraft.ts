@@ -133,7 +133,10 @@ export function useConfigDraft(backend: BackendController, sessionId: string): C
         if (fresh !== null && configNameRef.current === targetName) {
           setLoadedMs(fresh.modifiedMs);
         }
-        setNotice(`已保存 ${targetName}，相关会话已按新配置重载`);
+        /* 只说"已保存"。是否已让会话生效由重载那条路径自己报（它会区分
+           成功几个、失败几个）——这里再写一句"相关会话已按新配置重载"，
+           在重载全失败时就是假话。 */
+        setNotice(`已保存 ${targetName}`);
         void backend.refreshConfigs();
       } else if (result.status === 422) {
         setProblems(result.problems);

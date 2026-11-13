@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   type ApiClient,
   type AuditEntryView,
@@ -93,7 +93,8 @@ export interface BackendController {
   refreshSessions: () => Promise<void>;
   refreshConfigs: () => Promise<void>;
 
-  createSession: (config: string) => Promise<void>;
+  /** 新建会话；返回 HTTP 状态码（201 = 建成，0 = 未连后端或请求异常）。 */
+  createSession: (config: string) => Promise<number>;
   /** 从一份设备配置批量开多台设备；返回逐台结果。 */
   bulkCreateSessions: (params: SessionBulkParams) => Promise<SessionBulkResult | null>;
   /** 对多台设备并发触发上报；onProgress 报告进度。 */
@@ -378,12 +379,15 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     }
   }, [sessions, activeSession]);
 
-  /* 会话没了就把它的明细清掉，别留着上一个会话的目录糊弄人 */
-  useEffect(() => {
-    if (activeSession === '') {
-      setCatalog(null);
-      setEventPlans([]);
-    }
+  /* 切会话先把明细清掉：不清的话，在新会话的目录回来之前，页面上挂着的
+     是上一台设备的 CEID/报告/SVID 与计划列表——标题已经换了、数据没换。
+     而且新会话的拉取一旦失败（或一直没回来），这份旧数据会**永久**留着。
+     用 layout effect 是为了赶在浏览器绘制之前清掉，不让用户看到错帧。
+     这里不能只判 `activeSession === ''`：断开/删除设备时 activeSession 未必
+     先变空，两个非空会话之间直接切换才是最常走的那条路。 */
+  useLayoutEffect(() => {
+    setCatalog(null);
+    setEventPlans([]);
   }, [activeSession]);
 
   const sessionCommands = useSessionCommands({ client, notifier, refreshSessions, refreshSessionDetail });
@@ -411,17 +415,27 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       const targets = matched.length > 0 ? matched : sessions;
 
       let hot = 0;
+      let failed = 0;
       for (const session of targets) {
         try {
           const status = await client.reloadSession(session.id);
           if (status === 200) {
             hot += 1;
+          } else {
+            failed += 1;
           }
         } catch {
-          /* 单个会话重载失败不阻断其余 */
+          /* 单个会话重载失败不阻断其余，但要计数——全部失败还报"已生效"，
+             用户会以为改动上线了，实际设备还在跑旧配置 */
+          failed += 1;
         }
       }
-      if (hot > 0) {
+      if (failed > 0) {
+        notifierRef.current.warn(
+          `配置已保存，但 ${failed} 个会话未能生效`,
+          `${hot} 个已重载（连接标识未变的走热生效）；没生效的仍在用旧配置，回工作台点「重载」重试`,
+        );
+      } else if (hot > 0) {
         notifierRef.current.info(`配置已生效：${hot} 个会话已重载（连接标识未变的走热生效，主机不断连）`);
       }
       await refreshSessions();

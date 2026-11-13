@@ -170,6 +170,15 @@ class ApiContractHardeningTest {
         assertTrue(this.calls.isEmpty(), "超限请求体不能被当成「没给目标」: " + this.calls);
     }
 
+    @Test
+    void oversizedObjectBodyReportsTooLargeNotBadBody() throws Exception {
+        String body = "{\"name\":\"" + "x".repeat(HttpSupport.MAX_BODY_BYTES) + "\"}";
+        HttpResponse<String> res = send("POST", "/api/v2/hosts", body);
+        assertEquals(400, res.statusCode(), res.body());
+        assertTrue(res.body().contains("body-too-large"), res.body());
+        assertTrue(this.calls.isEmpty(), "超限请求体不能落到业务层: " + this.calls);
+    }
+
     /* ---------- 主机动作的状态码 ---------- */
 
     @Test

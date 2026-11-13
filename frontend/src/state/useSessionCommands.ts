@@ -42,10 +42,18 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
 
+  /**
+   * 新建会话。
+   *
+   * <p>返回 HTTP 状态码（`201` 才算真的建好；异常与未连后端返回 `0`）。
+   * 调用方需要区分"成功/失败"时必须看返回值——这里把错误提示发出去之后是
+   * 正常 resolve 的，早期调用处（CSV 导入）直接把 resolve 当成功，结果
+   * 全部 409 的情况下也会报"已导入 N 个"。</p>
+   */
   const createSession = useCallback(
-    async (config: string) => {
+    async (config: string): Promise<number> => {
       if (client === null) {
-        return;
+        return 0;
       }
       try {
         const status = await client.createSession(config.trim());
@@ -56,8 +64,10 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
           notifierRef.current.error(text);
         }
         await refreshSessions();
+        return status;
       } catch (error) {
         notifierRef.current.error('新建会话失败', (error as Error).message);
+        return 0;
       }
     },
     [client, refreshSessions],

@@ -63,6 +63,29 @@ describe('3.0 two-zone routes', () => {
     });
   });
 
+  it('falls back to the zone home when the sub-page name is unknown', () => {
+    /* 旧书签/手输的子页名不认识时不能原样塞进路由：DevicePage 一个分支都匹配不上，
+       页面只剩页签、下面全空，看起来像坏了 */
+    expect(parseHash('#/device/line1/runtime/whatever')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'status',
+    });
+    expect(parseHash('#/device/line1/config/nope')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'config',
+      page: 'overview',
+    });
+    expect(parseHash('#/hosts/h1/runtime/nope')).toEqual({
+      name: 'host',
+      hostId: 'h1',
+      zone: 'runtime',
+      page: 'status',
+    });
+  });
+
   it('parses hosts list and host detail routes', () => {
     expect(parseHash('#/hosts')).toEqual({ name: 'hosts' });
     expect(parseHash('#/hosts/host-1/config/overview')).toEqual({

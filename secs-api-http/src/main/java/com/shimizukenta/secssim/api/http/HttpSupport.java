@@ -293,7 +293,14 @@ abstract class HttpSupport {
      */
     protected JsonHub readJsonObject(HttpExchange ex, int limit) throws IOException {
         String raw = readBody(ex, limit);
-        if (raw == null || raw.isBlank()) {
+        if (raw == null) {
+            /* readBody 只在超过上限时返回 null（空正文返回的是空串），
+               所以这里能精确报"太大"而不是含糊的 bad-body——客户端据此
+               知道该减小载荷，而不是去检查自己到底发了什么。 */
+            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            return null;
+        }
+        if (raw.isBlank()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
             return null;
         }
@@ -501,12 +508,36 @@ abstract class HttpSupport {
     protected static void respondBinary(HttpExchange ex, String contentType,
                                        String filename, byte[] body) throws IOException {
         ex.getResponseHeaders().add("Content-Type", contentType);
-        ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+        ex.getResponseHeaders().add("Content-Disposition",
+                "attachment; filename=\"" + safeAttachmentName(filename) + "\"");
         ex.getResponseHeaders().add("Cache-Control", "no-store");
         ex.sendResponseHeaders(200, body.length);
         try (OutputStream out = ex.getResponseBody()) {
             out.write(body);
         }
+    }
+
+    /**
+     * 附件文件名收口。
+     *
+     * <p>{@code Content-Disposition} 是头，不是正文：文件名里的引号能提前闭合、
+     * CR/LF 能注入新头、{@code /} 与 {@code \} 会把下载路径带到别处。
+     * 这里只留 ASCII 字母数字与 {@code ._-}，其余换成 {@code _}；
+     * 结果为空时回 {@code download}。</p>
+     *
+     * @param filename 原始文件名
+     * @return 可安全放进头的文件名
+     */
+    protected static String safeAttachmentName(String filename) {
+        String raw = filename == null ? "" : filename;
+        StringBuilder safe = new StringBuilder(raw.length());
+        for (int index = 0; index < raw.length(); index += 1) {
+            char ch = raw.charAt(index);
+            boolean ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+                    || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+            safe.append(ok ? ch : '_');
+        }
+        return safe.length() == 0 ? "download" : safe.toString();
     }
 
     /** 回 JSON Lines；浏览器会按附件下载，curl 拿到的是逐行 JSON。 */

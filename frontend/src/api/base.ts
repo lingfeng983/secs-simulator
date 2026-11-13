@@ -147,7 +147,22 @@ export async function readJson<T>(response: Response): Promise<T> {
     }
     throw new ApiError(response.status, code, `${response.status} ${text.slice(0, 200)}`);
   }
-  return (await response.json()) as T;
+  /* 状态码 200 不代表 body 是 JSON：静态资源兜底会把拼错的端点回成一页 HTML，
+     反向代理也可能塞个错误页。直接 response.json() 抛的是 SyntaxError
+     （"Unexpected token '<'"），那东西弹到界面上等于没提示。 */
+  const text = await response.text();
+  if (text.trim() === '') {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      response.status,
+      'bad-json',
+      `${response.status} 返回的不是 JSON：${text.slice(0, 120)}`,
+    );
+  }
 }
 
 /** 命令类端点：界面只关心状态码，失败原因在响应体或服务端日志里。 */

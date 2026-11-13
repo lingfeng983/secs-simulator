@@ -34,11 +34,15 @@ export function HostDetailPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  /* 详情页 2 秒轮询：相位/版本/计数都是活数据 */
+  /* 详情页 2 秒轮询：相位/版本/计数都是活数据。
+     依赖只能挂 refresh 本身（useCallback 稳定），不能挂 hosts——那是每次 render
+     都会新建的对象，报文每 150 ms 冲刷一次就会把定时器反复清掉重建，2 秒永远不到期，
+     页面上的相位/重试次数就再也不刷新了。 */
+  const refreshHosts = hosts.refresh;
   useEffect(() => {
-    const timer = window.setInterval(() => void hosts.refresh(), 2_000);
+    const timer = window.setInterval(() => void refreshHosts(), 2_000);
     return () => window.clearInterval(timer);
-  }, [hosts]);
+  }, [refreshHosts]);
 
   if (host === null) {
     return (

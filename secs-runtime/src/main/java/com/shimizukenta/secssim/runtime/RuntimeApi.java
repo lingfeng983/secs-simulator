@@ -20,6 +20,7 @@ import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.SessionManager;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionState;
+import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
 
 /**
@@ -465,9 +466,22 @@ final class RuntimeApi {
 
         try {
             /* 重载 = 按配置恢复（设计 §2.4）：内存里的运行时编辑先清库再重建会话，
-               否则注册观察者会把刚清掉的钉值/计划覆盖又装回来。 */
+               否则注册观察者会把刚清掉的钉值/计划覆盖又装回来。
+               清之前先抓快照：重建可能因配置非法/端口被占失败，失败时旧会话会被
+               launcher 拉回来，但编辑已经删了——不回滚等于"重载失败一次，钉值全丢"。 */
+            RuntimePersister.Edits before = this.persister.snapshot(sessionId);
             this.persister.clearEdits(sessionId);
-            this.launcher.reload(sessionId);
+            try {
+                this.launcher.reload(sessionId);
+            } catch (ConfigException | IOException failure) {
+                this.persister.restore(sessionId, before);
+                this.sessions.find(sessionId).ifPresent(session -> {
+                    if (session instanceof HsmsSessionRuntime hsms) {
+                        this.persister.replay(hsms, sessionId);
+                    }
+                });
+                throw failure;
+            }
             Log.info("会话 " + sessionId + " 已按配置重载");
             this.sessions.find(sessionId).ifPresent(session ->
                     this.persister.devicePhase(sessionId, phaseName(session.linkPhase()), session.lastError()));

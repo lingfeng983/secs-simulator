@@ -1055,7 +1055,7 @@ paths:
         '400': { description: alid / category / text 不合法 }
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
-        '500': { description: 发送失败 }
+        '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
     delete:
       tags: [devices]
       summary: 报警清除（S5F1，ALCD 置 0）
@@ -1069,7 +1069,7 @@ paths:
         '400': { description: alid / category / text 不合法 }
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
-        '500': { description: 发送失败 }
+        '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
   /api/v2/devices/{id}/runtime/ceid/{ceid}:
     post:
       tags: [devices]
@@ -1082,7 +1082,7 @@ paths:
         '400': { description: ceid 不合法 }
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
-        '500': { description: 发送失败 }
+        '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
   /api/v2/devices/{id}/runtime/executions:
     get:
       tags: [devices]
@@ -1105,9 +1105,9 @@ paths:
         - { name: planId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: 已触发一次 }
-        '404': { description: 设备不存在 }
+        '404': { description: 设备或计划不存在 }
         '409': { description: 设备离线 }
-        '500': { description: 计划不存在或发送失败 }
+        '502': { description: 发送失败（链路/对端拒绝） }
   /api/v2/devices/{id}/runtime/plans/{planId}/enabled:
     post:
       tags: [devices]

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { controlStateLabel } from '../../shared/lib/controlState';
 import { EventsPanel } from '../panels/EventsPanel';
@@ -71,12 +71,17 @@ export function DevicePage({
 }: PanelBaseProps & { sessionId: string; zone: DeviceZone; page: DevicePage }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
 
-  /* 进入设备页就把全局会话钉到这台设备:所有面板按 activeSession 取数 */
-  useEffect(() => {
-    if (summary !== undefined && backend.activeSession !== sessionId) {
-      backend.setActiveSession(sessionId);
+  /* 进入设备页就把全局会话钉到这台设备：所有面板按 activeSession 取数。
+     必须是 layout effect —— 面板的写操作闭包在 hook 创建时就捕获了当时的
+     activeSession，用 useEffect 的话会先画出一帧（还指向上一台设备），
+     这一帧里用户如果正好点「删除 SVID / 删除报告」，动的就是 A 设备的数据。 */
+  const setActiveSession = backend.setActiveSession;
+  const activeSession = backend.activeSession;
+  useLayoutEffect(() => {
+    if (summary !== undefined && activeSession !== sessionId) {
+      setActiveSession(sessionId);
     }
-  }, [backend, sessionId, summary]);
+  }, [activeSession, setActiveSession, sessionId, summary]);
 
   const baseProps: PanelBaseProps = {
     backend,

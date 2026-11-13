@@ -450,20 +450,41 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         exportName="sessions"
         onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
         onImport={async (imported) => {
+          /* `backend.sessions` 是本次导入开始前的快照，且 createSession 内部把
+             「配置不存在/端口占用」都当提示发出去后正常返回——所以既不能用闭包
+             里的列表判重，也不能用"没抛异常"当成功。两条都改掉：本地维护一份
+             已占用集合，成功与否只看 201。 */
+          const taken = new Set(backend.sessions.map((session) => session.config));
           let done = 0;
+          let skipped = 0;
+          let failed = 0;
           for (const row of imported) {
             const config = (row['配置'] ?? '').trim();
-            if (config === '' || backend.sessions.some((session) => session.config === config)) {
+            if (config === '' || taken.has(config)) {
+              skipped += 1;
               continue;
             }
-            try {
-              await backend.createSession(config);
+            const status = await backend.createSession(config);
+            if (status === 201) {
+              taken.add(config);
               done += 1;
-            } catch {
-              /* 单行失败（配置不存在/端口占用）不阻断其余行 */
+            } else {
+              failed += 1;
             }
           }
-          notifier.success(`已按配置导入 ${done} 个会话`);
+          const tail = [
+            failed > 0 ? `${failed} 行失败` : '',
+            skipped > 0 ? `${skipped} 行跳过` : '',
+          ].filter((part) => part !== '').join('，');
+          if (done === 0 && failed > 0) {
+            notifier.error('导入没有创建任何会话', tail);
+          } else if (done === 0) {
+            /* 全被跳过（没有「配置」列、或同名配置已存在）也不能报"已导入 0 个"，
+               那读起来像成功 */
+            notifier.warn('没有可导入的行', tail === '' ? '每行都需要一列「配置」' : tail);
+          } else {
+            notifier.success(`已按配置导入 ${done} 个会话`, tail);
+          }
         }}
         emptyText="暂无会话(用 --demo-session / --config 启动,或在右上角新建)"
         defaultSort={{ key: 'id', direction: 'asc' }}

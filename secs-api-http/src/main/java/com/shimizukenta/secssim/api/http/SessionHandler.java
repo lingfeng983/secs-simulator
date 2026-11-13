@@ -291,6 +291,12 @@ final class SessionHandler extends HttpSupport {
             }
             /* DELETE /sessions/{id} 是关会话;/host-sim 是断开;其余子路径是运行时编辑的删除 */
             String rest = ex.getRequestURI().getPath().substring(ApiPaths.SESSION_PREFIX.length());
+            /* 末尾多一个斜杠不该改变语义：`DELETE /api/v1/sessions/s1/` 以前因为
+               indexOf('/') >= 0 被当成"子资源"丢给 handleSessionCommand，回 404，
+               而 `DELETE /sessions/s1` 是能断开的。 */
+            if (rest.endsWith("/")) {
+                rest = rest.substring(0, rest.length() - 1);
+            }
             if (rest.indexOf('/') < 0 || rest.endsWith("/host-sim")) {
                 this.closeSession(ex);
             } else {
