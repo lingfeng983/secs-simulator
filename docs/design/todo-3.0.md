@@ -85,7 +85,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 - [x] v1 面板死代码收敛：删除 `useHostSims`、`HostSimHostsPanel`、`HostSimFdcPanel`、`HostSimCollectPanel`（连同其 `parseSvidList` 单测）、`HostSimMessagesPanel`、`HostSimMonitorPanel`、`HostTargetPicker`；`HOST_PRESETS` / `PRESET_GROUPS` / `HostPreset` 搬到新文件 `hostsim/hostPresets.ts`（主机「报文模板」「消息发送」两页仍在用）。`SvidCheckList` **保留**——它仍被设备「结构」页的 SVID 勾选列表使用（原清单把这条写错了）。tsc 与 Vitest 130 项全绿。
 - [ ] v1 端点语义收口（设计 §2.5 兼容表）：`DELETE /api/v1/sessions/{id}` 目前仍是「移除」；设计期望转 `disconnect` + Deprecation 头。M3 前端已不在用 v1 关闭流程，可安全切换（需同步改 v1 测试）。
 - [x] `frontend/e2e` 之外，检查 `frontend/src/**` 是否还有引用已删除 `HostSimPage` 的残留：已全量 grep `frontend/src` 与 `frontend/e2e`，无残留。
-- [ ] v1 端点语义收口的**依赖说明**：设计 §2.5 的 `DELETE /api/v1/sessions/{id}` → `link/disconnect` 需要设备侧 v2 断开能力（§3 M2 第 4 项），当前 `context.closeSession` 仍是「关闭并移除」。建议与 M2 一起做，避免先加废弃头却保留移除语义。
+- [ ] v1 端点语义收口的**依赖说明**：`DELETE /api/v1/sessions/{id}` 要转 `link/disconnect`，设备侧 v2 断开端点已经就位（见 §3），剩下的只是前端切过去 + v1 测试同步改写。
 
 ---
 
@@ -98,7 +98,9 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
   - **相位收敛**：`resetStaleDevicePhases()` 启动时把上次进程留下的 `CONNECTED / LISTENING / STARTING` 改成 `DISCONNECTED`（保留行，配置版本不动），否则界面会显示一堆"连着的死设备"。
   - **销毁 vs 重载**：销毁（v1 关闭）与重载都 `clearRuntimeEdits`，但**都不清 `runtime_plan_state`**——启停是用户明确的开关选择，重连后照旧。重载先清库再重建会话，否则注册观察者会把刚清掉的钉值又装回来。
 - [x] **SSE 生命周期帧**：`event: device-link`（`HsmsSessionRuntime.onLinkPhase` 钩子 → 落 `device_link` + 追加 `link_event` + 推帧）、`event: host-link`（`HostSimulator.onPhase`）、`event: config-changed`（保存/新建成功后）。SSE 侧不用改：`StreamHandler` 本来就把 `NoticeEvent.type()` 直接当 `event:` 名。
-- [ ] 设备侧 v2 端点：`/devices/{id}/link/{connect|disconnect|reload}`、`/devices/{id}/runtime/{plans,catalog,svids/pin,message,alarm}` 未建（设计 §2.5）；当前仍走 v1 `/sessions/**`。**注**：`HsmsSessionRuntime` 已实现 `disconnect()`（只断链、保对象、`reconnect()` 复用）与 `open()` 重入，端点只差 HTTP 接线。
+- [x] **设备侧 v2 链路端点**：`GET /api/v2/devices/{id}/link`（相位 + 控制状态 + 时间戳，内存相位优先）、`POST|PUT /api/v2/devices/{id}/link/{connect|disconnect|reload}`。connect 幂等（已连上直接 200）、disconnect 只断链（`HsmsSessionRuntime.disconnect()`：关 communicator 与 ACK 池，模型/钉值/计划启用态全留，`reconnect()` 复用同一对象）、reload 复用会话重载（会先清运行态编辑）。状态码：404 设备不存在/动作未知、405 方法不对、409 不可重载、502 连接失败。openapi 已补（64 path 全绿），HTTP 契约测试 `DeviceLinkApiTest`（5 项）。
+- [ ] **设备侧 v2 运行态端点**：`/devices/{id}/runtime/{plans,catalog,svids/pin,message,alarm}` 仍未建；前端这类操作还走 v1 `/sessions/**`（功能可用，只是命名空间没切）。
+- [ ] v1 `DELETE /api/v1/sessions/{id}` → `disconnect` + `Deprecation` 头：依赖上一项完成后再切，否则前端拿不到重连入口，删除就变成"设备消失且找不回来"。
 - [ ] 断开展示：v1 会话关闭后设备从列表消失（v1 语义），设计期望「已断开」行保留——等设备 v2 端点落地后由 M3 前端切过去。
 
 ---

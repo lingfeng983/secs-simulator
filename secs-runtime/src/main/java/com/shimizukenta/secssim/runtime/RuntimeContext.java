@@ -485,6 +485,79 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return SessionOutcome.OK;
     }
 
+    /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
+
+    @Override
+    public String deviceLinkV2Json(String deviceId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        String canonical = canonicalDeviceId(deviceId);
+        /* 内存相位是权威：device_link 行可能落后一拍（相位回调是异步的） */
+        String phase = session == null ? null
+                : RuntimeApi.phaseName(session.linkPhase());
+        String lastError = session == null ? null : session.lastError();
+        java.util.Optional<RuntimeStateRepository.LinkRow> row = this.linkState.deviceLink(canonical);
+        if (session == null && row.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(160);
+        sb.append("{\"deviceId\":").append(quote(canonical))
+                .append(",\"phase\":").append(quote(phase != null ? phase
+                        : row.map(RuntimeStateRepository.LinkRow::phase).orElse("STOPPED")))
+                .append(",\"controlState\":")
+                .append(quote(session == null ? "OFFLINE" : session.controlState().name()))
+                .append(",\"lastError\":").append(quote(lastError == null ? "" : lastError))
+                .append(",\"configRevision\":").append(row.map(RuntimeStateRepository.LinkRow::configRevision).orElse(0L))
+                .append(",\"connectedAt\":").append(row.map(RuntimeStateRepository.LinkRow::connectedAt).orElse(null))
+                .append(",\"disconnectedAt\":").append(row.map(RuntimeStateRepository.LinkRow::disconnectedAt).orElse(null))
+                .append('}');
+        return sb.toString();
+    }
+
+    @Override
+    public SessionOutcome deviceConnectV2(String deviceId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        if (session.linkPhase() != SessionRuntime.LinkPhase.STOPPED
+                && session.linkPhase() != SessionRuntime.LinkPhase.DISCONNECTED
+                && session.linkPhase() != SessionRuntime.LinkPhase.FAILED) {
+            /* 幂等：已经在监听/已连上，重复点「连接」不该报错 */
+            return SessionOutcome.OK;
+        }
+        try {
+            session.reconnect();
+            this.persister.devicePhase(deviceId, RuntimeApi.phaseName(session.linkPhase()),
+                    session.lastError());
+            return SessionOutcome.OK;
+        } catch (java.io.IOException | RuntimeException e) {
+            com.shimizukenta.secssim.app.log.Log.error("设备连接失败: " + deviceId + " " + e.getMessage(), e);
+            this.persister.devicePhase(deviceId, "FAILED", e.getMessage());
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    @Override
+    public SessionOutcome deviceDisconnectV2(String deviceId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        /* 只断链：配置、模型、钉值、计划启用态、运行时编辑都留着，再连原样恢复 */
+        session.disconnect();
+        this.persister.devicePhase(deviceId, "DISCONNECTED", session.lastError());
+        return SessionOutcome.OK;
+    }
+
+    @Override
+    public SessionOutcome deviceReloadV2(String deviceId) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        return this.api.reloadSession(session.id());
+    }
+
     /** v2 设备 id 与 v1 legacy stem 都归一到 config.db 的 ULID（台账按它归属）。 */
     private String canonicalDeviceId(String key) {
         if (key == null || key.isBlank()) {

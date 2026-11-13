@@ -516,6 +516,51 @@ public interface ApiContext {
         return SessionOutcome.UNKNOWN_SESSION;
     }
 
+    /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
+
+    /**
+     * v2：设备链路相位（device_link 行 + 内存相位）。
+     *
+     * @param deviceId 设备 id（ULID 或 v1 legacy stem，两者等价）
+     * @return JSON；设备不存在返回 {@code null}
+     */
+    default String deviceLinkV2Json(String deviceId) {
+        return null;
+    }
+
+    /**
+     * v2：打开设备链路（被动 = 监听，主动 = 建链）。
+     *
+     * <p>与 {@link #createSession} 的区别：会话必须已经存在，这里只动链路，
+     * 配置、模型、钉值、计划启用态全部保留。</p>
+     *
+     * @param deviceId 设备 id
+     * @return 结果
+     */
+    default SessionOutcome deviceConnectV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：只断链不销毁设备（断开后设备仍留在列表里，可再连）。
+     *
+     * @param deviceId 设备 id
+     * @return 结果
+     */
+    default SessionOutcome deviceDisconnectV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：按配置重载设备（等价于 v1 的会话重载）。
+     *
+     * @param deviceId 设备 id
+     * @return 结果
+     */
+    default SessionOutcome deviceReloadV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     /** v2：主机实例列表（含持久行与内存相位）。 */

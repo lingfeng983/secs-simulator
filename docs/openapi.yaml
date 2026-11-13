@@ -943,6 +943,46 @@ paths:
         '200': { description: 已更新 }
         '400': { description: 计划不存在或请求体非法 }
         '404': { description: 设备不存在 }
+  /api/v2/devices/{id}/link:
+    get:
+      tags: [devices]
+      summary: 设备链路相位（内存相位优先，缺省回落到 device_link 行）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{deviceId, phase, controlState, lastError, configRevision, connectedAt, disconnectedAt}' }
+        '404': { description: 设备不存在（既没有会话也没有 device_link 行） }
+  /api/v2/devices/{id}/link/{action}:
+    post:
+      tags: [devices]
+      summary: 连接 / 断开 / 重载设备链路（只动链路，不动配置与运行态编辑）
+      description: |
+        connect 幂等：已经连上时直接返回 200。disconnect 只断链不销毁设备，
+        钉值、计划启用态、运行时目录编辑全部保留，再 connect 时原样恢复。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [connect, disconnect, reload] }
+      responses:
+        '200': { description: 已执行 }
+        '404': { description: 设备不存在 / action 未知 }
+        '405': { description: 方法不是 POST/PUT }
+        '409': { description: 该设备不可重载（没有配置来源） }
+        '502': { description: 连接失败（端口占用、对端拒绝等） }
+    put:
+      tags: [devices]
+      summary: 同 POST（设计 §2.5 GET/PUT 契约的写路径）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [connect, disconnect, reload] }
+      responses:
+        '200': { description: 已执行 }
+        '404': { description: 设备不存在 / action 未知 }
   /api/v2/hosts:
     get:
       tags: [host-sims]

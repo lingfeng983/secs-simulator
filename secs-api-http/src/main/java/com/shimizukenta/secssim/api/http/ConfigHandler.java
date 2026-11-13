@@ -334,6 +334,18 @@ final class ConfigHandler extends HttpSupport {
         }
         String rest = path.substring(ApiPaths.DEVICE_V2_PREFIX.length());
         String[] parts = rest.split("/");
+        if (parts.length >= 2 && "link".equals(parts[1]) && !parts[0].isBlank()) {
+            if (parts.length == 2) {
+                this.handleDeviceLinkStateV2(ex, parts[0]);
+                return;
+            }
+            if (parts.length == 3) {
+                this.handleDeviceLinkV2(ex, parts[0], parts[2]);
+                return;
+            }
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
         if (parts.length >= 3 && "runtime".equals(parts[1]) && !parts[0].isBlank()) {
             if (parts.length == 3 && "executions".equals(parts[2])) {
                 this.handleExecutionsV2(ex, parts[0]);
@@ -441,6 +453,52 @@ final class ConfigHandler extends HttpSupport {
                     + "\",\"enabled\":" + enabled + "}");
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
             default -> respond(ex, 400, "{\"ok\":false,\"error\":\"plan-not-found\"}");
+        }
+    }
+
+    /** GET /api/v2/devices/{id}/link：链路相位（断开展示、重连按钮的状态来源）。 */
+    private void handleDeviceLinkStateV2(HttpExchange ex, String deviceId) throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        String json = this.context.deviceLinkV2Json(deviceId);
+        if (json == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            return;
+        }
+        respond(ex, 200, json);
+    }
+
+    /** POST /api/v2/devices/{id}/link/{connect|disconnect|reload}。 */
+    private void handleDeviceLinkV2(HttpExchange ex, String deviceId, String action) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
+        if (!"POST".equals(method) && !"PUT".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        final SessionOutcome outcome;
+        switch (action) {
+            case "connect" -> outcome = this.context.deviceConnectV2(deviceId);
+            case "disconnect" -> outcome = this.context.deviceDisconnectV2(deviceId);
+            case "reload" -> outcome = this.context.deviceReloadV2(deviceId);
+            default -> {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+                return;
+            }
+        }
+        audit(ex, "device-link", deviceId, "action=" + action + " outcome=" + outcome);
+        switch (outcome) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"action\":\"" + action + "\"}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            case NOT_RELOADABLE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-reloadable\"}");
+            default -> respond(ex, 502, "{\"ok\":false,\"error\":\"link-" + action + "-failed\"}");
         }
     }
 
