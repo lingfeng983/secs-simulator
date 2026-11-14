@@ -115,6 +115,47 @@
   color: #0f8a6a;
 }
 
+/* ---------- 实例头里的紧凑区域切换（不再单独占一行） ---------- */
+.zone-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.zone-switch-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.zone-switch-btn:hover {
+  color: var(--text);
+}
+
+.zone-switch-btn.config.active {
+  border-color: rgba(68, 87, 199, 0.35);
+  background: rgba(68, 87, 199, 0.08);
+  color: #4457c7;
+  font-weight: 600;
+}
+
+.zone-switch-btn.runtime.active {
+  border-color: rgba(15, 138, 106, 0.35);
+  background: rgba(15, 138, 106, 0.08);
+  color: #0f8a6a;
+  font-weight: 600;
+}
+
 /* ---------- 子页签 ---------- */
 .subtabs {
   display: flex;

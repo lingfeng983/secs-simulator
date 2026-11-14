@@ -560,10 +560,16 @@ textarea {
   color: var(--danger);
 }
 
-.badge-accent,
-.badge.tone-info {
+.badge-accent {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* info 单独用蓝：设备四态里"离线"必须和"在线（绿）"一眼分得开，
+   借用 accent（青绿）会跟 ok 混在一起 */
+.badge.tone-info {
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 .badge-muted,
@@ -592,7 +598,18 @@ textarea {
   box-shadow: 0 0 0 3px var(--warn-soft);
 }
 
-.conn-dot.danger,
+/* 离线：链路通了但设备没 ONLINE。蓝色与"启动（黄）"区分开，
+   否则操作员分不清"还没人连"和"连着但没上线" */
+.conn-dot.info {
+  background: var(--info);
+  box-shadow: 0 0 0 3px var(--info-soft);
+}
+
+.conn-dot.danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
 .conn-dot.muted {
   background: var(--faint);
 }

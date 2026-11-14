@@ -17,9 +17,11 @@ export interface InstanceHeadProps {
   metrics?: ReadonlyArray<{ label: string; value: ReactNode }>;
   /** 右侧动作按钮组。 */
   actions?: ReactNode;
+  /** 配置区 / 运行区切换：并入实例头这一行，不再单独占一行。 */
+  zoneSwitch?: ReactNode;
 }
 
-export function InstanceHead({ title, badge, subtitle, metrics, actions }: InstanceHeadProps): JSX.Element {
+export function InstanceHead({ title, badge, subtitle, metrics, actions, zoneSwitch }: InstanceHeadProps): JSX.Element {
   return (
     <div className="instance-head">
       <div className="instance-head-main">
@@ -39,12 +41,58 @@ export function InstanceHead({ title, badge, subtitle, metrics, actions }: Insta
           ))}
         </div>
       )}
-      {actions !== undefined && <div className="instance-actions">{actions}</div>}
+      {(zoneSwitch !== undefined || actions !== undefined) && (
+        <div className="instance-actions">
+          {zoneSwitch}
+          {actions}
+        </div>
+      )}
     </div>
   );
 }
 
-/** 配置区/运行区切换条。 */
+/**
+ * 紧凑的配置区 / 运行区切换：放在实例头的状态/动作行里，一行排完。
+ * 老的 {@link ZoneBar} 保留给其它调用点，新页面只用这个。
+ */
+export function ZoneSwitch({
+  zone,
+  onChange,
+  configNote,
+  runtimeNote,
+}: {
+  zone: 'config' | 'runtime';
+  onChange: (zone: 'config' | 'runtime') => void;
+  configNote?: string;
+  runtimeNote?: string;
+}): JSX.Element {
+  return (
+    <div className="zone-switch" role="tablist" aria-label="配置区 / 运行区">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={zone === 'config'}
+        className={`zone-switch-btn config${zone === 'config' ? ' active' : ''}`}
+        onClick={() => onChange('config')}
+        title={configNote ?? '修改实例定义'}
+      >
+        ▣ 配置区
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={zone === 'runtime'}
+        className={`zone-switch-btn runtime${zone === 'runtime' ? ' active' : ''}`}
+        onClick={() => onChange('runtime')}
+        title={runtimeNote ?? '查看与操作当前运行'}
+      >
+        ◉ 运行区
+      </button>
+    </div>
+  );
+}
+
+/** 配置区/运行区切换条（旧版，单独占一行；保留兼容）。 */
 export function ZoneBar({
   zone,
   onChange,

@@ -64,8 +64,13 @@ class SessionEventControlTest {
 
             JsonHub before = JsonHub.fromJson(session.eventsJson());
             assertEquals(1, before.get("events").length());
-            assertTrue(before.get("events").get(0).get("enabled").booleanValue());
+            assertFalse(before.get("events").get(0).get("enabled").booleanValue(),
+                    "加载后默认禁用，等操作员显式启动");
             assertEquals("periodic", before.get("events").get(0).get("triggerType").optionalString().orElse(""));
+
+            assertTrue(session.setEventEnabled("beat", true));
+            JsonHub started = JsonHub.fromJson(session.eventsJson());
+            assertTrue(started.get("events").get(0).get("enabled").booleanValue(), "启动后应显示运行中");
 
             clock.advanceMs(1_000L);
             session.pumpNow();

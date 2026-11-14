@@ -217,7 +217,15 @@ final class EventScheduler {
     void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
         this.schedule = schedule == null ? EventSchedule.empty() : schedule;
         this.limiter = new RateLimiter(maxEventsPerSec, RATE_WINDOW_MS);
+
+        /* 3.0 需求：所有计划默认禁用。
+           配置里的计划只描述"触发规则"，不表示"现在就要跑"——设备一上线就
+           按周期往主机灌 S6F11，现场看到的是"没人点过就开始发"。这里统一置为
+           禁用，由操作员在事件编排页显式「启动」后才参与调度。 */
         this.disabledPlans.clear();
+        for (EventPlan plan : this.schedule.plans()) {
+            this.disabledPlans.add(plan.id());
+        }
 
         this.conditionDebouncers.clear();
         this.conditionErrorLogged.clear();
@@ -239,7 +247,8 @@ final class EventScheduler {
      * @return JSON 文本
      */
     String eventsJson(java.util.function.IntFunction<String> ceidOwner) {
-        return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans, ceidOwner);
+        return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans, ceidOwner,
+                null, this::planStatus);
     }
 
     /**
@@ -252,7 +261,30 @@ final class EventScheduler {
     String eventsJson(java.util.function.IntFunction<String> ceidOwner,
                       java.util.Map<String, PlanRuntimeStat> stats) {
         return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans,
-                ceidOwner, stats);
+                ceidOwner, stats, this::planStatus);
+    }
+
+    /**
+     * 一条计划此刻的运行态（界面用）。
+     *
+     * <p>三个状态互斥：没启用是 {@code stopped}；启用了但设备没在线（严格 GEM
+     * 下不允许上报）或被主机 S2F37 屏蔽了该 CEID 是 {@code waiting}；真正在发
+     * 才是 {@code running}。</p>
+     *
+     * @param plan 计划
+     * @return 运行态
+     */
+    SessionJsonViews.PlanStatus planStatus(EventPlan plan) {
+        if (this.disabledPlans.contains(plan.id())) {
+            return new SessionJsonViews.PlanStatus("stopped", "");
+        }
+        if (!this.canSend()) {
+            return new SessionJsonViews.PlanStatus("waiting", "offline");
+        }
+        if (!this.ceidEnabled(plan.ceid())) {
+            return new SessionJsonViews.PlanStatus("waiting", "ceid-disabled");
+        }
+        return new SessionJsonViews.PlanStatus("running", "");
     }
 
 
@@ -313,6 +345,8 @@ final class EventScheduler {
         }
         plans.add(plan);
         replaceSchedule(new EventSchedule(plans));
+        /* 运行时新增的计划同样默认禁用：加完还要显式「启动」才会按规则触发 */
+        this.disabledPlans.add(plan.id());
         return true;
     }
 

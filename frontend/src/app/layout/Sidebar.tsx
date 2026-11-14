@@ -21,14 +21,23 @@ import {
   clampSidebarWidth,
 } from '../../state/usePreferences';
 import type { HostV2 } from '../../api';
+import {
+  DEVICE_STATUS_LABEL,
+  DEVICE_STATUS_TONE,
+  deviceStatus,
+  deviceStatusHint,
+} from '../../shared/lib/deviceStatus';
+import { hostPhaseLabel, hostPhaseTone } from '../../state/useHostsV2';
 
 /** 侧栏「设备清单」动态组里的一台设备。 */
 export interface SidebarDevice {
   id: string;
   label: string;
-  /** OFFLINE / COMMUNICATING / ONLINE（E5 简化模型）。 */
+  /** 会话状态：CREATED / OPENING / OPEN / CLOSING / CLOSED。 */
   state: string;
-  /** 创建时使用的模板 id；空 = 未分组。 */
+  /** 控制状态：OFFLINE / COMMUNICATING / ONLINE。 */
+  controlState?: string;
+  /** 创建时使用的模板 id，只用于悬浮说明，不再参与分组。 */
   template?: string;
   /** 配置文件，用于 tooltip。 */
   config?: string;
@@ -36,27 +45,6 @@ export interface SidebarDevice {
 
 /** 侧栏「主机清单」动态组里的一台主机（v2 独立实例）。 */
 export type SidebarHost = HostV2;
-
-/** 状态字与色调：主机连上但还没 SELECT 时是"连接中"，不能算离线。 */
-function stateLabel(state: string): string {
-  if (state === 'ONLINE') {
-    return '在线';
-  }
-  if (state === 'COMMUNICATING') {
-    return '通讯中';
-  }
-  return '离线';
-}
-
-function stateTone(state: string): 'ok' | 'warn' | 'muted' {
-  if (state === 'ONLINE') {
-    return 'ok';
-  }
-  if (state === 'COMMUNICATING') {
-    return 'warn';
-  }
-  return 'muted';
-}
 
 export interface SidebarProps {
   /** 当前路由。 */
@@ -209,29 +197,13 @@ export function Sidebar({
     </div>
   );
 
-  /* ===== 设备树 ===== */
-  const onlineCount = devices.filter((device) => device.state !== 'OFFLINE').length;
-  const [deviceFilter, setDeviceFilter] = useState('');
-  const [groupByTemplate, setGroupByTemplate] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  /* ===== 设备树 =====
+     设备清单只保留"平铺设备 + 可展开子页"：筛选框、按模板分组、分组折叠
+     这些入口与逻辑已下线，避免用户在一张只有几台设备的清单里还要先选模式。 */
+  /* 计数用「在线」：标题里的 n/m 是"有几台真的能上报事件"。
+     只连上但没上线的不算——严格 GEM 下它们一条 S6F11 也发不出去。 */
+  const onlineCount = devices.filter((device) => deviceStatus(device) === 'online').length;
   const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
-  const query = deviceFilter.trim().toLowerCase();
-  const visibleDevices = query === ''
-    ? devices
-    : devices.filter((device) => (
-      device.label.toLowerCase().includes(query)
-      || device.id.toLowerCase().includes(query)
-      || (device.template ?? '').toLowerCase().includes(query)
-      || (device.config ?? '').toLowerCase().includes(query)
-    ));
-
-  const templateGroups = new Map<string, SidebarDevice[]>();
-  for (const device of visibleDevices) {
-    const key = device.template === undefined || device.template === '' ? '未分组模板' : device.template;
-    const list = templateGroups.get(key) ?? [];
-    list.push(device);
-    templateGroups.set(key, list);
-  }
 
   const toggleSet = (
     setter: (updater: (previous: ReadonlySet<string>) => ReadonlySet<string>) => void,
@@ -250,7 +222,9 @@ export function Sidebar({
 
   const renderDevice = (device: SidebarDevice, withPages: boolean) => {
     const active = route.name === 'device' && route.sessionId === device.id;
-    const tone = stateTone(device.state);
+    const status = deviceStatus(device);
+    const tone = DEVICE_STATUS_TONE[status];
+    const label = DEVICE_STATUS_LABEL[status];
     const expanded = expandedDevices.has(device.id);
     return (
       <div className="nav-device" key={device.id}>
@@ -258,9 +232,9 @@ export function Sidebar({
           <button
             type="button"
             className={`nav-item${active ? ' active' : ''}`}
-            onClick={() => onNavigate({ name: 'device', sessionId: device.id, zone: 'runtime', page: 'catalog' })}
+            onClick={() => onNavigate({ name: 'device', sessionId: device.id, zone: 'runtime', page: DEVICE_RUNTIME_PAGES[0] })}
             aria-current={active ? 'page' : undefined}
-            title={`${device.label}（${stateLabel(device.state)}）${device.template === undefined || device.template === '' ? '' : `\n模板：${device.template}`}`}
+            title={`${device.label}（${label}）${deviceStatusHint(status)}${device.template === undefined || device.template === '' ? '' : `\n模板：${device.template}`}`}
           >
             {collapsed ? (
               <span className={`nav-monogram ${tone}`} aria-hidden="true">
@@ -272,7 +246,7 @@ export function Sidebar({
               </span>
             )}
             {!collapsed && <span className="nav-label">{device.label}</span>}
-            {!collapsed && <span className={`nav-state tone-${tone}`}>{stateLabel(device.state)}</span>}
+            {!collapsed && <span className={`nav-state tone-${tone}`}>{label}</span>}
           </button>
           {withPages && !collapsed && (
             <button
@@ -314,51 +288,9 @@ export function Sidebar({
 
   const renderDeviceTree = () => (
     <>
-      {!collapsed && (
-        <div className="nav-device-tools">
-          <input
-            type="search"
-            className="nav-filter"
-            placeholder="筛选设备/模板"
-            value={deviceFilter}
-            onChange={(event) => setDeviceFilter(event.target.value)}
-            aria-label="筛选设备"
-          />
-          <button
-            type="button"
-            className={`nav-mode${groupByTemplate ? ' active' : ''}`}
-            onClick={() => setGroupByTemplate((previous) => !previous)}
-            title={groupByTemplate ? '切换为平铺设备列表' : '按设备模板聚合为三级菜单'}
-          >
-            {groupByTemplate ? '平铺' : '分组'}
-          </button>
-        </div>
-      )}
       {!collapsed && <div className="nav-group-title nav-group-subtitle">设备 · {onlineCount}/{devices.length}</div>}
-      {visibleDevices.length === 0 && !collapsed && (
-        <p className="nav-empty">{devices.length === 0 ? '暂无设备' : '没有匹配的设备'}</p>
-      )}
-      {!groupByTemplate && visibleDevices.map((device) => renderDevice(device, false))}
-      {groupByTemplate && collapsed && visibleDevices.map((device) => renderDevice(device, false))}
-      {groupByTemplate && !collapsed && [...templateGroups.entries()].map(([template, groupDevices]) => {
-        const folded = collapsedGroups.has(template);
-        return (
-          <div className="nav-template-group" key={template}>
-            <button
-              type="button"
-              className={`nav-template-head${folded ? ' folded' : ''}`}
-              onClick={() => toggleSet(setCollapsedGroups, template)}
-              aria-expanded={!folded}
-              title={`模板 ${template}（${groupDevices.length} 台）`}
-            >
-              <span className="nav-caret">{folded ? '▸' : '▾'}</span>
-              <span className="nav-template-name">{template}</span>
-              <span className="nav-template-count">{groupDevices.length}</span>
-            </button>
-            {!folded && groupDevices.map((device) => renderDevice(device, true))}
-          </div>
-        );
-      })}
+      {devices.length === 0 && !collapsed && <p className="nav-empty">暂无设备</p>}
+      {devices.map((device) => renderDevice(device, !collapsed))}
     </>
   );
 
@@ -392,9 +324,8 @@ export function Sidebar({
         {hostInstances.map((host) => {
           const active = route.name === 'host' && route.hostId === host.id;
           const expanded = expandedHosts.has(host.id);
-          const tone = host.phase === 'CONNECTED' ? 'ok' : host.phase === 'FAILED' ? 'danger' : 'muted';
-          const phase = host.phase === 'CONNECTED' ? '已连接' : host.phase === 'CONNECTING' ? '连接中'
-            : host.phase === 'FAILED' ? '连接失败' : '已断开';
+          const tone = hostPhaseTone(host.phase);
+          const phase = hostPhaseLabel(host.phase);
           return (
             <div className="nav-device" key={host.id}>
               <div className="nav-device-row">

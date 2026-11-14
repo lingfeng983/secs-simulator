@@ -9,7 +9,7 @@ import {
   type HostZone,
 } from '../../app/router';
 import { hostPhaseLabel, hostPhaseTone, type HostsV2State } from '../../state/useHostsV2';
-import { InstanceHead, SubTabs, ZoneBar } from '../../shared/ui/zone';
+import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
 import { HostDetailPanels } from '../panels/hostsim/HostDetailPanels';
 /**
@@ -113,6 +113,14 @@ export function HostDetailPage({
             </button>
           </>
         }
+        zoneSwitch={
+          <ZoneSwitch
+            zone={zone}
+            onChange={(next) => goTo?.(`host-zone:${hostId}:${next}`)}
+            configNote="▣ 修改后点「使设置生效」，按最新设置重连。"
+            runtimeNote="◉ 这里的操作只对本次连接有效；收发只作用于本主机。"
+          />
+        }
       />
 
       {error !== '' && <p className="inline-note danger">{error}</p>}
@@ -139,12 +147,6 @@ export function HostDetailPage({
         </div>
       )}
 
-      <ZoneBar
-        zone={zone}
-        onChange={(next) => goTo?.(`host-zone:${hostId}:${next}`)}
-        configNote="▣ 修改后点「使设置生效」，按最新设置重连。"
-        runtimeNote="◉ 这里的操作只对本次连接有效；收发只作用于本主机。"
-      />
       <SubTabs
         pages={pages}
         active={page}

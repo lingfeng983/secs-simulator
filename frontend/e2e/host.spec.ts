@@ -115,33 +115,39 @@ test('主机配置区·概览：改设置 → 保存 → 版本 +1 → 使设置
   await expect(page.locator('.pending-banner')).toHaveCount(0);
 });
 
-test('主机配置区·连接：连接动作面板能断开再连回', async ({ page }) => {
+test('主机配置区不再有连接页签，连接动作在实例头', async ({ page }) => {
   const state = await mockApi(page);
   await openHost(page);
   await switchZone(page, '配置区');
-  await openSubTab(page, '连接');
+  const tabs = page.locator('.subtabs');
+  await expect(tabs.getByRole('tab', { name: '连接', exact: true })).toHaveCount(0);
+  /* 旧深链回落到概览 */
+  await page.goto('/#/hosts/host-1/config/connection');
+  await expect(page.locator('#panel-host-overview')).toBeVisible();
 
-  const panel = page.locator('#panel-host-connect');
-  await expect(panel).toBeVisible();
-  await expect(panel).toContainText('相位');
-  await panel.getByRole('button', { name: '断开连接' }).click();
+  const head = page.locator('.instance-head');
+  await head.getByRole('button', { name: '断开连接' }).click();
   await expect.poll(() => state.hosts.find((host) => host.id === 'host-1')?.open).toBe(false);
 
-  await panel.getByRole('button', { name: '连接' }).click();
+  await head.getByRole('button', { name: '连接', exact: true }).click();
   await expect.poll(() => state.hosts.find((host) => host.id === 'host-1')?.open).toBe(true);
 
-  await panel.getByRole('button', { name: '使设置生效' }).click();
+  await head.getByRole('button', { name: '使设置生效' }).click();
   await expect.poll(() => state.calls.some((call) => call.endsWith('/apply'))).toBe(true);
 });
 
-test('主机配置区·报文模板：16 条预设分组浏览', async ({ page }) => {
+test('主机配置区·报文模板：每条预设都给具体 SML 案例', async ({ page }) => {
   await openHost(page);
   await openSubTab(page, '报文模板');
   const panel = page.locator('#panel-host-presets');
   await expect(panel).toBeVisible();
-  const items = panel.locator('.preset-guide-item');
-  expect(await items.count()).toBeGreaterThan(8);
-  await expect(panel).toContainText('发送入口在运行区·消息发送');
+
+  /* 不再只有 SxFy 名字：每条都带 SML 正文 */
+  const cases = panel.locator('.preset-case');
+  expect(await cases.count()).toBeGreaterThan(8);
+  await expect(cases.first().locator('pre')).toContainText('S1F1 W');
+  await expect(panel.getByRole('button', { name: '填入运行区发送' }).first()).toBeVisible();
+  await expect(panel.getByRole('button', { name: '复制 SML' }).first()).toBeVisible();
 });
 
 test('主机配置区·Trace 设置：只生成不发（readOnly）', async ({ page }) => {
@@ -156,16 +162,21 @@ test('主机配置区·Trace 设置：只生成不发（readOnly）', async ({ p
   await expect(panel.getByRole('button', { name: '生成并发送' })).toHaveCount(0);
 });
 
-test('主机配置区·采集设置：下发配置后能开能停', async ({ page }) => {
+test('主机配置区·采集设置：保存方案 + 下发配置', async ({ page }) => {
   const state = await mockApi(page);
   await openHost(page);
   await openSubTab(page, '采集设置');
   const panel = page.locator('#panel-host-collect');
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText('数据采集（S1F3 轮询）');
+  await expect(panel).toContainText('采集设置（S1F3 配置库）');
+
+  /* 配置区能把当前参数存成一份方案，运行区一键下发 */
+  await panel.getByLabel('配置名称（留空自动生成）').fill('温度 1s');
+  await panel.getByRole('button', { name: '保存为配置' }).click();
+  await expect(panel.locator('.plan-row')).toContainText('温度 1s');
 
   await panel.getByRole('button', { name: '下发配置' }).click();
-  await expect(panel.getByText(/采集中|未采集/)).toBeVisible();
+  await expect(panel.getByText(/采集中|已配置|未配置/)).toBeVisible();
   await expect.poll(() => state.calls.some((call) => call.includes('/collector'))).toBe(true);
 });
 
@@ -175,7 +186,7 @@ test('主机运行区·实时状态：相位与版本读数', async ({ page }) =
   await openHost(page, 'host-2');
   await page.goto('/#/hosts/host-2/runtime/status');
   await expect(page.getByRole('heading', { name: '实时状态' })).toBeVisible();
-  await expect(page.locator('.kpi-grid')).toContainText('链路相位');
+  await expect(page.locator('.kpi-grid')).toContainText('链路状态');
   await expect(page.locator('.kpi-grid')).toContainText('最新设置版本');
   /* 断开的主机在运行区给出重连入口 */
   await expect(page.locator('.empty-zone')).toContainText('链路已断开，主机仍在列表里');
@@ -220,6 +231,23 @@ test('主机运行区·Trace 采集：生成并发送', async ({ page }) => {
   await expect.poll(() => state.calls.some((call) => call.endsWith('/send'))).toBe(true);
 });
 
+test('主机运行区·Trace 采集：S6F1 参数按 TRID 画趋势，可勾选参数', async ({ page }) => {
+  await page.goto('/#/hosts/host-1/runtime/trace');
+  const charts = page.locator('#panel-host-trace-charts');
+  await expect(charts).toBeVisible();
+  await expect(charts).toContainText('S6F1 参数趋势');
+  await expect(charts.getByRole('heading', { name: /TRID 1/ })).toBeVisible();
+
+  /* 默认只画前两个参数，不是把 S6F1 里的值全铺开 */
+  await expect(charts.locator('.collector-chart')).toHaveCount(2);
+  await expect(charts.locator('.collector-chart canvas').first()).toBeVisible();
+
+  /* 取消一个参数 → 曲线少一条；选择按 TRID 单独保存 */
+  await charts.locator('.param-picker .check-inline').first().locator('input').uncheck();
+  await expect(charts.locator('.collector-chart')).toHaveCount(1);
+  await expect(charts.locator('.param-picker .check-inline').first().locator('input')).not.toBeChecked();
+});
+
 test('主机运行区·数据采集：曲线与手动启停', async ({ page }) => {
   await openHost(page);
   await page.goto('/#/hosts/host-1/runtime/collect');
@@ -240,65 +268,65 @@ test('主机运行区·数据采集：曲线与手动启停', async ({ page }) =
     .toBe(true);
 });
 
-test('主机运行区·收发记录：只显示本主机，方向/SxFy/内容/清理都可用', async ({ page }) => {
-  await openHost(page);
-  await page.goto('/#/hosts/host-1/runtime/monitor');
-  const panel = page.locator('#panel-host-monitor');
-  await expect(panel).toBeVisible();
-  await expect(panel.getByText('发 → 设备').first()).toBeVisible();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+test('主机消息统一收进右侧抽屉：只看本主机 + 收发配色', async ({ page }) => {
+  await page.goto('/#/hosts/host-1/runtime/status');
+  /* 运行区不再有独立的收发记录子页/面板 */
+  await expect(page.locator('#panel-host-monitor')).toHaveCount(0);
+  await expect(page.locator('.subtabs')).not.toContainText('收发记录');
 
-  /* 只看主机发出 */
-  await panel.getByLabel('按方向过滤').selectOption('sent');
-  await expect(panel.getByText('发 → 设备').first()).toBeVisible();
-  await expect(panel.getByText('收 ← 设备')).toHaveCount(0);
-  await panel.getByLabel('按方向过滤').selectOption('all');
+  const drawer = page.locator('.monitor-drawer');
+  await page.locator('.monitor-toggle').click();
+  await expect(drawer).toBeVisible();
 
-  /* SxFy 过滤（大小写都认） */
-  await panel.getByLabel('按 SxFy 过滤').fill('S1F2');
-  await expect(panel.getByText('S1F1 W', { exact: true })).toHaveCount(0);
-  await expect(panel.getByText('S1F2', { exact: true })).toBeVisible();
-  await panel.getByLabel('按 SxFy 过滤').fill('');
+  /* 只看当前主机：设备视角的报文被过滤掉 */
+  await expect(drawer.getByLabel('选择要查看的设备或主机')).toHaveValue('host:host-1');
+  await expect(drawer.getByText(/只看主机 host-1/)).toBeVisible();
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('S1F2', { exact: true })).toBeVisible();
 
-  /* 内容过滤 */
-  await panel.getByLabel('按报文内容过滤').fill('SECS-SIM');
-  await expect(panel.getByText('S1F2', { exact: true })).toBeVisible();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toHaveCount(0);
-  await panel.getByRole('button', { name: '清空过滤' }).click();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+  /* 主机视角：direction=in 是主机发出，out 是主机收到 */
+  await expect(drawer.locator('.mm-row.sent')).toHaveCount(1);
+  await expect(drawer.locator('.mm-row.recv')).toHaveCount(2);
 
-  /* 清理：打水位后当前表清空 */
-  await panel.getByRole('button', { name: '清理' }).click();
-  await expect(panel.getByText(/当前条件下没有报文/)).toBeVisible();
+  await drawer.getByLabel('按方向过滤').selectOption('sent');
+  await expect(drawer.locator('.mm-row.recv')).toHaveCount(0);
+  await drawer.getByLabel('按方向过滤').selectOption('all');
+
+  await drawer.getByLabel('按 SxFy 过滤').fill('S1F2');
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toHaveCount(0);
+  await expect(drawer.getByText('S1F2', { exact: true })).toBeVisible();
+  await drawer.getByLabel('按 SxFy 过滤').fill('');
+
+  await drawer.getByLabel('按报文内容过滤').fill('SECS-SIM');
+  await expect(drawer.getByText('S1F2', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toHaveCount(0);
+  await drawer.getByLabel('按报文内容过滤').fill('');
 });
 
-test('主机运行区·手动操作：按最新设置重连与手发 SML', async ({ page }) => {
-  const state = await mockApi(page);
+test('主机运行区·手动操作页签已删除：旧深链回落到实时状态', async ({ page }) => {
   await openHost(page);
   await page.goto('/#/hosts/host-1/runtime/manual');
-  const panel = page.locator('#panel-host-manual');
-  await expect(panel).toBeVisible();
-
-  await panel.getByRole('button', { name: '按最新设置重连' }).click();
-  await expect.poll(() => state.calls.some((call) => call.endsWith('/apply'))).toBe(true);
-
-  await panel.getByRole('button', { name: '发送', exact: true }).click();
-  await expect.poll(() => state.calls.some((call) => call.endsWith('/send'))).toBe(true);
+  await expect(page.locator('#panel-host-manual')).toHaveCount(0);
+  await expect(page.locator('.subtabs')).not.toContainText('手动操作');
+  await expect(page.locator('.subtabs').getByRole('tab', { name: '实时状态', exact: true }))
+    .toHaveAttribute('aria-selected', 'true');
 });
 
 /* ==================== 骨架与空态 ==================== */
 
-test('主机两段式：配置区 5 页、运行区 6 页', async ({ page }) => {
+test('主机两段式：配置区 4 页、运行区 4 页（连接/手动操作已删除）', async ({ page }) => {
   await openHost(page);
   const tabs = page.locator('.subtabs');
-  await expect(tabs.getByRole('tab')).toHaveCount(5);
+  await expect(tabs.getByRole('tab')).toHaveCount(4);
   await expect(tabs).toContainText('报文模板');
   await expect(tabs).toContainText('Trace 设置');
+  await expect(tabs).not.toContainText('连接');
 
   await switchZone(page, '运行区');
-  await expect(tabs.getByRole('tab')).toHaveCount(6);
-  await expect(tabs).toContainText('收发记录');
-  await expect(tabs).toContainText('手动操作');
+  await expect(tabs.getByRole('tab')).toHaveCount(4);
+  await expect(tabs).not.toContainText('收发记录');
+  await expect(tabs).not.toContainText('手动操作');
+  await expect(tabs).toContainText('数据采集');
 });
 
 test('主机不存在时给出空态', async ({ page }) => {
@@ -308,16 +336,20 @@ test('主机不存在时给出空态', async ({ page }) => {
   await expect(page.locator('#panel-hosts-v2')).toBeVisible();
 });
 
-test('侧栏主机树：点实例进详情，展开后可直达子页', async ({ page }) => {
+test('侧栏主机树：点实例默认进运行区，展开后可直达子页', async ({ page }) => {
   await page.goto('/#/workbench');
   const nav = page.locator('.sidenav');
   await expect(nav.locator('.nav-group-title', { hasText: '主机清单' })).toBeVisible();
   await nav.locator('.nav-device', { hasText: '产线 A 主机' }).getByRole('button', { name: /产线 A 主机/ }).first().click();
   await expect(page.locator('.instance-head')).toContainText('产线 A 主机');
+  /* 需求 8：菜单点进来默认运行区，配置区由实例头上的切换按钮进入 */
+  await expect(page.locator('.zone-switch').getByRole('tab', { name: /运行区/ }))
+    .toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.subtabs')).toContainText('实时状态');
 
   await page.locator('.nav-device', { hasText: '产线 A 主机' }).getByRole('button', { name: /展开 产线 A 主机 的子页/ }).click();
-  await page.locator('.nav-device', { hasText: '产线 A 主机' }).getByRole('button', { name: /收发记录/ }).click();
-  await expect(page.locator('#panel-host-monitor')).toBeVisible();
+  await page.locator('.nav-device', { hasText: '产线 A 主机' }).getByRole('button', { name: /数据采集/ }).click();
+  await expect(page.locator('#panel-host-collect')).toBeVisible();
 });
 
 test('主机模板页：套用新建会建出一台主机', async ({ page }) => {

@@ -9,7 +9,6 @@ import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.jsonhub.JsonHubBuilder;
 import com.shimizukenta.secssim.app.log.Log;
-import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
 import com.shimizukenta.secs.SecsCommunicator;
@@ -167,6 +166,16 @@ public final class HostSimulator {
                 view.autoReconnect(), parseCatalog(view.variableCatalogJson()));
         sim.eventBus = bus;
         sim.settingRevision.set(view.settingRevision());
+        /* 采集配置随实例持久化：进程重启 / 主机重连后启停 CEID 判定必须还在，
+           否则用户「下发配置」后一重连就变成「收到 CEID 但什么都没发生」。 */
+        String collectorJson = view.collectorJson();
+        if (collectorJson != null && collectorJson.contains("startCeid")) {
+            try {
+                sim.setCollectorConfig(collectorJson);
+            } catch (RuntimeException e) {
+                Log.warn("主机采集配置恢复失败（" + view.id() + "）: " + e.getMessage());
+            }
+        }
         return sim;
     }
 
@@ -553,8 +562,19 @@ public final class HostSimulator {
     /**
      * 把主机侧的收发挂到事件总线（3.0：所有主机都发布，perspective=host；
      * 设备侧同一帧是设备视角，二者不去重）。
+     *
+     * <p>采集器的 CEID 触发判定也挂在这条 pass-through 上：它在 socket 读线程
+     * 收到 DATA 帧时立刻触发，早于 replyMgr / 接收队列，也不依赖自动应答是否成功。
+     * 以前挂在 {@link #onPrimary} 的末尾，一旦前面的 S6F12 自动应答抛异常
+     * （重连窗口里 communicator 被置空、或对端已断开），整段 try 就跳到 catch，
+     * 「收到启动 CEID」与「开始采集」之间会静默断开。</p>
      */
     private void installPassThrough(SecsCommunicator comm) {
+        comm.addReceiveMessagePassThroughListener(message -> {
+            if (message.getStream() == 6 && message.getFunction() == 11) {
+                this.onS6f11(message);
+            }
+        });
         final com.shimizukenta.secssim.app.event.EventBus bus = this.eventBus;
         if (bus == null) {
             return;
@@ -612,36 +632,67 @@ public final class HostSimulator {
                 this.communicator.send(message, 6, function == 11 ? 12 : 2, false,
                         Secs2.getBuilder().binary(new byte[] {0x00}));
             }
-            if (stream == 6 && function == 11) {
-                this.onS6f11(message);
-            }
+            /* CEID 判定已在 installPassThrough 里做，不能再挂在这里：
+               自动应答失败会连累它一起被跳过。 */
         } catch (Exception e) {
             Log.warn("主机自动应答失败（" + this.hostId + "）: " + e);
         }
     }
 
-    /** 从 S6F11 body 的 L[3] 第 2 项取 CEID,比对采集器启停(与本地/远程无关)。 */
+    /**
+     * 从 S6F11 body 取 CEID 并比对采集器启停（与本地/远程无关）。
+     *
+     * <p>标准是 L[3]{DATAID, CEID, REPORTS}，第 2 项是 CEID；部分设备发
+     * L[2]{CEID, REPORTS}，这时第 2 项是列表、解析失败，退回第 1 项。
+     * 这里不再用 {@code open} 做前置门槛：真正的可启动检查在 collectorStart 里，
+     * 链路正在建立时 open 可能还没置位，但帧已经到了，早退会白白丢掉这次触发。</p>
+     */
     private void onS6f11(SecsMessage message) {
         CollectorConfig config = this.collectorConfig;
-        if (config == null || !this.open.get()) {
+        if (config == null) {
             return;
         }
         int ceid;
         try {
             Secs2 body = message.secs2();
-            if (body.secs2Item() != Secs2Item.LIST || body.size() < 2) {
+            if (body.secs2Item() != Secs2Item.LIST || body.size() < 1) {
                 return;
             }
-            ceid = Secs2Read.asInt(body.get(1));
+            ceid = readCeid(body);
         } catch (Exception e) {
+            Log.warn("主机解析 S6F11 CEID 失败（" + this.hostId + "）: " + e);
+            return;
+        }
+        if (ceid < 0) {
             return;
         }
 
         if (!this.collectorRunning && ceid == config.startCeid()) {
+            Log.info("主机收到启动 CEID " + ceid + "（" + this.hostId + "），触发 S1F3 采集");
             this.collectorStart("CEID " + ceid);
         } else if (this.collectorRunning && ceid == config.stopCeid()) {
+            Log.info("主机收到停止 CEID " + ceid + "（" + this.hostId + "），停止 S1F3 采集");
             this.collectorStop("CEID " + ceid);
         }
+    }
+
+    /** S6F11 body 的 CEID 位置：L[3] 取 index 1，L[2] 依次试 index 1 / 0。 */
+    private static int readCeid(Secs2 body) throws Secs2Exception {
+        if (body.size() >= 2) {
+            try {
+                return Secs2Read.asInt(body.get(1));
+            } catch (Secs2Exception | RuntimeException e) {
+                /* 第 2 项是报告列表：按 L[2]{CEID, REPORTS} 继续试 */
+            }
+        }
+        if (body.size() >= 1) {
+            try {
+                return Secs2Read.asInt(body.get(0));
+            } catch (Secs2Exception | RuntimeException e) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     /* ===== S1F3 采集器 ===== */

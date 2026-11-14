@@ -135,6 +135,8 @@ class EventReporterTest {
         EventReporter reporter = reporter(store, notices, scheduler::previewSchedule);
 
         assertTrue(scheduler.addEventPlan(plan("c", 2001, 4, 5.0)));
+        /* 计划默认禁用：新增后要显式启动才参与调度/效果施加 */
+        assertTrue(scheduler.setEventEnabled("c", true));
 
         assertThrows(IOException.class, () -> reporter.emit(2001, "c"));
 
@@ -151,6 +153,8 @@ class EventReporterTest {
         EventReporter reporter = reporter(store, new CopyOnWriteArrayList<>(), scheduler::previewSchedule);
 
         assertTrue(scheduler.updateEventPlan("u", plan("u", 2001, 6, 1.0)));
+        /* 更新不改变启用态；计划默认禁用，这里显式启动后再验证效果 */
+        assertTrue(scheduler.setEventEnabled("u", true));
 
         assertThrows(IOException.class, () -> reporter.emit(2001, "u"));
 
@@ -190,6 +194,54 @@ class EventReporterTest {
         assertThrows(IOException.class, () -> reporter.emit(2001, null));
 
         assertTrue(store.activeAt(8, NOW).isEmpty(), "被禁用的计划不得施加效果");
+    }
+
+    /**
+     * 配置里的计划默认禁用：加载后不参与调度，必须显式启动。
+     *
+     * <p>回归点：设备一上线就按周期往主机灌 S6F11，现场看起来像"没人点过就开始发"。</p>
+     */
+    @Test
+    void plansAreDisabledByDefault() {
+        EventScheduler scheduler = scheduler();
+        scheduler.enableSchedule(new EventSchedule(List.of(plan("d", 2001, 9, 1.0))), 10);
+
+        assertTrue(scheduler.previewSchedule().plans().isEmpty(), "加载后默认不参与调度");
+        assertTrue(scheduler.setEventEnabled("d", true));
+        assertEquals(1, scheduler.previewSchedule().plans().size(), "显式启动后才参与调度");
+    }
+
+    /**
+     * 计划三态：没启用 {@code stopped}、启用了但设备不在线 {@code waiting}、
+     * 在线且 CEID 可用 {@code running}。
+     *
+     * <p>界面上"运行中"必须等于"消息真的在发"。只按 {@code enabled} 判断会把
+     * "启动了但设备离线"也显示成运行中——操作员盯着一个一条报文都不发的"运行中"，
+     * 这是最容易误判的一类问题。</p>
+     */
+    @Test
+    void planStatusReflectsEnabledOnlineAndCeidGate() {
+        java.util.concurrent.atomic.AtomicBoolean online = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean ceidAllowed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        EventScheduler scheduler = new EventScheduler(new Rng(7L).derive("events"),
+                () -> NOW, () -> null, online::get, (ceid, planId) -> { });
+        scheduler.ceidEnabled(ceid -> ceidAllowed.get());
+
+        EventPlan plan = plan("s", 2001, 3, 1.0);
+        scheduler.enableSchedule(new EventSchedule(List.of(plan)), 10);
+
+        assertEquals("stopped", scheduler.planStatus(plan).status(), "默认禁用");
+
+        assertTrue(scheduler.setEventEnabled("s", true));
+        assertEquals("waiting", scheduler.planStatus(plan).status(), "启用了但设备没在线");
+        assertEquals("offline", scheduler.planStatus(plan).reason());
+
+        online.set(true);
+        assertEquals("running", scheduler.planStatus(plan).status(), "在线且在发");
+
+        ceidAllowed.set(false);
+        assertEquals("waiting", scheduler.planStatus(plan).status(), "主机 S2F37 屏蔽了该事件");
+        assertEquals("ceid-disabled", scheduler.planStatus(plan).reason());
     }
 
     /** planId 来自运行时编辑：引号/反斜杠/换行必须转义，通知仍能按 JSON 解析。 */

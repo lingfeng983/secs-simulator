@@ -155,45 +155,50 @@ class SessionControlStateTest {
     }
 
     /**
-     * E30：<b>计划驱动的</b>主动上报（S6F11 / S6F1）只在 ONLINE 之后允许。
+     * 严格 GEM：计划驱动的主动上报只在设备 {@code ONLINE} 时允许。
      *
-     * <p>修复前 {@code controlState} 只用于界面显示：链路一选上就发事件，
-     * 主机还没 S1F13/S1F17 就先收到一堆 S6F11，S1F15 下线后事件照发。
-     * 严格的 GEM 主机会按违规处理。</p>
-     *
-     * <p>注意手动 {@code emitCeid} 是操作员的显式动作，不受此限（见方法注释）——
-     * 这里用计划驱动，才能验证"设备自己决定什么时候发"的那条路径。</p>
+     * <p>"已连接"（{@code COMMUNICATING}）不等于在线——此时设备在主机眼里还是
+     * OFF-LINE，发 S6F11 属于违规。上线有两条路，两条都要能走通：操作员手动
+     * 上线（{@code setOnline}，等价 S1F17），或主机自己发 S1F13 + S1F17。
+     * 下线（{@code setOnline(false)}，等价 S1F15）后立刻停发。</p>
      */
     @Test
-    void scheduledReportsWaitForOnline() throws Exception {
+    void scheduledReportsRequireOnline() throws Exception {
         try (Fixture f = new Fixture()) {
             f.session.enableSchedule(new EventSchedule(List.of(
                     new EventPlan("beat", 2001, new Trigger.Periodic(1_000L, 0L)))), 10);
 
             assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
-                    "刚选上链路，主机还没建立通信");
+                    "刚选上链路：已连接但设备仍离线");
+
+            /* 计划默认禁用：必须显式启动，否则下面的"该发"永远不成立，等于没测 */
+            assertTrue(f.session.setEventEnabled("beat", true), "计划应能启动");
 
             f.tick();
-            assertEquals(0L, f.session.counters().get("emitted"), "未 ONLINE 时不得发出计划驱动的 S6F11");
+            assertEquals(0L, f.session.counters().get("emitted"),
+                    "已连接但未上线：严格 GEM 下不得上报 S6F11");
 
-            f.send(1, 13, Secs2.getBuilder().list());
-            assertEquals(EquipmentControlState.COMMUNICATING, f.session.controlState(),
-                    "S1F13 只建立通信，不等于 ONLINE");
-
-            f.tick();
-            assertEquals(0L, f.session.counters().get("emitted"), "仅 COMMUNICATING 仍然不得上报");
-
-            f.send(1, 17, Secs2.getBuilder().list());
+            /* 路径一：操作员手动上线（等价主机发 S1F17） */
+            assertTrue(f.session.setOnline(true), "链路已建，应能手动上线");
             assertEquals(EquipmentControlState.ONLINE, f.session.controlState());
 
             f.tick();
-            assertEquals(1L, f.session.counters().get("emitted"), "ONLINE 后计划应恢复上报");
+            assertEquals(1L, f.session.counters().get("emitted"), "上线后按触发规则上报");
 
-            f.send(1, 15, Secs2.getBuilder().list());
+            /* 手动下线（等价主机发 S1F15）后停发 */
+            assertTrue(f.session.setOnline(false));
             assertEquals(EquipmentControlState.OFFLINE, f.session.controlState());
 
             f.tick();
-            assertEquals(1L, f.session.counters().get("emitted"), "S1F15 下线后不得继续上报");
+            assertEquals(1L, f.session.counters().get("emitted"), "下线后不得继续上报");
+
+            /* 路径二：主机自己把设备拉上线 */
+            f.send(1, 13, Secs2.getBuilder().list());
+            f.send(1, 17, Secs2.getBuilder().list());
+            assertEquals(EquipmentControlState.ONLINE, f.session.controlState(), "S1F17 应把设备置为 ONLINE");
+
+            f.tick();
+            assertEquals(2L, f.session.counters().get("emitted"), "主机上线后恢复上报");
         }
     }
 

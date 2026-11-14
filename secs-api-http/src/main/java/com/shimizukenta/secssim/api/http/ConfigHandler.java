@@ -877,7 +877,7 @@ final class ConfigHandler extends HttpSupport {
         respond(ex, 200, json);
     }
 
-    /** POST /api/v2/devices/{id}/link/{connect|disconnect|reload}。 */
+    /** POST /api/v2/devices/{id}/link/{connect|disconnect|reload|online|offline}。 */
     private void handleDeviceLinkV2(HttpExchange ex, String deviceId, String action) throws IOException {
         if (!requireRole(ex, ApiRole.OPERATOR)) {
             return;
@@ -892,6 +892,9 @@ final class ConfigHandler extends HttpSupport {
             case "connect" -> outcome = this.context.deviceConnectV2(deviceId);
             case "disconnect" -> outcome = this.context.deviceDisconnectV2(deviceId);
             case "reload" -> outcome = this.context.deviceReloadV2(deviceId);
+            /* GEM 的上线/下线：等价于主机发 S1F17 / S1F15，只动控制状态不动链路 */
+            case "online" -> outcome = this.context.deviceOnlineV2(deviceId, true);
+            case "offline" -> outcome = this.context.deviceOnlineV2(deviceId, false);
             default -> {
                 respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
                 return;
@@ -902,6 +905,7 @@ final class ConfigHandler extends HttpSupport {
             case OK -> respond(ex, 200, "{\"ok\":true,\"action\":\"" + action + "\"}");
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
             case NOT_RELOADABLE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-reloadable\"}");
+            case NOT_CONNECTED -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-connected\"}");
             default -> respond(ex, 502, "{\"ok\":false,\"error\":\"link-" + action + "-failed\"}");
         }
     }

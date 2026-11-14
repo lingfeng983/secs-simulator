@@ -60,7 +60,7 @@ function initialState(): MockState {
   return {
     deviceOnline: true,
     hostConnected: true,
-    eventEnabled: true,
+    eventEnabled: false,
     sessions: [
       { id: 'line1', device: 'LINE1', controlState: 'ONLINE', state: 'OPEN', port: 5000 },
       { id: 'line2', device: 'LINE2', controlState: 'OFFLINE', state: 'OPEN', port: 5001 },
@@ -128,6 +128,13 @@ function hostMessages(): unknown[] {
     {
       seq: 1, sessionId: '', hostId: 'host-1', perspective: 'host',
       direction: 'out', stream: 1, function: 2, wbit: false, body: '<L[2] <A "SECS-SIM"> <A "3.0">>', at: Date.now() - 7_500,
+    },
+    /* 设备按 S2F23 推上来的 Trace：TRID=1，三个采样值，运行区要按 TRID 画趋势 */
+    {
+      seq: 3, sessionId: '', hostId: 'host-1', perspective: 'host',
+      direction: 'out', stream: 6, function: 1, wbit: true,
+      body: '<L[4] <U4 1> <U4 3> <A "120000"> <L[3] <F4 23.8> <F4 24.1> <F4 23.9>>>',
+      at: Date.now() - 7_000,
     },
   ];
 }
@@ -234,8 +241,22 @@ export async function mockApi(page: Page): Promise<MockState> {
         return ok({ ok: false, error: 'device-not-found' }, 404);
       }
       session.state = 'OPEN';
-      session.controlState = 'ONLINE';
+      /* 严格 GEM：建链只到 COMMUNICATING（已连接、仍离线），上线要等 S1F17 或手动点 */
+      session.controlState = 'COMMUNICATING';
       return ok({ ok: true, phase: 'LISTENING' });
+    }
+    if (/^\/api\/v2\/devices\/[^/]+\/link\/(online|offline)$/.test(path) && method === 'POST') {
+      const id = decodeURIComponent(path.split('/')[4] ?? '');
+      const session = state.sessions.find((item) => item.id === id);
+      if (session === undefined) {
+        return ok({ ok: false, error: 'device-not-found' }, 404);
+      }
+      if (session.state === 'CLOSED') {
+        /* 没有链路就没有"在线"可言，后端回 409 */
+        return ok({ ok: false, error: 'not-connected' }, 409);
+      }
+      session.controlState = path.endsWith('/online') ? 'ONLINE' : 'OFFLINE';
+      return ok({ ok: true, action: path.split('/').pop() });
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/reload$/.test(path)) {
       return ok({ ok: true });
@@ -269,9 +290,15 @@ export async function mockApi(page: Page): Promise<MockState> {
       });
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/events$/.test(path) && method === 'GET') {
+      const sessionId = decodeURIComponent(path.split('/')[4] ?? '');
+      const session = state.sessions.find((item) => item.id === sessionId);
+      /* 运行态按严格 GEM 推：启用了 + 设备在线才真在发，否则是"等待上线" */
+      const online = session !== undefined && session.state === 'OPEN' && session.controlState === 'ONLINE';
       return ok({
         events: [{
           id: 'beat', ceid: 2001, owner: 'CH1', enabled: state.eventEnabled,
+          status: state.eventEnabled ? (online ? 'running' : 'waiting') : 'stopped',
+          statusReason: state.eventEnabled && !online ? 'offline' : '',
           triggerType: 'periodic', periodMs: 1000, jitterMs: 0,
           effects: [{ svid: 1001, op: 'set', value: 80 }],
         }],
@@ -541,9 +568,9 @@ export async function mockApi(page: Page): Promise<MockState> {
 
 /* ---------------- 导航助手（所有 spec 共用） ---------------- */
 
-/** 侧栏「设备清单」里的静态入口（工作台）。 */
+/** 侧栏「设备」组里的静态入口（原「工作台」，3.0 第三轮改名「设备清单」）。 */
 export async function openWorkbench(page: Page): Promise<void> {
-  await page.locator('.sidenav .nav-item', { hasText: '工作台' }).first().click();
+  await page.locator('.sidenav .nav-item', { hasText: '设备清单' }).first().click();
   await expect(page.locator('#panel-sessions')).toBeVisible();
 }
 
@@ -553,11 +580,11 @@ export async function openDeviceFromSidebar(page: Page, device: string): Promise
   await expect(page.locator('.instance-head .instance-title')).toContainText(device);
 }
 
-/** 切配置区 / 运行区（ZoneBar 与子页签都是 role=tab，用按钮文案区分）。 */
+/** 切配置区 / 运行区：切换按钮已并入实例头（.zone-switch），文案带 ▣ / ◉ 前缀。 */
 export async function switchZone(page: Page, zone: '配置区' | '运行区'): Promise<void> {
-  await page.locator('.zonebar').getByRole('tab', { name: new RegExp(`^${zone}`) }).click();
-  await expect(page.locator('.zonebar').getByRole('tab', { name: new RegExp(`^${zone}`) }))
-    .toHaveAttribute('aria-selected', 'true');
+  const tab = page.locator('.zone-switch').getByRole('tab', { name: new RegExp(zone) });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
 /** 切设备/主机详情里的子页签。 */

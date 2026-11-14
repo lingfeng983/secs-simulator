@@ -55,6 +55,8 @@ class SessionOnConditionTest {
         session.enableSchedule(new EventSchedule(List.of(
                 new EventPlan("hot", 2001,
                         new Trigger.OnCondition(Expression.parse("svid.1001 > 190"), 1_000L)))), 20);
+        /* 计划默认禁用：先显式启动，否则条件成立也不会发，去抖断言全部失效 */
+        session.setEventEnabled("hot", true);
         session.open();
 
         try (SecsCommunicator client = connect(port)) {

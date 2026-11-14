@@ -21,8 +21,9 @@ export function WorkbenchPage({ backend, notifier, preferences, updatePreference
       msgs += row.msgsPerMin;
       events += row.s6f11PerMin;
       alarms += row.counters.activeAlarms ?? 0;
-      /* 主机连上但还没 S1F17 时是 COMMUNICATING：已经连通，不算离线 */
-      if (row.controlState === 'ONLINE' || row.controlState === 'COMMUNICATING') {
+      /* 严格 GEM：只有 ONLINE 才算在线。COMMUNICATING 是"连着但没上线"，
+         此时设备一条 S6F11 都发不出去，算进在线会让读数自欺欺人。 */
+      if (row.controlState === 'ONLINE') {
         online += 1;
       }
     }

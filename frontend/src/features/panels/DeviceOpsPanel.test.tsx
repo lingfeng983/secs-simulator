@@ -32,8 +32,9 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
       {
         id: 'dev-b',
         state: 'OPEN',
-        controlState: 'OFFLINE',
-        hasPeer: false,
+        /* 已连接但设备离线（COMMUNICATING）：严格 GEM 下不能上报，界面给「上线」 */
+        controlState: 'COMMUNICATING',
+        hasPeer: true,
         device: 'DEV-B',
         units: 2,
         port: 5002,
@@ -47,7 +48,7 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
     ],
     sessions: [
       { id: 'dev-a', state: 'OPEN', controlState: 'ONLINE', device: 'DEV-A', units: 1, lastError: '', counters: { emitted: 3, s9Replies: 2 } },
-      { id: 'dev-b', state: 'OPEN', controlState: 'OFFLINE', device: 'DEV-B', units: 2, lastError: '', counters: {} },
+      { id: 'dev-b', state: 'OPEN', controlState: 'COMMUNICATING', device: 'DEV-B', units: 2, lastError: '', counters: {} },
     ],
     ceid: 2001,
     setCeid: () => undefined,
@@ -62,6 +63,7 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
     reloadSession: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn().mockResolvedValue(undefined),
     connectSession: vi.fn().mockResolvedValue(undefined),
+    setDeviceOnline: vi.fn().mockResolvedValue(undefined),
   } as unknown as BackendController;
 }
 
@@ -89,7 +91,7 @@ function renderPanel(backend: BackendController): string {
 describe('DeviceOpsPanel 渲染契约', () => {
   it('merges overview and session data into one table', () => {
     const html = renderPanel(makeBackend());
-    /* 一张表:读数(端口/速率)与操作(重载/断开)同处一行 */
+    /* 一张表:读数(端口/速率)与操作(重载/启动·停止)同处一行 */
     expect(html).toContain('设备与会话');
     expect((html.match(/<table/g) ?? []).length).toBe(1);
     expect(html).toContain('>5001<');
@@ -102,10 +104,13 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).not.toContain('>S9Fx</th>');
     expect(html).not.toContain('>最近事件</th>');
     expect(html).not.toContain('>单元</th>');
-    /* 但信息没丢:控制徽标的 title 里带着状态与单元数 */
-    expect(html).toContain('OPEN · 1 个单元');
+    /* 但信息没丢:四态徽标的 title 里带着会话/控制状态 */
+    expect(html).toContain('（OPEN · 在线）');
     expect(html).toContain('重载');
-    expect(html).toContain('断开');
+    expect(html).toContain('停止');
+    /* 上线/下线只在链路建起来之后才出现：离线那行给「上线」，在线那行给「下线」 */
+    expect(html).toContain('>上线</button>');
+    expect(html).toContain('>下线</button>');
     expect(html).not.toContain('>上报</button>');
     expect(html).toContain('>3</td>');
     /* 两台设备各占一行 */
@@ -119,7 +124,7 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).toContain('已选 0 台');
     expect(html).toContain('批量同步配置');
     expect(html).toContain('批量重载');
-    expect(html).toContain('批量断开');
+    expect(html).toContain('批量停止');
     expect(html).not.toContain('批量上报');
     expect(html).not.toContain('批量新建');
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(3);
@@ -140,15 +145,14 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).toContain('>0<');
   });
 
-  it('offers connect instead of disconnect once a device is closed', () => {
+  it('offers start instead of stop once a device is closed', () => {
     const backend = makeBackend();
-    /* 3.0：关闭 = 断开链路，设备留在列表里。断开态那一行要能连回去，
-       而且不能同时出现「断开」——两个相反动作并排会让人不敢点。 */
+    /* 停止态那一行要能再启动，而且不能同时出现「停止」——两个相反动作并排会让人不敢点。 */
     backend.sessions = [
       { id: 'dev-a', state: 'CLOSED', controlState: 'OFFLINE', device: 'DEV-A', units: 1, lastError: '', counters: {} },
     ] as never;
     const html = renderPanel(backend);
-    expect(html).toContain('>连接</button>');
-    expect(html).not.toContain('>断开</button>');
+    expect(html).toContain('>启动</button>');
+    expect(html).not.toContain('>停止</button>');
   });
 });

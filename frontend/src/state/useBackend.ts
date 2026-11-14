@@ -132,6 +132,8 @@ export interface BackendController {
   closeSession: (sessionId: string) => Promise<void>;
   /** 重新建链：断开态的设备对象复用，模型/钉值/计划启用态原样恢复。 */
   connectSession: (deviceId: string) => Promise<void>;
+  /** 手动上线 / 下线（GEM 里等价于主机发 S1F17 / S1F15）；未建链时提示先启动。 */
+  setDeviceOnline: (deviceId: string, online: boolean) => Promise<void>;
   reloadSession: (sessionId: string) => Promise<void>;
   trigger: (sessionId: string, ceid: number) => Promise<void>;
   setAlarm: (sessionId: string, alid: number, set: boolean, text: string, category: number) => Promise<void>;

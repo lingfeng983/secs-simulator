@@ -49,6 +49,11 @@ class SessionAfterEventTest {
                 new EventPlan("a", 2001, new Trigger.At(1_000L)),
                 new EventPlan("b", 2003, new Trigger.AfterEvent("a", 500L)),
                 new EventPlan("c", 2002, new Trigger.AfterEvent("b", 200L)))), 20);
+        /* 3.0 起计划默认禁用：本用例验证 AfterEvent 链的时序，先把三条都显式启动，
+           否则整条链不会触发，断言会退化成"什么都没发生" */
+        session.setEventEnabled("a", true);
+        session.setEventEnabled("b", true);
+        session.setEventEnabled("c", true);
         session.open();
 
         try (SecsCommunicator client = connect(port)) {

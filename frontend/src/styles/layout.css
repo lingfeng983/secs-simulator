@@ -251,6 +251,18 @@ body.sidenav-resizing .app {
   color: var(--warn);
 }
 
+.nav-monogram.info {
+  border-color: color-mix(in srgb, var(--info) 35%, transparent);
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.nav-monogram.danger {
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .nav-item.active .nav-monogram {
   border-color: var(--accent-line);
   background: var(--accent-soft);
@@ -275,6 +287,14 @@ body.sidenav-resizing .app {
 
 .nav-item .nav-state.tone-warn {
   color: var(--warn);
+}
+
+.nav-item .nav-state.tone-info {
+  color: var(--info);
+}
+
+.nav-item .nav-state.tone-danger {
+  color: var(--danger);
 }
 
 .sidenav-foot {
@@ -348,50 +368,58 @@ body.sidenav-resizing .app {
   -webkit-backdrop-filter: blur(14px) saturate(1.5);
 }
 
+/* 标题区压成一行：分组名/一句话说明不再各占一行 */
 .page-title {
   display: flex;
-  flex-direction: column;
-  gap: 0.05rem;
-  min-width: 11rem;
+  align-items: center;
+  min-width: 0;
   flex: 0 1 auto;
 }
 
-.page-crumb {
+.page-path {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--faint);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.page-crumb::after {
-  content: '';
-  flex: 1 1 auto;
-  height: 1px;
-  min-width: 12px;
-  max-width: 40px;
-  background: var(--line-strong);
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: min(46vw, 620px);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .page-name {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 1rem;
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 
+.page-sep {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 13px;
+}
+
 .page-desc {
-  color: var(--muted);
-  font-size: 11.5px;
-  max-width: 68ch;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.monitor-toggle {
+  gap: 0.35rem;
+}
+
+.monitor-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 .topbar-actions {

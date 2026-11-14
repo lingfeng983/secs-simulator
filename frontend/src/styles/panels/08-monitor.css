@@ -1,0 +1,424 @@
+/* ============================================================
+   右侧实时消息监控抽屉 + 采集计划 / 参数勾选 / SML 案例
+   颜色全部走 tokens：接收用 --ok（绿），发送用 --warn（琥珀）。
+   ============================================================ */
+
+/* 抽屉展开时给主内容让出宽度，不盖住页面 */
+.app.monitor-open .main-col {
+  margin-right: var(--monitor-w, 420px);
+}
+
+.monitor-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  max-width: 720px;
+  border-left: 1px solid var(--line-strong);
+  background: var(--canvas);
+  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.08);
+}
+
+.monitor-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.monitor-resize:hover {
+  background: var(--accent-line);
+}
+
+.monitor-head {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.monitor-head-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitor-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.monitor-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+/* 查看对象：一次只看一台设备或一台主机，用下拉切换 */
+.monitor-target {
+  margin-top: 6px;
+}
+
+.monitor-target .field {
+  width: 100%;
+}
+
+.monitor-target .field > select {
+  width: 100%;
+  min-width: 0;
+}
+
+.mm-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mm-chip.recv {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+}
+
+.mm-chip.sent {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+.monitor-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.monitor-filters .field {
+  min-width: 0;
+  flex: 1 1 92px;
+}
+
+.monitor-filters .field-wide {
+  flex: 2 1 160px;
+}
+
+/* 抽屉只有 300~720px 宽：控件必须跟着字段宽度收缩。
+   全局 .field-wide input 是 14rem 固定宽，直接搬进来会把整行顶出抽屉。 */
+.monitor-filters .field > input,
+.monitor-filters .field > select {
+  width: 100%;
+  min-width: 0;
+}
+
+.monitor-filters .check-inline {
+  flex: 0 0 auto;
+}
+
+.monitor-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.monitor-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.monitor-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 10px 18px;
+}
+
+.mm-row {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin-bottom: 5px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.mm-row:hover {
+  border-color: var(--accent-line);
+}
+
+.mm-row:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.mm-row.open {
+  border-color: var(--accent-line);
+}
+
+.mm-row.recv {
+  border-left-color: var(--ok);
+  background: color-mix(in srgb, var(--ok-soft) 45%, var(--surface));
+}
+
+.mm-row.sent {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn-soft) 45%, var(--surface));
+}
+
+.mm-row-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.mm-caret {
+  color: var(--muted);
+  font-size: 10px;
+  width: 0.8em;
+  flex: 0 0 auto;
+}
+
+.mm-time {
+  color: var(--muted);
+}
+
+.mm-sf {
+  font-weight: 650;
+}
+
+.mm-body {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-2);
+  /* 展开后内容可能很长：给一个上限并允许内部滚动，别把整条时间线顶走 */
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.mm-cat {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ---------- 已保存采集计划 ---------- */
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.plan-row .plan-name {
+  font-weight: 600;
+  min-width: 96px;
+}
+
+.plan-row .plan-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.plan-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0;
+}
+
+.plan-chip {
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-2);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.plan-chip:hover {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---------- 参数勾选 ---------- */
+.param-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--line);
+  border-bottom: 1px dashed var(--line);
+  margin: 8px 0;
+}
+
+.param-picker .check-inline {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.param-picker .check-inline:has(input:checked) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------- SML 案例 ---------- */
+/* 卡片尺寸固定：每张 320×264，排成整齐的网格；
+   报文体长短不一，超出的部分在 pre 里滚动，不把卡片撑高。 */
+.preset-case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 320px);
+  justify-content: start;
+  gap: 10px;
+}
+
+@media (max-width: 700px) {
+  .preset-case-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.preset-case {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: 264px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+  overflow: hidden;
+}
+
+@media (max-width: 700px) {
+  .preset-case {
+    width: 100%;
+  }
+}
+
+.preset-case h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preset-case p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  /* 说明最多两行，保持每张卡片的正文起点对齐 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.8em;
+}
+
+.preset-case pre {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  word-break: normal;
+  overflow: auto;
+}
+
+.preset-case .toolbar {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* ---------- 采集概览 ---------- */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.overview-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.overview-card h3 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+}
+
+.overview-card .overview-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.overview-card ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+@media (max-width: 960px) {
+  .app.monitor-open .main-col {
+    margin-right: 0;
+  }
+  .monitor-drawer {
+    width: min(100vw, 420px) !important;
+    z-index: 60;
+  }
+}

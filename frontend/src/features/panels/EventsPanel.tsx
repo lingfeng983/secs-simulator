@@ -26,6 +26,38 @@ export function triggerLabel(plan: EventPlanView): string {
   }
 }
 
+/** 计划的运行态；后端没给 status 时按 enabled 兜底。 */
+export type PlanStatus = 'stopped' | 'waiting' | 'running';
+
+export function planStatusOf(plan: EventPlanView): PlanStatus {
+  if (plan.status !== undefined) {
+    return plan.status;
+  }
+  return plan.enabled ? 'running' : 'stopped';
+}
+
+/** 运行态徽标：停止灰、等待黄、运行绿。 */
+const PLAN_STATUS_BADGE: Record<PlanStatus, { text: string; badge: string }> = {
+  stopped: { text: '已停止', badge: 'badge-muted' },
+  waiting: { text: '等待上线', badge: 'badge-warn' },
+  running: { text: '运行中', badge: 'badge-ok' },
+};
+
+/** 等待原因说清楚：是设备没上线，还是主机把这个事件屏蔽了。 */
+function planStatusHint(plan: EventPlanView): string {
+  if (planStatusOf(plan) === 'stopped') {
+    return '已停止：启动后按触发规则发送事件';
+  }
+  switch (plan.statusReason) {
+    case 'offline':
+      return '已启动，但设备不在线：严格 GEM 下只有 ONLINE 才能上报 S6F11。到设备清单点「上线」，或等主机发 S1F17';
+    case 'ceid-disabled':
+      return '已启动，但该事件被主机用 S2F37 屏蔽了：主机重新使能后自动恢复';
+    default:
+      return '正在按触发规则发送事件';
+  }
+}
+
 /** 触发类型选项(与后端 Trigger 的四种实现一一对应)。 */
 const TRIGGER_TYPES = [
   ['periodic', '周期'],
@@ -60,6 +92,9 @@ const EMPTY_PLAN: EventPlanInput = {
 export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): JSX.Element {
   const { eventPlans, catalog, activeSession } = backend;
   const enabled = eventPlans.filter((plan) => plan.enabled).length;
+  /* 「已启动」和「运行中」是两件事：启动了但设备没在线，消息其实发不出去。
+     运行态以后端为准；老后端不带 status 时按 enabled 兜底，别把界面弄空白。 */
+  const running = eventPlans.filter((plan) => planStatusOf(plan) === 'running').length;
 
   /* 计划编辑 */
   const [planEditorOpen, setPlanEditorOpen] = useState(false);
@@ -80,6 +115,24 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
 
   const ceidChoices = catalog?.ceids ?? [];
   const svidChoices = catalog?.svids ?? [];
+
+  /* 全部启动 / 全部停止：计划默认禁用，逐条点「启用」在几十条计划时不现实。
+     只在设备在线后才有意义（离线时调度器会跳过，不会积压）。 */
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const setAllEnabled = async (next: boolean) => {
+    const targets = eventPlans.filter((plan) => plan.enabled !== next);
+    if (targets.length === 0) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      for (const plan of targets) {
+        await backend.toggleEvent(plan);
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   /* 归属过滤：多单元设备才需要；计划的归属由它引用的 CEID 决定 */
   const owners = useMemo(
@@ -159,10 +212,16 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     {
       key: 'enabled',
       header: '状态',
-      sortValue: (row) => (row.enabled ? 1 : 0),
-      render: (row) => (
-        <span className={`badge badge-${row.enabled ? 'ok' : 'muted'}`}>{row.enabled ? '启用' : '禁用'}</span>
-      ),
+      sortValue: (row) => ['stopped', 'waiting', 'running'].indexOf(planStatusOf(row)),
+      render: (row) => {
+        const status = planStatusOf(row);
+        const badge = PLAN_STATUS_BADGE[status];
+        return (
+          <span className={`badge ${badge.badge}`} title={planStatusHint(row)}>
+            {badge.text}
+          </span>
+        );
+      },
     },
     {
       key: 'actions',
@@ -189,9 +248,9 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
             type="button"
             onClick={() => void backend.toggleEvent(row)}
             disabled={activeSession === ''}
-            title={row.enabled ? '禁用后不再触发;已排队的延迟事件会清掉' : '重新启用;禁用期间的事件不补发'}
+            title={row.enabled ? '停止后不再触发;已排队的延迟事件会清掉' : '启动后按触发规则发送事件(设备在线才真正发出);停止期间的事件不补发'}
           >
-            {row.enabled ? '禁用' : '启用'}
+            {row.enabled ? '停止' : '启动'}
           </button>
           <button type="button" onClick={() => openPlanEditor(row)} title="编辑计划(触发规则与效果)">
             编辑
@@ -257,9 +316,25 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     <Panel
       id="panel-events"
       title="事件编排"
-      description="引用「事件设置」里已定义的 CEID 做计划:增删改、启停、手动触发。运行时改动不写回配置。"
+      description="计划默认禁用；设备在线后点「启动」才开始按触发规则发事件。运行时改动不写回配置。"
       actions={
         <>
+          <button
+            type="button"
+            disabled={activeSession === '' || bulkBusy || eventPlans.length === 0}
+            onClick={() => void setAllEnabled(true)}
+            title="启动全部计划：设备在线时立即按各自的触发规则发送事件"
+          >
+            {bulkBusy ? '处理中…' : '全部启动'}
+          </button>
+          <button
+            type="button"
+            disabled={activeSession === '' || bulkBusy || enabled === 0}
+            onClick={() => void setAllEnabled(false)}
+            title="停止全部计划：已在队列里的延迟事件一并清除"
+          >
+            全部停止
+          </button>
           <button
             type="button"
             disabled={activeSession === '' || cycleBusy}
@@ -307,7 +382,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           { header: 'CEID', value: (row) => row.ceid },
           { header: '归属', value: (row) => row.owner ?? '' },
           { header: '触发规则', value: (row) => triggerLabel(row) },
-          { header: '状态', value: (row) => (row.enabled ? '启用' : '禁用') },
+          { header: '状态', value: (row) => PLAN_STATUS_BADGE[planStatusOf(row)].text },
         ]}
       />
 
@@ -411,7 +486,8 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
       <PanelFootnote
         items={[
           { label: '计划数', value: eventPlans.length },
-          { label: '启用中', value: enabled, tone: enabled > 0 ? 'ok' : undefined },
+          { label: '已启动', value: enabled },
+          { label: '运行中', value: running, tone: running > 0 ? 'ok' : undefined },
         ]}
       />
 

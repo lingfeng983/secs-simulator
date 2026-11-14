@@ -148,30 +148,18 @@ export function useHostsV2(client: ApiClient | null) {
 
 export type HostsV2State = ReturnType<typeof useHostsV2>;
 
-/** 主机相位 → 徽标色调（设计 §3.3：四态）。 */
-export function hostPhaseTone(phase: HostV2['phase']): 'ok' | 'warn' | 'danger' | 'muted' {
-  switch (phase) {
-    case 'CONNECTED':
-      return 'ok';
-    case 'CONNECTING':
-      return 'warn';
-    case 'FAILED':
-      return 'danger';
-    default:
-      return 'muted';
-  }
+/** 主机相位 → 徽标色调：界面只区分「链接」（绿）与「停止」（红）。 */
+export function hostPhaseTone(phase: HostV2['phase']): 'ok' | 'danger' {
+  return phase === 'CONNECTED' ? 'ok' : 'danger';
 }
 
-/** 主机相位 → 中文。 */
+/**
+ * 主机相位 → 中文。
+ *
+ * <p>主机只有两种可操作状态：链路通（链接）与没通（停止）。
+ * CONNECTING / FAILED 这类中间态在实例头的动作按钮与错误行里已经能看出来，
+ * 状态徽标再拆成四种只会让"现在到底能不能发报文"更难判断。</p>
+ */
 export function hostPhaseLabel(phase: HostV2['phase']): string {
-  switch (phase) {
-    case 'CONNECTED':
-      return '已连接';
-    case 'CONNECTING':
-      return '连接中';
-    case 'FAILED':
-      return '连接失败';
-    default:
-      return '已断开';
-  }
+  return phase === 'CONNECTED' ? '链接' : '停止';
 }

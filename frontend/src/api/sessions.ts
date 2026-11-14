@@ -27,6 +27,7 @@ type SessionApi = Pick<
   | 'bulkSessions'
   | 'closeSession'
   | 'connectDevice'
+  | 'setDeviceOnline'
   | 'reloadSession'
   | 'trigger'
   | 'alarm'
@@ -100,6 +101,16 @@ export const sessionApi: SessionApi = {
       await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/link/connect`), {
         method: 'POST',
       }, LONG_REQUEST_TIMEOUT_MS),
+    );
+  },
+  async setDeviceOnline(deviceId, online) {
+    /* GEM 的上线/下线：只动控制状态，链路与端口都不动。
+       链路没建立时后端回 409（没有主机就没有"在线"可言），由调用方提示。 */
+    return commandStatus(
+      await request(
+        apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/link/${online ? 'online' : 'offline'}`),
+        { method: 'POST' },
+      ),
     );
   },
   async reloadSession(sessionId) {

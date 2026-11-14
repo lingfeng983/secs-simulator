@@ -16,7 +16,7 @@ export interface NavItemDef {
   id: string;
   /** 菜单上的短名称。 */
   label: string;
-  /** 顶栏标题下的一句话说明。 */
+  /** 顶栏单行路径里的短说明（不再单独占一行）。 */
   description: string;
   icon: IconName;
   /** 该入口对应的路由。 */
@@ -34,13 +34,13 @@ export interface NavGroupDef {
 export const NAV_GROUPS: readonly NavGroupDef[] = [
   {
     id: 'devices',
-    label: '设备清单',
+    label: '设备',
     dynamic: 'devices',
     items: [
       {
         id: 'workbench',
-        label: '工作台',
-        description: '模拟器的总控台:设备与会话合并成一张表,读数、勾选、生命周期操作都在一行。',
+        label: '设备清单',
+        description: '总览与会话管理',
         icon: 'overview',
         route: { name: 'workbench' },
       },
@@ -54,7 +54,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'hosts',
         label: '主机模拟',
-        description: '以主机角色连任意设备地址:可同时开多台,每台有独立的设置与收发记录。',
+        description: '多主机实例管理',
         icon: 'hostsim',
         route: { name: 'hosts' },
       },
@@ -67,21 +67,21 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'host-templates',
         label: '主机模板',
-        description: '预存目标地址/端口/Device ID 的主机实例模板,新建主机时可一键填入。',
+        description: '目标地址 / 端口 / Device ID 预设',
         icon: 'hostsim',
         route: { name: 'host-templates' },
       },
       {
         id: 'templates',
         label: '设备模板',
-        description: '设备模板的增删改查；工作台新建设备只从这里选模板。',
+        description: '设备模板增删改查',
         icon: 'config',
         route: { name: 'templates' },
       },
       {
         id: 'audit',
         label: '审计',
-        description: '谁在什么时候动了什么：操作留痕。',
+        description: '操作留痕',
         icon: 'audit',
         route: { name: 'system', page: 'audit' },
       },
@@ -103,7 +103,8 @@ export function routeTitle(route: Route): { group: string; label: string; descri
         || (route.name === 'templates' && item.id === 'templates')
         || (route.name === 'system' && item.id === route.page)
       ) {
-        return { group: group.label, label: item.label, description: item.description };
+        /* group 保留在数据结构里供命令面板/测试用，顶栏不再展示它 */
+        return { group: '', label: item.label, description: item.description };
       }
     }
   }

@@ -55,6 +55,21 @@ final class SessionJsonViews {
     }
 
     /**
+     * 一条计划的运行态。
+     *
+     * <p>和 {@code enabled} 分开：{@code enabled} 是"操作员点过启动"，{@code status}
+     * 是"消息现在到底发不发得出去"。计划启动了但设备没在线（严格 GEM 下不能上报）
+     * 时，前者是 true、后者是 {@code waiting}——界面上必须能看出这个区别，
+     * 否则操作员只会看到"运行中"却一条报文都没有。</p>
+     *
+     * @param status {@code stopped} / {@code waiting} / {@code running}
+     * @param reason 未运行的原因：{@code offline}（设备未在线）、
+     *               {@code ceid-disabled}（事件被主机 S2F37 屏蔽）、空串（无）
+     */
+    record PlanStatus(String status, String reason) {
+    }
+
+    /**
      * 事件编排列表（含每条计划的启用状态、触发规则与归属;v6 起带效果数组）。
      *
      * <p>归属不单独存储，而是按计划引用的 CEID 反查：计划属于哪个单元，
@@ -67,7 +82,7 @@ final class SessionJsonViews {
      */
     static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
                              java.util.function.IntFunction<String> ceidOwner) {
-        return eventsJson(plans, disabledPlans, ceidOwner, null);
+        return eventsJson(plans, disabledPlans, ceidOwner, null, null);
     }
 
     /**
@@ -86,6 +101,23 @@ final class SessionJsonViews {
     static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
                              java.util.function.IntFunction<String> ceidOwner,
                              Map<String, PlanRuntimeStat> stats) {
+        return eventsJson(plans, disabledPlans, ceidOwner, stats, null);
+    }
+
+    /**
+     * 全量视图：统计 + 运行态。
+     *
+     * @param plans         编排表
+     * @param disabledPlans 运行时禁用的计划 id
+     * @param ceidOwner     CEID → 归属单元名
+     * @param stats         planId → 运行统计；null = 不带统计
+     * @param statusOf      计划 → 运行态；null = 不带运行态
+     * @return JSON 文本
+     */
+    static String eventsJson(Iterable<EventPlan> plans, Set<String> disabledPlans,
+                             java.util.function.IntFunction<String> ceidOwner,
+                             Map<String, PlanRuntimeStat> stats,
+                             java.util.function.Function<EventPlan, PlanStatus> statusOf) {
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> events = new ArrayList<>();
 
@@ -96,6 +128,11 @@ final class SessionJsonViews {
             String owner = ceidOwner == null ? "" : ceidOwner.apply(plan.ceid());
             pairs.add(b.pair("owner", owner == null ? "" : owner));
             pairs.add(b.pair("enabled", !disabledPlans.contains(plan.id())));
+            if (statusOf != null) {
+                PlanStatus status = statusOf.apply(plan);
+                pairs.add(b.pair("status", status == null ? "stopped" : status.status()));
+                pairs.add(b.pair("statusReason", status == null ? "" : status.reason()));
+            }
             if (stats != null) {
                 PlanRuntimeStat stat = stats.getOrDefault(plan.id(), PlanRuntimeStat.EMPTY);
                 pairs.add(b.pair("fireCount", stat.fireCount()));

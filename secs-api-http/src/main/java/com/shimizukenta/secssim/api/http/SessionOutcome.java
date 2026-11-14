@@ -18,6 +18,9 @@ public enum SessionOutcome {
     /** 会话在，但没有配置来源（例如内置演示会话），因此不能重载。 */
     NOT_RELOADABLE,
 
+    /** 会话在，但链路没建立（没有主机），不能上线/下线。 */
+    NOT_CONNECTED,
+
     /** 标识已被占用。 */
     CONFLICT,
 

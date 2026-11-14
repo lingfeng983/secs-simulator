@@ -170,10 +170,10 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       }
       try {
         const status = await client.closeSession(sessionId);
-        /* 3.0 起这是「断开」不是「删除」：设备仍在列表里，随时能再连 */
-        const text = lifecycleMessage(status, `断开设备 ${sessionId}`);
+        /* 3.0 起这是「停止端口监听」不是「删除」：设备仍在清单里，随时能再启动 */
+        const text = lifecycleMessage(status, `停止设备 ${sessionId}`);
         if (status === 200 || status === 204) {
-          notifierRef.current.success(text, '端口已释放，设备保留在列表里，可随时再连');
+          notifierRef.current.success(text, '端口已释放，设备保留在设备清单里，可随时启动');
         } else {
           notifierRef.current.error(text);
         }
@@ -192,9 +192,9 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       }
       try {
         const status = await client.connectDevice(deviceId);
-        const text = lifecycleMessage(status, `连接设备 ${deviceId}`);
+        const text = lifecycleMessage(status, `启动设备 ${deviceId}`);
         if (status === 200 || status === 201) {
-          notifierRef.current.success(text, '设定值与事件启停已按上次保留');
+          notifierRef.current.success(text, '端口已开始监听，等主机连接；设定值与事件启停按上次保留');
         } else {
           notifierRef.current.error(text);
         }
@@ -204,6 +204,35 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       }
     },
     [client, refreshSessions],
+  );
+
+  /* 手动上线/下线：GEM 里这是主机的 S1F17 / S1F15，这里给操作员一条同样的路。
+     只改控制状态不动链路，所以不需要重连；失败时把后端的原因说清楚——
+     最常见的是"链路还没建"，这时点上线没有任何意义。 */
+  const setDeviceOnline = useCallback(
+    async (deviceId: string, online: boolean) => {
+      if (client === null) {
+        return;
+      }
+      try {
+        const status = await client.setDeviceOnline(deviceId, online);
+        if (status === 200) {
+          notifierRef.current.success(
+            online ? `设备 ${deviceId} 已上线` : `设备 ${deviceId} 已下线`,
+            online ? '按计划规则上报事件（等价于主机发 S1F17）' : '主动上报立即停止（等价于主机发 S1F15）',
+          );
+        } else if (status === 409) {
+          notifierRef.current.error('设备还没连上主机', '先「启动」端口并等主机建立 HSMS 链接，才能上线');
+        } else {
+          notifierRef.current.error(lifecycleMessage(status, `${online ? '上线' : '下线'}设备 ${deviceId}`));
+        }
+        await refreshSessions();
+        await refreshSessionDetail(deviceId);
+      } catch (error) {
+        notifierRef.current.error(online ? '上线失败' : '下线失败', (error as Error).message);
+      }
+    },
+    [client, refreshSessions, refreshSessionDetail],
   );
 
   const reloadSession = useCallback(
@@ -257,10 +286,11 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       batchClose,
       closeSession,
       connectSession,
+      setDeviceOnline,
       reloadSession,
       trigger,
     }),
     [createSession, bulkCreateSessions, batchTrigger, batchReload, batchClose,
-      closeSession, connectSession, reloadSession, trigger],
+      closeSession, connectSession, setDeviceOnline, reloadSession, trigger],
   );
 }

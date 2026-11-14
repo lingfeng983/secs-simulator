@@ -699,6 +699,21 @@ public interface ApiContext {
     }
 
     /**
+     * v2：手动把设备置为在线 / 离线（GEM 里对应 S1F17 / S1F15）。
+     *
+     * <p>只改控制状态，不动链路：离线后 S6F11 / S6F1 立刻停发，在线后按计划
+     * 规则恢复。链路没建立时返回 {@link SessionOutcome#NOT_CONNECTED}——
+     * ONLINE 是"对某台主机"而言的，没有主机就没有可上的线。</p>
+     *
+     * @param deviceId 设备 id
+     * @param online   是否在线
+     * @return 结果
+     */
+    default SessionOutcome deviceOnlineV2(String deviceId, boolean online) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
      * v2：按配置重载设备（等价于 v1 的会话重载）。
      *
      * @param deviceId 设备 id

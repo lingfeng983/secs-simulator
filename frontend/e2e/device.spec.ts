@@ -138,14 +138,48 @@ test('配置区·版本历史：列出快照与 SHA 前缀', async ({ page }) =>
 
 /* ==================== 运行区 ==================== */
 
-test('运行区·实时状态：四个读数都在', async ({ page }) => {
+test('运行区不再有实时状态页签，实例头直接给四态与启停', async ({ page }) => {
   await page.goto('/#/device/line1/runtime/status');
-  await expect(page.getByRole('heading', { name: '实时状态' })).toBeVisible();
-  const kpis = page.locator('.kpi-grid').first();
-  await expect(kpis).toContainText('会话状态');
-  await expect(kpis).toContainText('控制状态');
-  await expect(kpis).toContainText('累计上报');
-  await expect(kpis).toContainText('活动报警');
+  /* 旧 status 深链回落到运行区首页（事件计划） */
+  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件计划', exact: true }))
+    .toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.subtabs')).not.toContainText('实时状态');
+
+  const head = page.locator('.instance-head');
+  /* 四态：停止 / 启动 / 离线（已连接但没上线）/ 在线 */
+  await expect(head.locator('.badge').first()).toHaveText(/停止|启动|离线|在线/);
+  await expect(head).toContainText('设备状态');
+  /* 停止态给「启动设备」，其余给「停止设备」 */
+  await expect(head.getByRole('button', { name: /启动设备|停止设备/ })).toBeVisible();
+});
+
+test('设备清单：离线可手动上线，在线可下线（等价 S1F17 / S1F15）', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/');
+
+  /* line2 在夹具里是"端口开着但没建链"（启动态）。先停再启，拿到一次干净的建链：
+     建链只到 COMMUNICATING（已连接、仍离线），上线要单独一步。 */
+  const row = page.locator('#panel-sessions tbody tr', { hasText: 'line2' }).first();
+  await row.getByRole('button', { name: '停止' }).click();
+  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '停止' }).click();
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line2')?.state).toBe('CLOSED');
+
+  await row.getByRole('button', { name: '启动' }).click();
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line2')?.controlState)
+    .toBe('COMMUNICATING');
+
+  /* 已连接但离线：徽标是「离线」，行上出现「上线」而不是「下线」 */
+  await expect(row.locator('.badge', { hasText: '离线' })).toBeVisible();
+  await expect(row.getByRole('button', { name: '下线' })).toHaveCount(0);
+
+  await row.getByRole('button', { name: '上线' }).click();
+  await expect.poll(() => state.calls.some((call) => call.endsWith('/link/online'))).toBe(true);
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line2')?.controlState).toBe('ONLINE');
+  await expect(row.locator('.badge', { hasText: '在线' })).toBeVisible();
+
+  await row.getByRole('button', { name: '下线' }).click();
+  await expect.poll(() => state.sessions.find((item) => item.id === 'line2')?.controlState).toBe('OFFLINE');
+  await expect(row.getByRole('button', { name: '上线' })).toHaveCount(0);
 });
 
 test('运行区·事件计划：计划卡 + 台账 + 只看失败 / 含试跑', async ({ page }) => {
@@ -191,20 +225,45 @@ test('运行区·事件计划：单步试跑打后端、导出 CSV', async ({ pa
   expect(download.suggestedFilename()).toBe('plan-executions.csv');
 });
 
-test('运行区·事件计划：计划行按钮（预览 / 触发 / 禁用 / 编辑 / 删除）', async ({ page }) => {
+test('运行区·事件计划：设备离线时启动只到「等待上线」，消息不会真发', async ({ page }) => {
+  const state = await mockApi(page);
+  /* line2 置成"已连接但离线"：严格 GEM 下这种状态不能上报 S6F11 */
+  const line2 = state.sessions.find((item) => item.id === 'line2');
+  if (line2 !== undefined) {
+    line2.state = 'OPEN';
+    line2.controlState = 'COMMUNICATING';
+  }
+  await page.goto('/#/device/line2/runtime/plans');
+
+  const row = page.locator('#panel-events tbody tr', { hasText: 'beat' }).first();
+  await expect(row.locator('.badge', { hasText: '已停止' })).toBeVisible();
+
+  await row.getByRole('button', { name: '启动' }).click();
+  /* 启动了 ≠ 在发：离线时状态必须是「等待上线」，否则操作员会盯着一个不发报文的"运行中" */
+  await expect(row.locator('.badge', { hasText: '等待上线' })).toBeVisible();
+  await expect(row.locator('.badge', { hasText: '运行中' })).toHaveCount(0);
+  /* 徽标 title 要说清楚为什么没在发、怎么才能发 */
+  await expect(row.locator('.badge', { hasText: '等待上线' })).toHaveAttribute('title', /上线|S1F17/);
+});
+
+test('运行区·事件计划：默认停止，行按钮（预览 / 触发 / 启动 / 编辑 / 删除）', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/#/device/line1/runtime/plans');
   const panel = page.locator('#panel-events');
   const row = panel.locator('tbody tr', { hasText: 'beat' }).first();
 
+  /* 计划默认禁用：先显示「已停止」，点「启动」后才运行 */
+  await expect(row.locator('.badge', { hasText: '已停止' })).toBeVisible();
   await row.getByRole('button', { name: '预览' }).click();
   await expect(panel.locator('.event-preview')).toBeVisible();
 
   await row.getByRole('button', { name: '触发' }).click();
   await expect.poll(() => state.calls.some((call) => call.includes('/ceid/2001'))).toBe(true);
 
-  await row.getByRole('button', { name: '禁用' }).click();
-  await expect(row.getByRole('button', { name: '启用' })).toBeVisible();
+  await row.getByRole('button', { name: '启动' }).click();
+  await expect(row.getByRole('button', { name: '停止' })).toBeVisible();
+  /* line1 在夹具里是 ONLINE：启动后是真在发，所以是「运行中」而不是「等待上线」 */
+  await expect(row.locator('.badge', { hasText: '运行中' })).toBeVisible();
 
   await row.getByRole('button', { name: '编辑' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -321,24 +380,71 @@ test('运行区·状态变量：新增弹窗能填能取消', async ({ page }) =
   await expect(page.locator('.toast').first()).toBeVisible();
 });
 
-test('运行区·报文收发：分类屏蔽与导出', async ({ page }) => {
-  await page.goto('/#/device/line1/runtime/messages');
-  const panel = page.locator('#panel-messages');
-  await expect(panel).toBeVisible();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
-  await expect(panel.getByText('S6F11 W', { exact: true })).toBeVisible();
+test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色', async ({ page }) => {
+  await page.goto('/#/device/line1/runtime/plans');
+  /* 运行区不再单独摆一块消息列表，子页里也没有「报文收发」 */
+  await expect(page.locator('#panel-messages')).toHaveCount(0);
+  await expect(page.locator('.subtabs')).not.toContainText('报文收发');
 
-  await panel.getByRole('button', { name: /^探测/ }).click();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toHaveCount(0);
-  await expect(panel.getByText('S6F11 W', { exact: true })).toBeVisible();
+  const drawer = page.locator('.monitor-drawer');
+  await expect(drawer).toHaveCount(0);
+  await page.locator('.monitor-toggle').click();
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('button', { name: '收起消息监控' })).toBeVisible();
+  /* 顶栏按钮不再带消息条数 */
+  await expect(page.locator('.monitor-toggle .monitor-count')).toHaveCount(0);
 
-  await panel.getByRole('button', { name: '全部显示' }).click();
-  await expect(panel.getByText('S1F1 W', { exact: true })).toBeVisible();
+  /* 抽屉是侧边栏：主内容让出同样的宽度，抽屉内部不横向溢出 */
+  const drawerBox = await drawer.boundingBox();
+  const mainBox = await page.locator('.main-col').boundingBox();
+  expect(drawerBox).not.toBeNull();
+  expect(mainBox).not.toBeNull();
+  if (drawerBox !== null && mainBox !== null) {
+    expect(drawerBox.width).toBeGreaterThan(300);
+    expect(mainBox.x + mainBox.width).toBeLessThanOrEqual(drawerBox.x + 1);
+  }
+  expect(await drawer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
 
-  const downloadPromise = page.waitForEvent('download');
-  await panel.getByRole('button', { name: '导出本设备报文' }).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('messages-device-line1.jsonl');
+  /* 默认只看当前设备 */
+  await expect(drawer.getByLabel('选择要查看的设备或主机')).toHaveValue('device:line1');
+  await expect(drawer.getByText(/只看设备 line1/)).toBeVisible();
+
+  /* 接收 / 发送用不同的行样式与徽标区分 */
+  await expect(drawer.locator('.mm-row.recv').first()).toBeVisible();
+  await expect(drawer.locator('.mm-row.sent').first()).toBeVisible();
+  await expect(drawer.locator('.mm-chip.recv').first()).toBeVisible();
+  await expect(drawer.locator('.mm-chip.sent').first()).toBeVisible();
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toBeVisible();
+
+  /* 报文体默认不展示，点行才展开 */
+  await expect(drawer.locator('.mm-body')).toHaveCount(0);
+  const s6f11 = drawer.locator('.mm-row', { hasText: 'S6F11 W' }).first();
+  await s6f11.click();
+  await expect(drawer.locator('.mm-body')).toHaveCount(1);
+  await expect(drawer.locator('.mm-body')).toContainText('<L[3]>');
+  await s6f11.click();
+  await expect(drawer.locator('.mm-body')).toHaveCount(0);
+
+  /* 一次只看一个对象：切到主机后，设备独有的 S6F11 不再出现 */
+  await drawer.getByLabel('选择要查看的设备或主机').selectOption('host:host-1');
+  await expect(drawer.getByText(/只看主机 host-1/)).toBeVisible();
+  await expect(drawer.getByText('S6F11 W', { exact: true })).toHaveCount(0);
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toBeVisible();
+  await drawer.getByLabel('选择要查看的设备或主机').selectOption('device:line1');
+  await expect(drawer.getByText(/只看设备 line1/)).toBeVisible();
+  await expect(drawer.getByText('S6F11 W', { exact: true })).toBeVisible();
+
+  await drawer.getByLabel('按方向过滤').selectOption('sent');
+  await expect(drawer.locator('.mm-row.recv')).toHaveCount(0);
+  await drawer.getByLabel('按方向过滤').selectOption('all');
+
+  await drawer.getByLabel('按 SxFy 过滤').fill('S6F11');
+  await expect(drawer.getByText('S1F1 W', { exact: true })).toHaveCount(0);
+  await expect(drawer.getByText('S6F11 W', { exact: true })).toBeVisible();
+  await drawer.getByLabel('按 SxFy 过滤').fill('');
+
+  await drawer.getByRole('button', { name: '收起消息监控' }).click();
+  await expect(drawer).toHaveCount(0);
 });
 
 test('运行区·手动操作：发送 SML / 压测 / 报警置位清除 / 报警风暴', async ({ page }) => {
@@ -380,23 +486,24 @@ test('配置区 / 运行区切换会换掉子页签集合', async ({ page }) => 
   await expect(tabs).not.toContainText('配置原文');
 });
 
-test('设备头部的返回工作台与指标', async ({ page }) => {
+test('设备头部的返回设备清单与指标', async ({ page }) => {
   await gotoDevice(page);
   const head = page.locator('.instance-head');
   await expect(head).toContainText('LINE1');
   await expect(head).toContainText('line1');
-  await expect(head).toContainText('会话状态');
-  await head.getByRole('button', { name: '← 工作台' }).click();
+  await expect(head).toContainText('设备状态');
+  /* 配置区 / 运行区切换就在这同一行，不再单独占一行 */
+  await expect(head.locator('.zone-switch')).toBeVisible();
+  await expect(page.locator('.zonebar')).toHaveCount(0);
+  await head.getByRole('button', { name: '← 设备清单' }).click();
   await expect(page.locator('#panel-sessions')).toBeVisible();
 });
 
 test('运行区各子页都能直达（深链）', async ({ page }) => {
   const pages = [
-    { page: 'status', tab: '实时状态', text: '实时状态' },
     { page: 'plans', tab: '事件计划', text: '事件编排' },
     { page: 'catalog', tab: '事件与报告', text: '事件与报告' },
     { page: 'svids', tab: '状态变量', text: '状态变量' },
-    { page: 'messages', tab: '报文收发', text: '本设备与主机之间的报文收发' },
     { page: 'manual', tab: '手动操作', text: '手动发送' },
   ] as const;
   for (const item of pages) {
@@ -406,4 +513,12 @@ test('运行区各子页都能直达（深链）', async ({ page }) => {
       .toHaveAttribute('aria-selected', 'true');
   }
   void openSubTab;
+});
+
+test('旧消息深链回落到运行区首页，并自动拉开监控抽屉', async ({ page }) => {
+  await page.goto('/#/device/line1/runtime/messages');
+  await expect(page.locator('#panel-messages')).toHaveCount(0);
+  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件计划', exact: true }))
+    .toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.monitor-drawer')).toBeVisible();
 });

@@ -111,6 +111,16 @@ export interface EventPlanView {
   /** 归属单元：由所引用 CEID 的归属反查（后端计算，只读）。 */
   owner?: string;
   enabled: boolean;
+  /**
+   * 运行态：{@code stopped} 未启用 / {@code waiting} 已启用但发不出去 /
+   * {@code running} 正在发。
+   *
+   * <p>和 {@code enabled} 分开：计划启动了但设备没在线（严格 GEM 下不能上报）时
+   * 是 {@code waiting}，界面不能显示成"运行中"。</p>
+   */
+  status?: 'stopped' | 'waiting' | 'running';
+  /** 未运行的原因：offline / ceid-disabled。 */
+  statusReason?: string;
   triggerType: string;
   atMs?: number;
   periodMs?: number;
@@ -464,6 +474,13 @@ export interface ApiClient {
   closeSession(sessionId: string): Promise<number>;
   /** 重新建链（断开态的会话对象复用，模型/钉值/计划启用态原样恢复）。 */
   connectDevice(deviceId: string): Promise<number>;
+  /**
+   * 手动把设备置为在线 / 离线（GEM 里等价于主机发 S1F17 / S1F15）。
+   *
+   * <p>只改控制状态，不动链路：离线后 S6F11 / S6F1 立刻停发，在线后按计划恢复。
+   * 链路没建立时后端回 409（没有主机就没有"在线"可言）。</p>
+   */
+  setDeviceOnline(deviceId: string, online: boolean): Promise<number>;
   /** 按配置重载会话。 */
   reloadSession(sessionId: string): Promise<number>;
   trigger(sessionId: string, ceid: number): Promise<number>;

@@ -679,6 +679,21 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
+    public SessionOutcome deviceOnlineV2(String deviceId, boolean online) {
+        HsmsSessionRuntime session = sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        if (!session.setOnline(online)) {
+            /* 没有主机时不允许上线：GEM 的 ONLINE 是"对某台主机"的状态 */
+            return SessionOutcome.NOT_CONNECTED;
+        }
+        com.shimizukenta.secssim.app.log.Log.info("设备 " + deviceId
+                + (online ? " 置为在线（等价 S1F17）" : " 置为离线（等价 S1F15）"));
+        return SessionOutcome.OK;
+    }
+
+    @Override
     public SessionOutcome deviceReloadV2(String deviceId) {
         HsmsSessionRuntime session = sessionFor(deviceId);
         if (session == null) {

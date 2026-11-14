@@ -10,11 +10,9 @@ import { mockApi } from './fixtures';
 
 const VIEWS = [
   { name: 'workbench', hash: '#/workbench' },
-  { name: 'device-status', hash: '#/device/line1/runtime/status' },
   { name: 'device-plans', hash: '#/device/line1/runtime/plans' },
   { name: 'device-catalog', hash: '#/device/line1/runtime/catalog' },
   { name: 'device-svids', hash: '#/device/line1/runtime/svids' },
-  { name: 'device-messages', hash: '#/device/line1/runtime/messages' },
   { name: 'device-manual', hash: '#/device/line1/runtime/manual' },
   { name: 'device-overview', hash: '#/device/line1/config/overview' },
   { name: 'device-connection', hash: '#/device/line1/config/connection' },
@@ -25,7 +23,8 @@ const VIEWS = [
   { name: 'hosts', hash: '#/hosts' },
   { name: 'host-overview', hash: '#/hosts/host-1/config/overview' },
   { name: 'host-trace', hash: '#/hosts/host-1/runtime/trace' },
-  { name: 'host-monitor', hash: '#/hosts/host-1/runtime/monitor' },
+  { name: 'host-collect', hash: '#/hosts/host-1/runtime/collect' },
+  { name: 'host-presets', hash: '#/hosts/host-1/config/presets' },
   { name: 'host-templates', hash: '#/host-templates' },
   { name: 'templates', hash: '#/templates' },
   { name: 'audit', hash: '#/system/audit' },
@@ -72,6 +71,15 @@ for (const theme of ['light', 'dark'] as const) {
         await page.mouse.up();
       }
       await shot(page, `${theme}-sidebar-wide`);
+    });
+
+    test(`${theme} monitor-drawer`, async ({ page }) => {
+      await page.addInitScript((value) => {
+        localStorage.setItem('secs-sim-ui:preferences', JSON.stringify({ theme: value }));
+      }, theme);
+      await page.goto('/#/device/line1/runtime/plans');
+      await page.locator('.monitor-toggle').click();
+      await shot(page, `${theme}-monitor-drawer`);
     });
 
     test(`${theme} command-palette`, async ({ page }) => {

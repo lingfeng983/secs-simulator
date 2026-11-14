@@ -5,6 +5,8 @@ import { inDesktopShell, tauriInvoke, type ShellConnection } from '../shared/lib
 import { mergeMessages } from '../shared/lib/messageFilter';
 import { useBackend } from '../state/useBackend';
 import { usePreferences, type ThemePreference } from '../state/usePreferences';
+import { usePersistentState } from '../state/usePersistentState';
+import { useInputDraftCache } from '../state/useInputDraftCache';
 import { useToasts } from '../state/useToasts';
 import { useEventStream, type NoticeWire } from '../state/useEventStream';
 import { ToastHost } from '../shared/ui/ToastHost';
@@ -35,12 +37,16 @@ import { HostDetailPage } from '../features/pages/HostDetailPage';
 import { HostTemplatePage } from '../features/pages/HostTemplatePage';
 import { SystemPage } from '../features/pages/SystemPage';
 import { TemplatePage } from '../features/pages/TemplatePage';
+import { MessageMonitorDrawer, type MonitorScope, type MonitorTarget } from '../features/panels/MessageMonitorDrawer';
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
 
 /** 界面保留的报文条数（消息监视面板用；与后端内存上限 5000 不同，界面只留最近的）。 */
 const MAX_LIVE_MESSAGES = 5_000;
+
+/** 2.x/3.0 早期的消息子页 hash：页面已下线，命中时自动拉开右侧监控抽屉。 */
+const LEGACY_MONITOR_HASH = /^#\/(?:device\/[^/]+\/(?:runtime\/)?messages|hosts\/[^/]+\/runtime\/monitor)(?:[?#]|$)/;
 
 /** 快捷键说明表。 */
 const SHORTCUTS: readonly ShortcutHint[] = [
@@ -67,6 +73,9 @@ export function App(): JSX.Element {
   const [shellConn, setShellConn] = useState<ShellConnection | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  /** 右侧实时消息监控：展开状态与宽度都记住，收起后不占版面。 */
+  const [monitorOpen, setMonitorOpen] = usePersistentState<boolean>('secs.ui.monitor.open', false);
+  const [monitorWidth, setMonitorWidth] = usePersistentState<number>('secs.ui.monitor.width', 420);
   const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
   /** 实时报文缓冲：SSE 增量 + 历史补拉，消息监视面板消费。 */
   const [liveMessages, setLiveMessages] = useState<WireMessage[]>([]);
@@ -187,7 +196,8 @@ export function App(): JSX.Element {
           events: ['runtime', 'plans'],
           alarms: ['runtime', 'manual'],
           svids: ['runtime', 'svids'],
-          messages: ['runtime', 'messages'],
+          /* 命令面板里的旧「报文收发」入口：页面已下线，落到运行区首页 + 右侧抽屉。 */
+          messages: ['runtime', 'plans'],
           send: ['runtime', 'manual'],
           connection: ['config', 'connection'],
           structure: ['config', 'structure'],
@@ -199,7 +209,7 @@ export function App(): JSX.Element {
       }
       if (id.startsWith('device-zone:')) {
         const [, sessionId, zone] = id.split(':');
-        navigate({ name: 'device', sessionId, zone: zone as DeviceZone, page: zone === 'config' ? 'overview' : 'status' });
+        navigate({ name: 'device', sessionId, zone: zone as DeviceZone, page: zone === 'config' ? 'overview' : 'plans' });
         return;
       }
       if (id.startsWith('device-page:')) {
@@ -208,7 +218,8 @@ export function App(): JSX.Element {
         return;
       }
       if (id.startsWith('host-open:')) {
-        navigate({ name: 'host', hostId: id.slice('host-open:'.length), zone: 'config', page: 'overview' });
+        /* 从左侧菜单/列表进主机，默认落在运行区；配置区由实例头上的切换按钮进入。 */
+        navigate({ name: 'host', hostId: id.slice('host-open:'.length), zone: 'runtime', page: 'status' });
         return;
       }
       if (id.startsWith('host-zone:')) {
@@ -230,7 +241,7 @@ export function App(): JSX.Element {
         return;
       }
       if (id.startsWith('device:')) {
-        navigate({ name: 'device', sessionId: id.slice('device:'.length), zone: 'runtime', page: 'catalog' });
+        navigate({ name: 'device', sessionId: id.slice('device:'.length), zone: 'runtime', page: 'plans' });
         return;
       }
       if (id.startsWith('device-open:')) {
@@ -301,6 +312,37 @@ export function App(): JSX.Element {
   useEffect(() => {
     void refreshRef.current();
   }, [routeKey, client]);
+
+  /* 页面范围内缓存所有表单输入：切页签/切页面回来后草稿还在。 */
+  useInputDraftCache(routeKey);
+
+  /* 旧消息深链会被路由收口到运行区首页；顺手把抽屉拉开，
+     否则用户从旧书签/收藏夹进来会以为"消息页面怎么没了"。 */
+  useEffect(() => {
+    if (LEGACY_MONITOR_HASH.test(window.location.hash)) {
+      setMonitorOpen(true);
+    }
+  }, [routeKey, setMonitorOpen]);
+
+  const monitorScope: MonitorScope = route.name === 'device'
+    ? { kind: 'device', id: route.sessionId }
+    : route.name === 'host'
+      ? { kind: 'host', id: route.hostId }
+      : { kind: 'none', id: '' };
+
+  /* 抽屉里一次只看一台设备或一台主机：把可选项一并给它，切换不跳页 */
+  const monitorTargets: MonitorTarget[] = [
+    ...backend.sessions.map((session) => ({
+      kind: 'device' as const,
+      id: session.id,
+      label: session.device === '' ? session.id : session.device,
+    })),
+    ...hostV2.hosts.map((host) => ({
+      kind: 'host' as const,
+      id: host.id,
+      label: host.name,
+    })),
+  ];
 
   /* ---------- 命令面板 ---------- */
 
@@ -463,18 +505,25 @@ export function App(): JSX.Element {
   const devicePageDescription = route.name === 'device'
     ? (route.zone === 'config' ? DEVICE_CONFIG_PAGE_LABELS : DEVICE_RUNTIME_PAGE_LABELS)[route.page as never]
     : '';
+  /* 顶栏只显示一行紧凑路径：当前对象 › 区域 / 子页。
+     分组名（设备清单 / 主机清单）与长说明都不再占位置。 */
+  const zoneLabel = (zone: string): string => (zone === 'config' ? '配置区' : '运行区');
   const hostTitle = route.name === 'host'
     ? (() => {
       const host = hostV2.find(route.hostId);
       const label = host === null ? route.hostId : `${host.name} · ${host.id}`;
-      const description = route.zone === 'config'
+      const page = route.zone === 'config'
         ? HOST_CONFIG_PAGE_LABELS[route.page as never]
         : HOST_RUNTIME_PAGE_LABELS[route.page as never];
-      return { group: '主机清单', label, description };
+      return { group: '', label, description: `${zoneLabel(route.zone)} / ${page}` };
     })()
     : null;
   const title = route.name === 'device'
-    ? { group: '设备清单', label: deviceName, description: devicePageDescription }
+    ? {
+      group: '',
+      label: deviceName,
+      description: `${zoneLabel(route.zone)} / ${devicePageDescription}`,
+    }
     : route.name === 'host' && hostTitle !== null
       ? hostTitle
       : routeTitle(route);
@@ -482,7 +531,8 @@ export function App(): JSX.Element {
   const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
     id: session.id,
     label: `${session.device}`,
-    state: session.controlState ?? 'OFFLINE',
+    state: session.state,
+    controlState: session.controlState,
     template: backend.configList.find((entry) => entry.name === session.config)?.template ?? '',
     config: session.config,
   }));
@@ -499,9 +549,12 @@ export function App(): JSX.Element {
 
   return (
     <div
-      className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+      className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}${monitorOpen ? ' monitor-open' : ''}`}
       /* 宽度用 CSS 变量驱动 grid 布局：拖动时只改这一个变量，不重排 DOM */
-      style={{ '--sidenav-w': `${preferences.sidebarWidth}px` } as CSSProperties}
+      style={{
+        '--sidenav-w': `${preferences.sidebarWidth}px`,
+        '--monitor-w': `${monitorWidth}px`,
+      } as CSSProperties}
     >
       <Sidebar
         route={route}
@@ -529,6 +582,8 @@ export function App(): JSX.Element {
           density={preferences.density}
           onToggleDensity={() => update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' })}
           onShowHelp={() => setHelpOpen(true)}
+          monitorOpen={monitorOpen}
+          onToggleMonitor={() => setMonitorOpen((previous) => !previous)}
         />
 
         {backend.backendError !== '' && (
@@ -562,6 +617,16 @@ export function App(): JSX.Element {
       {route.name === 'templates' && <TemplatePage {...panelProps} />}
         </main>
       </div>
+
+      <MessageMonitorDrawer
+        open={monitorOpen}
+        onClose={() => setMonitorOpen(false)}
+        messages={liveMessages}
+        scope={monitorScope}
+        targets={monitorTargets}
+        width={monitorWidth}
+        onWidthChange={setMonitorWidth}
+      />
 
       <ToastHost toasts={notifier.toasts} onDismiss={notifier.dismiss} onDismissAll={notifier.dismissAll} />
 

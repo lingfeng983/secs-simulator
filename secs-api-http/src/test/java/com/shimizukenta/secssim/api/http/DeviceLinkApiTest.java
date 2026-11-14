@@ -78,6 +78,15 @@ class DeviceLinkApiTest {
                 calls.add("reload:" + deviceId);
                 return reloadResult;
             }
+
+            @Override
+            public SessionOutcome deviceOnlineV2(String deviceId, boolean online) {
+                calls.add((online ? "online:" : "offline:") + deviceId);
+                if ("nope".equals(deviceId)) {
+                    return SessionOutcome.UNKNOWN_SESSION;
+                }
+                return "lonely".equals(deviceId) ? SessionOutcome.NOT_CONNECTED : SessionOutcome.OK;
+            }
         };
         this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0),
                 AccessControl.open(), context, null, null, null, null);
@@ -124,6 +133,25 @@ class DeviceLinkApiTest {
         assertTrue(state.body().contains("\"LISTENING\""), state.body());
         assertEquals(404, send("POST", "/api/v2/devices/dev_a/link/teleport").statusCode());
         assertEquals(405, send("GET", "/api/v2/devices/dev_a/link/connect").statusCode());
+    }
+
+    /**
+     * 上线/下线是 GEM 的 S1F17 / S1F15：只动控制状态，走的是 link 命名空间。
+     *
+     * <p>没有链路时后端回 409：ONLINE 是"对某台主机"的状态，没连上就没有可上的线。</p>
+     */
+    @Test
+    void onlineAndOfflineReachContext() throws Exception {
+        this.calls.clear();
+        assertEquals(200, send("POST", "/api/v2/devices/dev_a/link/online").statusCode());
+        assertEquals(200, send("POST", "/api/v2/devices/dev_a/link/offline").statusCode());
+        assertEquals(List.of("online:dev_a", "offline:dev_a"), this.calls);
+
+        HttpResponse<String> notConnected = send("POST", "/api/v2/devices/lonely/link/online");
+        assertEquals(409, notConnected.statusCode(), notConnected.body());
+        assertTrue(notConnected.body().contains("not-connected"), notConnected.body());
+
+        assertEquals(404, send("POST", "/api/v2/devices/nope/link/offline").statusCode());
     }
 
     /* ---------- helpers ---------- */

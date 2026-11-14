@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mockApi, openDeviceFromSidebar, openTool } from './fixtures';
+import { mockApi, openDeviceFromSidebar, openSubTab, openTool } from './fixtures';
 
 /**
  * 3.0 外壳 + 工作台 + 全局控件。
@@ -18,7 +18,8 @@ test('落在工作台：三组侧栏 + KPI + 设备一张表', async ({ page }) 
   await page.goto('/');
 
   const nav = page.locator('.sidenav');
-  await expect(nav.locator('.nav-group-title', { hasText: '设备清单' })).toBeVisible();
+  await expect(nav.locator('.nav-group-title', { hasText: /^设备$/ })).toBeVisible();
+  await expect(nav.locator('.nav-item', { hasText: '设备清单' })).toBeVisible();
   await expect(nav.locator('.nav-group-title', { hasText: '主机清单' })).toBeVisible();
   await expect(nav.locator('.nav-group-title', { hasText: '独立工具' })).toBeVisible();
 
@@ -39,61 +40,53 @@ test('侧栏设备树：点设备进运行区，展开子页可直达配置区',
   await page.goto('/');
 
   await openDeviceFromSidebar(page, 'LINE1');
-  await expect(page.locator('.zonebar').getByRole('tab', { name: /^运行区/ })).toHaveAttribute('aria-selected', 'true');
+  /* 菜单进设备默认落运行区，切换按钮并入实例头，不再单独占一行 */
+  await expect(page.locator('.zonebar')).toHaveCount(0);
+  await expect(page.locator('.zone-switch').getByRole('tab', { name: /运行区/ }))
+    .toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.subtabs')).toContainText('事件与报告');
 
-  /* 子页入口在「分组」模式的三级菜单里：先切分组，再展开设备 */
-  await page.locator('.nav-mode').click();
-  const deviceNode = page.locator('.sidenav .nav-group').first().locator('.nav-device', { hasText: 'LINE1' });
+  /* 平铺设备树：展开箭头直接可见，不用先切「分组」 */
+  const deviceNode = page.locator('.sidenav .nav-device', { hasText: 'LINE1' });
   await deviceNode.getByRole('button', { name: /展开 LINE1 的子页/ }).click();
   await deviceNode.getByRole('button', { name: /版本历史/ }).click();
-  await expect(page.locator('.zonebar').getByRole('tab', { name: /^配置区/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.zone-switch').getByRole('tab', { name: /配置区/ }))
+    .toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.subtabs').getByRole('tab', { name: '版本历史' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('heading', { name: '配置版本历史' })).toBeVisible();
 });
 
-test('侧栏筛设备：输关键字只剩匹配项，清了又回来', async ({ page }) => {
+test('侧栏设备树已精简：筛选 / 模板分组 / 平铺切换全部下线', async ({ page }) => {
   await page.goto('/');
-  const deviceGroup = page.locator('.sidenav .nav-group').first();
-  const filter = page.getByLabel('筛选设备');
-  await filter.fill('LINE2');
-  await expect(deviceGroup.locator('.nav-device')).toHaveCount(1);
-  await expect(deviceGroup.locator('.nav-device')).toContainText('LINE2');
-
-  await filter.fill('不存在');
-  await expect(page.getByText('没有匹配的设备')).toBeVisible();
-
-  await filter.fill('');
+  const nav = page.locator('.sidenav');
+  await expect(nav.getByLabel('筛选设备')).toHaveCount(0);
+  await expect(nav.locator('.nav-mode')).toHaveCount(0);
+  await expect(nav.locator('.nav-template-head')).toHaveCount(0);
+  await expect(nav.locator('.nav-device-tools')).toHaveCount(0);
+  /* 设备仍然平铺列出，展开后子页可用（.nav-device 主机树也在用，只数第一组） */
+  const deviceGroup = nav.locator('.nav-group').first();
   await expect(deviceGroup.locator('.nav-device')).toHaveCount(2);
+  await expect(deviceGroup.getByRole('button', { name: /展开 LINE1 的子页/ })).toBeVisible();
 });
 
-test('侧栏按模板分组：切「分组」出现模板行，再切回平铺', async ({ page }) => {
-  await page.goto('/');
-  const toggle = page.locator('.nav-mode');
-  await expect(toggle).toHaveText('分组');
-  await toggle.click();
-  await expect(toggle).toHaveText('平铺');
-  /* mock 里 line1 用 etch、line2 用 bare */
-  const deviceGroup = page.locator('.sidenav .nav-group').first();
-  await expect(page.locator('.nav-template-head')).toHaveCount(2);
-  await page.locator('.nav-template-head', { hasText: 'etch' }).click();
-  await expect(deviceGroup.locator('.nav-device')).toHaveCount(1);
-  await toggle.click();
-  await expect(deviceGroup.locator('.nav-device')).toHaveCount(2);
-});
-
-test('工作台点行进设备页，面包屑标题跟着变', async ({ page }) => {
+test('顶栏只占一行：不展示分组名，路径单行显示', async ({ page }) => {
   await page.goto('/');
   await page.locator('#panel-sessions tbody tr', { hasText: 'LINE1' }).first().click();
   await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
-  await expect(page.locator('.topbar')).toContainText('设备清单');
-  await expect(page.locator('.topbar')).toContainText('LINE1');
+
+  const path = page.locator('.page-path');
+  await expect(path).toHaveCount(1);
+  await expect(path).toContainText('LINE1');
+  /* 「设备清单 / 主机清单」这类分组名不再上顶栏，也不再有面包屑+标题+说明三行 */
+  await expect(page.locator('.page-crumb')).toHaveCount(0);
+  await expect(path).not.toContainText('设备清单');
+  await expect(path).not.toContainText('主机清单');
 });
 
-test('设备不存在时给出空态并可回工作台', async ({ page }) => {
+test('设备不存在时给出空态并可回设备清单', async ({ page }) => {
   await page.goto('/#/device/ghost/runtime/catalog');
   await expect(page.getByText('设备 ghost 不存在')).toBeVisible();
-  await page.getByRole('button', { name: '← 回工作台' }).click();
+  await page.getByRole('button', { name: '← 设备清单' }).click();
   await expect(page.locator('#panel-sessions')).toBeVisible();
 });
 
@@ -101,11 +94,24 @@ test('设备不存在时给出空态并可回工作台', async ({ page }) => {
 
 test('2.x 旧设备深链映射到 3.0 两段式', async ({ page }) => {
   await page.goto('/#/device/line1/events');
-  await expect(page.locator('.zonebar').getByRole('tab', { name: /^运行区/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.zone-switch').getByRole('tab', { name: /运行区/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.subtabs').getByRole('tab', { name: '事件计划' })).toHaveAttribute('aria-selected', 'true');
 
   await page.goto('/#/device/line1/config');
   await expect(page.locator('.subtabs').getByRole('tab', { name: '配置原文' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('输入草稿跨页签保留：切走再回来还在', async ({ page }) => {
+  await page.goto('/#/hosts/host-1/config/trace');
+  const nameField = page.locator('#panel-host-trace').getByLabel('方案名称（留空自动生成）');
+  await nameField.fill('草稿-温度曲线');
+
+  /* 切到别的子页再切回来：面板重挂，草稿要从缓存里恢复 */
+  await openSubTab(page, '报文模板');
+  await expect(page.locator('#panel-host-presets')).toBeVisible();
+  await openSubTab(page, 'Trace 设置');
+  await expect(page.locator('#panel-host-trace').getByLabel('方案名称（留空自动生成）'))
+    .toHaveValue('草稿-温度曲线');
 });
 
 test('2.x 旧主机模拟深链落到主机列表', async ({ page }) => {
@@ -153,10 +159,10 @@ test('批量工具条：全选 / 清空 / 重载 / 断开确认', async ({ page 
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(2);
 
-  /* 批量断开要弹确认；3.0 起是断链不是删除：行还在，状态变「离线」，可再连 */
-  await batch.getByRole('button', { name: '批量断开' }).click();
-  await expect(page.getByRole('dialog')).toContainText('确定断开选中的 2 台设备');
-  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '断开' }).click();
+  /* 批量停止要弹确认；停止的是端口监听不是删除：行还在，可再启动 */
+  await batch.getByRole('button', { name: '批量停止' }).click();
+  await expect(page.getByRole('dialog')).toContainText('确定停止选中的 2 台设备');
+  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '停止' }).click();
   await expect.poll(() => state.sessions.filter((item) => item.state === 'CLOSED').length).toBe(2);
   await expect(page.locator('#panel-sessions tbody tr')).toHaveCount(2);
 
@@ -176,7 +182,7 @@ test('批量同步配置弹窗能打开并给出目标台数', async ({ page }) 
   await expect(dialog).toHaveCount(0);
 });
 
-test('单行「重载」直接打后端，「断开」先确认再改状态，「连接」能连回去', async ({ page }) => {
+test('单行「重载」直接打后端，「停止」先确认再改状态，「启动」能再开端口', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
   const row = page.locator('#panel-sessions tbody tr', { hasText: 'line1' }).first();
@@ -184,15 +190,15 @@ test('单行「重载」直接打后端，「断开」先确认再改状态，�
   await row.getByRole('button', { name: '重载' }).click();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(1);
 
-  await row.getByRole('button', { name: '断开' }).click();
+  await row.getByRole('button', { name: '停止' }).click();
   /* 弹窗右上角的 × 也叫「关闭」，取底部的确认按钮 */
-  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '断开' }).click();
+  await page.getByRole('dialog').locator('.modal-foot').getByRole('button', { name: '停止' }).click();
   await expect.poll(() => state.sessions.find((item) => item.id === 'line1')?.state).toBe('CLOSED');
 
-  /* 断开后行不消失，按钮换成「连接」；连回去打到 v2 的 link/connect */
+  /* 停止后行不消失，按钮换成「启动」；启动打到 v2 的 link/connect */
   const closedRow = page.locator('#panel-sessions tbody tr', { hasText: 'line1' }).first();
   await expect(closedRow).toContainText('line1');
-  await closedRow.getByRole('button', { name: '连接' }).click();
+  await closedRow.getByRole('button', { name: '启动' }).click();
   await expect.poll(() => state.sessions.find((item) => item.id === 'line1')?.state).toBe('OPEN');
   await expect.poll(() => state.calls.some((call) => call.endsWith('/link/connect'))).toBe(true);
 });

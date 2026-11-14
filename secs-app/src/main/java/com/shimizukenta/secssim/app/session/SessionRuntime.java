@@ -156,6 +156,19 @@ public interface SessionRuntime {
     }
 
     /**
+     * 手动把设备置为在线 / 离线（GEM 里主机用 S1F17 / S1F15，这里给操作员一条同样的路）。
+     *
+     * <p>只改控制状态，不动链路：{@code online=false} 等价于主机发了 S1F15，
+     * 之后主动上报（S6F11 / S6F1）立刻停；{@code online=true} 等价于 S1F17 被接受。</p>
+     *
+     * @param online 是否在线
+     * @return 是否生效；链路没建立（没有主机）时返回 {@code false}
+     */
+    default boolean setOnline(boolean online) {
+        return false;
+    }
+
+    /**
      * 事件编排列表（含启用状态）。
      *
      * @return JSON 文本

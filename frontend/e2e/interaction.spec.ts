@@ -47,8 +47,8 @@ test('sidebar collapses to an icon rail and keeps navigation usable', async ({ p
   /* 折叠后设备项只剩"首字母徽标 + tooltip",仍要能点进设备页 */
   await expect(side.locator('.nav-monogram').first()).toHaveText('LI');
   await side.locator('.nav-item[title^="LINE1"]').click();
-  /* 3.0 默认落运行区·事件与报告 */
-  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件与报告', exact: true }))
+  /* 3.0 默认落运行区首页·事件计划 */
+  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件计划', exact: true }))
     .toHaveAttribute('aria-selected', 'true');
 });
 

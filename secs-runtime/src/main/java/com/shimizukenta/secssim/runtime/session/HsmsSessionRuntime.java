@@ -1063,8 +1063,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             final Object gate = new Object();
             final java.util.List<SecsMessage> early = new java.util.ArrayList<>();
             this.communicator = this.connector.open(
+                    /* 原始收帧（含 secondary 应答）只进报文监控 */
+                    message -> this.publish("in", message),
                     message -> {
-                        this.publish("in", message);
                         PrimaryDispatcher ready;
                         synchronized (gate) {
                             /* 取到局部变量再出锁用：出锁后 dispatcher 可能被
@@ -1236,6 +1237,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     @Override
     public EquipmentControlState controlState() {
         return this.control.state();
+    }
+
+    @Override
+    public boolean setOnline(boolean online) {
+        if (!this.control.communicatable()) {
+            /* ONLINE 是"对某台主机"而言的：链路都没建，就没有可上的线。
+               返回 false 让界面明确告诉操作员"先启动并等主机连上"。 */
+            return false;
+        }
+        this.changeControlState(online ? EquipmentControlState.ONLINE : EquipmentControlState.OFFLINE);
+        return true;
     }
 
     @Override

@@ -51,14 +51,16 @@ final class HsmsConnector {
      * <p>监听器在 {@code open()} <b>之前</b>注册：主动端的 SELECT 可能在 open 返回前就完成，
      * 之后再注册会漏掉那一次状态迁移（表现为"已经连上但 hasPeer 一直是 false"）。</p>
      *
-     * @param onReceive         收到主机报文
+     * @param onReceiveRaw      收到的每一条 DATA 帧（含 W 位应答；仅用于报文监控，不参与分发）
+     * @param onReceive         收到主机报文（已由应答管理器过滤，只含 primary）
      * @param onSent            本机发出的报文
      * @param onState           通信状态变化
      * @param onProtocolFailure 协议层报错（bind 失败、连接被拒、超时等）；{@code null} 表示忽略
      * @return 通信器
      * @throws IOException 连接失败
      */
-    SecsCommunicator open(java.util.function.Consumer<SecsMessage> onReceive,
+    SecsCommunicator open(java.util.function.Consumer<SecsMessage> onReceiveRaw,
+                          java.util.function.Consumer<SecsMessage> onReceive,
                           java.util.function.Consumer<SecsMessage> onSent,
                           java.util.function.Consumer<Boolean> onState,
                           Consumer<Throwable> onProtocolFailure) throws IOException {
@@ -84,6 +86,11 @@ final class HsmsConnector {
                 onProtocolFailure.accept(t);
             }
         });
+        /* 报文监控走 pass-through：W 位的 secondary 应答会被应答管理器
+           （replyMgr.put）直接消费掉，不会进普通接收队列；只挂
+           addSecsMessageReceiveListener 的话，界面只看得见发出去的 S1F1，
+           看不见主机回的 S1F2。pass-through 在消费之前触发，收发都能看见。 */
+        comm.addReceiveMessagePassThroughListener(message -> onReceiveRaw.accept(message));
         comm.addSecsMessageReceiveListener(message -> onReceive.accept(message));
         comm.addSendedMessagePassThroughListener(message -> onSent.accept(message));
         comm.addSecsCommunicatableStateChangeListener(value -> onState.accept(value));

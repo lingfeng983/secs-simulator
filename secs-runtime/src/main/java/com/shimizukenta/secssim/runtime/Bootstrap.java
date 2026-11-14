@@ -382,7 +382,8 @@ public final class Bootstrap {
             Log.error("恢复钉值失败（跳过）: " + deviceId + " " + e.getMessage(), e);
         }
         try {
-            /* 停用也要恢复：配置里默认启用、用户上次手动停掉的计划，重连后不该自己跑起来 */
+            /* 停用也要恢复：计划加载时一律默认禁用，只有这里回放用户上次的选择，
+               否则重启后用户手动启动过的计划会全部退回停止 */
             for (RuntimeStateRepository.PlanStateRow row : state.planStates(deviceId)) {
                 hsms.setEventEnabled(row.planId(), row.enabled());
             }

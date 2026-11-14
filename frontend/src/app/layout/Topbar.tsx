@@ -1,7 +1,7 @@
 import { Icon } from '../../shared/ui/Icon';
 
 export interface TopbarProps {
-  /** 顶栏标题（路由派生:分组/标题/描述）。 */
+  /** 顶栏标题（路由派生:分组/标题/描述）。group 只用于内部语义，不展示。 */
   title: { group: string; label: string; description: string };
   refreshing: boolean;
   onRefresh: () => void;
@@ -14,14 +14,18 @@ export interface TopbarProps {
   density: 'comfortable' | 'compact';
   onToggleDensity: () => void;
   onShowHelp: () => void;
+  /** 右侧实时消息监控抽屉是否展开。 */
+  monitorOpen: boolean;
+  /** 展开/隐藏消息监控。 */
+  onToggleMonitor: () => void;
 }
 
 /**
  * 顶栏。
  *
- * <p>左边告诉用户「现在在哪」（分组 / 面板 + 一句话说明），
- * 右边是全局动作：刷新、命令面板、连接、日志级别、主题、密度、快捷键。
- * 会话切换在设备页内完成,连接状态看设备卡与子页徽标——顶栏不再重复。</p>
+ * <p>左侧是一行紧凑路径（当前对象 › 当前子页），不再用三行展示
+ * 「分组 / 标题 / 说明」，也不再重复「设备清单 / 主机清单」这类分组名；
+ * 右侧是全局动作，其中包括右侧消息监控抽屉的开关。</p>
  */
 export function Topbar({
   title,
@@ -36,16 +40,35 @@ export function Topbar({
   density,
   onToggleDensity,
   onShowHelp,
+  monitorOpen,
+  onToggleMonitor,
 }: TopbarProps): JSX.Element {
   return (
     <header className="topbar">
       <div className="page-title">
-        <span className="page-crumb">{title.group}</span>
-        <h1 className="page-name">{title.label}</h1>
-        <p className="page-desc">{title.description}</p>
+        <div className="page-path" title={`${title.label}${title.description === '' ? '' : ` · ${title.description}`}`}>
+          {title.label !== '' && <span className="page-name">{title.label}</span>}
+          {title.description !== '' && (
+            <>
+              <span className="page-sep" aria-hidden="true">›</span>
+              <span className="page-desc">{title.description}</span>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="topbar-actions">
+        <button
+          type="button"
+          className={`icon-btn text-btn monitor-toggle${monitorOpen ? ' active' : ''}`}
+          onClick={onToggleMonitor}
+          aria-pressed={monitorOpen}
+          title={monitorOpen ? '隐藏实时消息监控' : '展开实时消息监控（接收 / 发送按颜色区分）'}
+        >
+          <Icon name="messages" size={15} />
+          <span className="monitor-label">消息监控</span>
+        </button>
+
         <button
           type="button"
           className="icon-btn text-btn"

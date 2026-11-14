@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
-import { controlStateLabel } from '../../shared/lib/controlState';
+import {
+  DEVICE_STATUS_LABEL,
+  DEVICE_STATUS_TONE,
+  deviceStatus,
+  deviceStatusHint,
+} from '../../shared/lib/deviceStatus';
 import { EventsPanel } from '../panels/EventsPanel';
 import { CeidPanel } from '../panels/CeidPanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
@@ -9,9 +14,8 @@ import { ConfigPanel } from '../panels/ConfigPanel';
 import { ConnectionPanel } from '../panels/ConnectionPanel';
 import { StructurePanel } from '../panels/StructurePanel';
 import { SendPanel } from '../panels/SendPanel';
-import { MessagePanel } from '../panels/MessagePanel';
 import { LiveEventList } from '../../shared/ui/LiveEventList';
-import { InstanceHead, SubTabs, ZoneBar } from '../../shared/ui/zone';
+import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -37,20 +41,6 @@ export const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
   manual: '手动操作:向该设备发送 SML、压测,以及报警置位/清除。',
 };
 
-/** 控制状态 → 徽标色调。 */
-function controlTone(state: string | undefined): 'ok' | 'warn' | 'danger' | 'muted' {
-  switch (state) {
-    case 'ONLINE':
-      return 'ok';
-    case 'COMMUNICATING':
-      return 'warn';
-    case 'OFFLINE':
-      return 'danger';
-    default:
-      return 'muted';
-  }
-}
-
 /**
  * 单设备详情页——两段式（设计 §3.2）：实例头 + 配置区 / 运行区。
  * 配置区改「这台设备是什么」（保存后需重载），运行区操作当前运行。
@@ -70,6 +60,24 @@ export function DevicePage({
   messages,
 }: PanelBaseProps & { sessionId: string; zone: DeviceZone; page: DevicePage }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
+  const [busy, setBusy] = useState(false);
+
+  /* 四态判据统一走 deviceStatus：设备页头、侧栏、设备清单必须说同一句话 */
+  const status = deviceStatus(summary ?? {});
+
+  const startDevice = () => {
+    setBusy(true);
+    void backend.connectSession(sessionId).finally(() => setBusy(false));
+  };
+  const stopDevice = () => {
+    setBusy(true);
+    void backend.closeSession(sessionId).finally(() => setBusy(false));
+  };
+  /* 上线/下线只动 GEM 控制状态，不动链路：等价于主机发 S1F17 / S1F15 */
+  const setOnline = (online: boolean) => {
+    setBusy(true);
+    void backend.setDeviceOnline(sessionId, online).finally(() => setBusy(false));
+  };
 
   /* 进入设备页就把全局会话钉到这台设备：所有面板按 activeSession 取数。
      必须是 layout effect —— 面板的写操作闭包在 hook 创建时就捕获了当时的
@@ -105,10 +113,10 @@ export function DevicePage({
       <div className="panel-stack">
         <div className="empty-state">
           <p className="empty-text">设备 {sessionId} 不存在</p>
-          <p className="empty-hint">它可能已被删除。回到工作台重新选一台设备。</p>
+          <p className="empty-hint">它可能已被删除。回到设备清单重新选一台设备。</p>
           <div className="empty-action">
             <button type="button" onClick={() => goTo?.('workbench')}>
-              ← 回工作台
+              ← 设备清单
             </button>
           </div>
         </div>
@@ -125,35 +133,81 @@ export function DevicePage({
       <InstanceHead
         title={summary?.device ?? sessionId}
         badge={
-          <span className={`badge tone-${controlTone(summary?.controlState)}`}>
-            {controlStateLabel(summary?.controlState)}
+          <span className={`badge tone-${DEVICE_STATUS_TONE[status]}`} title={deviceStatusHint(status)}>
+            {DEVICE_STATUS_LABEL[status]}
           </span>
         }
         subtitle={
           <>
-            <span className="mono">{sessionId}</span> · {summary?.state ?? '—'}
+            <span className="mono">{sessionId}</span> · {DEVICE_STATUS_LABEL[status]}
             {summary?.units !== undefined ? ` · ${summary.units} 个单元` : ''}
             {summary?.lastError ? <span className="danger"> · {summary.lastError}</span> : ''}
           </>
         }
         metrics={[
-          { label: '会话状态', value: summary?.state ?? '—' },
-          { label: '控制状态', value: controlStateLabel(summary?.controlState) },
+          { label: '设备状态', value: DEVICE_STATUS_LABEL[status] },
           { label: '单元数', value: summary?.units ?? '—' },
+          { label: '累计上报', value: summary?.counters.emitted ?? '—' },
         ]}
         actions={
-          <button type="button" onClick={() => goTo?.('workbench')}>
-            ← 工作台
-          </button>
+          <>
+            {status === 'stopped' ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={startDevice}
+                title="启动端口监听：主机随后可以连上来"
+              >
+                启动设备
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={stopDevice}
+                title="停止端口监听：链路断开、端口释放，设备仍保留在设备清单里"
+              >
+                停止设备
+              </button>
+            )}
+            {status === 'offline' && (
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => setOnline(true)}
+                title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
+              >
+                上线
+              </button>
+            )}
+            {status === 'online' && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setOnline(false)}
+                title="设备下线（等价主机发 S1F15）：主动上报立即停止"
+              >
+                下线
+              </button>
+            )}
+            <button type="button" onClick={() => goTo?.('workbench')}>
+              ← 设备清单
+            </button>
+          </>
+        }
+        zoneSwitch={
+          <ZoneSwitch
+            zone={zone}
+            onChange={(next) => goTo?.(`device-zone:${sessionId}:${next}`)}
+            configNote="▣ 修改的是设备定义;保存后需重载才会进入运行。"
+            runtimeNote="◉ 这里的操作只对本次运行有效;重载后按配置恢复。"
+          />
         }
       />
 
-      <ZoneBar
-        zone={zone}
-        onChange={(next) => goTo?.(`device-zone:${sessionId}:${next}`)}
-        configNote="▣ 修改的是设备定义;保存后需重载才会进入运行。"
-        runtimeNote="◉ 这里的操作只对本次运行有效;重载后按配置恢复。"
-      />
       <SubTabs
         pages={pages}
         active={page}
@@ -181,9 +235,6 @@ export function DevicePage({
           <DeviceRevisionsPanel {...baseProps} sessionId={sessionId} />
         )}
 
-        {zone === 'runtime' && page === 'status' && (
-          <DeviceRuntimeStatusPanel {...baseProps} sessionId={sessionId} />
-        )}
         {zone === 'runtime' && page === 'plans' && (
           <div className="panel-stack">
             <EventsPanel key={sessionId} {...baseProps} />
@@ -200,7 +251,6 @@ export function DevicePage({
         )}
         {zone === 'runtime' && page === 'catalog' && <CeidPanel key={sessionId} {...baseProps} mode="both" />}
         {zone === 'runtime' && page === 'svids' && <SvidPanel key={sessionId} {...baseProps} />}
-        {zone === 'runtime' && page === 'messages' && <MessagePanel key={sessionId} {...baseProps} />}
         {zone === 'runtime' && page === 'manual' && (
           <div className="panel-stack">
             <SendPanel key={sessionId} {...baseProps} />
@@ -391,37 +441,4 @@ function DeviceRevisionsPanel({
   );
 }
 
-/** 运行区·实时状态:链路相位/控制状态/计数。 */
-function DeviceRuntimeStatusPanel({
-  sessionId,
-  backend,
-}: PanelBaseProps & { sessionId: string }): JSX.Element {
-  const summary = backend.sessions.find((session) => session.id === sessionId);
-  return (
-    <section className="panel-section">
-      <div className="section-head">
-        <h2>实时状态</h2>
-      </div>
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-value">{summary?.state ?? '—'}</div>
-          <div className="kpi-label">会话状态</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{controlStateLabel(summary?.controlState)}</div>
-          <div className="kpi-label">控制状态</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{summary?.counters.emitted ?? '—'}</div>
-          <div className="kpi-label">累计上报</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{summary?.counters.activeAlarms ?? '—'}</div>
-          <div className="kpi-label">活动报警</div>
-        </div>
-      </div>
-      {summary?.lastError ? <p className="inline-note danger">{summary.lastError}</p> : null}
-      <p className="hint">链路相位由连接状态实时驱动;设备断开后定义保留,重连后运行态编辑恢复。</p>
-    </section>
-  );
-}
+/** 运行区·实时状态已下线：三态徽标、单元数与累计上报都收进实例头。 */

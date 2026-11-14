@@ -70,7 +70,7 @@ describe('3.0 two-zone routes', () => {
       name: 'device',
       sessionId: 'line1',
       zone: 'runtime',
-      page: 'status',
+      page: 'plans',
     });
     expect(parseHash('#/device/line1/config/nope')).toEqual({
       name: 'device',
@@ -94,13 +94,56 @@ describe('3.0 two-zone routes', () => {
       zone: 'config',
       page: 'overview',
     });
+    /* 收发记录已并入右侧「实时消息监控」抽屉：旧 monitor 深链回落到运行区首页。 */
     expect(parseHash('#/hosts/host-1/runtime/monitor')).toEqual({
       name: 'host',
       hostId: 'host-1',
       zone: 'runtime',
-      page: 'monitor',
+      page: 'status',
     });
     expect(parseHash('#/hostsim/monitor')).toEqual({ name: 'hosts' });
+  });
+
+  it('routes removed pages to the zone home', () => {
+    /* 运行区不再单独展示消息监控，旧书签不能落到一个没有渲染分支的 page 上。 */
+    expect(parseHash('#/device/line1/runtime/messages')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'plans',
+    });
+    expect(parseHash('#/device/line1/messages')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'plans',
+    });
+    /* 实时状态页签已删除：旧 status 深链落到运行区首页 */
+    expect(parseHash('#/device/line1/runtime/status')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'plans',
+    });
+    expect(parseHash('#/device/line1/runtime/manual')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'manual',
+    });
+    /* 主机连接页与手动操作页已删除 */
+    expect(parseHash('#/hosts/h1/config/connection')).toEqual({
+      name: 'host',
+      hostId: 'h1',
+      zone: 'config',
+      page: 'overview',
+    });
+    expect(parseHash('#/hosts/h1/runtime/manual')).toEqual({
+      name: 'host',
+      hostId: 'h1',
+      zone: 'runtime',
+      page: 'status',
+    });
   });
 
   it('parses the standalone tool routes', () => {

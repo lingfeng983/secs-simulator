@@ -6,7 +6,14 @@ import { Modal } from '../../shared/ui/Modal';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import { formatCount } from '../../shared/lib/format';
-import { controlStateLabel, controlStateTone } from '../../shared/lib/controlState';
+import { controlStateLabel } from '../../shared/lib/controlState';
+import {
+  DEVICE_STATUS_LABEL,
+  DEVICE_STATUS_TONE,
+  deviceStatus,
+  deviceStatusHint,
+  type DeviceStatusSource,
+} from '../../shared/lib/deviceStatus';
 import type { PanelBaseProps } from './types';
 import { saveHint } from '../../shared/lib/saveFile';
 
@@ -70,7 +77,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     });
   }, [backend.client]);
 
-  const online = sessions.filter((item) => item.controlState === 'ONLINE').length;
+  const onlineCount = sessions.filter((item) => deviceStatus(item) === 'online').length;
 
   /* /overview 按 id 并进会话行:计数以会话为准,速率/端口/角色以总览为准 */
   const overviewById = useMemo(() => new Map((overview ?? []).map((row) => [row.id, row])), [overview]);
@@ -90,14 +97,14 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     };
   }), [sessions, overviewById]);
 
-  /* "在线"包含 COMMUNICATING：主机已连上、设备只是还没收到 S1F17。
-     只看 OFFLINE 才叫离线，否则主机遇模拟器刚连上时列表会自相矛盾。 */
-  const connected = (state: string | undefined) => state === 'ONLINE' || state === 'COMMUNICATING';
+  /* "在线"只认 GEM 的 ONLINE：端口开着（启动）、或连着但主机没让上线（离线）
+     都不算在线，否则列表里会出现"显示在线、报文一条都没有"。 */
+  const connected = (state: DeviceStatusSource) => deviceStatus(state) === 'online';
   const visible = useMemo(() => rows.filter((row) => {
-    if (stateFilter === 'online' && !connected(row.controlState)) {
+    if (stateFilter === 'online' && !connected(row)) {
       return false;
     }
-    if (stateFilter === 'offline' && connected(row.controlState)) {
+    if (stateFilter === 'offline' && connected(row)) {
       return false;
     }
     return true;
@@ -167,16 +174,19 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     },
     {
       key: 'control',
-      header: '控制',
-      sortValue: (row) => row.controlState ?? '',
-      render: (row) => (
-        <span
-          className={`badge tone-${controlStateTone(row.controlState)}`}
-          title={`${row.state} · ${row.units} 个单元`}
-        >
-          {controlStateLabel(row.controlState)}
-        </span>
-      ),
+      header: '状态',
+      sortValue: (row) => deviceStatus(row),
+      render: (row) => {
+        const status = deviceStatus(row);
+        return (
+          <span
+            className={`badge tone-${DEVICE_STATUS_TONE[status]}`}
+            title={`${deviceStatusHint(status)}（${row.state}${row.controlState === undefined ? '' : ` · ${controlStateLabel(row.controlState)}`}）`}
+          >
+            {DEVICE_STATUS_LABEL[status]}
+          </span>
+        );
+      },
     },
     {
       key: 'role',
@@ -218,34 +228,57 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       key: 'actions',
       header: '',
       render: (row) => {
-        /* 3.0：关闭 = 断开链路（设备保留），所以断开态要能一键连回去。
-           「连接」与「断开」互斥，同一行不会同时出现两个相反的动作。 */
-        const disconnected = row.state === 'CLOSED';
+        /* 三个动作对应三件事，互不替代：
+           「重载」= 重启（按配置文件重新装载）；
+           「启动/停止」= 端口监听开关（启动后主机才连得上，停止后端口释放）；
+           「上线/下线」= GEM 控制状态（等价主机发 S1F17 / S1F15）——只有链路
+           建起来（离线/在线）才出现：没连上主机时没有"上线"可言。 */
+        const status = deviceStatus(row);
         return (
           <div className="row-actions" onClick={(event) => event.stopPropagation()}>
             <button
               type="button"
               onClick={() => void backend.reloadSession(row.id)}
-              title="按配置文件重新装载(配置有问题时旧会话不受影响)"
+              title="重载（重启）：按配置文件重新装载，配置有问题时旧会话不受影响"
             >
               重载
             </button>
-            {disconnected ? (
+            {status === 'stopped' ? (
               <button
                 type="button"
+                className="primary"
                 onClick={() => void backend.connectSession(row.id)}
-                title="按当前配置重新建链(模型/设定值/事件启停原样恢复)"
+                title="启动端口监听（设备开始等主机连接）"
               >
-                连接
+                启动
               </button>
             ) : (
               <button
                 type="button"
                 className="danger"
                 onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
-                title="断开链路:端口立即释放,设备保留在列表里"
+                title="停止端口监听：链路断开、端口立即释放，设备保留在清单里"
               >
-                断开
+                停止
+              </button>
+            )}
+            {status === 'offline' && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void backend.setDeviceOnline(row.id, true)}
+                title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
+              >
+                上线
+              </button>
+            )}
+            {status === 'online' && (
+              <button
+                type="button"
+                onClick={() => void backend.setDeviceOnline(row.id, false)}
+                title="设备下线（等价主机发 S1F15）：主动上报立即停止"
+              >
+                下线
               </button>
             )}
           </div>
@@ -507,8 +540,9 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           { header: '设备', value: (row) => row.device },
           { header: '配置', value: (row) => row.config },
           { header: '端口', value: (row) => row.port },
-          { header: '控制', value: (row) => controlStateLabel(row.controlState) },
-          { header: '状态', value: (row) => row.state },
+          { header: '状态', value: (row) => DEVICE_STATUS_LABEL[deviceStatus(row)] },
+          { header: '会话状态', value: (row) => row.state },
+          { header: '控制状态', value: (row) => controlStateLabel(row.controlState) },
           { header: '角色', value: (row) => (row.hostSim ? '主机模拟' : '设备') },
           { header: '单元', value: (row) => row.units },
           { header: '报文/分钟', value: (row) => row.msgsPerMin },
@@ -565,10 +599,10 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           type="button"
           className="danger"
           disabled={selected.size === 0 || batchBusy}
-          title="断开选中的设备链路(端口立即释放;设备保留,可再连)"
+          title="停止选中设备的端口监听(链路断开、端口立即释放;设备保留,可再启动)"
           onClick={() => setCloseTarget({ ids: [...selected], label: `选中的 ${selected.size} 台设备` })}
         >
-          批量断开
+          批量停止
         </button>
       </div>
 
@@ -621,10 +655,10 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
 
       <ConfirmModal
         open={closeTarget !== null}
-        title="断开连接"
+        title="停止设备"
         danger
-        confirmLabel="断开"
-        message={closeTarget === null ? '' : `确定断开${closeTarget.label}？端口会立即释放、主机连接断开，设备仍保留在列表里，可随时再连。`}
+        confirmLabel="停止"
+        message={closeTarget === null ? '' : `确定停止${closeTarget.label}？端口会立即释放、与主机的链路断开，设备仍保留在清单里，可随时再启动。`}
         onClose={() => setCloseTarget(null)}
         onConfirm={() => {
           if (closeTarget === null) {
@@ -648,7 +682,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       <PanelFootnote
         items={[
           { label: '会话数', value: sessions.length },
-          { label: '在线', value: online, tone: online > 0 ? 'ok' : undefined },
+          { label: '在线', value: onlineCount, tone: onlineCount > 0 ? 'ok' : undefined },
           {
             label: '活动报警',
             value: rows.reduce((sum, row) => sum + row.activeAlarms, 0),

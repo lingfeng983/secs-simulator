@@ -11,7 +11,9 @@ export function controlStateLabel(state: string | undefined): string {
     case 'OFFLINE':
       return '离线';
     case 'COMMUNICATING':
-      return '通信中';
+      /* 链路已建、设备还没上线：GEM 里这是"已连接但 OFF-LINE"，
+         直接叫"通信中"会让人以为能收发了 */
+      return '已连接未上线';
     case 'ONLINE':
       return '在线';
     default:
