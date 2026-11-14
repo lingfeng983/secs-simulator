@@ -280,7 +280,7 @@ test('主机消息统一收进右侧抽屉：只看本主机 + 收发配色', as
 
   /* 只看当前主机：设备视角的报文被过滤掉 */
   await expect(drawer.getByLabel('选择要查看的设备或主机')).toHaveValue('host:host-1');
-  await expect(drawer.getByText(/只看主机 host-1/)).toBeVisible();
+  await expect(drawer.getByLabel('选择要查看的设备或主机').locator('option:checked')).toContainText('host-1');
   await expect(drawer.getByText('S1F1 W', { exact: true })).toBeVisible();
   await expect(drawer.getByText('S1F2', { exact: true })).toBeVisible();
 

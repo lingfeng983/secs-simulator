@@ -270,26 +270,6 @@ public final class HostSimulator {
         return this.settingRevision.get();
     }
 
-    /** 当前连接实际生效的设置版本。 */
-    public long appliedRevision() {
-        return this.appliedRevision.get();
-    }
-
-    /** 重试次数(autoReconnect 开启时递增)。 */
-    public long retryCount() {
-        return this.retryCount.get();
-    }
-
-    /** 下一次重试时刻(epoch ms);无排程为 0。 */
-    public long nextRetryAt() {
-        return this.nextRetryAt;
-    }
-
-    /** 变量目录(只读视图)。 */
-    public Map<Integer, CatalogEntry> variableCatalog() {
-        return Map.copyOf(this.variableCatalog);
-    }
-
     /**
      * 保存设置(名称/目标):settingRevision +1,下次连接生效。
      *

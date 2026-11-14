@@ -104,25 +104,4 @@ public final class TracePlan {
         }
         return totalSeconds * MS_PER_SECOND;
     }
-
-    /**
-     * 把毫秒格式化为 {@code hhmmss}。
-     *
-     * @param ms 毫秒（必须是非整秒的整数倍）
-     * @return DSPER 文本
-     */
-    public static String formatDsper(long ms) {
-        if (ms <= 0L || ms % MS_PER_SECOND != 0L) {
-            throw new IllegalArgumentException("DSPER 必须是正的整秒，实际 " + ms + " ms");
-        }
-        long totalSeconds = ms / MS_PER_SECOND;
-        long hours = totalSeconds / 3_600L;
-        long minutes = (totalSeconds % 3_600L) / 60L;
-        long seconds = totalSeconds % 60L;
-
-        if (hours > 99L) {
-            throw new IllegalArgumentException("DSPER 超出 hh 两位能表示的范围: " + ms + " ms");
-        }
-        return String.format(java.util.Locale.ROOT, "%02d%02d%02d", hours, minutes, seconds);
-    }
 }

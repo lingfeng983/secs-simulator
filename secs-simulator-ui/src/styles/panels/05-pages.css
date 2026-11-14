@@ -110,61 +110,7 @@
 .template-guide b {
   color: var(--fg);
 }
-/* ===== 主机预设说明 ===== */
-.preset-guide {
-  margin: 0.5rem 0;
-  padding: 0.45rem 0.65rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
 
-.preset-guide > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 11.8px;
-}
-
-.preset-guide > summary:hover {
-  color: var(--fg);
-}
-
-.preset-guide-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 0.6rem 1rem;
-  margin-top: 0.5rem;
-}
-
-.preset-guide-grid h4 {
-  margin: 0 0 0.25rem;
-  color: var(--fg);
-  font-size: 12px;
-}
-
-.preset-guide-grid dl {
-  margin: 0;
-}
-
-.preset-guide-item {
-  margin: 0 0 0.4rem;
-}
-
-.preset-guide-item dt {
-  color: var(--fg);
-  font-size: 11.8px;
-}
-
-.preset-guide-item dd {
-  margin: 0.05rem 0 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
-.preset-guide-item dd .hint-inline {
-  margin-left: 0.4rem;
-}
 /* ===== SVID 多选：S6F1 / S1F3 共用，紧凑左对齐 ===== */
 .field-block {
   display: flex;
@@ -280,4 +226,3 @@
 .template-quick .template-head {
   margin-bottom: 0.3rem;
 }
-

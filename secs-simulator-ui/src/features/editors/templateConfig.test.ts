@@ -7,7 +7,6 @@ import {
   editTemplates,
   parseConfigDocument,
   readTemplates,
-  stringifyConfig,
   templateOutputs,
   uniqueId,
   isExpressionName,
@@ -208,7 +207,10 @@ describe('template helpers', () => {
   });
 
   it('serializes with a trailing newline', () => {
-    expect(stringifyConfig({ a: 1 })).toBe('{\n  "a": 1\n}\n');
+    const result = editDocument('{}', (root) => {
+      root['a'] = 1;
+    });
+    expect(result.ok && result.text).toBe('{\n  "a": 1\n}\n');
   });
 
   it('edits the whole document while preserving unknown keys', () => {

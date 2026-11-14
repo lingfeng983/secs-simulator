@@ -42,11 +42,6 @@ final class SessionNotifier {
         this.noticeBus = bus;
     }
 
-    /** 每秒报文数。 */
-    long msgRate() {
-        return this.msgRate.countInWindow(System.currentTimeMillis());
-    }
-
     /**
      * 把报文发布到事件总线。
      *

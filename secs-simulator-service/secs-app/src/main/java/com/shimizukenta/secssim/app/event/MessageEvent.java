@@ -107,11 +107,6 @@ public record MessageEvent(long seq, String sessionId, String hostId, String dir
         }
     }
 
-    /** 是否来自某个主机模拟实例。 */
-    public boolean fromHost() {
-        return !this.hostId.isEmpty();
-    }
-
     /**
      * 主机模拟实例发布的报文（自动分配序号，主机视角）。
      *

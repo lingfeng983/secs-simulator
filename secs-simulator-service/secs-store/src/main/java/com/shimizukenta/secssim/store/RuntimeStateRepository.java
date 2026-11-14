@@ -134,41 +134,6 @@ public final class RuntimeStateRepository {
         }
     }
 
-    /** 读全部设备链路行。 */
-    public List<LinkRow> allDeviceLinks() {        try (Connection connection = this.db.readRuntime();
-             PreparedStatement st = connection.prepareStatement(
-                     "SELECT device_id, phase, config_revision, control_state, last_error, "
-                             + "overrides_json, last_good_json, connected_at, disconnected_at FROM device_link")) {
-            try (ResultSet rs = st.executeQuery()) {
-                List<LinkRow> result = new ArrayList<>();
-                while (rs.next()) {
-                    result.add(new LinkRow(rs.getString(1), rs.getString(2), rs.getLong(3),
-                            rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                            (Long) rs.getObject(8), (Long) rs.getObject(9)));
-                }
-                return result;
-            }
-        } catch (SQLException e) {
-            throw new StoreException("读 device_link 列表失败: " + e.getMessage(), e);
-        }
-    }
-
-    /** 部署覆盖 / lastGood 快照（断开保留、destroy 才清）。 */
-    public void saveDeviceRuntimeJson(String deviceId, String overridesJson, String lastGoodJson) {
-        this.db.writeRuntime(connection -> {
-            try (PreparedStatement st = connection.prepareStatement(
-                    "UPDATE device_link SET overrides_json=?, last_good_json=? WHERE device_id=?")) {
-                st.setString(1, overridesJson);
-                st.setString(2, lastGoodJson);
-                st.setString(3, deviceId);
-                st.executeUpdate();
-            } catch (SQLException e) {
-                throw new StoreException("保存设备运行 JSON 失败: " + e.getMessage(), e);
-            }
-            return null;
-        });
-    }
-
     /* ---------- host_link ---------- */
 
     /** 建立/重置主机链路行。 */
@@ -346,31 +311,6 @@ public final class RuntimeStateRepository {
         } catch (SQLException e) {
             throw new StoreException("读计划运行态失败: " + e.getMessage(), e);
         }
-    }
-
-    /** 记一次计划触发(fire_count+1 / last_fire_at=now;行不存在则建)。 */
-    public void recordPlanFire(String deviceId, String planId, boolean succeeded, String error) {
-        this.db.writeRuntime(connection -> {
-            try (PreparedStatement st = connection.prepareStatement(
-                    "INSERT INTO runtime_plan_state(device_id, plan_id, enabled, start_at, last_fire_at, "
-                            + "fire_count, skipped_count, last_error) VALUES(?,?,1,?,?,1,0,?) "
-                            + "ON CONFLICT(device_id, plan_id) DO UPDATE SET last_fire_at=excluded.last_fire_at, "
-                            + "fire_count=fire_count+1, "
-                            + "skipped_count=skipped_count+CASE WHEN ?=0 THEN 1 ELSE 0 END, "
-                            + "last_error=excluded.last_error")) {
-                long now = System.currentTimeMillis();
-                st.setString(1, deviceId);
-                st.setString(2, planId);
-                st.setLong(3, now);
-                st.setLong(4, now);
-                st.setString(5, error == null ? "" : error);
-                st.setInt(6, succeeded ? 1 : 0);
-                st.executeUpdate();
-            } catch (SQLException e) {
-                throw new StoreException("记计划触发失败: " + e.getMessage(), e);
-            }
-            return null;
-        });
     }
 
     /** 写运行时计划正文覆盖（add/update/delete）。 */

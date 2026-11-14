@@ -37,9 +37,6 @@ import { useDeviceOps } from './useDeviceOps';
 import { useServerOps } from './useServerOps';
 import { useLogLevel } from './useLogLevel';
 
-/** 面板里保留的报文条数上限。 */
-export const MAX_MESSAGES = 200;
-
 /** 各类资源的轮询间隔（毫秒）。 */
 const INTERVAL = {
   /** 健康与会话：变化快，盯得紧。 */

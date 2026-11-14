@@ -50,27 +50,6 @@ export function Panel({ title, description, actions, stats, children, id, index,
   );
 }
 
-/** 指标格：一个小块数字 + 说明，横排就是一条"仪表刻度"。 */
-export function StatCard({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: string;
-  tone?: 'ok' | 'warn' | 'danger';
-}): JSX.Element {
-  return (
-    <div className={`stat-card${tone === undefined ? '' : ` tone-${tone}`}`}>
-      <span className="stat-label">{label}</span>
-      <span className="stat-value">{value}</span>
-      {hint !== undefined && <span className="stat-hint">{hint}</span>}
-    </div>
-  );
-}
-
 /** 面板脚注条目：右下角一行的"名称 数值"。 */
 export interface FootnoteItem {
   label: string;

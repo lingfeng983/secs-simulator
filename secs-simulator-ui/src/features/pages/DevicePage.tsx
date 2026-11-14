@@ -25,22 +25,6 @@ import {
   type DeviceZone,
 } from '../../app/router';
 
-/** 设备子页的一句话说明（顶栏描述用）。 */
-export const DEVICE_PAGE_DESCRIPTIONS: Record<DevicePage, string> = {
-  overview: '设备定义摘要:名称/模板/自动连接与配置版本。',
-  connection: '该设备的连接参数:会话 id、端口、绑定地址、device-id 与 HSMS 超时。',
-  structure: '该设备的结构:设备名/单元/SVID 属性与曲线、组合、实例模板。',
-  document: '该设备的配置原文:只保留 JSON 全覆盖编辑,保存逐字节写回。',
-  constants: '设备常量(ECV):主机用 S2F13/F14 查询、S2F15/F16 写入的调机参数。',
-  revisions: '配置版本历史:每次保存留一个版本,可对比与回滚。',
-  status: '当前运行的实时状态:链路相位、控制状态与计数。',
-  plans: '该设备的事件编排:引用已设置的事件做计划(增删改/启停/触发)与实时上报。',
-  catalog: '该设备的事件与报告:运行时临时增删改 CEID/RPTID,手动触发上报。',
-  svids: '该设备的状态变量:曲线预览与值设定。',
-  messages: '该设备与主机的报文收发:按类别屏蔽,只看当前关心的消息。',
-  manual: '手动操作:向该设备发送 SML、压测,以及报警置位/清除。',
-};
-
 /**
  * 单设备详情页——两段式（设计 §3.2）：实例头 + 配置区 / 运行区。
  * 配置区改「这台设备是什么」（保存后需重载），运行区操作当前运行。

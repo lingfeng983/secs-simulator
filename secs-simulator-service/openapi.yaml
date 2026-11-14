@@ -456,7 +456,7 @@ paths:
       summary: 曲线预览（SCSP v1 二进制）
       description: |
         小端；48 字节固定头 + 每条序列的 svid 与 min/max/avg f64 数组。
-        格式见 `docs/preview-binary.md`。
+        格式见 `docs/guides/preview-binary.md`。
       parameters:
         - $ref: '#/components/parameters/SessionQuery'
         - $ref: '#/components/parameters/From'

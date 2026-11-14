@@ -27,13 +27,11 @@ export type DeviceConfigPage =
   | 'constants'   // 设备常量（ECV）
   | 'revisions';  // 版本历史
 
-/** 设备运行区子页：当前运行（仅本次运行有效）。 */
+/** 设备运行区子页：当前运行（仅本次有效）。 */
 export type DeviceRuntimePage =
-  | 'status'    // 实时状态（页签已下线，保留类型给旧深链）
   | 'plans'     // 事件计划与执行：计划 CRUD + 启停 + 本设备实时事件
   | 'catalog'   // 事件与报告：CEID/RPTID 运行时增删改 + 手动触发
   | 'svids'     // 状态变量：曲线预览 + 值设定
-  | 'messages'  // 报文收发（已并入右侧抽屉）
   | 'manual';   // 手动操作：SML 发送 + 报警置位/清除
 
 export type DeviceZone = 'config' | 'runtime';
@@ -51,19 +49,16 @@ export const DEVICE_RUNTIME_PAGES: readonly DeviceRuntimePage[] = [
 /** 主机配置区子页（连接参数并入概览，不再单列一页）。 */
 export type HostConfigPage =
   | 'overview'   // 概览：名称/目标/设置版本/自动重连
-  | 'connection' // 连接：旧页签（保留类型给旧深链）
   | 'presets'    // 报文模板：16 条预设 + 说明
   | 'trace'      // Trace 设置：S2F23 表单
   | 'collect';   // 采集设置：启停 CEID + SVID
 
-/** 主机运行区子页（手动操作已下线）。 */
+/** 主机运行区子页。 */
 export type HostRuntimePage =
   | 'status'   // 实时状态
   | 'messages' // 消息发送（只发本主机）
   | 'trace'    // Trace 采集
-  | 'collect'  // 数据采集
-  | 'monitor'  // 收发记录（已并入右侧抽屉）
-  | 'manual';  // 手动操作（旧页签，保留类型给旧深链）
+  | 'collect'; // 数据采集
 
 export type HostZone = 'config' | 'runtime';
 export type HostPage = HostConfigPage | HostRuntimePage;
@@ -86,16 +81,13 @@ export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
   revisions: '版本历史',
 };
 export const DEVICE_RUNTIME_PAGE_LABELS: Record<DeviceRuntimePage, string> = {
-  status: '实时状态',
   plans: '事件计划',
   catalog: '事件与报告',
   svids: '状态变量',
-  messages: '报文收发',
   manual: '手动操作',
 };
 export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
   overview: '概览',
-  connection: '连接',
   presets: '报文模板',
   trace: 'Trace 设置',
   collect: '采集设置',
@@ -105,8 +97,6 @@ export const HOST_RUNTIME_PAGE_LABELS: Record<HostRuntimePage, string> = {
   messages: '消息发送',
   trace: 'Trace 采集',
   collect: '数据采集',
-  monitor: '收发记录',
-  manual: '手动操作',
 };
 
 /** 全局单功能页已精简掉；旧 hash 一律回落工作台。 */
@@ -134,19 +124,6 @@ const LEGACY_DEVICE_PAGE: Record<string, [DeviceZone, DevicePage]> = {
   connection: ['config', 'connection'],
   structure: ['config', 'structure'],
   config: ['config', 'document'],
-};
-
-/** 旧 hostsim 子页 → 主机域新家。 */
-const LEGACY_HOSTSIM_PAGE: Record<string, [HostZone, HostPage]> = {
-  hosts: ['config', 'overview'],
-  messages: ['runtime', 'messages'],
-  fdc: ['runtime', 'trace'],
-  collect: ['runtime', 'collect'],
-  /* 收发记录已并入右侧抽屉，不再有独立的 monitor 运行区子页。 */
-  monitor: ['runtime', 'status'],
-  /* 连接页与手动操作页已删除：旧书签回落到各自区域的首页。 */
-  connection: ['config', 'overview'],
-  manual: ['runtime', 'status'],
 };
 
 function isDeviceZone(value: string | undefined): value is DeviceZone {
@@ -185,7 +162,6 @@ export function parseHash(hash: string, legacyTab?: string): Route {
     }
     if (parts[0] === 'hostsim') {
       /* 2.x：#/hostsim/{page} → 主机列表页（实例树里再进详情） */
-      void LEGACY_HOSTSIM_PAGE;
       return { name: 'hosts' };
     }
     if (parts[0] === 'hosts' && parts[1] === undefined) {

@@ -201,8 +201,6 @@ if (Test-Path $frontSrc) {
     $files += Get-ChildItem -Path $frontSrc -Recurse -File |
         Where-Object { $_.Extension -in '.ts', '.tsx' -and $_.Name -notlike '*.test.ts' -and $_.Name -notlike '*.test.tsx' }
 }
-$proto = Join-Path $root '../docs/design/frontend-panel.html'
-if (Test-Path $proto) { $files += Get-Item $proto }
 
 $violations = New-Object System.Collections.Generic.List[object]
 $scanned = 0
@@ -213,18 +211,7 @@ foreach ($file in $files) {
     if ($null -eq $source) { continue }
     $scanned += 1
 
-    $texts = if ($file.Extension -eq '.html') {
-        # 原型：只取标签之间的文本，脚本/样式整段跳过
-        $body = [regex]::Replace($source, '(?is)<script[\s\S]*?</script>', '')
-        $body = [regex]::Replace($body, '(?is)<style[\s\S]*?</style>', '')
-        $body = [regex]::Replace($body, '(?s)<!--[\s\S]*?-->', '')
-        foreach ($m in [regex]::Matches($body, '>([^<>{}]+)<')) {
-            $line = ($body.Substring(0, $m.Index) -split "`n").Count
-            [pscustomobject]@{ Line = $line; Text = $m.Groups[1].Value }
-        }
-    } else {
-        Get-UiTexts $source -Jsx:($file.Extension -eq '.tsx')
-    }
+    $texts = Get-UiTexts $source -Jsx:($file.Extension -eq '.tsx')
 
     foreach ($text in $texts) {
         $value = $text.Text

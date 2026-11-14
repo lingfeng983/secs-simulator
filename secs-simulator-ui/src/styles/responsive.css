@@ -164,8 +164,7 @@
   }
 
   .config-editor,
-  .sml-editor,
-  .log {
+  .sml-editor {
     min-height: 14rem;
   }
 }
@@ -193,21 +192,12 @@
   }
 
   .spark,
-  .spark-pair,
   .collector-charts {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .spark-readout {
     grid-column: 1;
-  }
-
-  .device-header {
-    padding: 0.75rem 0.9rem;
-  }
-
-  .device-tabs > button {
-    padding: 0 0.8rem;
   }
 
   .toast-host {

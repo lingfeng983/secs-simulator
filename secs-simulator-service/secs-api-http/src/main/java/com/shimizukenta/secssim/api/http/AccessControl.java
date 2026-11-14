@@ -32,22 +32,12 @@ public final class AccessControl {
     }
 
     /**
-     * 认证。<b>参数被忽略</b>：直连访问下没有凭据可校验。
+     * 认证。直连访问下没有凭据可校验。
      *
-     * @param secret 调用方出示的口令（已废弃，忽略）
      * @return 恒为 {@code local/ADMIN}
      */
-    public Principal authenticate(String secret) {
+    public Principal authenticate() {
         return LOCAL;
-    }
-
-    /**
-     * 账号数量（诊断用）。
-     *
-     * @return 恒为 0：不再有账号
-     */
-    public int size() {
-        return 0;
     }
 
     /**

@@ -265,47 +265,10 @@ textarea.invalid {
   border-color: var(--danger);
 }
 
-.svid-preview {
-  padding: 0.75rem 0.85rem;
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius);
-  background: var(--accent-soft);
-}
-
 .effects-editor .template-subhead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-/* 值来源/常量等处的一行说明 */
-.detail-list {
-  display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr);
-  gap: 0.3rem 0.8rem;
-  margin: 0 0 0.75rem;
-  font-size: 12px;
-}
-
-.detail-list dt {
-  color: var(--muted);
-}
-
-.detail-list dd {
-  margin: 0;
-}
-
-/* 采集卡 / 主机模拟 */
-.collector-form {
-  display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-}
-
-.hostsim-target {
-  align-items: flex-end;
-  gap: 0.6rem;
 }
 
 .data-table td.sml-cell {
@@ -401,47 +364,6 @@ textarea.invalid {
   min-width: 0;
 }
 
-/* 可展开的次要表单 */
-.inline-create {
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-
-.inline-create > summary {
-  padding: 0.5rem 0.8rem;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  list-style: none;
-}
-
-.inline-create > summary::-webkit-details-marker {
-  display: none;
-}
-
-.inline-create > summary::before {
-  content: '+';
-  display: inline-block;
-  width: 1rem;
-  color: var(--accent);
-  font-family: var(--font-mono);
-}
-
-.inline-create[open] > summary::before {
-  content: '−';
-}
-
-.inline-create > summary:hover {
-  color: var(--ink);
-}
-
-.inline-create > .toolbar,
-.inline-create > .form-row {
-  padding: 0 0.8rem 0.7rem;
-}
-
 /* 表格:在面板里不再自带一圈边框,避免"框套框" */
 .panel-body .table-scroll {
   border-color: var(--line);
@@ -529,13 +451,6 @@ textarea.invalid {
   min-width: 4.5rem;
 }
 
-.batch-bar .sep {
-  width: 1px;
-  height: 16px;
-  margin: 0 0.15rem;
-  background: var(--line-strong);
-}
-
 /* 批量工具条在窄屏折行时保持可读:计数与 CEID 各自成组,按钮靠右 */
 @media (max-width: 680px) {
   .batch-bar {
@@ -554,4 +469,3 @@ textarea.invalid {
     flex: 1 1 auto;
   }
 }
-

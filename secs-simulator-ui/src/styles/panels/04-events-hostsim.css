@@ -114,32 +114,8 @@ button.active:not(.segment):not(.segmented > button) {
   color: var(--accent);
 }
 
-/* ===== 主机模拟:实例选择条 ===== */
-.host-picker {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem var(--field-gap);
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-
-.host-picker .spacer {
-  flex: 1 1 auto;
-}
-
 @media (max-width: 680px) {
-  .host-picker {
-    flex-direction: column;
-    align-items: stretch;
-  }
 
-  .host-picker .spacer {
-    display: none;
-  }
 }
 
 /* ===== 报文收发监视（设备页·消息 / 主机模拟·消息监控） ===== */
@@ -299,30 +275,7 @@ button.active:not(.segment):not(.segmented > button) {
   white-space: normal;
   min-width: 280px;
 }
-/* ===== 主机模拟：多选发送目标 ===== */
-.host-multi {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
 
-.host-multi-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.host-check-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.9rem;
-}
 /* ===== 图表工具条（缩放/图例开关） ===== */
 .chart-toolbar {
   display: flex;

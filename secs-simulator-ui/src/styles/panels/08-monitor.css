@@ -54,14 +54,6 @@
   font-weight: 650;
 }
 
-.monitor-legend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 11px;
-}
-
 /* 查看对象：一次只看一台设备或一台主机，用下拉切换 */
 .monitor-target {
   margin-top: 6px;

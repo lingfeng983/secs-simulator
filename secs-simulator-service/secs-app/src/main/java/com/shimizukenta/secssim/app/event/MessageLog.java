@@ -337,18 +337,6 @@ public final class MessageLog implements AutoCloseable {
     }
 
     /**
-     * 最近历史（JSON Lines），供导出与离线分析。
-     *
-     * @param limit     最多返回条数
-     * @param sessionId 只取这个会话；空串表示全部
-     * @param direction {@code in} / {@code out}；空串表示全部
-     * @return 每行一个 JSON 对象
-     */
-    public synchronized String recentJsonl(int limit, String sessionId, String direction) {
-        return this.recentJsonl(limit, sessionId, direction, 0L, null, null);
-    }
-
-    /**
      * 最近历史（JSON Lines,带游标与报文类型过滤）。
      *
      * @param limit     最多返回条数

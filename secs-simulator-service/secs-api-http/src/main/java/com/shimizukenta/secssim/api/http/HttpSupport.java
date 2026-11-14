@@ -89,7 +89,7 @@ abstract class HttpSupport {
 
     /** 直连访问下恒为本机管理员（请求头不参与身份判定）。 */
     protected AccessControl.Principal authenticate(HttpExchange ex) {
-        return this.access.authenticate(null);
+        return this.access.authenticate();
     }
 
     /**

@@ -53,7 +53,6 @@ export function InstanceHead({ title, badge, subtitle, metrics, actions, zoneSwi
 
 /**
  * 紧凑的配置区 / 运行区切换：放在实例头的状态/动作行里，一行排完。
- * 老的 {@link ZoneBar} 保留给其它调用点，新页面只用这个。
  */
 export function ZoneSwitch({
   zone,
@@ -92,47 +91,6 @@ export function ZoneSwitch({
   );
 }
 
-/** 配置区/运行区切换条（旧版，单独占一行；保留兼容）。 */
-export function ZoneBar({
-  zone,
-  onChange,
-  configNote,
-  runtimeNote,
-}: {
-  zone: 'config' | 'runtime';
-  onChange: (zone: 'config' | 'runtime') => void;
-  configNote: string;
-  runtimeNote: string;
-}): JSX.Element {
-  return (
-    <div className="zonebar-wrap">
-      <div className="zonebar" role="tablist" aria-label="配置区 / 运行区">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={zone === 'config'}
-          className={`zone-btn config${zone === 'config' ? ' active' : ''}`}
-          onClick={() => onChange('config')}
-        >
-          <span className="zone-ico" aria-hidden="true">▣</span>
-          <span>配置区<small>修改实例定义</small></span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={zone === 'runtime'}
-          className={`zone-btn runtime${zone === 'runtime' ? ' active' : ''}`}
-          onClick={() => onChange('runtime')}
-        >
-          <span className="zone-ico" aria-hidden="true">◉</span>
-          <span>运行区<small>查看与操作当前运行</small></span>
-        </button>
-      </div>
-      <div className={`zone-note ${zone}`}>{zone === 'config' ? configNote : runtimeNote}</div>
-    </div>
-  );
-}
-
 /** 两段式内部的子页签。 */
 export function SubTabs({
   pages,
@@ -157,36 +115,6 @@ export function SubTabs({
           {page.label}
         </button>
       ))}
-    </div>
-  );
-}
-
-/** 「待生效」横幅（设备=配置待生效 / 主机=设置待生效）。 */
-export function PendingBanner({
-  kind,
-  latest,
-  running,
-  onApply,
-  extra,
-}: {
-  kind: 'config' | 'settings';
-  latest: string;
-  running: string;
-  onApply: () => void;
-  extra?: ReactNode;
-}): JSX.Element | null {
-  return (
-    <div className={`pending-banner ${kind}`} role="status">
-      <span className="pending-tag">{kind === 'config' ? '配置待生效' : '设置待生效'}</span>
-      <span className="pending-text">
-        {kind === 'config' ? '配置已更新到' : '设置已更新到'} <b>{latest}</b>
-        ，当前{kind === 'config' ? '运行' : '生效'}仍是 <b>{running}</b>
-      </span>
-      <span className="spacer" />
-      {extra}
-      <button type="button" className="primary" onClick={onApply}>
-        {kind === 'config' ? '重载使生效' : '使设置生效'}
-      </button>
     </div>
   );
 }

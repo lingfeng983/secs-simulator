@@ -5,7 +5,7 @@
  * 实例自己的动作；每实例的收发记录走 perspective=host。</p>
  */
 
-import type { ApiClient, SentMessageResult, WireMessage } from './types';
+import type { ApiClient, SentMessageResult } from './types';
 import { apiUrl, readJson, request } from './base';
 
 /** 一个主机实例（v2：与设备无关）。 */
@@ -43,16 +43,12 @@ type HostsV2Api = Pick<
   ApiClient,
   | 'hostsV2'
   | 'createHostV2'
-  | 'hostV2'
   | 'deleteHostV2'
   | 'saveHostV2'
   | 'connectHostV2'
   | 'disconnectHostV2'
   | 'applyHostV2'
   | 'sendHostV2'
-  | 'hostMessagesV2'
-  | 'refreshHostVariablesV2'
-  | 'declareHostVariableTypeV2'
   | 'hostTemplatesV2'
   | 'saveHostTemplateV2'
   | 'deleteHostTemplateV2'
@@ -75,13 +71,6 @@ export const hostsV2Api: HostsV2Api = {
       throw new Error(body.error ?? '新建主机失败');
     }
     return body.hostId ?? '';
-  },
-  async hostV2(hostId) {
-    const response = await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}`));
-    if (response.status === 404) {
-      return null;
-    }
-    return await readJson<HostV2>(response);
   },
   async deleteHostV2(hostId) {
     const response = await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}`), { method: 'DELETE' });
@@ -128,29 +117,6 @@ export const hostsV2Api: HostsV2Api = {
         body: JSON.stringify({ sml }),
       }, 60_000),
     );
-  },
-  async hostMessagesV2(hostId, limit = 500) {
-    const body = await readJson<{ messages?: WireMessage[]; total?: number }>(
-      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/messages?limit=${limit}`)),
-    );
-    return body.messages ?? [];
-  },
-  async refreshHostVariablesV2(hostId) {
-    const body = await readJson<{ ok?: boolean; count?: number; error?: string }>(
-      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/variables`),
-        { method: 'POST' }, 60_000),
-    );
-    if (!body.ok) {
-      throw new Error(body.error ?? '目标未提供变量清单，请手动填写');
-    }
-    return body.count ?? 0;
-  },
-  async declareHostVariableTypeV2(hostId, svid, type) {
-    const response = await request(
-      apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/variables/${svid}`),
-      { method: 'PUT', headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ type }) },
-    );
-    return response.ok;
   },
   async hostTemplatesV2() {
     const body = await readJson<{ templates?: HostTemplate[] }>(

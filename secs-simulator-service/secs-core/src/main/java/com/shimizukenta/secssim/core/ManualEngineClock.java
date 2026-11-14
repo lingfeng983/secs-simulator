@@ -36,13 +36,4 @@ public final class ManualEngineClock implements EngineClock {
         }
         this.nowMs += deltaMs;
     }
-
-    /**
-     * 直接设定当前毫秒（允许回退，仅用于测试布置）。
-     *
-     * @param nowMs 目标毫秒
-     */
-    public void setNowMs(long nowMs) {
-        this.nowMs = nowMs;
-    }
 }

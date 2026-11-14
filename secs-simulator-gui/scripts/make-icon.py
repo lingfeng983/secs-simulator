@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """生成应用图标：深色圆角底 + 晶圆 + 信号弧。
 
-输出：
-  assets/icon.png          1024x1024，Tauri `tauri icon` 的源图
-  assets/icon.ico          16..256 多尺寸，Windows exe / 任务栏
-  assets/icon-<n>.png      16/32/48/64/128/256，窗口与托盘
+输出（secs-simulator-gui/assets/）：
+  icon.png     1024x1024，唯一被消费的源图：`npm run icon`（tauri icon）用它
+               生成 src-tauri/icons/ 下的 NSIS 图标与托盘图
+  icon.ico     16..256 多尺寸
+  icon-<n>.png 16/32/48/64/128/256（留作他用，构建链路不消费）
 """
 
 from pathlib import Path

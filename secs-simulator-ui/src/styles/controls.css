@@ -353,8 +353,7 @@ textarea {
 }
 
 /* 复选框组:前面的说明文字与其它字段的描述列对齐 */
-.form-row > .template-label,
-.form-row > .field-label {
+.form-row > .template-label {
   flex: 0 0 var(--field-label-w);
   width: var(--field-label-w);
   max-width: var(--field-label-w);
@@ -394,9 +393,7 @@ textarea {
 
 /* 工具条里的描述列:与表单行同一宽度 */
 .toolbar > .template-label,
-.toolbar > .field-label,
-.preview-controls > .template-label,
-.preview-controls > .field-label {
+.preview-controls > .template-label {
   flex: 0 0 var(--field-label-w);
   width: var(--field-label-w);
   max-width: var(--field-label-w);
@@ -537,8 +534,7 @@ textarea {
   opacity: 0.7;
 }
 
-.badge:empty::before,
-.badge.no-dot::before {
+.badge:empty::before {
   display: none;
 }
 
@@ -558,11 +554,6 @@ textarea {
 .badge.tone-danger {
   background: var(--danger-soft);
   color: var(--danger);
-}
-
-.badge-accent {
-  background: var(--accent-soft);
-  color: var(--accent);
 }
 
 /* info 单独用蓝：设备四态里"离线"必须和"在线（绿）"一眼分得开，

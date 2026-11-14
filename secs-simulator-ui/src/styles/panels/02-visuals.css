@@ -1,20 +1,3 @@
-/* ===== 图表、编辑器/结果/日志、差异视图、子表网格、单变量曲线 =====
- * 由 panels.css 按主题拆出（原行 529-980）；
- * 规则内容未改动，汇总顺序见 ../panels.css。
- */
-/* ===== 图表 ===== */
-.sparks {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.spark-pair {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  gap: 0.6rem;
-  align-items: center;
-}
 
 .spark {
   display: grid;
@@ -65,14 +48,6 @@
 }
 
 .collector-chart,
-.uplot-block,
-.multi-axis-block {
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-inset);
-}
-
 .collector-chart-head {
   display: flex;
   align-items: baseline;
@@ -93,44 +68,6 @@
 
 .collector-chart .spark-readout {
   font-size: 10.5px;
-}
-
-.uplots {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.uplot-title {
-  margin-bottom: 0.3rem;
-  color: var(--muted);
-  font: 11.5px/1.4 var(--font-mono);
-}
-
-.uplot-host,
-.multi-axis-host {
-  width: 100%;
-}
-
-.uplot-host .u-legend {
-  font-size: 11px;
-}
-
-.preview-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
-.ceid {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-  color: var(--muted);
 }
 
 /* ===== 编辑器 / 结果 / 日志 ===== */
@@ -169,18 +106,6 @@
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   background: var(--danger-soft);
   color: var(--danger);
-}
-
-.log {
-  height: 24rem;
-  overflow: auto;
-  margin: 0;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-inset);
-  font: 11.5px/1.65 var(--font-mono);
-  white-space: pre-wrap;
 }
 
 /* SML 语法高亮 */
@@ -296,46 +221,6 @@
     repeat(7, minmax(0, 1fr)) minmax(11rem, 1.5fr) auto;
 }
 
-/* 值来源格：不再缩进成子块，直接占一格 */
-.form-grid-cell {
-  min-width: 0;
-  align-self: center;
-}
-
-.form-grid-cell .svid-source {
-  margin: 0;
-  padding: 0;
-  border-left: none;
-}
-
-.form-grid-cell .svid-source-bar {
-  gap: 0.35rem;
-}
-
-/* 值来源格里放不下"名称 + 下拉 + 按钮"三件套，
-   改成纵向：名称一行、控件一行。 */
-.form-grid-cell .svid-source-bar {
-  flex-wrap: wrap;
-  gap: 0.25rem 0.35rem;
-}
-
-.form-grid-cell .svid-source-label {
-  flex: 1 1 100%;
-  max-width: none;
-  font-size: 10.5px;
-  font-weight: 500;
-}
-
-.form-grid-cell .svid-source-kind {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-}
-
-.form-grid-cell .svid-source-bar > button {
-  flex: 0 0 auto;
-}
-
 /* 表头行：只说列名，行内不再重复 */
 .form-grid-head {
   align-items: center;
@@ -399,7 +284,6 @@
   align-self: end;
 }
 
-
 /* ===== 单变量曲线图(带坐标轴) ===== */
 .variable-chart {
   width: 100%;
@@ -424,7 +308,6 @@
   margin-left: auto;
   color: var(--fg-strong);
 }
-
 
 /* 事件清单：图上标不下时,这里按时刻列全 */
 .variable-chart-events {
@@ -452,5 +335,3 @@
   padding: 0.1rem 0;
   color: var(--fg);
 }
-
-

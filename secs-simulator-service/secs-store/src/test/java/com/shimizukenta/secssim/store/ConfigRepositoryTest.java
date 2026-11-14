@@ -94,18 +94,12 @@ class ConfigRepositoryTest {
     }
 
     @Test
-    void duplicateNameIsRejectedButTombstoneAllowsReuse() {
+    void duplicateNameIsRejected() {
         setUp();
         this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
         StoreException e = assertThrows(StoreException.class,
                 () -> this.repo.createDevice("line1", "line2", "etch", BODY_V1, true, "test"));
         assertEquals(StoreException.Kind.CONFLICT, e.kind());
-
-        /* 软删后名字可复用（唯一索引只约束未删除行） */
-        this.repo.deleteDevice("line1");
-        assertTrue(this.repo.findDevice("line1").isEmpty());
-        String reused = this.repo.createDevice("line1", "line1-b", "etch", BODY_V1, true, "test");
-        assertTrue(reused.startsWith("dev_"));
     }
 
     @Test

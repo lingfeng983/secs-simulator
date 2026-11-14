@@ -63,16 +63,6 @@ public record UnitSpec(UnitId unitId, String name, List<SvidDef> svids, List<Rep
     }
 
     /**
-     * 按符号名查找 CEID。
-     *
-     * @param slot 符号名
-     * @return 定义
-     */
-    public Optional<CeidDef> findCeid(String slot) {
-        return this.ceids.stream().filter(d -> d.slot().equals(slot)).findFirst();
-    }
-
-    /**
      * 是否定义了 {@code UNIT_ID} 槽位。
      *
      * @return 已定义返回 {@code true}

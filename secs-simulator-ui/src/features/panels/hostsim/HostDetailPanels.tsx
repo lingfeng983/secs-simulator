@@ -1114,6 +1114,3 @@ function requireClient(client: ApiClient | null): ApiClient {
   }
   return client;
 }
-
-/** 保留类型引用，避免旧代码把 WireMessage 换成 any 时悄悄漏掉过滤。 */
-export type HostPanelMessage = WireMessage;

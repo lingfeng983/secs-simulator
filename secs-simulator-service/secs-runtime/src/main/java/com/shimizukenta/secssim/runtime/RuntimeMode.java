@@ -15,20 +15,18 @@ package com.shimizukenta.secssim.runtime;
 public enum RuntimeMode {
 
     /** 一体化：随桌面壳启动，仅供本机访问。 */
-    INTEGRATED("integrated", true),
+    INTEGRATED("integrated"),
 
     /** 服务端：常驻 Linux，供远程客户端访问。 */
-    SERVER("server", false),
+    SERVER("server"),
 
     /** 探针：开一个 HSMS 被动端口并应答 S1F1，用于现场排障与 CI。 */
-    PROBE("probe", true);
+    PROBE("probe");
 
     private final String id;
-    private final boolean loopbackOnly;
 
-    RuntimeMode(String id, boolean loopbackOnly) {
+    RuntimeMode(String id) {
         this.id = id;
-        this.loopbackOnly = loopbackOnly;
     }
 
     /**
@@ -38,15 +36,6 @@ public enum RuntimeMode {
      */
     public String id() {
         return this.id;
-    }
-
-    /**
-     * 是否只允许回环访问。
-     *
-     * @return {@code true} 表示只绑 127.0.0.1
-     */
-    public boolean loopbackOnly() {
-        return this.loopbackOnly;
     }
 
     /**

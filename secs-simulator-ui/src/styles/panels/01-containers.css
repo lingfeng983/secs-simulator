@@ -223,22 +223,6 @@
 .panel-footnote .tone-danger { color: var(--danger); font-weight: 600; }
 
 /* 面板内的统计条:一行等宽小格,像仪表刻度 */
-.panel-stats > .stat-card,
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-  padding: 10px var(--panel-pad);
-  border: none;
-  border-right: 1px solid var(--line-soft);
-  background: transparent;
-}
-
-.stat-card:last-child {
-  border-right: none;
-}
-
 .stat-label {
   color: var(--muted);
   font-size: 10.5px;
@@ -262,10 +246,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.stat-card.tone-ok .stat-value { color: var(--ok); }
-.stat-card.tone-warn .stat-value { color: var(--warn); }
-.stat-card.tone-danger .stat-value { color: var(--danger); }
 
 /* ===== 指标卡 ===== */
 .kpi-grid {
@@ -453,12 +433,6 @@
   border-bottom: none;
 }
 
-.data-table td.body {
-  max-width: 30rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .data-table th.sortable {
   cursor: pointer;
 }
@@ -529,4 +503,3 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
-

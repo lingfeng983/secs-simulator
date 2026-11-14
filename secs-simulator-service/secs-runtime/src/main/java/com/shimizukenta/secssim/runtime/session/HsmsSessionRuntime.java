@@ -392,10 +392,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this.scheduler::previewSchedule,
                 ceid -> this.hostReports.isEnabled(ceid),
                 this.scheduler::recordSkipped,
-                () -> {
-                    this.scheduler.recordEventFire();
-                    this.recordEventFired();
-                },
+                this::recordEventFired,
                 this::publishNotice,
                 () -> this.clock.nowMs(),
                 () -> this.s6f11Wbit,
@@ -425,11 +422,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public void collectionEventWbit(boolean enabled) {
         this.s6f11Wbit = enabled;
-    }
-
-    /** S6F11 是否带 W 位。 */
-    public boolean collectionEventWbitEnabled() {
-        return this.s6f11Wbit;
     }
 
     /**
@@ -1215,7 +1207,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * @param saver 回调；{@code null} 表示不落盘
      */
     public void constantSaver(ConstantSaver saver) {
-        this.constantStore.saver(saver);
         /* 协作者负责协议翻译，落盘这一下交给会话层——它才知道写哪个文件 */
         this.hostSide.constantSaver(saver::save);
     }

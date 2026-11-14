@@ -52,7 +52,7 @@ class MessageLogTest {
             assertEquals(first.body(), restored.get("body").optionalString().orElse(""));
             assertEquals(1_000L, restored.get("at").longValue());
 
-            assertEquals(2, reopened.recentJsonl(10, "", "").lines().count());
+            assertEquals(2, reopened.recentJsonl(10, "", "", 0L, null, null).lines().count());
         }
     }
 

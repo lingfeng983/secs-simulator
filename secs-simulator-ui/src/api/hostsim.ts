@@ -1,28 +1,21 @@
 /**
- * 主机模拟域端点：多主机实例、按会话的主机连接、S1F3 采集器。
+ * 主机模拟域端点：S1F3 采集器、按会话的主机连接。
  *
- * <p>两套端点并存：`/host-sims`（实例 id 维度，多主机）与
- * `/sessions/{id}/host-sim`（会话维度，一次一主机）。前者是后者的升级形态，
- * 但老界面仍用后者，故都保留。</p>
+ * <p>两套端点并存：`/host-sims/{id}/collector*`（实例 id 维度，多主机）与
+ * `/sessions/{id}/host-sim*`（会话维度，一次一主机）。实例的创建/关闭/发送/压测
+ * 走 v2（hostsV2.ts），这里只剩采集器与会话维度的端点。</p>
  */
 
 import type {
-  ApiClient, BurstResult, BurstStatus, CollectorConfigInput, CollectorState, HostSimInstance, SentMessageResult,
+  ApiClient, CollectorConfigInput, CollectorState, SentMessageResult,
 } from './types';
 import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, parseCollectorResult, readJson, request } from './base';
 
 type HostSimApi = Pick<
   ApiClient,
-  | 'hostSims'
-  | 'openHostInstance'
-  | 'hostInstance'
-  | 'closeHostInstance'
-  | 'sendHostInstanceSml'
   | 'hostInstanceCollector'
   | 'setHostInstanceCollector'
   | 'hostInstanceCollectorCommand'
-  | 'hostInstanceBurst'
-  | 'hostInstanceBurstStatus'
   | 'openHostSim'
   | 'closeHostSim'
   | 'sendHostSml'
@@ -32,66 +25,6 @@ type HostSimApi = Pick<
 >;
 
 export const hostSimApi: HostSimApi = {
-  async hostSims() {
-    const body = await readJson<{ hosts?: HostSimInstance[] }>(
-      await request(apiUrl('/api/v1/host-sims')),
-    );
-    return body.hosts ?? [];
-  },
-  async openHostInstance(req) {
-    const response = await request(apiUrl('/api/v1/host-sims'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(req),
-    }, LONG_REQUEST_TIMEOUT_MS);
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status === 409) {
-        throw new Error('设备已有主机连接，或实例 id 已存在');
-      }
-      /* 后端的 {"ok":false,"error":"..."} 里通常有可读原因，别把整段 JSON 甩给用户 */
-      let detail = text.slice(0, 200);
-      try {
-        const body = JSON.parse(text) as { error?: unknown };
-        if (typeof body.error === 'string' && body.error !== '') {
-          detail = body.error;
-        }
-      } catch {
-        /* 非 JSON 响应就保留原文 */
-      }
-      throw new Error(`${response.status} ${detail}`);
-    }
-    return response.status;
-  },
-  async hostInstance(hostId) {
-    const response = await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}`));
-    /* 实例不存在 = 没有这个主机，对调用方是 null 而不是错误 */
-    if (!response.ok) {
-      return null;
-    }
-    return readJson<HostSimInstance>(response);
-  },
-  async closeHostInstance(hostId) {
-    return commandStatus(
-      await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}`), { method: 'DELETE' }),
-    );
-  },
-  async sendHostInstanceSml(hostId, sml) {
-    /* 以主机角色发 W 位报文同样要等设备回复，用长超时 */
-    const response = await request(
-      apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/send`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: sml,
-      },
-      LONG_REQUEST_TIMEOUT_MS,
-    );
-    if (!response.ok) {
-      throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
-    }
-    return readJson<SentMessageResult>(response);
-  },
   async hostInstanceCollector(hostId) {
     const response = await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector`));
     /* 未配置采集器时后端回非 2xx，这里当"没有采集器"处理 */
@@ -125,28 +58,6 @@ export const hostSimApi: HostSimApi = {
       throw new Error(parsed.error ?? text.slice(0, 200));
     }
     return parsed;
-  },
-  async hostInstanceBurst(hostId, payload) {
-    /* 压测在服务端后台执行：这里的响应只是"受理"，最终统计由 hostInstanceBurstStatus 轮询取回 */
-    const response = await request(
-      apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/burst`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify(payload),
-      },
-      LONG_REQUEST_TIMEOUT_MS,
-    );
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`${response.status} ${text.slice(0, 200)}`);
-    }
-    return JSON.parse(text) as BurstResult;
-  },
-  async hostInstanceBurstStatus(hostId) {
-    return readJson<BurstStatus>(
-      await request(apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/burst`)),
-    );
   },
   async openHostSim(sessionId, target) {
     return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {

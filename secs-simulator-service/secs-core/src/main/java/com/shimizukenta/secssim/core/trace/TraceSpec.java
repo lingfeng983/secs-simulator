@@ -1,7 +1,6 @@
 package com.shimizukenta.secssim.core.trace;
 
 import java.util.List;
-import java.util.Objects;
 
 /**
  * 一条 Trace 的定义（来自 S2F23）。
@@ -61,20 +60,5 @@ public record TraceSpec(int trid, List<Integer> svids, long dsperMs, int totsmp,
     public String toString() {
         return "TraceSpec(trid=" + this.trid + ", svids=" + this.svids
                 + ", dsper=" + this.dsperMs + "ms, totsmp=" + this.totsmp + ", repgsz=" + this.repgsz + ")";
-    }
-
-    /**
-     * 判断两个定义是否等价（用于重复初始化判定）。
-     *
-     * @param other 另一个
-     * @return 等价返回 {@code true}
-     */
-    public boolean sameAs(TraceSpec other) {
-        return other != null
-                && this.trid == other.trid
-                && this.dsperMs == other.dsperMs
-                && this.totsmp == other.totsmp
-                && this.repgsz == other.repgsz
-                && Objects.equals(this.svids, other.svids);
     }
 }

@@ -101,20 +101,6 @@ public final class ValueStore {
     }
 
     /**
-     * 取某 SVID 绑定的曲线。
-     *
-     * @param svid 绝对 SVID
-     * @return 曲线
-     */
-    public Curve curveOf(int svid) {
-        Binding binding = this.bindings.get(svid);
-        if (binding == null) {
-            throw new IllegalArgumentException("svid not bound: " + svid);
-        }
-        return binding.curve();
-    }
-
-    /**
      * 清空全部绑定。
      */
     public void clear() {

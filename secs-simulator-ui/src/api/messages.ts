@@ -1,18 +1,17 @@
 /**
- * 观测域端点：SSE 票据、报文历史（含 JSONL 导出）、审计、日志级别。
+ * 观测域端点：SSE 票据、报文历史、审计、日志级别。
  *
  * <p>都是"看"的接口，不改变设备状态；写入类端点在各会话/配置域里。</p>
  */
 
 import type { ApiClient, AuditEntryView, AuditFilters, MessageHistoryOptions, MessagePage } from './types';
-import { apiUrl, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
+import { apiUrl, readJson, request } from './base';
 
 type MessageApi = Pick<
   ApiClient,
   | 'ticket'
   | 'eventsUrl'
   | 'messages'
-  | 'messagesJsonl'
   | 'audit'
   | 'logLevel'
   | 'setLogLevel'
@@ -55,21 +54,6 @@ export const messageApi: MessageApi = {
       limit: body.limit ?? limit,
       truncated: body.truncated ?? false,
     };
-  },
-  async messagesJsonl(sessionId, direction, limit) {
-    const query = new URLSearchParams({ limit: String(limit), format: 'jsonl' });
-    if (sessionId !== '') {
-      query.set('session', sessionId);
-    }
-    if (direction !== '') {
-      query.set('direction', direction);
-    }
-    /* 导出 5000 条 JSONL 可能需要好几秒 */
-    const response = await request(apiUrl(`/api/v1/messages?${query}`), {}, LONG_REQUEST_TIMEOUT_MS);
-    if (!response.ok) {
-      throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
-    }
-    return response.text();
   },
   async audit(limit, filters?: AuditFilters) {
     const query = new URLSearchParams({ limit: String(limit) });

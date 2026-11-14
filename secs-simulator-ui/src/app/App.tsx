@@ -23,7 +23,7 @@ import { Topbar } from './layout/Topbar';
 import { useRoute, type DevicePage, type DeviceZone, type HostPage, type HostZone } from './router';
 import { useHostsV2, hostPhaseLabel, hostPhaseTone } from '../state/useHostsV2';
 import { WorkbenchPage } from '../features/pages/WorkbenchPage';
-import { DevicePage as DevicePageView, DEVICE_PAGE_DESCRIPTIONS } from '../features/pages/DevicePage';
+import { DevicePage as DevicePageView } from '../features/pages/DevicePage';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -188,20 +188,10 @@ export function App(): JSX.Element {
   const goTo = useCallback(
     (id: string) => {
       if (id.startsWith('device-tab:')) {
-        /* 旧面板 id:映射进两段式 */
+        /* 旧面板 id:映射进两段式（命令面板只传 svids，其余旧 id 归运行区首页） */
         const [, sessionId, tab] = id.split(':');
         const mapped: Record<string, [DeviceZone, DevicePage]> = {
-          ceids: ['runtime', 'catalog'],
-          reports: ['runtime', 'catalog'],
-          events: ['runtime', 'plans'],
-          alarms: ['runtime', 'manual'],
           svids: ['runtime', 'svids'],
-          /* 命令面板里的旧「报文收发」入口：页面已下线，落到运行区首页 + 右侧抽屉。 */
-          messages: ['runtime', 'plans'],
-          send: ['runtime', 'manual'],
-          connection: ['config', 'connection'],
-          structure: ['config', 'structure'],
-          config: ['config', 'document'],
         };
         const hit = mapped[tab] ?? ['runtime', 'catalog'];
         navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
@@ -248,41 +238,23 @@ export function App(): JSX.Element {
         navigate({ name: 'device', sessionId: id.slice('device-open:'.length), zone: 'config', page: 'overview' });
         return;
       }
-      if (id.startsWith('hostsim-page:')) {
-        /* 旧主机模拟子页 → 主机列表页(详情从实例树进) */
-        navigate({ name: 'hosts' });
-        return;
-      }
       switch (id) {
         case 'workbench':
-        case 'overview':
-        case 'events':
-        case 'messages':
         case 'sessions':
           navigate({ name: 'workbench' });
           return;
         case 'audit':
-        case 'console':
           navigate({ name: 'system', page: 'audit' });
           return;
         case 'templates':
           navigate({ name: 'templates' });
           return;
-        case 'hostsim':
-          navigate({ name: 'hosts' });
-          return;
-        case 'host-templates':
-          navigate({ name: 'host-templates' });
-          return;
         default: {
-          /* 设备能力 id → 当前设备对应子页;旧 id 归到新家(preview/catalog→状态变量,burst/collector→就近) */
+          /* 设备能力 id → 当前设备对应子页（命令面板只传 catalog） */
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
             const mapped: Record<string, [DeviceZone, DevicePage]> = {
-              preview: ['runtime', 'svids'],
               catalog: ['runtime', 'catalog'],
-              burst: ['runtime', 'manual'],
-              collector: ['config', 'overview'],
             };
             const hit = mapped[id] ?? ['runtime', 'catalog'];
             navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });

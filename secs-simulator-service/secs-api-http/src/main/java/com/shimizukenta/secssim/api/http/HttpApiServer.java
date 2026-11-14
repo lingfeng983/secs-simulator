@@ -476,7 +476,7 @@ public final class HttpApiServer {
         }
 
         long uptime = Duration.between(this.startedAt, Instant.now()).toMillis();
-        AccessControl.Principal principal = this.access.authenticate(null);
+        AccessControl.Principal principal = this.access.authenticate();
 
         /* 这段是拼进 JSON 对象的片段，必须以逗号开头。实现方写错（或塞了裸换行、
            引号）时整份 health 就不是合法 JSON 了，调用方连版本号都读不到——
@@ -919,7 +919,7 @@ public final class HttpApiServer {
 
     /** 要求调用方至少具备某角色（直连访问下恒为管理员）。 */
     private boolean requireRole(HttpExchange ex, ApiRole required) throws IOException {
-        AccessControl.Principal principal = this.access.authenticate(null);
+        AccessControl.Principal principal = this.access.authenticate();
         if (principal == null) {
             respond(ex, 401, "{\"ok\":false,\"error\":\"unauthorized\"}");
             return false;
@@ -939,7 +939,7 @@ public final class HttpApiServer {
         if (sink == null) {
             return;
         }
-        AccessControl.Principal principal = this.access.authenticate(null);
+        AccessControl.Principal principal = this.access.authenticate();
         if (principal == null) {
             return;
         }

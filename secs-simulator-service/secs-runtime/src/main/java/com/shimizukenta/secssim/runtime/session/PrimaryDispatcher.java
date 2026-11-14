@@ -1,7 +1,6 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.EquipmentControlState;
@@ -61,9 +60,6 @@ final class PrimaryDispatcher {
     /** S1F3 的应答（允许抛受检异常：发送失败要往上冒）。 */
     private final ThrowingConsumer<SecsMessage> replyS1F4;
 
-    /** 最近一条 S9Fx 回应。 */
-    private final AtomicReference<String> lastS9 = new AtomicReference<>("");
-
     /** S9Fx 回了几次。 */
     private final AtomicLong s9Replies = new AtomicLong();
 
@@ -91,11 +87,6 @@ final class PrimaryDispatcher {
         this.replyS1F4 = replyS1F4;
         this.errorSink = errorSink;
         this.sessionId = sessionId;
-    }
-
-    /** 最近一条 S9Fx 回应。 */
-    String lastS9() {
-        return this.lastS9.get();
     }
 
     /** S9Fx 回了几次。 */
@@ -233,10 +224,8 @@ final class PrimaryDispatcher {
         try {
             if (isKnownStream(stream)) {
                 this.communicator.get().gem().s9f5(primary);
-                this.lastS9.set("S9F5 ← S" + stream + "F" + primary.getFunction() + "（功能不支持）");
             } else {
                 this.communicator.get().gem().s9f3(primary);
-                this.lastS9.set("S9F3 ← S" + stream + "F" + primary.getFunction() + "（流不支持）");
             }
             this.s9Replies.incrementAndGet();
         } catch (Exception e) {

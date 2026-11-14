@@ -18,7 +18,6 @@
 - [配置格式 Schema v4](guides/schema-v4.md) — 旧格式，仍兼容读取
 - [SVID 值变化机制与规则](guides/svid-value-model.md) — 默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界
 - [二进制曲线预览格式（SCSP v1）](guides/preview-binary.md) — `GET /api/v1/preview.bin` 的字节布局
-- [设备工作台重设计方案](guides/redesign-device-workbench.md) — 事件驱动 SVID 与单设备全景页设计稿
 
 ## adr
 

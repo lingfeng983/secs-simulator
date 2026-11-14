@@ -131,11 +131,6 @@ export function downloadBlob(filename: string, blob: Blob): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/** 下载一段文本。 */
-export function downloadText(filename: string, text: string, mime = 'text/plain;charset=utf-8'): void {
-  downloadBlob(filename, new Blob([text], { type: mime }));
-}
-
 /**
  * 解析 CSV（支持双引号、引号内逗号/换行、CRLF、UTF-8 BOM）。
  *

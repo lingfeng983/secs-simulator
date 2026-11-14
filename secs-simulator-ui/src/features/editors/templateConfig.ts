@@ -136,13 +136,9 @@ export const SECS_TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4',
 export const TRIGGER_TYPES = ['at', 'periodic', 'onCondition', 'afterEvent'] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
-/** 事件效果的 op（schema v6，docs/guides/redesign-device-workbench.md §1.1）。 */
+/** 事件效果的 op(schema v6,语义见 docs/guides/svid-value-model.md)。 */
 export const EFFECT_OPS = ['set', 'add', 'pulse', 'shift', 'resume'] as const;
 export type EffectOp = (typeof EFFECT_OPS)[number];
-
-export function isEffectOp(value: unknown): value is EffectOp {
-  return typeof value === 'string' && (EFFECT_OPS as readonly string[]).includes(value);
-}
 
 /** 某个 op 的参数字段；set 的 decayMs 可省略。 */
 export function effectFieldSpecs(op: EffectOp): { key: string; label: string; optional?: boolean }[] {
@@ -310,7 +306,7 @@ function readObjectArray(parent: JsonObject, key: string, path: string): JsonObj
 export { readObjectArray };
 
 /** 把整份文档写回文本。结构化编辑会统一成 2 空格缩进。 */
-export function stringifyConfig(root: JsonObject): string {
+function stringifyConfig(root: JsonObject): string {
   return `${JSON.stringify(root, null, 2)}
 `;
 }

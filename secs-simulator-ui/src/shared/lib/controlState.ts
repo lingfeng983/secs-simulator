@@ -20,17 +20,3 @@ export function controlStateLabel(state: string | undefined): string {
       return state ?? '-';
   }
 }
-
-/** 控制状态的色调。 */
-export function controlStateTone(state: string | undefined): 'ok' | 'warn' | 'danger' | 'muted' {
-  switch (state) {
-    case 'ONLINE':
-      return 'ok';
-    case 'COMMUNICATING':
-      return 'warn';
-    case 'OFFLINE':
-      return 'danger';
-    default:
-      return 'muted';
-  }
-}

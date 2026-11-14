@@ -119,12 +119,6 @@ final class EventScheduler {
         return this.rejectedCounter.get();
     }
 
-    /** 事件速率统计（界面显示用）。 */
-    private final RateTracker eventRate = new RateTracker();
-
-    /** 最近一次事件时间。 */
-    private volatile long lastEventAtMs = 0L;
-
     EventScheduler(Rng eventRng,
                    java.util.function.LongSupplier clock,
                    java.util.function.Supplier<ValueSource> values,
@@ -159,16 +153,6 @@ final class EventScheduler {
     /** 设置 CEID 是否已定义的判定（引用校验用）。 */
     void knownCeid(java.util.function.IntPredicate predicate) {
         this.knownCeid = predicate;
-    }
-
-    /** 事件速率统计。 */
-    RateTracker eventRate() {
-        return this.eventRate;
-    }
-
-    /** 最近一次事件时间。 */
-    long lastEventAtMs() {
-        return this.lastEventAtMs;
     }
 
     /** 判断某个 CEID 是否被禁用（S2F37 或运行时禁用）。 */
@@ -585,13 +569,5 @@ final class EventScheduler {
         for (ConditionDebouncer debouncer : this.conditionDebouncers.values()) {
             debouncer.reset();
         }
-    }
-
-
-    /** 记一次事件上报(速率与最近时刻)。 */
-    void recordEventFire() {
-        long now = System.currentTimeMillis();
-        this.eventRate.record(now);
-        this.lastEventAtMs = now;
     }
 }

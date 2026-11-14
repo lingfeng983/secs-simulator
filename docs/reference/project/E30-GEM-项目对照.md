@@ -402,4 +402,4 @@ S6F2     <B ACKC6>
 | [E5 项目对照](E5-SECS-II-项目对照.md) | 报文结构与数据项编码的实现对照 |
 | [E5 标准整理版](../standards/02-E5-SECS-II-中文整理.md) | 消息逐条定义（第 8 章含 S6F11 等 GEM 核心消息） |
 | [全量评审 2026-10-20../../reports/code-review-2026-10-20.md) | P0/P1 问题与修复顺序 |
-| `docs/openapi.yaml`、`docs/guides/schema-v5.md` | 项目接口与配置规格 |
+| `secs-simulator-service/openapi.yaml`、`docs/guides/schema-v5.md` | 项目接口与配置规格 |

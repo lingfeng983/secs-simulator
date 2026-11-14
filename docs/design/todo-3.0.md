@@ -78,7 +78,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 ## 2. M3 遗留（设计 §3 未完全落地项）
 
 - [x] **e2e 用例按 3.0 IA 重写**：`frontend/e2e/fixtures.ts` 改为「可变状态假后端」（sessions/hosts/templates 可增删改，`calls`/`queries` 记调用与查询串，`mockApi()` 统一去掉 `showSaveFilePicker` 让导出走下载回退）；新增 `device.spec.ts`（21 例，设备域 12 页全覆盖）、`host.spec.ts`（20 例，主机域列表 + 详情 11 页 + 新建→连接→发送→采集→断开→删除整链）；重写 `app.spec.ts`（28 例，三组侧栏/设备树/筛选/批量/命令面板/主题密度/快捷键/连接设置/模板页/审计）。全量 **83 passed / 48 skipped**（截图用例需 `SHOTS=1`）。过程中修掉 4 个真实缺陷：`Overlay` 不响应 Esc（快捷键表关不掉）、`DeviceOpsPanel`「全选」永远禁用、设备「事件与报告」页缺报告表入口（`CeidPanel` 补 `both` 模式）、主机「收发记录」页拿不到报文缓冲。
-- [x] **文案清理门禁**：`secs-simulator-ui/scripts/check-ui-words.ps1` 已落地并挂进 `check-all.ps1`（tsc 之后、Vitest 之前）。不只看字面量：剔除注释/import、剥掉 `${...}` 拼出的 key/路由/选择器（`host-zone:${hostId}:${next}` 这类不再误报）、中文按词匹配 + 白名单（列表/表格/报表/图表/仪表/表达 放行）、英文按词边界且大小写敏感（`?sql=` 不会命中 `SQL`）、.tsx 才做 JSX 文本、顺带扫 `docs/design/frontend-panel.html`。清理了 25 处真实命中：`落盘`→写入文件、`台账`→执行记录、`快照`→版本、`T6 事务`→T6 多段交互、报警页的 `logs/messages.jsonl` 说明、版本历史表头 `SHA-256`→`校验值`。当前 **99 文件 / 5481 段文案全绿**；已用探针验证「注入 `数据表` / `SQLite` / `hostId` 会 exit 1 并给出文件:行号」。
+- [x] **文案清理门禁**：`secs-simulator-ui/scripts/check-ui-words.ps1` 已落地并挂进 `check-all.ps1`（tsc 之后、Vitest 之前）。不只看字面量：剔除注释/import、剥掉 `${...}` 拼出的 key/路由/选择器（`host-zone:${hostId}:${next}` 这类不再误报）、中文按词匹配 + 白名单（列表/表格/报表/图表/仪表/表达 放行）、英文按词边界且大小写敏感（`?sql=` 不会命中 `SQL`）、.tsx 才做 JSX 文本、（原型已删除，现只扫源码）。清理了 25 处真实命中：`落盘`→写入文件、`台账`→执行记录、`快照`→版本、`T6 事务`→T6 多段交互、报警页的 `logs/messages.jsonl` 说明、版本历史表头 `SHA-256`→`校验值`。当前 **99 文件 / 5481 段文案全绿**；已用探针验证「注入 `数据表` / `SQLite` / `hostId` 会 exit 1 并给出文件:行号」。
 - [x] **HostDetailPanels 的 API 客户端注入是模块级 hack**（`setHostDetailClient`）：改为经 `PanelBaseProps` 正常传参，删除注入器。客户端由 `HostDetailPage` 用 `backend.client` 逐层下传；`requireClient` 在异步发送里兜底为空态；顺带修掉 `client ?? useHostsClient()` 的条件式伪 Hook。
 - [x] 主机详情·数据采集页：曲线视图补齐（复用 `VariableChart`，按样本 epoch 时间轴画每个 SVID）。
 - [ ] 主机详情·Trace 设置 / 采集设置（配置区）与运行区同名页当前复用同一实现（`readOnly` 只藏了发送按钮）；按设计拆「保存到设置」语义。
@@ -120,7 +120,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 - [x] **Linux 包补 secs-store**：`scripts/package-linux.ps1` 的 `$modules` 与 `packaging/start-server.sh` 的 classpath 都加了 `secs-store.jar`（漏了的话打包脚本自己能过、启动时才 `NoClassDefFoundError`）。
 - [ ] Windows 安装包：原生 exe 构建 `-am` 已含 secs-store；安装后首次启动会释放 `native/sqlitejdbc.dll` 到工作目录——在干净机器上实测一次首启。
 - [x] 版本号统一 3.0.0：`pom.xml` 及 8 个子模块、`frontend/package.json`、`gui/package.json`、`gui/src-tauri/tauri.conf.json`、`Cargo.toml` + `Cargo.lock`、两个 `package-lock.json`、`BuildInfo.VERSION`。
-- [x] 文档：README / `docs/README.md` / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy/运行态写透段）/ ADR 0017 状态「已接受」/ `docs/openapi.yaml` 错误响应补齐（72 path 全绿）。
+- [x] 文档：README / `docs/README.md` / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy/运行态写透段）/ ADR 0017 状态「已接受」/ `secs-simulator-service/openapi.yaml` 错误响应补齐（72 path 全绿）。
 - [x] 两个模块的 `scripts/check.ps1`（原 check-all，已拆分） 全绿（mvn、openapi、tsc、文案门禁、Vitest、Playwright 83 passed / 48 skipped）。
 - [ ] 发布说明 + 打 tag `v3.0.0`。
 

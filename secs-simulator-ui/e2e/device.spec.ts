@@ -407,7 +407,7 @@ test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色',
 
   /* 默认只看当前设备 */
   await expect(drawer.getByLabel('选择要查看的设备或主机')).toHaveValue('device:line1');
-  await expect(drawer.getByText(/只看设备 line1/)).toBeVisible();
+  await expect(drawer.getByLabel('选择要查看的设备或主机').locator('option:checked')).toContainText('line1');
 
   /* 接收 / 发送用不同的行样式与徽标区分 */
   await expect(drawer.locator('.mm-row.recv').first()).toBeVisible();
@@ -427,11 +427,11 @@ test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色',
 
   /* 一次只看一个对象：切到主机后，设备独有的 S6F11 不再出现 */
   await drawer.getByLabel('选择要查看的设备或主机').selectOption('host:host-1');
-  await expect(drawer.getByText(/只看主机 host-1/)).toBeVisible();
+  await expect(drawer.getByLabel('选择要查看的设备或主机').locator('option:checked')).toContainText('host-1');
   await expect(drawer.getByText('S6F11 W', { exact: true })).toHaveCount(0);
   await expect(drawer.getByText('S1F1 W', { exact: true })).toBeVisible();
   await drawer.getByLabel('选择要查看的设备或主机').selectOption('device:line1');
-  await expect(drawer.getByText(/只看设备 line1/)).toBeVisible();
+  await expect(drawer.getByLabel('选择要查看的设备或主机').locator('option:checked')).toContainText('line1');
   await expect(drawer.getByText('S6F11 W', { exact: true })).toBeVisible();
 
   await drawer.getByLabel('按方向过滤').selectOption('sent');

@@ -28,13 +28,6 @@ class TracePlanTest {
     }
 
     @Test
-    void dsperFormatsBack() {
-        assertEquals("000010", TracePlan.formatDsper(10_000L));
-        assertEquals("010000", TracePlan.formatDsper(3_600_000L));
-        assertThrows(IllegalArgumentException.class, () -> TracePlan.formatDsper(1_500L), "必须是整秒");
-    }
-
-    @Test
     void sampleTimesFollowDsper() {
         assertEquals(1_000L, TracePlan.sampleTimeMs(0L, 1_000L, 1));
         assertEquals(5_000L, TracePlan.sampleTimeMs(0L, 1_000L, 5));

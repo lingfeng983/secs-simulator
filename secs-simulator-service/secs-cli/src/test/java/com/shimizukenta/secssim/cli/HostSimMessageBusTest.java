@@ -133,7 +133,8 @@ class HostSimMessageBusTest {
             assertEquals(1L, deviceS1f1, () -> "设备侧 S1F1 应恰好一份: " + describe(events));
             assertEquals(1L, hostS1f1, () -> "主机侧 S1F1 应恰好一份: " + describe(events));
             assertEquals(1L, events.stream()
-                            .filter(e -> e.stream() == 1 && e.function() == 1 && e.fromHost())
+                            .filter(e -> e.stream() == 1 && e.function() == 1
+                                    && "host".equals(e.perspective()) && !e.hostId().isEmpty())
                             .count(),
                     "主机视角的报文都带 hostId");
         } finally {

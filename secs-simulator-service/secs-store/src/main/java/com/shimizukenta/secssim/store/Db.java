@@ -248,25 +248,6 @@ public final class Db implements AutoCloseable {
         }
     }
 
-    /** 在线备份 config.db（WAL 下必须用 VACUUM INTO，直接复制文件会丢未 checkpoint 的页）。 */
-    public void backupConfigTo(Path target) {
-        Path file = target.toAbsolutePath();
-        try {
-            Files.createDirectories(file.getParent());
-            Files.deleteIfExists(file);
-        } catch (IOException e) {
-            throw new StoreException("备份目标不可用: " + file + ": " + e.getMessage(), e);
-        }
-        /* VACUUM 不允许发生在事务里：只拿单写者锁，不开事务 */
-        synchronized (this.writerLock) {
-            try (var st = this.configWriter.createStatement()) {
-                st.executeUpdate("VACUUM INTO '" + file.toString().replace("'", "''") + "'");
-            } catch (SQLException e) {
-                throw new StoreException("VACUUM INTO 失败: " + e.getMessage(), e);
-            }
-        }
-    }
-
     /** work-dir。 */
     public Path workDir() {
         return this.workDir;

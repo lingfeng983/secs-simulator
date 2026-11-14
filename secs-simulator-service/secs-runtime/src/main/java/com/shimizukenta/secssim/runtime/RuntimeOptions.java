@@ -40,18 +40,6 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                              int messagesRecent, int auditRecent,
                              boolean migrateConfig, Path exportConfig, boolean resetRuntime) {
 
-    /** 便捷构造：日志级别用默认 INFO,保留条数用默认值（测试与既有调用点）。 */
-    public RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
-                          int hsmsPort, int deviceId, boolean demoSession,
-                          Path configFile, Path webRoot, Path workDir,
-                          Path tlsKeystore, String tlsPassword, boolean help) {
-        this(mode, bindHost, httpPort, hsmsPort, deviceId, demoSession,
-                configFile, webRoot, workDir, tlsKeystore, tlsPassword, help,
-                com.shimizukenta.secssim.app.log.Log.Level.INFO, DEFAULT_MESSAGES_RECENT,
-                DEFAULT_AUDIT_RECENT, false, null, false);
-    }
-
-
     /** 报文日志内存保留条数默认值（与 MessageLog.DEFAULT_RECENT 对齐）。 */
     public static final int DEFAULT_MESSAGES_RECENT = 5_000;
     /** 审计日志内存保留条数默认值（与 AuditLog.DEFAULT_RECENT 对齐）。 */

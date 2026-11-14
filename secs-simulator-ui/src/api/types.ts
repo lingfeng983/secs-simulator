@@ -231,19 +231,6 @@ export interface PreviewSeries {
   avg: number[];
 }
 
-export interface AlarmState {
-  alid: number;
-  text: string;
-  category: number;
-  atMillis: number;
-}
-
-export interface TerminalMessage {
-  tid: number;
-  text: string;
-  atMillis: number;
-}
-
 /** 预览窗口内的一条事件标记（schema v6:运行时=编排重放,草稿=模拟时间轴）。 */
 export interface PreviewEventMark {
   at: number;
@@ -340,24 +327,6 @@ export interface CollectorState {
   lastRttMs?: number;
   staleSvids?: number[];
   series?: { svid: number; name?: string; unit?: string; t: number[]; v: number[] }[];
-}
-
-/** 一个主机实例（多主机：同一台设备可开多个主机，各自独立）。 */
-export interface HostSimInstance {
-  /** 实例 id（host-1、host-2…）。 */
-  id: string;
-  /** 宿主会话 id。 */
-  session: string;
-  /** 连接是否打开。 */
-  open: boolean;
-  /** 目标地址 host:port。 */
-  target: string;
-  port: number;
-  deviceId: number;
-  /** local = 连本机设备；remote = 连远程 SECS。 */
-  mode: 'local' | 'remote';
-  remote: boolean;
-  lastError?: string;
 }
 
 /** 主机模拟连接目标;remote 为 true 时连这个地址而不是本机。 */
@@ -526,8 +495,6 @@ export interface ApiClient {
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
   messages(sessionId: string, direction: string, limit: number, opts?: MessageHistoryOptions): Promise<MessagePage>;
-  /** 报文历史 JSON Lines，用于导出。 */
-  messagesJsonl(sessionId: string, direction: string, limit: number): Promise<string>;
   /** 配置目录列表。 */
   configs(): Promise<ConfigEntry[]>;
   /** 新建一份配置；templateId 缺省是空骨架，其余取内置设备模板目录里的 id。 */
@@ -557,32 +524,12 @@ export interface ApiClient {
   logLevel(): Promise<string>;
   /** 切换日志级别。 */
   setLogLevel(level: string): Promise<boolean>;
-  /** 列出全部主机实例（多主机）。 */
-  hostSims(): Promise<HostSimInstance[]>;
-  /** 新建一个主机实例：连本机设备或远程 SECS。 */
-  openHostInstance(request: {
-    session: string;
-    host?: string;
-    port?: number;
-    deviceId?: number;
-    hostId?: string;
-  }): Promise<number>;
-  /** 按实例 id 读主机状态。 */
-  hostInstance(hostId: string): Promise<HostSimInstance | null>;
-  /** 按实例 id 关闭主机。 */
-  closeHostInstance(hostId: string): Promise<number>;
-  /** 按实例 id 以主机角色发送 SML。 */
-  sendHostInstanceSml(hostId: string, sml: string): Promise<SentMessageResult>;
   /** 按实例 id 读采集器状态。 */
   hostInstanceCollector(hostId: string): Promise<CollectorState | null>;
   /** 按实例 id 下发采集器配置。 */
   setHostInstanceCollector(hostId: string, config: CollectorConfigInput): Promise<{ ok: boolean; error?: string }>;
   /** 按实例 id 手动启停采集器。 */
   hostInstanceCollectorCommand(hostId: string, start: boolean): Promise<{ ok: boolean; error?: string }>;
-  /** 按实例 id 压测发送（服务端后台连发同一条 SML，POST 只回受理）。 */
-  hostInstanceBurst(hostId: string, request: BurstRequest): Promise<BurstResult>;
-  /** 主机实例的压测进度/最近一次结果。 */
-  hostInstanceBurstStatus(hostId: string): Promise<BurstStatus>;
 
   /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
   openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;
@@ -618,7 +565,6 @@ export interface ApiClient {
     deviceId?: number;
     autoReconnect?: boolean;
   }): Promise<string>;
-  hostV2(hostId: string): Promise<import('./hostsV2').HostV2 | null>;
   deleteHostV2(hostId: string): Promise<boolean>;
   saveHostV2(hostId: string, request: {
     name: string;
@@ -630,9 +576,6 @@ export interface ApiClient {
   disconnectHostV2(hostId: string): Promise<void>;
   applyHostV2(hostId: string): Promise<void>;
   sendHostV2(hostId: string, sml: string): Promise<SentMessageResult>;
-  hostMessagesV2(hostId: string, limit?: number): Promise<WireMessage[]>;
-  refreshHostVariablesV2(hostId: string): Promise<number>;
-  declareHostVariableTypeV2(hostId: string, svid: number, type: string): Promise<boolean>;
   hostTemplatesV2(): Promise<import('./hostsV2').HostTemplate[]>;
   saveHostTemplateV2(request: {
     id?: string;

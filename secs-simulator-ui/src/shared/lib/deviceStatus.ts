@@ -76,8 +76,3 @@ export function deviceStatusHint(status: DeviceStatus): string {
       return '设备在线：事件按规则正常上报';
   }
 }
-
-/** 该状态能不能主动上报（严格 GEM：只有 ONLINE 可以）。 */
-export function canReportEvents(status: DeviceStatus): boolean {
-  return status === 'online';
-}

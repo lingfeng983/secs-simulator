@@ -329,16 +329,6 @@ public final class PlanExecutionRepository implements Closeable {
         });
     }
 
-    /** 因队列满被丢弃的台账条数（诊断用；正常应为 0）。 */
-    public long droppedCount() {
-        return this.dropped.get();
-    }
-
-    /** 批写失败次数（诊断用；非 0 说明台账已经落后于实际执行）。 */
-    public long flushFailureCount() {
-        return this.flushFailures.get();
-    }
-
     @Override
     public synchronized void close() {
         if (this.closed) {

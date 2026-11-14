@@ -327,14 +327,8 @@ export async function mockApi(page: Page): Promise<MockState> {
     if (/^\/api\/v1\/sessions\/[^/]+\/ceid\/\d+$/.test(path)) {
       return ok({ ok: true, outcome: 'OK' });
     }
-    if (/^\/api\/v1\/sessions\/[^/]+\/alarms$/.test(path)) {
-      return ok([{ alid: 1001, alcd: 'rance', text: 'TEMP HIGH', set: true, at: Date.now() }]);
-    }
     if (/^\/api\/v1\/sessions\/[^/]+\/alarm\/\d+$/.test(path)) {
       return ok({ ok: true });
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/terminal$/.test(path)) {
-      return ok([{ text: '设备就绪', at: Date.now() }]);
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/message$/.test(path)) {
       return ok(sendResult());
@@ -438,12 +432,6 @@ export async function mockApi(page: Page): Promise<MockState> {
         autoReconnect: false, retryCount: 0, settingRevision: 1, appliedRevision: 0, lastError: '',
       });
       return ok({ ok: true, hostId: id }, 201);
-    }
-    if (/^\/api\/v2\/hosts\/[^/]+\/messages$/.test(path)) {
-      return ok({ ok: true, total: 2, messages: hostMessages() });
-    }
-    if (/^\/api\/v2\/hosts\/[^/]+\/variables$/.test(path)) {
-      return ok({ ok: true, count: 2 });
     }
     if (/^\/api\/v2\/hosts\/[^/]+\/connect$/.test(path)) {
       const id = path.split('/')[4];
@@ -553,11 +541,6 @@ export async function mockApi(page: Page): Promise<MockState> {
     }
     if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/step$/.test(path)) {
       return ok({ ok: true, planId: 'beat' });
-    }
-    if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/enabled$/.test(path)) {
-      const body = request.postDataJSON() as { enabled?: boolean } | null;
-      state.eventEnabled = body?.enabled ?? url.searchParams.get('enabled') === 'true';
-      return ok({ ok: true, enabled: state.eventEnabled });
     }
 
     return ok({});

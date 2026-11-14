@@ -357,37 +357,6 @@ public final class ConfigRepository {
         }
     }
 
-    /**
-     * 删除设备（软删墓碑 + 正文/版本/投影随事务删除；墓碑行保留供审计与改名复用）。
-     *
-     * <p>链路仍在 up 时应被拒绝——那是调用方（运行层）的职责，本类只管存储。</p>
-     *
-     * @param key 设备 key
-     */
-    public void deleteDevice(String key) {
-        this.db.writeConfig(unchecked(connection -> {
-            DeviceRow device = findLiveDevice(connection, key);
-            try (PreparedStatement st = connection.prepareStatement(
-                    "UPDATE device SET deleted_at=? WHERE id=?")) {
-                st.setLong(1, System.currentTimeMillis());
-                st.setString(2, device.id());
-                st.executeUpdate();
-            }
-            try (PreparedStatement st = connection.prepareStatement(
-                    "DELETE FROM config_document WHERE device_id=?")) {
-                st.setString(1, device.id());
-                st.executeUpdate();
-            }
-            try (PreparedStatement st = connection.prepareStatement(
-                    "DELETE FROM config_revision WHERE device_id=?")) {
-                st.setString(1, device.id());
-                st.executeUpdate();
-            }
-            clearProjections(connection, device.id());
-            return null;
-        }));
-    }
-
     /** 直接重投影（迁移 / 校验自检用）：整体重建该设备的投影表。 */
     public void reproject(String key) {
         this.db.writeConfig(unchecked(connection -> {

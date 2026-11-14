@@ -77,28 +77,6 @@ class DbTest {
     }
 
     @Test
-    void vacuumIntoProducesOpenableBackup() throws Exception {
-        try (Db db = Db.open(workDir)) {
-            db.writeConfig(connection -> {
-                exec(connection, "CREATE TABLE backup_probe (v TEXT)");
-                exec(connection, "INSERT INTO backup_probe VALUES ('数据')");
-                return null;
-            });
-            Path backup = workDir.resolve("backup").resolve("config-snapshot.db");
-            db.backupConfigTo(backup);
-            assertTrue(Files.isRegularFile(backup), "备份文件没有生成");
-
-            /* 备份能被独立打开且数据在（设计 §2.8：VACUUM INTO 备份可独立打开） */
-            try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + backup);
-                 var st = c.createStatement();
-                 var rs = st.executeQuery("SELECT v FROM backup_probe")) {
-                assertTrue(rs.next());
-                assertEquals("数据", rs.getString(1));
-            }
-        }
-    }
-
-    @Test
     void nativeLibraryIsExtractedIntoWorkDir() throws Exception {
         try (Db _ = Db.open(workDir)) {
             Path lib = workDir.resolve("native").resolve(

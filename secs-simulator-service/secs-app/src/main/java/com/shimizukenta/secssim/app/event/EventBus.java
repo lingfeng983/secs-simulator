@@ -37,17 +37,8 @@ public final class EventBus {
             try {
                 listener.accept(event);
             } catch (RuntimeException e) {
-                Log.error("事件订阅者失败（已忽略）", e);
+                    Log.error("事件订阅者失败（已忽略）", e);
             }
         }
-    }
-
-    /**
-     * 当前订阅者数量（诊断用）。
-     *
-     * @return 数量
-     */
-    public int subscriberCount() {
-        return this.listeners.size();
     }
 }
