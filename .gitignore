@@ -4,14 +4,16 @@ target/
 *.jar
 *.war
 
-# ---- 安装包与运行产物（统一收到 build/：installer / run / native）----
-/build/
+# ---- 安装包与运行产物 ----
+# 安装包统一收到 scripts/out/（scripts/package.ps1 产出）
+/scripts/out/
 # 历史产物目录，保留忽略以防旧脚本残留
+/build/
 package/
 
 # ---- native / runtime images ----
 # 只忽略仓库根下的 runtime/（jlink 产物）；不要写成 runtime/，
-# 那会连 secs-runtime 模块的 Java 源码一起忽略掉。
+# 那会连 secs-simulator-service/secs-runtime 模块的 Java 源码一起忽略掉。
 /runtime/
 
 # ---- native image ----
@@ -24,17 +26,15 @@ package/
 .vscode/
 *.swp
 
-# ---- frontend ----
-frontend/node_modules/
+# ---- 前端（secs-simulator-ui）----
 node_modules/
-frontend/dist/
 dist/
 .pnpm-store/
-frontend/test-results/
-frontend/playwright-report/
-frontend/blob-report/
+secs-simulator-ui/test-results/
+secs-simulator-ui/playwright-report/
+secs-simulator-ui/blob-report/
 # 本地截图（人工/临时 Playwright 脚本产出，不是源码）
-frontend/shots/
+secs-simulator-ui/shots/
 
 # ---- local state & logs ----
 logs/
@@ -58,10 +58,10 @@ docs/reference/pdf/
 *.artifact.json
 
 # ---- Tauri 桌面壳构建产物 ----
-# resources/ 由 scripts/package-windows.ps1 在构建时填充（原生 exe），不是源码
-gui/src-tauri/resources/
-gui/src-tauri/gen/
-gui/src-tauri/target/
+# resources/ 由 scripts/package.ps1 在构建时填充（原生 exe），不是源码
+secs-simulator-gui/src-tauri/resources/
+secs-simulator-gui/src-tauri/gen/
+secs-simulator-gui/src-tauri/target/
 
 # ---- 第三方工具本地状态 ----
 .freebuff/
@@ -70,4 +70,4 @@ gui/src-tauri/target/
 
 # ---- 会话工具临时目录(本地状态,不入库) ----
 .zcode/
-frontend/.pw-tmp/
+secs-simulator-ui/.pw-tmp/

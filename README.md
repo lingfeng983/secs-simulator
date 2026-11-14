@@ -7,7 +7,19 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 
 ---
 
+## 仓库结构
+
+| 目录 | 内容 |
+|---|---|
+| `secs-simulator-service/` | Java 后端（父 POM + 下表 8 个 Maven 模块）、`openapi.yaml`、`packaging/`（打进 Linux 包的启动素材）、`tools/host-e2e/`（实机协议探针）、`scripts/`（后端门禁） |
+| `secs-simulator-ui/` | Web 前端（Vite + React），含 mock/实机 Playwright 探针与 `scripts/`（前端门禁） |
+| `secs-simulator-gui/` | Tauri 桌面壳，`assets/`（图标源）与 `scripts/make-icon.py` |
+| `scripts/` | 全仓唯一脚本 `package.ps1`：生成安装包（产物落 `scripts/out/`） |
+| `docs/` | 文档（分区见 [docs/README.md](docs/README.md)） |
+
 ## 模块
+
+（均在 `secs-simulator-service/` 下）
 
 | 模块 | 职责 | 依赖约束 |
 |---|---|---|
@@ -40,8 +52,9 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 
 ```powershell
 $env:JAVA_HOME = 'E:\Java\graalvm-jdk-25.0.4+7.1'
+cd secs-simulator-service
 mvn -B verify
-mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 frontend/dist）
+mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 secs-simulator-ui/dist）
 ```
 
 `-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
@@ -51,21 +64,22 @@ mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 fro
 
 ### 本地质量门禁
 
-提交前跑这一条：
+提交前分别跑两个模块的门禁：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/check-all.ps1
+powershell -ExecutionPolicy Bypass -File secs-simulator-service/scripts/check.ps1   # mvn test + openapi 契约
+powershell -ExecutionPolicy Bypass -File secs-simulator-ui/scripts/check.ps1        # tsc + 文案 + Vitest + Playwright（-SkipE2E 可跳）
 ```
 
 CI（`.github/workflows/ci.yml`）在每次 push/PR 上跑同一组检查：后端测试在
 Linux 与 Windows 两个平台矩阵上跑（端口/SO_REUSEADDR 语义不同，单平台绿不算数），
 前端跑 `tsc` + Vitest + Playwright，另有 openapi 重复键与 `.ps1` BOM 契约检查。
-本地脚本更适合提交前自查（带 `-SkipBackend` / `-SkipE2E` 选项）。
 
-依次执行 `mvn -B test` → 前端依赖（缺 `node_modules` 时才 `npm ci`）→ `npx tsc --noEmit`
-→ `npm test` → `npx playwright test`，任一步失败即以该步退出码结束。
+后端门禁依次执行 `mvn -B test` → `check-openapi.py`（装了 Python 才跑）；
+前端门禁依次执行 前端依赖（缺 `node_modules` 时才 `npm ci`）→ `npx tsc --noEmit`
+→ `check-ui-words.ps1` → `npm test` → `npx playwright test`，任一步失败即以该步退出码结束。
 需要 JDK 25（`JAVA_HOME` 指向 JDK 25，推荐 GraalVM 25）；Playwright 浏览器先装一次：
-`npx playwright install chromium`。`-SkipBackend` / `-SkipE2E` 可按需跳过。
+`npx playwright install chromium`。
 
 ## 运行
 
@@ -82,8 +96,8 @@ secs-sim --mode=integrated --demo-session --hsms-port 5000
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
 
 # 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
-scripts\build-frontend.ps1
-secs-sim --mode=integrated --demo-session --web-root frontend/dist
+secs-simulator-ui\scripts\build.ps1
+secs-sim --mode=integrated --demo-session --web-root secs-simulator-ui/dist
 
 # 服务端：默认只绑回环（127.0.0.1），对外绑定必须显式 --bind
 # 内部工具不做鉴权，浏览器/脚本直连即可；提供 keystore 时走 HTTPS
@@ -294,7 +308,7 @@ curl -X POST --data-binary @docs/examples/sml/equip/s5f1-example.sml \
 
 ### OpenAPI
 
-HTTP API 的机器可读契约在 [docs/openapi.yaml](docs/openapi.yaml)（OpenAPI 3.0.3）。
+HTTP API 的机器可读契约在 [secs-simulator-service/openapi.yaml](secs-simulator-service/openapi.yaml)（OpenAPI 3.0.3）。
 改接口时请同步这个文件；同一个 path 的多个方法写在一个声明里（YAML 不允许重复键）。
 
 ### 审计
@@ -356,19 +370,19 @@ curl -X POST \
 
 ## 前端
 
-前端是独立的 Vite + React + TypeScript 工程（`frontend/`），构建后由后端同源托管：
+前端是独立的 Vite + React + TypeScript 工程（`secs-simulator-ui/`），构建后由后端同源托管：
 
 ```powershell
-scripts\build-frontend.ps1                 # 产出 frontend/dist
-secs-sim --web-root frontend/dist          # 与 API 同源，浏览器直接打开
+secs-simulator-ui\scripts\build.ps1        # 产出 secs-simulator-ui/dist
+secs-sim --web-root secs-simulator-ui/dist # 与 API 同源，浏览器直接打开
 ```
 
-开发时用 `npm --prefix frontend run dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
-前端单元 / 组件测试用 `npm --prefix frontend test`（Vitest；`scripts/check-all.ps1` 会跑）。
+开发时用 `npm --prefix secs-simulator-ui run dev`（`vite.config.ts` 已把 `/api` 代理到 `127.0.0.1:5000`）。
+前端单元 / 组件测试用 `npm --prefix secs-simulator-ui test`（Vitest；`secs-simulator-ui/scripts/check.ps1` 会跑）。
 浏览器 E2E 用 Playwright：
 
 ```powershell
-cd frontend
+cd secs-simulator-ui
 npx playwright install chromium
 npm run test:e2e
 ```
@@ -380,10 +394,11 @@ npm run test:e2e
 
 ```powershell
 $env:E2E_REAL_URL='http://127.0.0.1:5000'
-npm --prefix frontend run test:e2e:real
+npm --prefix secs-simulator-ui run test:e2e:real
 ```
 
-这条真实链路不在 `scripts/check-all.ps1` 里：它需要一个已经起来的后端，按上面的命令手动跑。
+这条真实链路不在模块门禁脚本里：它需要一个已经起来的后端，按上面的命令手动跑
+（一键编排见 `secs-simulator-service/tools/host-e2e/run-e2e.ps1`）。
 
 ### 界面结构
 
@@ -484,27 +499,28 @@ npm --prefix frontend run test:e2e:real
 决策与约束见 [ADR 0016](docs/adr/0016-layout-and-layer-consolidation.md)。
 
 截图回归：`SHOTS=1 npx playwright test e2e/shots.spec.ts` 会把浅色/深色/窄屏各页写进
-`frontend/shots/redesign/`，用来比对视觉改动（默认跳过，不参与断言）。
+`secs-simulator-ui/shots/redesign/`，用来比对视觉改动（默认跳过，不参与断言）。
 
 界面的完整使用说明（启动登录、每个面板的操作、常见问题）见
 **[用户手册](docs/guides/user-guide.md)**。
 
 ## 打包
 
-只有两种发布形态，各自一条脚本（都会先自动构建前端）：
+只有一种发布形态入口，全仓唯一打包脚本 `scripts/package.ps1`（会先自动构建前端）：
 
 ```powershell
-# 1. Windows 安装程序（Tauri/NSIS）：桌面壳 + 原生镜像后端 + 前端一并打进安装包
-scripts\package-windows.ps1
+# 两个安装包都打，产物落在 scripts/out/
+powershell -ExecutionPolicy Bypass -File scripts/package.ps1
 
-# 2. Linux 服务端（jar 包）：模块 jar + 前端 + start-server.sh，目标机需 JDK 25+
-scripts\package-linux.ps1
+# 只打其一
+powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Windows
+powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 ```
 
-- **Windows 安装程序** `build/installer/SECS Simulator_<版本>_x64-setup.exe`：打开直接进界面
+- **Windows 安装程序** `scripts/out/SECS Simulator_<版本>_x64-setup.exe`：打开直接进界面
   （前端内嵌在壳里），默认启动内置的 `secs-sim.exe`（原生镜像，无需 JVM）连本机；
   右上角「连接」可随时切到远程服务端（本机后端自动停止），留空切回本机，选择会记住。
-- **Linux 服务端** `build/installer/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
+- **Linux 服务端** `scripts/out/secs-sim-server-<版本>-linux.zip`：部署在设备所在的
   Linux 机器，`./start-server.sh` 以 server 模式对外并托管 web，被 Windows 端远程操作。
 - 构建需要 JDK 25（推荐 GraalVM 25，自带 `native-image`）+ Node；安装程序另需 Rust
   工具链（`tauri build` 用）。`-SkipNative` / `-SkipJars` / `-SkipFrontend` 可复用已有产物。
@@ -563,7 +579,7 @@ scripts\package-linux.ps1
 - [3.0.0 发布说明](docs/reports/release-notes-3.0.0.md)
 - [2.0.1 发布说明](docs/reports/release-notes-2.0.1.md)
 - [2.0.0 发布说明](docs/reports/release-notes-2.0.0.md)
-- [OpenAPI 3.0 契约](docs/openapi.yaml)
+- [OpenAPI 3.0 契约](secs-simulator-service/openapi.yaml)
 - [二进制曲线预览格式](docs/guides/preview-binary.md)
 - [M0](docs/reports/m0-report.md) · [M1](docs/reports/m1-report.md) · [M2](docs/reports/m2-report.md) · [M3](docs/reports/m3-report.md) · [M4](docs/reports/m4-report.md) · [M4-b](docs/reports/m4b-report.md) · [M5](docs/reports/m5-report.md) · [M6](docs/reports/m6-report.md) · [M7](docs/reports/m7-report.md) · [M6-b](docs/reports/m6b-report.md) · [M6-c](docs/reports/m6c-report.md) · [M8-a](docs/reports/m8a-report.md) · [M8-b](docs/reports/m8b-report.md) · [M8-c](docs/reports/m8c-report.md) · [M8-d](docs/reports/m8d-report.md) · [M8-e](docs/reports/m8e-report.md) · [M9](docs/reports/m9-report.md) · [M9-b / M9-c](docs/reports/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/reports/code-review-2026-10-17.md)

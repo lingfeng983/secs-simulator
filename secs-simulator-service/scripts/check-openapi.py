@@ -5,7 +5,7 @@
 两个同名 path 只会留下一个，另一个端点的文档凭空消失。
 用严格 loader 把重复键直接判成失败，CI/本地门禁才能挡住。
 
-用法：python scripts/check-openapi.py [docs/openapi.yaml]
+用法：python scripts/check-openapi.py [openapi.yaml]
 退出码：0 通过；1 有问题。
 """
 
@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 
 import yaml
+
+# 默认校验 service 根下的 openapi.yaml（本脚本位于 secs-simulator-service/scripts/）。
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "openapi.yaml"
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -57,7 +60,7 @@ def resolve(doc, ref):
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/openapi.yaml")
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PATH
     text = path.read_text(encoding="utf-8")
 
     try:

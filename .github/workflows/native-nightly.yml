@@ -5,7 +5,7 @@
 # runner 自带的 MSVC 工具链。放在每次 push 的路径上只会拖慢反馈。
 # 3.0 M0 起（设计 §2.3.1）：sqlite-jdbc(JNI) 是硬门禁，任务改为
 # 双平台矩阵、失败即红（去掉 continue-on-error）——夜间不红就等于没有覆盖。
-# 前端产物必须先构建：NativeRuntimeIT 的静态托管用例要求 frontend/dist。
+# 前端产物必须先构建：NativeRuntimeIT 的静态托管用例要求 secs-simulator-ui/dist。
 name: Native nightly
 
 on:
@@ -36,9 +36,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: secs-simulator-ui/package-lock.json
       - name: 构建前端产物
-        working-directory: frontend
+        working-directory: secs-simulator-ui
         run: |
           npm ci
           npm run build
@@ -49,10 +49,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
       - name: mvn -Pnative verify
+        working-directory: secs-simulator-service
         run: mvn -B -ntp -Pnative verify -pl secs-cli -am
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: ${{ matrix.artifact }}
-          path: secs-cli/target/${{ matrix.exe }}
+          path: secs-simulator-service/secs-cli/target/${{ matrix.exe }}
           if-no-files-found: error

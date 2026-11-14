@@ -15,7 +15,7 @@ HTTP/SSE API 见 [docs/openapi.yaml](../openapi.yaml),架构与模块见 [README
 secs-sim --mode=integrated
 
 # 顺便托管界面(推荐):构建一次前端后,浏览器直接打开 READY 行里的地址
-secs-sim --mode=integrated --web-root frontend/dist
+secs-sim --mode=integrated --web-root secs-simulator-ui/dist
 
 # 从配置文件装载设备
 secs-sim --mode=integrated --config ./device.json --hsms-port 5000
@@ -111,7 +111,7 @@ LOT_START/LOT_END 正好可做 S1F3 采集的启停 CEID)。加 `--demo-session`
 
 **视觉与排版**:界面按「精密仪器控制台」的语言重做——固定的深色机箱侧栏 +
 浅色仪表盘 + 信号青(teal)主色,暖色只留给报警。所有颜色、圆角、间距、字号都走同一套
-CSS 令牌(`frontend/src/styles/tokens.css`),深浅两套各自调色并校过正文对比度(≥4.5:1);
+CSS 令牌(`secs-simulator-ui/src/styles/tokens.css`),深浅两套各自调色并校过正文对比度(≥4.5:1);
 曲线也用主题色绘制,切主题时自动重画。
 
 ## 3. 典型工作流
@@ -303,8 +303,8 @@ Ctrl+滚轮纵向缩放、双击复位;「事件标记」开关可只看曲线�
 
 | 形态 | 内容 | 用法 |
 |---|---|---|
-| **Windows 安装程序** `SECS Simulator_<版本>_x64-setup.exe` | Tauri 壳(前端内嵌) + 原生 exe 后端 | 安装后打开直接进界面,默认连本机后端(无需 JVM);`scripts/package-windows.ps1` 产出 |
-| **Linux 服务端** `secs-sim-server-<版本>-linux.zip` | 模块 jar + 前端 + `start-server.sh` | 部署在 Linux 设备机,`./start-server.sh` 以 server 模式对外(目标机需 JDK 25+);`scripts/package-linux.ps1` 产出 |
+| **Windows 安装程序** `SECS Simulator_<版本>_x64-setup.exe` | Tauri 壳(前端内嵌) + 原生 exe 后端 | 安装后打开直接进界面,默认连本机后端(无需 JVM);`scripts/package.ps1 -Target Windows` 产出 |
+| **Linux 服务端** `secs-sim-server-<版本>-linux.zip` | 模块 jar + 前端 + `start-server.sh` | 部署在 Linux 设备机,`./start-server.sh` 以 server 模式对外(目标机需 JDK 25+);`scripts/package.ps1 -Target Linux` 产出 |
 
 远程场景:设备在 Linux 机(A)解压服务端包并 `./start-server.sh` 启动;
 操作者在 Windows 机(B)安装程序,打开后点右上角「连接」,填 A 机地址(`http://A 机 IP:8080`)
@@ -314,7 +314,7 @@ Ctrl+滚轮纵向缩放、双击复位;「事件标记」开关可只看曲线�
 
 ## 7. 一分钟上手清单
 
-1. `secs-sim --mode=integrated --web-root frontend/dist`
+1. `secs-sim --mode=integrated --web-root secs-simulator-ui/dist`
 2. 浏览器开 READY 行的地址;
 3. 工作台选设备模板 → 「新建设备」；没有模板就去「模板管理」新建；
 4. 主机连配置里的 HSMS 端口,等控制状态变绿；

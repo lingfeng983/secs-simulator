@@ -1,13 +1,14 @@
 ﻿$ErrorActionPreference = 'Continue'
-# 本脚本位于 tools/host-e2e/，仓库根在上两级
+# 本脚本位于 secs-simulator-service/tools/host-e2e/，service 根在上两级
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$ui = Join-Path (Split-Path $root -Parent) 'secs-simulator-ui'
 $work = Join-Path $env:TEMP ('secs-e2e-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $work | Out-Null
 $hsms = 15730
 $out = Join-Path $work 'out.log'
 $errf = Join-Path $work 'err.log'
 $exe = Join-Path $root 'secs-cli\target\secs-sim.exe'
-$dist = Join-Path $root 'frontend\dist'
+$dist = Join-Path $ui 'dist'
 # 退出码：Start-Process 带 -RedirectStandardOutput 时 ExitCode 读不到（PowerShell 行为），
 # 改由 cmd /c 转发子进程退出码，重定向在 cmd 内完成。
 # 直接启动（不重定向）：Start-Process 带重定向时 ExitCode 读不到；日志本来就落在 work/logs。
@@ -21,12 +22,12 @@ $http = (Select-String -Path $ready -Pattern '^http=(\d+)').Matches[0].Groups[1]
 
 '==== 1/2 browser real E2E ===='
 $env:E2E_REAL_URL = 'http://127.0.0.1:' + $http
-Push-Location (Join-Path $root 'frontend')
+Push-Location $ui
 cmd /c "npx playwright test -c playwright.real.config.ts > real.log 2>&1"
 $script:pw = $LASTEXITCODE
 Pop-Location
 'PLAYWRIGHT=' + $script:pw
-Get-Content (Join-Path $root 'frontend\real.log') -Tail 5 -ErrorAction SilentlyContinue
+Get-Content (Join-Path $ui 'real.log') -Tail 5 -ErrorAction SilentlyContinue
 
 '==== 2/2 protocol host + HTTP full ===='
 Set-Location (Join-Path $root 'tools\host-e2e')

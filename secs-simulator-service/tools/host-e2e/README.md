@@ -9,10 +9,10 @@
 | `run-e2e.ps1` | 一键：启动原生 exe → Playwright 实机 E2E → SimHost 全量 → 优雅停机；末行输出 `RESULT=PASS/FAIL` |
 | `run-probe.ps1` | 一键：启动原生 exe → MinProbe 排障 |
 
-前置条件：先构建原生镜像（`mvn -B -Pnative -pl secs-cli -am -DskipTests package`）与前端（`scripts/build-frontend.ps1`），
-并设置 `JAVA_HOME`（脚本用 `$env:JAVA_HOME\bin\javac.exe` 编译）。
+前置条件：先构建原生镜像（在 `secs-simulator-service/` 下执行 `mvn -B -Pnative -pl secs-cli -am -DskipTests package`）
+与前端（`secs-simulator-ui/scripts/build.ps1`），并设置 `JAVA_HOME`（脚本用 `$env:JAVA_HOME\bin\javac.exe` 编译）。
 
-编译与运行（在仓库根执行）：
+编译与运行（在 `secs-simulator-service/` 目录执行）：
 
 ```powershell
 $cp = 'secs-protocol\target\classes;secs-json\target\classes'

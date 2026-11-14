@@ -4,7 +4,7 @@
   "version": "3.0.1",
   "identifier": "com.shimizukenta.secssim",
   "build": {
-    "frontendDist": "../../frontend/dist"
+    "frontendDist": "../../secs-simulator-ui/dist"
   },
   "app": {
     "withGlobalTauri": true,

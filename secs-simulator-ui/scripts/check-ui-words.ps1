@@ -4,7 +4,7 @@
     界面文案门禁：产品界面只描述"能做什么 / 看到什么"，不出现实现词。
 
 .DESCRIPTION
-    设计 §3.5 的落地检查。扫描 frontend/src 下的 .ts/.tsx，只检查
+    设计 §3.5 的落地检查。扫描 src 下的 .ts/.tsx，只检查
     **用户能看到的文本**：
       - 字符串字面量（单引号 / 双引号 / 模板串）
       - JSX 文本（标签之间的中文）
@@ -27,7 +27,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if (-not (Test-Path (Join-Path $root 'frontend/src'))) {
+if (-not (Test-Path (Join-Path $root 'src'))) {
     $root = (Get-Location).Path
 }
 
@@ -196,12 +196,12 @@ function Find-Banned([string]$text, [switch]$BareOnly) {
 }
 
 $files = @()
-$frontSrc = Join-Path $root 'frontend/src'
+$frontSrc = Join-Path $root 'src'
 if (Test-Path $frontSrc) {
     $files += Get-ChildItem -Path $frontSrc -Recurse -File |
         Where-Object { $_.Extension -in '.ts', '.tsx' -and $_.Name -notlike '*.test.ts' -and $_.Name -notlike '*.test.tsx' }
 }
-$proto = Join-Path $root 'docs/design/frontend-panel.html'
+$proto = Join-Path $root '../docs/design/frontend-panel.html'
 if (Test-Path $proto) { $files += Get-Item $proto }
 
 $violations = New-Object System.Collections.Generic.List[object]
