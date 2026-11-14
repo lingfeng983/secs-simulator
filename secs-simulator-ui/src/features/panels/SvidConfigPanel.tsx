@@ -2,7 +2,9 @@ import type { PanelBaseProps } from './types';
 import { ConfigEditShell, MissingEquipment } from './ConfigEditShell';
 import { FormGridHead, FormRow, GlobalSvidsForm, nextId, templateIdsOf, TypeSelect } from '../editors/ConfigFormEditor';
 import { SvidSourceEditor } from '../editors/SvidSourceEditors';
+import { useParamTemplates } from '../../state/useParamTemplates';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
+import type { ParamTemplate } from '../../api/paramTemplates';
 import { isJsonObject, numberField, readObjectArray, stringField, type JsonObject } from '../editors/templateConfig';
 
 /**
@@ -10,10 +12,12 @@ import { isJsonObject, numberField, readObjectArray, stringField, type JsonObjec
  *
  * <p>全局 SVID 与各单元 SVID 的定义都在这里改：写入配置草稿，
  * 「校验」→「保存」后相关会话自动重载。值来源（曲线/模板直配）
- * 跟在每行定义下面，与「结构」页共用同一套编辑件。</p>
+ * 跟在每行定义下面；「引用模板」合并参数模板库（所有设备共享），
+ * 选中库条目即把模板体复制进本配置。</p>
  */
 export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { backend, sessionId, configName } = props;
+  const paramLibrary = useParamTemplates(backend);
   return (
     <ConfigEditShell
       backend={backend}
@@ -35,8 +39,14 @@ export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; co
                 equipment={root.equipment}
                 edit={edit}
                 templateIds={templateIdsOf(root)}
+                library={paramLibrary.entries}
               />
-              <UnitSvidsForms root={root} edit={edit} templateIds={templateIdsOf(root)} />
+              <UnitSvidsForms
+                root={root}
+                edit={edit}
+                templateIds={templateIdsOf(root)}
+                library={paramLibrary.entries}
+              />
             </>
           )
           : <MissingEquipment edit={edit} />
@@ -46,10 +56,11 @@ export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; co
 }
 
 /** 每个单元一张 SVID 子表：offset/slot/type/unit/decimals/min/max。 */
-function UnitSvidsForms({ root, edit, templateIds }: {
+function UnitSvidsForms({ root, edit, templateIds, library }: {
   root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
   templateIds: string[];
+  library?: ParamTemplate[];
 }): JSX.Element {
   const equipment = isJsonObject(root.equipment) ? root.equipment : {};
   const idSpace = isJsonObject(equipment.idSpace) ? equipment.idSpace : {};
@@ -75,6 +86,7 @@ function UnitSvidsForms({ root, edit, templateIds }: {
           unitIndex={index}
           edit={edit}
           templateIds={templateIds}
+          library={library}
           absoluteBase={svidBase + index * svidStride}
         />
       ))}
@@ -82,11 +94,12 @@ function UnitSvidsForms({ root, edit, templateIds }: {
   );
 }
 
-function UnitSvidsForm({ unit, unitIndex, edit, templateIds, absoluteBase }: {
+function UnitSvidsForm({ unit, unitIndex, edit, templateIds, library, absoluteBase }: {
   unit: JsonObject;
   unitIndex: number;
   edit: (mutate: (root: JsonObject) => void) => void;
   templateIds: string[];
+  library?: ParamTemplate[];
   absoluteBase: number;
 }): JSX.Element {
   const list = readObjectArray(unit, 'svids', 'unit');
@@ -207,6 +220,22 @@ function UnitSvidsForm({ unit, unitIndex, edit, templateIds, absoluteBase }: {
                   mutate={(fn) => mutateItem(index, fn)}
                   templateIds={templateIds}
                   absoluteId={absoluteBase + offset}
+                  library={library}
+                  editRootAndDef={library === undefined ? undefined : (fn) => edit((draft) => {
+                    /* 注意 fn 的第一个参数必须是文档根（物化要往根上的 templates 段追加），
+                       不能传单元对象——传错会把 templates 写进 unit 里。 */
+                    const draftEquipment = isJsonObject(draft.equipment) ? draft.equipment : null;
+                    const draftUnits = draftEquipment !== null && Array.isArray(draftEquipment.units)
+                      ? draftEquipment.units as unknown[]
+                      : [];
+                    const draftUnit = isJsonObject(draftUnits[unitIndex]) ? draftUnits[unitIndex] as JsonObject : null;
+                    const draftItems = draftUnit !== null && Array.isArray(draftUnit.svids)
+                      ? draftUnit.svids as JsonObject[]
+                      : [];
+                    if (draftUnit !== null && isJsonObject(draftItems[index])) {
+                      fn(draft, draftItems[index]);
+                    }
+                  })}
                 />
               </div>
             );

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import type { ParamTemplate } from '../../api/paramTemplates';
 import { SvidSourceEditor, EffectsEditor } from './SvidSourceEditors';
 import { RefMultiSelect, type RefChoice } from './RefMultiSelect';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
@@ -602,11 +603,13 @@ function reserveOf(root: JsonObject): unknown[] {
   return idSpace.reserve as unknown[];
 }
 
-export function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
+export function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid, library }: {
   equipment: JsonObject;
   edit: Edit;
   templateIds: string[];
   onPreviewSvid?: (svid: number) => void;
+  /** 参数模板库条目（所有设备共享）；给了才在值来源里显示「模板库」一组。 */
+  library?: ParamTemplate[];
 }): JSX.Element {
   const list = readObjectArray(equipment, 'globalSvids', 'equipment');
 
@@ -710,6 +713,13 @@ export function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }:
           templateIds={templateIds}
           absoluteId={numberField(item, 'id') ?? 0}
           onPreviewSvid={onPreviewSvid}
+          library={library}
+          editRootAndDef={library === undefined ? undefined : (fn) => edit((draft) => {
+            const def = globalSvidsOf(draft)[index];
+            if (isJsonObject(def)) {
+              fn(draft, def);
+            }
+          })}
         />
       ))}
       {typeof list !== 'string' && list.length > 0 && (

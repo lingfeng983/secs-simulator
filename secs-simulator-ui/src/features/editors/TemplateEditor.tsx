@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
-import { BUILTIN_CURVE_PRESETS, BUILTIN_CURVE_PRESET_COUNT, findCurvePreset } from './builtinCurvePresets';
 import {
   CURVE_TYPES,
   arrayField,
@@ -26,23 +25,37 @@ import {
   type TemplateView,
 } from './templateConfig';
 
+/** 「从模板库填入…」的候选：一条单曲线形库条目的展示信息 + 曲线体。 */
+export interface LibraryCurveChoice {
+  /** 库条目 id（选项键）。 */
+  id: string;
+  name: string;
+  description: string;
+  curve: JsonObject;
+}
+
 interface TemplateEditorProps {
   /** 配置原文；结构化编辑永远从这份文本出发。 */
   text: string;
   /** 写回新的原文（只改草稿，不落盘）。 */
   onChange: (next: string) => void;
+  /** 参数模板库的单曲线条目；给了才显示「从模板库填入…」。 */
+  curveChoices?: ReadonlyArray<LibraryCurveChoice>;
 }
 
 type MutateTemplates = (mutate: (templates: TemplateView) => void) => void;
 
 /**
- * Schema v5 模板段的结构化编辑。
+ * 模板段的结构化编辑。
  *
  * <p>它<b>不替代</b>原文编辑：原文才是唯一事实来源。这里只是把 curves /
  * instances 解析成表单，改完再写回整份文档。JSON 里的未知键会保留，
  * 但缩进与空格会统一成 2 空格——这一点必须在界面上说清楚。</p>
+ *
+ * <p>参数模板库页传 {@code curveChoices} 让新建曲线从库里的单曲线条目起步；
+ * 实例允许不绑定 SVID（纯中间节点，输出仅供组合表达式引用）。</p>
  */
-export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Element {
+export function TemplateEditor({ text, onChange, curveChoices }: TemplateEditorProps): JSX.Element {
   const [error, setError] = useState('');
 
   const parsed = useMemo(() => parseConfigDocument(text), [text]);
@@ -143,15 +156,15 @@ export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Ele
     });
   };
 
-  /** 从内置变化模板库新建曲线：预设带好典型波形与量纲，用户再微调。 */
-  const addCurveFromPreset = (presetName: string) => {
-    const preset = findCurvePreset(presetName);
-    if (preset === undefined) {
+  /** 从参数模板库的单曲线条目新建曲线：复制波形与量纲，用户再微调；不影响库。 */
+  const addCurveFromLibrary = (entryId: string) => {
+    const choice = (curveChoices ?? []).find((item) => item.id === entryId);
+    if (choice === undefined) {
       return;
     }
     edit((templates) => {
-      const id = uniqueId(templates.curves.map((item) => item.id), preset.curve.type as string ?? 'curve');
-      templates.curves.push({ id, ...preset.curve });
+      const id = uniqueId(templates.curves.map((item) => item.id), choice.curve.type as string ?? 'curve');
+      templates.curves.push({ id, ...choice.curve });
     });
   };
 
@@ -173,12 +186,24 @@ export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Ele
       setError('先添加一条曲线或组合模板');
       return;
     }
+
+    const templateId = stringField(firstTemplate, 'id');
+
     if (firstSvid === undefined) {
-      setError('配置里还没有 SVID，实例没有可绑定的变量');
+      /* 没有 SVID 可绑（如参数模板库里的编辑）：实例留空绑定，作为纯中间节点，
+         输出仅供组合表达式引用——后端模板图允许空绑定实例。 */
+      edit((templates) => {
+        const id = uniqueId(templates.instances.map((item) => item.id), 'inst');
+        templates.instances.push({
+          id,
+          template: templateId,
+          svids: {},
+          params: {},
+        });
+      });
       return;
     }
 
-    const templateId = stringField(firstTemplate, 'id');
     const outputs = templateOutputs(view, templateId);
     if (outputs.length === 0) {
       setError(`模板 ${templateId} 没有输出名，无法绑定`);
@@ -201,24 +226,28 @@ export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Ele
       <div className="template-head">
         <h3>模板（结构化编辑）</h3>
         <div className="template-actions">
-          <select
-            value=""
-            aria-label="从内置变化模板新建曲线"
-            onChange={(event) => addCurveFromPreset(event.target.value)}
-            title={`内置 ${BUILTIN_CURVE_PRESET_COUNT} 套真实参数变化模板，选一条即建好曲线再微调`}
-            style={{ maxWidth: 200 }}
-          >
-            <option value="">内置变化模板…</option>
-            {BUILTIN_CURVE_PRESETS.map((group) => (
-              <optgroup key={group.category} label={group.category}>
-                {group.items.map((preset) => (
-                  <option key={preset.name} value={preset.name} title={preset.description}>
-                    {preset.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          {curveChoices !== undefined && curveChoices.length > 0 && (
+            <select
+              value=""
+              aria-label="从参数模板库新建曲线"
+              onChange={(event) => {
+                /* 壳回放表单状态补发的合成 change 不算用户选择，避免打开弹框就多一条曲线 */
+                if (!event.nativeEvent.isTrusted) {
+                  return;
+                }
+                addCurveFromLibrary(event.target.value);
+              }}
+              title={`参数模板库里有 ${curveChoices.length} 条单曲线模板，选一条即建好曲线再微调`}
+              style={{ maxWidth: 200 }}
+            >
+              <option value="">从模板库填入…</option>
+              {curveChoices.map((choice) => (
+                <option key={choice.id} value={choice.id} title={choice.description}>
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button type="button" onClick={addCurve}>
             + 曲线
           </button>
@@ -849,7 +878,7 @@ function InstanceCard({
       return;
     }
     if (firstSvid === undefined) {
-      onError('配置里还没有 SVID');
+      onError('没有可绑定的 SVID。不绑定也可以：把输出留给组合表达式引用（如 in.<实例>.<输出>）');
       return;
     }
     onMutate((templates) => {

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { BUILTIN_CURVE_PRESETS, BUILTIN_CURVE_PRESET_COUNT, findCurvePreset } from './builtinCurvePresets';
+import type { ParamTemplate } from '../../api/paramTemplates';
+import { materializeIntoRoot, singleCurveBodyOf } from './paramTemplates';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import {
   booleanField,
@@ -28,19 +29,25 @@ type ObjectEdit = (fn: (target: JsonObject) => void) => void;
  *
  * <p>默认（随机游走）/ 内联曲线 / 模板引用 三选一,写回落在 SVID 定义
  * 对象的 curve/template/output/params 四个键上,与后端 schema v6 一一对应。
- * 「预览曲线」把绝对 SVID 交给上层,按草稿 + 事件标记画单变量曲线。</p>
+ * 「引用模板」下拉合并参数模板库（所有设备共享）:选中库条目即把模板体
+ * 复制进本配置（复制快照语义）。「预览曲线」把绝对 SVID 交给上层,按草稿
+ * + 事件标记画单变量曲线。</p>
  *
  * <p>所有改动经 {@code mutate} 写穿（editDocument 重新解析原文定位到这条
  * 定义）,而不是改解析树上的活引用——直接改引用会在下一次重渲染重新解析
  * 原文时被丢掉,表现为"值来源设置完又自己切回默认"。</p>
  */
-export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPreviewSvid }: {
+export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPreviewSvid, library, editRootAndDef }: {
   def: JsonObject;
   /** 写穿：fn 拿到这条 SVID 定义在<b>新文档</b>里的活引用。 */
   mutate: (fn: (def: JsonObject) => void) => void;
   templateIds: string[];
   absoluteId: number;
   onPreviewSvid?: (svid: number) => void;
+  /** 参数模板库条目（所有设备共享）；给了才显示「模板库」一组。 */
+  library?: ParamTemplate[];
+  /** 整文档编辑 + 定位回这条 SVID 定义；库模板绑定用（追加 templates 段与回填直配字段必须一次写穿完成）。 */
+  editRootAndDef?: (fn: (root: JsonObject, def: JsonObject) => void) => void;
 }): JSX.Element {
   const kind = svidSourceKind(def);
   const [editing, setEditing] = useState(false);
@@ -89,7 +96,13 @@ export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPrevi
         <select
           className="svid-source-kind"
           value={kind}
-          onChange={(event) => setKind(event.target.value as SourceKind)}
+          onChange={(event) => {
+            /* 非用户事件（壳回放表单状态）不改变值来源，避免一进页面就变"引用模板" */
+            if (!event.nativeEvent.isTrusted) {
+              return;
+            }
+            setKind(event.target.value as SourceKind);
+          }}
           aria-label="值来源类型"
         >
           <option value="default">默认（随机游走）</option>
@@ -112,6 +125,7 @@ export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPrevi
         <CurveSourceEditor
           curve={objectField(def, 'curve')}
           mutateCurve={(fn) => mutate((target) => fn(objectField(target, 'curve')))}
+          library={library}
         />
       )}
       {expanded && kind === 'template' && (
@@ -119,6 +133,9 @@ export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPrevi
           def={def}
           mutate={mutate}
           templateIds={templateIds}
+          absoluteId={absoluteId}
+          library={library}
+          editRootAndDef={editRootAndDef}
         />
       )}
     </div>
@@ -134,13 +151,18 @@ function clearSourceKeys(def: JsonObject): void {
 }
 
 /** 内联曲线的参数编辑(step/pwl 的关键帧用 JSON 文本编辑)；mutateCurve 写穿到文档。 */
-export function CurveSourceEditor({ curve, mutateCurve }: {
+export function CurveSourceEditor({ curve, mutateCurve, library }: {
   curve: JsonObject;
   mutateCurve: (fn: (target: JsonObject) => void) => void;
+  /** 参数模板库条目（所有设备共享）；单曲线形条目可一键填入内联曲线。 */
+  library?: ParamTemplate[];
 }): JSX.Element {
   const rawType = stringField(curve, 'type', 'sine');
   const type = isCurveType(rawType) ? rawType : null;
   const specs = type !== null ? curveFieldSpecs(type) : [];
+  const libraryCurves = (library ?? [])
+    .map((entry) => ({ entry, curve: singleCurveBodyOf(entry) }))
+    .filter((item): item is { entry: ParamTemplate; curve: JsonObject } => item.curve !== undefined);
   return (
     <div className="form-row svid-source-detail">
       <label className="field">
@@ -168,36 +190,37 @@ export function CurveSourceEditor({ curve, mutateCurve }: {
         </select>
       </label>
 
-      <label className="field">
-        内置变化模板（{BUILTIN_CURVE_PRESET_COUNT} 套）
-        <select
-          value=""
-          aria-label="从内置变化模板填入"
-          onChange={(event) => {
-            const preset = findCurvePreset(event.target.value);
-            if (preset !== undefined) {
-              mutateCurve((target) => {
-                for (const key of Object.keys(target)) {
-                  delete target[key];
-                }
-                Object.assign(target, preset.curve);
-              });
-            }
-          }}
-          title="选一条预设，把该类参数典型的波形与量纲填进来，再微调"
-        >
-          <option value="">从内置模板填入…</option>
-          {BUILTIN_CURVE_PRESETS.map((group) => (
-            <optgroup key={group.category} label={group.category}>
-              {group.items.map((preset) => (
-                <option key={preset.name} value={preset.name} title={preset.description}>
-                  {preset.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </label>
+      {libraryCurves.length > 0 && (
+        <label className="field">
+          参数模板库（{libraryCurves.length} 条）
+          <select
+            value=""
+            aria-label="从参数模板库填入"
+            onChange={(event) => {
+              if (!event.nativeEvent.isTrusted) {
+                return;
+              }
+              const hit = libraryCurves.find((item) => item.entry.id === event.target.value);
+              if (hit !== undefined) {
+                mutateCurve((target) => {
+                  for (const key of Object.keys(target)) {
+                    delete target[key];
+                  }
+                  Object.assign(target, hit.curve);
+                });
+              }
+            }}
+            title="选一条库模板，把该类参数典型的波形与量纲填进来，再微调；填入的是复制，不影响库"
+          >
+            <option value="">从模板库填入…</option>
+            {libraryCurves.map(({ entry }) => (
+              <option key={entry.id} value={entry.id} title={entry.description}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {specs.map((field) => {
         if (field.kind === 'number') {
@@ -295,11 +318,16 @@ function CurveFramesField({ curve, kind, mutateCurve }: {
   );
 }
 
-/** 模板引用编辑:模板选择 + 可选输出 + 参数(JSON 对象,值为数字)；mutate 写穿。 */
-export function TemplateSourceEditor({ def, mutate, templateIds }: {
+/** 模板引用编辑:模板选择（本配置 + 参数模板库）+ 可选输出 + 参数(JSON 对象,值为数字)；mutate 写穿。 */
+export function TemplateSourceEditor({ def, mutate, templateIds, absoluteId, library, editRootAndDef }: {
   def: JsonObject;
   mutate: (fn: (target: JsonObject) => void) => void;
   templateIds: string[];
+  absoluteId: number;
+  /** 参数模板库条目（所有设备共享）；给了才显示「模板库」一组。 */
+  library?: ParamTemplate[];
+  /** 整文档编辑 + 定位回这条 SVID 定义；库绑定要一次写穿完成（追加模板段 + 回填直配字段）。 */
+  editRootAndDef?: (fn: (root: JsonObject, def: JsonObject) => void) => void;
 }): JSX.Element {
   const params = objectField(def, 'params');
   const [paramsText, setParamsText] = useState(() => {
@@ -307,6 +335,37 @@ export function TemplateSourceEditor({ def, mutate, templateIds }: {
     return keys.length === 0 ? '' : JSON.stringify(params);
   });
   const [bad, setBad] = useState(false);
+  const [pickError, setPickError] = useState('');
+
+  const currentTemplate = stringField(def, 'template');
+  const isLocal = templateIds.includes(currentTemplate);
+  const canBindLibrary = library !== undefined && editRootAndDef !== undefined;
+
+  /** 选中库条目:同一次 edit 里复制模板体进配置 + 回填直配字段。 */
+  const pickLibrary = (entry: ParamTemplate) => {
+    if (editRootAndDef === undefined) {
+      return;
+    }
+    editRootAndDef((root, target) => {
+      const plan = materializeIntoRoot(root, entry, absoluteId);
+      if (typeof plan === 'string') {
+        setPickError(plan);
+        return;
+      }
+      setPickError('');
+      target.template = plan.templateId;
+      if (plan.output !== undefined) {
+        target.output = plan.output;
+      } else {
+        delete target.output;
+      }
+      if (plan.params !== undefined) {
+        target.params = plan.params;
+      } else {
+        delete target.params;
+      }
+    });
+  };
 
   const commitParams = () => {
     if (paramsText.trim() === '') {
@@ -338,17 +397,42 @@ export function TemplateSourceEditor({ def, mutate, templateIds }: {
         <select
           value={stringField(def, 'template')}
           onChange={(event) => {
+            /* 壳/浏览器可能把上次的表单选择回放成非用户事件(isTrusted=false)：
+               受控 select 会因此补发 change，把"进页面"误当成"选了库模板"。 */
+            if (!event.nativeEvent.isTrusted) {
+              return;
+            }
+            const value = event.target.value;
+            if (value.startsWith('library:')) {
+              const entry = (library ?? []).find((item) => item.id === value.slice('library:'.length));
+              if (entry !== undefined) {
+                pickLibrary(entry);
+              }
+              return;
+            }
             mutate((target) => {
-              target.template = event.target.value;
+              target.template = value;
             });
           }}
         >
-          {templateIds.length === 0 && <option value="">（尚无模板）</option>}
+          {currentTemplate !== '' && !isLocal && (
+            <option value={currentTemplate}>{currentTemplate}（来自模板库，已复制）</option>
+          )}
+          {templateIds.length === 0 && <option value="">（本配置尚无模板）</option>}
           {templateIds.map((id) => (
             <option key={id} value={id}>
               {id}
             </option>
           ))}
+          {canBindLibrary && library!.length > 0 && (
+            <optgroup label="模板库（所有设备共享，选择即复制进本配置）">
+              {library!.map((entry) => (
+                <option key={entry.id} value={`library:${entry.id}`} title={entry.description}>
+                  {entry.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </label>
       <label className="field">
@@ -380,6 +464,7 @@ export function TemplateSourceEditor({ def, mutate, templateIds }: {
         />
         {bad && <span className="problems">应为数字键值对的 JSON,未写回</span>}
       </label>
+      {pickError !== '' && <p className="problems">{pickError}</p>}
     </div>
   );
 }

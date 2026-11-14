@@ -10,13 +10,15 @@ import { configApi } from './configs';
 import { hostSimApi } from './hostsim';
 import { hostsV2Api } from './hostsV2';
 import { messageApi } from './messages';
+import { paramTemplateApi } from './paramTemplates';
 import { sessionApi } from './sessions';
 
 export * from './types';
 export * from './base';
 export * from './hostsV2';
+export * from './paramTemplates';
 
-/** 组装完整客户端；四个域互不重叠，合并即全量。 */
+/** 组装完整客户端；域模块互不重叠，合并即全量。 */
 export function createClient(): ApiClient {
   return {
     ...sessionApi,
@@ -24,5 +26,6 @@ export function createClient(): ApiClient {
     ...messageApi,
     ...hostSimApi,
     ...hostsV2Api,
+    ...paramTemplateApi,
   };
 }

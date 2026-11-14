@@ -6,6 +6,17 @@ import { extname, join } from 'node:path';
 const DIST = new URL('../dist', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const PORT = 4199;
 
+/* 走查用的内存库：必须放在模块级，否则每个请求都会重置。 */
+const hostPlans = new Map(); // `${hostId}|${kind}` -> plan[]
+const paramTemplates = new Map([
+  ['pt_builtin_1', { id: 'pt_builtin_1', name: '恒温保温', description: '恒定 180°C：保温/待机段稳态温度。', source: 'builtin', readonly: true,
+    body: { curves: [{ id: 'main', type: 'constant', value: 180 }], instances: [{ id: 'main', template: 'main', svids: {} }], result: 'main.V' }, updatedAt: 1700000000000 }],
+  ['pt_builtin_2', { id: 'pt_builtin_2', name: '三段炉温程序', description: '升-保-降 pwl 关键帧。', source: 'builtin', readonly: true,
+    body: { curves: [{ id: 'seg', type: 'pwl', points: [{ tMs: 0, value: 20 }, { tMs: 600000, value: 400 }, { tMs: 1200000, value: 400 }, { tMs: 1800000, value: 50 }] }],
+      instances: [{ id: 'seg-i', template: 'seg', svids: {} }], result: 'seg-i.V' }, updatedAt: 1700000000001 }],
+]);
+
+
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 const json = (res, obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
@@ -36,7 +47,8 @@ http.createServer(async (req, res) => {
     if (path === '/api/v1/configs/line2.json') return json(res, { name: 'line2.json', modifiedMs: 2, text: JSON.stringify({
       schemaVersion: 5,
       session: { id: 'line2', passive: true, port: 5010, bindHost: '127.0.0.1', deviceId: 1 },
-      equipment: { name: 'LINE2', idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 }, units: [] },
+      equipment: { name: 'LINE2', idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 },
+        units: [{ unitId: 1, name: 'CH1', injectUnitId: false, svids: [{ offset: 1, slot: 'TEMP', type: 'F4', unit: 'C' }], reports: [], ceids: [] }] },
     }) });
     if (path === '/api/v1/audit') return json(res, { audit: [{ at: 1700000000000, actor: 'dev', role: 'admin', action: 'trigger-ceid', target: 'line1', detail: 'ceid=2001 outcome=OK' }], limit: 200 });
     return json(res, {});
@@ -61,7 +73,7 @@ http.createServer(async (req, res) => {
     return json(res, { hosts: v2Hosts });
   }
   /* ---- 主机配置区方案库（落"库"=内存 Map，重启即清，仅走查用） ---- */
-  const hostPlans = new Map(); // `${hostId}|${kind}` -> plan[]
+  /* hostPlans 定义在模块级（见文件顶部） */
   if (/^\/api\/v2\/hosts\/[^/]+\/plans$/.test(path)) {
     const hostId = path.split('/')[4];
     const kind = url.searchParams.get('kind') ?? '';
@@ -99,6 +111,32 @@ http.createServer(async (req, res) => {
   }
   if (path === '/api/v2/host-templates') {
     return json(res, { templates: v2Templates });
+  }
+  /* ---- 参数模板库（内存 Map，内置 2 条，仅走查用） ---- */
+  /* paramTemplates 定义在模块级（见文件顶部） */
+  if (path === '/api/v2/param-templates') {
+    if (req.method === 'GET') return json(res, { templates: [...paramTemplates.values()] });
+    if (req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json(res, { ok: false, error: 'bad-json' }, 400); }
+      if (!body?.name || !body?.body) return json(res, { ok: false, problems: ['模板名/模板体不能为空'] }, 400);
+      let parsed;
+      try { parsed = JSON.parse(body.body); } catch { return json(res, { ok: false, problems: ['模板体不是合法 JSON'] }, 400); }
+      const updatable = body.id && paramTemplates.has(body.id) && !paramTemplates.get(body.id).readonly;
+      const id = updatable ? body.id : `pt_walk_${paramTemplates.size + 1}`;
+      paramTemplates.set(id, { id, name: body.name, description: body.description ?? '', source: 'custom', readonly: false, body: parsed, updatedAt: Date.now() });
+      return json(res, { ok: true, id }, updatable ? 200 : 201);
+    }
+    return json(res, { ok: false, error: 'method-not-allowed' }, 405);
+  }
+  if (/^\/api\/v2\/param-templates\/[^/]+$/.test(path) && req.method === 'DELETE') {
+    const entry = paramTemplates.get(path.split('/').pop());
+    if (!entry) return json(res, { ok: false, error: 'not-found' }, 404);
+    if (entry.readonly) return json(res, { ok: false, error: 'readonly' }, 409);
+    paramTemplates.delete(entry.id);
+    return json(res, { ok: true });
   }
   if (path.startsWith('/api/v2/host-templates/')) {
     return json(res, { ok: true });

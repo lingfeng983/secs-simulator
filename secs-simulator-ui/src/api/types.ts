@@ -524,4 +524,14 @@ export interface ApiClient {
     note?: string;
   }): Promise<void>;
   deleteHostTemplateV2(id: string): Promise<boolean>;
+  /** 参数模板库（所有设备共享的变化逻辑,实现见 api/paramTemplates.ts）。 */
+  paramTemplates(): Promise<import('./paramTemplates').ParamTemplate[]>;
+  /** 新建（id 缺省,服务端生成）/ 更新参数模板；返回落库后的 id。 */
+  saveParamTemplate(request: {
+    id?: string;
+    name: string;
+    description?: string;
+    body: string;
+  }): Promise<string>;
+  deleteParamTemplate(id: string): Promise<boolean>;
 }

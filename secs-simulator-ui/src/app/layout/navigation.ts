@@ -81,7 +81,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'svid-templates',
         label: '参数模板',
-        description: 'SVID 变化模板（曲线/组合/实例）按设备维护',
+        description: '参数变化逻辑库,所有设备共享;设备配置时从中选择复制',
         icon: 'config',
         route: { name: 'svid-templates' },
       },
