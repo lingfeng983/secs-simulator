@@ -181,6 +181,15 @@ public final class Schema {
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS param_template (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+          body TEXT NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('builtin','custom')),
+          readonly INTEGER NOT NULL,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS host_template (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,

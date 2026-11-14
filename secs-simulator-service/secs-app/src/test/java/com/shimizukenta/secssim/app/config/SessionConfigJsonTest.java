@@ -201,6 +201,37 @@ class SessionConfigJsonTest {
         assertEquals(75.0, source.valueAt(1002, 0L).orElseThrow(), 1e-9, "组合模板应派生");
     }
 
+    /** 空绑定实例是合法的纯中间节点：输出只喂组合，组合经直配糖落到 SVID。 */
+    @Test
+    void intermediateInstanceMayStayUnboundForComposites() {
+        String json = """
+                {"schemaVersion":6,
+                 "session":{"id":"s1","port":5010},
+                 "equipment":{"name":"E","idSpace":{},
+                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
+                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"},
+                              {"offset":2,"slot":"DERIVED","type":"F4","template":"derived"}],
+                     "reports":[],"ceids":[]}]},
+                 "templates":{
+                   "curves":[{"id":"temp","type":"sine","min":100.0,"max":200.0,"periodMs":1000}],
+                   "composites":[{"id":"derived","outputs":{"V":"in.tempi.V * 0.5"}}],
+                   "instances":[
+                     {"id":"tempi","template":"temp","svids":{}}
+                   ]
+                 }}
+                """;
+
+        SessionConfig config = SessionConfigJson.parse(json);
+        CompilationResult compiled = config.compile();
+        assertTrue(compiled.ok(), () -> "配置不合法: " + compiled.issues());
+
+        GraphValueSource source = new GraphValueSource(
+                config.buildValues(compiled.equipment()), new Rng(1L).derive("graph"));
+        assertTrue(source.valueAt(1001, 0L).isEmpty(), "没有直配来源的 SVID 不该有图值");
+        assertEquals(75.0, source.valueAt(1002, 0L).orElseThrow(), 1e-9,
+                "空绑定中间实例应喂进组合并落到直配 SVID");
+    }
+
     @Test
     void afterEventTriggerRoundTrips() {
         String json = """

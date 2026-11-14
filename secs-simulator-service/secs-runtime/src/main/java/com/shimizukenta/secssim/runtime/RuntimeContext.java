@@ -9,6 +9,7 @@ import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.api.http.EventOutcome;
+import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
@@ -64,7 +65,8 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-            TemplateStore templates, MessageLog messages, AuditLog audit,
+            TemplateStore templates, ParamTemplateStore paramTemplates, MessageLog messages,
+            AuditLog audit,
             com.shimizukenta.secssim.app.event.EventBus eventBus,
             com.shimizukenta.secssim.app.event.NoticeBus notices,
             com.shimizukenta.secssim.store.HostRepository hostRepository,
@@ -89,7 +91,7 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         this.configs = configs;
         this.bursts = new BurstRunner(sessions, this.hosts);
         this.persister = new RuntimePersister(linkState, this::canonicalDeviceId);
-        this.api = new RuntimeApi(sessions, launcher, configs, templates, messages, audit,
+        this.api = new RuntimeApi(sessions, launcher, configs, templates, paramTemplates, messages, audit,
                 this.hosts, this.bursts, this.persister);
     }
 
@@ -1105,5 +1107,22 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public ConfigResult deleteTemplate(String id) {
         return this.api.deleteTemplate(id);
+    }
+
+    /* ---------- 参数模板库 ---------- */
+
+    @Override
+    public String paramTemplatesJson() {
+        return this.api.paramTemplatesJson();
+    }
+
+    @Override
+    public ParamTemplateSaved saveParamTemplate(String id, String name, String description, String body) {
+        return this.api.saveParamTemplate(id, name, description, body);
+    }
+
+    @Override
+    public ConfigResult deleteParamTemplate(String id) {
+        return this.api.deleteParamTemplate(id);
     }
 }

@@ -101,10 +101,9 @@ public record TemplateConfig(List<CurveDef> curves, List<CompositeDef> composite
                 throw new ConfigException("$.templates.instances",
                         "实例 " + def.id() + " 引用了未知模板: " + def.template());
             }
-            if (def.svids().isEmpty()) {
-                throw new ConfigException("$.templates.instances",
-                        "实例 " + def.id() + " 至少要把一个输出绑定到 SVID");
-            }
+            /* svids 为空是合法的"纯中间实例"：输出只供组合表达式引用，
+               不写任何 SVID（参数模板库依赖这一点表达"与 SVID 无关的逻辑"）。
+               没有任何消费者的空实例无害，不必拦。 */
 
             for (Map.Entry<String, Integer> binding : def.svids().entrySet()) {
                 if (!template.outputs().contains(binding.getKey())) {

@@ -317,6 +317,105 @@ final class ConfigHandler extends HttpSupport {
         return rest;
     }
 
+    /**
+     * GET /api/v2/param-templates：全部参数模板（条目带模板体，设备绑定不用二次请求）；
+     * POST 新建/更新（体是 {@code {"id"?,"name","description","body"}}，id 空 = 新建）。
+     */
+    void handleParamTemplatesV2(HttpExchange ex) throws IOException {
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 200, "{\"templates\":" + this.context.paramTemplatesJson() + "}");
+            return;
+        }
+        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            String body = readBody(ex, MAX_CONFIG_BYTES);
+            if (body == null) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            try {
+                com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+                String id = str(root, "id");
+                String name = str(root, "name");
+                String description = str(root, "description");
+                String templateBody = str(root, "body");
+                if (templateBody.isEmpty()) {
+                    respond(ex, 400, problemsJson(false, List.of("body 不能为空")));
+                    return;
+                }
+                ParamTemplateSaved saved =
+                        this.context.saveParamTemplate(id, name, description, templateBody);
+                audit(ex, "param-template-save", saved.id() == null ? name : saved.id(),
+                        "outcome=" + saved.result().outcome());
+                switch (saved.result().outcome()) {
+                    case OK -> respond(ex, saved.id().equals(id) ? 200 : 201,
+                            "{\"ok\":true,\"id\":\"" + json(saved.id()) + "\"}");
+                    case CONFLICT -> respond(ex, 409,
+                            "{\"ok\":false,\"error\":\"param-template-conflict\",\"problems\":[\""
+                                    + json(String.join("; ", saved.result().problems())) + "\"]}");
+                    case NOT_FOUND -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+                    case INVALID -> respond(ex, 400, problemsJson(false, saved.result().problems()));
+                    default -> respond(ex, 500, "{\"ok\":false,\"error\":\"param-template-failed\"}");
+                }
+            } catch (RuntimeException e) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
+            }
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /** DELETE /api/v2/param-templates/{id}；内置模板拒绝（409）。 */
+    void handleParamTemplateV2Path(HttpExchange ex) throws IOException {
+        String id = paramTemplateIdFromPath(ex);
+        if (id == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            ConfigResult result = this.context.deleteParamTemplate(id);
+            audit(ex, "param-template-delete", id, "outcome=" + result.outcome());
+            switch (result.outcome()) {
+                case OK -> respond(ex, 200, "{\"ok\":true,\"id\":\"" + json(id) + "\"}");
+                case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"param-template-readonly\"}");
+                case NOT_FOUND -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+                default -> respond(ex, 500, "{\"ok\":false,\"error\":\"param-template-failed\"}");
+            }
+            return;
+        }
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            /* 单个条目暂无独立读端点：列表已带 body，前端不需要额外请求 */
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    private static String paramTemplateIdFromPath(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        String prefix = ApiPaths.PARAM_TEMPLATE_V2_PREFIX;
+        if (!path.startsWith(prefix) || path.length() <= prefix.length()) {
+            return null;
+        }
+        String rest = path.substring(prefix.length());
+        if (rest.contains("/")) {
+            return null;
+        }
+        /* getPath() 已经解过一次码；再 decode 会把含 % 的 id 解坏并抛 IAE（500） */
+        return rest;
+    }
+
 
     /**
      * v2 设备域总入口（{@code /api/v2/devices/} 前缀）。

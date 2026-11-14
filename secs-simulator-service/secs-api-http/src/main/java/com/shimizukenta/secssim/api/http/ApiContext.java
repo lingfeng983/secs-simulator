@@ -1156,6 +1156,32 @@ public interface ApiContext {
         return ConfigResult.notFound("当前形态不支持模板管理");
     }
 
+    /** 全部参数模板（内置 + 自定义，条目带模板体）的 JSON 数组。 */
+    default String paramTemplatesJson() {
+        return "[]";
+    }
+
+    /**
+     * 新建/更新参数模板。
+     *
+     * <p>{@code id} 为空 = 新建（服务端生成 id）；非空 = 指定 id 建或改
+     * 自定义模板（内置只读拒绝）。实现必须先校验模板体再入库。</p>
+     *
+     * @param id          模板 id；空表示新建
+     * @param name        显示名
+     * @param description 说明
+     * @param body        模板体 JSON 原文
+     * @return 保存结果（带落库后的 id）
+     */
+    default ParamTemplateSaved saveParamTemplate(String id, String name, String description, String body) {
+        return new ParamTemplateSaved(ConfigResult.notFound("当前形态不支持参数模板"), null);
+    }
+
+    /** 删除自定义参数模板；内置拒绝。 */
+    default ConfigResult deleteParamTemplate(String id) {
+        return ConfigResult.notFound("当前形态不支持参数模板");
+    }
+
     /**
      * 保存一份配置。
      *

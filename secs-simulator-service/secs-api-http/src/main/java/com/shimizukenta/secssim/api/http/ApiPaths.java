@@ -89,6 +89,12 @@ final class ApiPaths {
     /** v2 单个主机模板前缀。 */
     static final String HOST_TEMPLATE_V2_PREFIX = "/api/v2/host-templates/";
 
+    /** 参数模板库集合（所有设备共享）。 */
+    static final String PARAM_TEMPLATES_V2 = "/api/v2/param-templates";
+
+    /** 参数模板库单个前缀。 */
+    static final String PARAM_TEMPLATE_V2_PREFIX = "/api/v2/param-templates/";
+
     /** 只校验不落盘的子路径。 */
     static final String VALIDATE_SUFFIX = "validate";
 

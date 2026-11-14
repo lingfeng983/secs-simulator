@@ -79,4 +79,9 @@ public final class Ids {
     public static String nextHostTemplate() {
         return "ht_" + next();
     }
+
+    /** 参数模板 id（{@code pt_} 前缀）。 */
+    public static String nextParamTemplate() {
+        return "pt_" + next();
+    }
 }

@@ -38,6 +38,7 @@ import com.shimizukenta.secssim.store.ConfigMigrator;
 import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.Db;
 import com.shimizukenta.secssim.store.HostRepository;
+import com.shimizukenta.secssim.store.ParamTemplateRepository;
 import com.shimizukenta.secssim.store.PlanExecutionRepository;
 import com.shimizukenta.secssim.store.RuntimeStateRepository;
 import com.shimizukenta.secssim.store.TemplateRepository;
@@ -157,9 +158,12 @@ public final class Bootstrap {
                     + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
         }
         seedTemplates(templateRepo);
+        ParamTemplateRepository paramTemplateRepo = new ParamTemplateRepository(db);
+        seedParamTemplates(paramTemplateRepo);
 
         ConfigStore configStore = new ConfigStore(configRepo, templateRepo, options.workDir());
         TemplateStore templates = new TemplateStore(options.workDir(), templateRepo);
+        ParamTemplateStore paramTemplates = new ParamTemplateStore(paramTemplateRepo);
         launcher.configStore(configStore);
         HostRepository hostRepo = new HostRepository(db);
         RuntimeStateRepository linkState = new RuntimeStateRepository(db);
@@ -248,7 +252,8 @@ public final class Bootstrap {
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
                 extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
-                messageLog, auditLog, bus, notices, hostRepo, linkState, planExecutions, configRepo);
+                paramTemplates, messageLog, auditLog, bus, notices, hostRepo, linkState,
+                planExecutions, configRepo);
 
         HttpApiServer api = HttpApiServer.start(
                 new InetSocketAddress(options.bindHost(), options.httpPort()), access, runtimeContext,
@@ -509,6 +514,20 @@ public final class Bootstrap {
                     .ifPresent((body) -> bodies.put(entry.id(), body));
         }
         return bodies;
+    }
+
+    /** 播种内置参数模板（只填缺失的行；入库前归一化为完整形，坏模板直接让启动失败）。 */
+    private static void seedParamTemplates(ParamTemplateRepository repo) {
+        int seeded = 0;
+        for (ParamTemplates.Entry entry : ParamTemplates.catalog()) {
+            String body = com.shimizukenta.secssim.app.config.ParamTemplateBody.normalize(entry.body());
+            if (repo.seed(entry.id(), entry.name(), entry.description(), body)) {
+                seeded++;
+            }
+        }
+        if (seeded > 0) {
+            Log.info("播种内置参数模板: " + seeded + " 套");
+        }
     }
 
     /** --reset-runtime：删掉 runtime.db 及其 WAL/SHM（配置库不动）。 */

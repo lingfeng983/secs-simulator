@@ -337,6 +337,9 @@ public final class HttpApiServer {
         http.createContext(ApiPaths.HOST_TEMPLATES_V2, withCors(this.hostSims::handleHostTemplatesV2));
         http.createContext(ApiPaths.DEVICE_V2_PREFIX, withCors(this.configs::handleDeviceV2));
         http.createContext(ApiPaths.HOST_TEMPLATE_V2_PREFIX, withCors(this.hostSims::handleHostTemplateV2Path));
+        /* 参数模板库（所有设备共享）：集合在前、单个在前缀之后（同 host-templates） */
+        http.createContext(ApiPaths.PARAM_TEMPLATES_V2, withCors(this.configs::handleParamTemplatesV2));
+        http.createContext(ApiPaths.PARAM_TEMPLATE_V2_PREFIX, withCors(this.configs::handleParamTemplateV2Path));
 
         /* 根上下文兜底；HttpServer 按最长前缀匹配，因此不会抢走 /api/v1/*。
            没有前端目录（纯 API 模式）时也要注册：否则拼错的路径会落到 JDK

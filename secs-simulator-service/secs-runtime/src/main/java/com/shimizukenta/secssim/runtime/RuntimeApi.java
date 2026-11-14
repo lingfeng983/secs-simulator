@@ -9,6 +9,7 @@ import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
 import com.shimizukenta.secssim.api.http.EventOutcome;
+import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -36,6 +37,7 @@ final class RuntimeApi {
     private final SessionLauncher launcher;
     private final ConfigStore configs;
     private final TemplateStore templates;
+    private final ParamTemplateStore paramTemplates;
     private final MessageLog messages;
     private final AuditLog audit;
     private final HostSimRegistry hosts;
@@ -45,12 +47,13 @@ final class RuntimeApi {
     private final RuntimePersister persister;
 
     RuntimeApi(SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
-            TemplateStore templates, MessageLog messages, AuditLog audit,
-            HostSimRegistry hosts, BurstRunner bursts, RuntimePersister persister) {
+            TemplateStore templates, ParamTemplateStore paramTemplates, MessageLog messages,
+            AuditLog audit, HostSimRegistry hosts, BurstRunner bursts, RuntimePersister persister) {
         this.sessions = sessions;
         this.launcher = launcher;
         this.configs = configs;
         this.templates = templates;
+        this.paramTemplates = paramTemplates;
         this.messages = messages;
         this.audit = audit;
         this.hosts = hosts;
@@ -642,6 +645,18 @@ final class RuntimeApi {
 
     ConfigResult deleteTemplate(String id) {
         return this.templates.delete(id);
+    }
+
+    String paramTemplatesJson() {
+        return this.paramTemplates.listJson();
+    }
+
+    ParamTemplateSaved saveParamTemplate(String id, String name, String description, String body) {
+        return this.paramTemplates.save(id, name, description, body);
+    }
+
+    ConfigResult deleteParamTemplate(String id) {
+        return this.paramTemplates.delete(id);
     }
 
     ConfigResult createConfig(String name, String templateId) {

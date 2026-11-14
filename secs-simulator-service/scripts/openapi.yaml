@@ -1380,6 +1380,41 @@ paths:
       responses:
         '200': { description: 已删除 }
         '404': { description: 模板不存在 }
+  /api/v2/param-templates:
+    get:
+      tags: [configs]
+      summary: 参数模板列表（所有设备共享；条目带模板体）
+      responses:
+        '200': { description: 模板数组（id/name/description/source/readonly/body/updatedAt） }
+    post:
+      tags: [configs]
+      summary: 新建（或带 id 更新）参数模板；模板体先归一化校验再入库
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, body]
+              properties:
+                id: { type: string, description: 空 = 新建（服务端生成 pt_ 前缀 id） }
+                name: { type: string }
+                description: { type: string }
+                body: { type: string, description: 模板体 JSON 原文（单曲线简形或完整形） }
+      responses:
+        '200': { description: 已更新 }
+        '201': { description: 已创建，返回生成的 id }
+        '400': { description: 模板体校验不过（problems 带原因） }
+        '409': { description: 内置模板只读 / id 冲突 }
+  /api/v2/param-templates/{templateId}:
+    delete:
+      tags: [configs]
+      summary: 删除自定义参数模板；内置模板拒绝
+      parameters:
+        - { name: templateId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已删除 }
+        '409': { description: 内置模板不能删除 }
+        '404': { description: 模板不存在 }
   /api/v1/host-sims:
     get:
       tags: [host-sims]
