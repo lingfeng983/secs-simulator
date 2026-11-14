@@ -90,6 +90,8 @@ Schema v5 = Schema v4 + `templates` 段。设备、ID 空间、事件编排的�
 
 - `template`：曲线或组合模板的 `id`。
 - `svids`：输出名 → 绝对 SVID。一个输出只能绑一个 SVID，一个 SVID 也只能有一个生产者。
+  允许为**空对象**：纯中间节点，输出只供组合表达式的 `in.实例.输出` 引用
+  （参数模板库的表达式模板就依赖这一点，见 `svid-value-model.md` §2.3.1）。
 - `params`：可选，写入参数链的最高层（`UNIT`）。
 
 构建时校验：
