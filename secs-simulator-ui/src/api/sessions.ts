@@ -1,5 +1,5 @@
 /**
- * 会话域端点：健康、会话增删改查、目录/预览、运行时编辑、手动发送、压测、总览。
+ * 会话域端点：健康、会话增删改查、目录/预览、计划启停、手动发送、压测、总览。
  *
  * <p>都是"某台设备"上的操作；配置与主机模拟见 {@code configs.ts} / {@code hostsim.ts}。</p>
  */
@@ -17,7 +17,7 @@ import type {
   SessionBulkResult,
   SessionSummary,
 } from './types';
-import { ApiError, apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, planToWire, readJson, request } from './base';
+import { ApiError, apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
 
 type SessionApi = Pick<
   ApiClient,
@@ -35,20 +35,6 @@ type SessionApi = Pick<
   | 'preview'
   | 'events'
   | 'setEventEnabled'
-  | 'addEventPlan'
-  | 'updateEventPlan'
-  | 'deleteEventPlan'
-  | 'addReport'
-  | 'updateReport'
-  | 'deleteReport'
-  | 'addSvid'
-  | 'updateSvid'
-  | 'deleteSvid'
-  | 'addCeid'
-  | 'updateCeid'
-  | 'deleteCeid'
-  | 'setSvidValue'
-  | 'clearSvidValue'
   | 'sendSml'
   | 'overview'
   | 'burst'
@@ -189,94 +175,6 @@ export const sessionApi: SessionApi = {
         { method: 'POST' },
       ),
     );
-  },
-  async addEventPlan(sessionId, plan) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(planToWire(plan)),
-    }));
-  },
-  async updateEventPlan(sessionId, planId, plan) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(planToWire(plan)),
-    }));
-  },
-  async deleteEventPlan(sessionId, planId) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}`), {
-      method: 'DELETE',
-    }));
-  },
-  async addReport(sessionId, report) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(report),
-    }));
-  },
-  async updateReport(sessionId, rptid, report) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(report),
-    }));
-  },
-  async deleteReport(sessionId, rptid) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${rptid}`), {
-      method: 'DELETE',
-    }));
-  },
-  async addSvid(sessionId, def) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(def),
-    }));
-  },
-  async updateSvid(sessionId, svid, def) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(def),
-    }));
-  },
-  async deleteSvid(sessionId, svid) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}`), {
-      method: 'DELETE',
-    }));
-  },
-  async addCeid(sessionId, ceid) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(ceid),
-    }));
-  },
-  async updateCeid(sessionId, ceid, def) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(def),
-    }));
-  },
-  async deleteCeid(sessionId, ceid) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceids/${ceid}`), {
-      method: 'DELETE',
-    }));
-  },
-  async setSvidValue(sessionId, svid, value) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ value }),
-    }));
-  },
-  async clearSvidValue(sessionId, svid) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/svids/${svid}/value`), {
-      method: 'DELETE',
-    }));
   },
   async sendSml(sessionId, sml) {
     /* W 位要等主机回复（T3），不能用 8 秒的短超时把正常等待判成失败 */

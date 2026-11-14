@@ -1,10 +1,10 @@
 ﻿$ErrorActionPreference = 'Continue'
-# 本脚本位于 secs-simulator-service/tools/host-e2e/，service 根在上两级
-$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+﻿# 本脚本位于 secs-simulator-service/scripts/tools/host-e2e/，service 根在上三级
+$root = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $ui = Join-Path (Split-Path $root -Parent) 'secs-simulator-ui'
 $work = Join-Path $env:TEMP ('secs-e2e-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $work | Out-Null
-$hsms = 15730
+$hsms = 15730   # demo-etch.json 里写死的 SECS 口（测试专用段）
 $out = Join-Path $work 'out.log'
 $errf = Join-Path $work 'err.log'
 $exe = Join-Path $root 'secs-cli\target\secs-sim.exe'
@@ -12,7 +12,7 @@ $dist = Join-Path $ui 'dist'
 # 退出码：Start-Process 带 -RedirectStandardOutput 时 ExitCode 读不到（PowerShell 行为），
 # 改由 cmd /c 转发子进程退出码，重定向在 cmd 内完成。
 # 直接启动（不重定向）：Start-Process 带重定向时 ExitCode 读不到；日志本来就落在 work/logs。
-$proc = Start-Process -FilePath $exe -ArgumentList @('--mode=integrated','--demo-session','--hsms-port',"$hsms",'--web-root',$dist,'--work-dir',$work) -PassThru -WindowStyle Hidden
+$proc = Start-Process -FilePath $exe -ArgumentList @('--mode=integrated','--config',(Join-Path $root 'secs-runtime	arget\classes\defaults\demo-etch.json'),'--web-root',$dist,'--work-dir',$work) -PassThru -WindowStyle Hidden
 $ready = Join-Path $work 'ready.txt'
 $dl = (Get-Date).AddSeconds(90)
 while (-not (Test-Path $ready)) { if ((Get-Date) -gt $dl) { break }; Start-Sleep -Milliseconds 150 }
@@ -30,8 +30,8 @@ Pop-Location
 Get-Content (Join-Path $ui 'real.log') -Tail 5 -ErrorAction SilentlyContinue
 
 '==== 2/2 protocol host + HTTP full ===='
-Set-Location (Join-Path $root 'tools\host-e2e')
-$cp = '..\..\secs-protocol\target\classes;..\..\secs-json\target\classes'
+Set-Location $PSScriptRoot
+$cp = '..\..\..\secs-protocol\target\classes;..\..\..\secs-json\target\classes'
 cmd /c "$env:JAVA_HOME\bin\javac.exe -cp $cp SimHost.java > jc.log 2>&1"
 $script:javac = $LASTEXITCODE
 'JAVAC=' + $script:javac

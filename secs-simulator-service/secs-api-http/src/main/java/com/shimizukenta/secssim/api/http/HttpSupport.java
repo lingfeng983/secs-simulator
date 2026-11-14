@@ -42,7 +42,7 @@ abstract class HttpSupport {
      * 单次曲线预览窗口的最大跨度（24 小时）。
      *
      * <p>{@code EventSimulator} 按 100ms 步长推进，窗口越大推进次数越多；
-     * 预览 GET 不做 Origin 校验，任意网页都能发起请求，没有上限等于给了一个
+     * 预览是纯读接口，任意来源都能发起（跨域已全放行），没有上限等于给了一个
      * 无需读取响应就能耗尽本机 CPU 的入口。实时预览与草稿预览共用同一条边界。</p>
      */
     static final long MAX_PREVIEW_WINDOW_MS = 24L * 60L * 60L * 1000L;

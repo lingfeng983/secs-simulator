@@ -155,7 +155,7 @@ class ConfigStoreTest {
         List<String> duplicateUnit = ConfigStore.validate("""
                 {"schemaVersion": 5,
                  "session": {"id": "line1", "passive": true, "bindHost": "127.0.0.1",
-                             "port": 0, "deviceId": 61, "seed": 3},
+                             "port": 5010, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "L1", "idSpace": {},
                    "units": [{"unitId": 1, "name": "CH1", "injectUnitId": false,
                               "svids": [], "reports": [], "ceids": []},
@@ -303,7 +303,7 @@ class ConfigStoreTest {
                 {"schemaVersion": 4,
                  "我自己加的键": {"保留我": true},
                  "session": {"id": "line1", "passive": true, "bindHost": "127.0.0.1",
-                             "port": 0, "deviceId": 61, "seed": 3,
+                             "port": 5010, "deviceId": 61, "seed": 3,
                              "timeouts": {"t3": 60}},
                  "equipment": {"name": "L1", "idSpace": {},
                    "constants": [{"id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 1.0, "unit": "C"}],
@@ -345,7 +345,7 @@ class ConfigStoreTest {
         return """
                 {"schemaVersion": 5,
                  "session": {"id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                             "port": 0, "deviceId": 61, "seed": 3},
+                             "port": 5010, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "L1", "idSpace": {},
                    "units": [{ "unitId": 1, "name": "CH1", "injectUnitId": false,
                      "svids": [{ "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C" }],

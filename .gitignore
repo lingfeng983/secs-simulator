@@ -1,6 +1,7 @@
 # ---- build output ----
 target/
 *.class
+__pycache__/
 *.jar
 *.war
 

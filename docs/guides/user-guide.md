@@ -4,7 +4,7 @@ SECS/GEM 多单元设备模拟器:在电脑上模拟出一台(或多台)符合 S
 供主机(Host)程序联调测试。浏览器打开即用,不需要 Spring、不需要安装,一个可执行文件搞定。
 
 本手册面向使用界面的人。配置文件格式(Schema v5)见 [docs/guides/schema-v5.md](schema-v5.md),
-HTTP/SSE API 见 [secs-simulator-service/openapi.yaml](../secs-simulator-service/openapi.yaml),架构与模块见 [README.md](../README.md)。
+HTTP/SSE API 见 [secs-simulator-service/scripts/openapi.yaml](../secs-simulator-service/scripts/openapi.yaml),架构与模块见 [README.md](../README.md)。
 
 ---
 
@@ -18,10 +18,10 @@ secs-sim --mode=integrated
 secs-sim --mode=integrated --web-root secs-simulator-ui/dist
 
 # 从配置文件装载设备
-secs-sim --mode=integrated --config ./device.json --hsms-port 5000
+secs-sim --mode=integrated --config ./device.json
 
-# 服务端模式:默认只绑回环;对外访问显式 --bind。内部工具不做鉴权,直连即可
-secs-sim --mode=server --bind 0.0.0.0 --port 8080
+# 服务端模式:默认监听 0.0.0.0;需要收窄时显式 --bind。内部工具不做鉴权,直连即可
+secs-sim --mode=server --port 8080
 ```
 
 启动日志里会打印一行 `READY`:
@@ -81,8 +81,9 @@ READY mode=integrated http=60331 utf8=true sessions=0 work=...
 
 **开箱即用的两台演示设备**:首次启动会向 `--work-dir` 播种 `demo-etch.json`
 (事件效果演示:超温闭环、pulse/shift/set 跳变)与 `demo-cvd.json`(主机拉取采集演示:
-LOT_START/LOT_END 正好可做 S1F3 采集的启停 CEID)。加 `--demo-session` 直接开两台;
-删掉文件重启即恢复默认,已有文件永不覆盖。
+演示设备 JSON 只作测试资产(host-e2e/IT 用 `--config` 显式启动),日常不自动创建。
+设备一旦建好就存在数据库里:进程重启后列表原样保留,但都是「停止」状态——
+由用户点「启动」才开始监听 HSMS,重启不会自动拉起任何会话。
 
 **排障**:顶栏「日志」下拉可随时切 error/info/debug(后端日志级别,切换会记审计);
 后端连不上时页面顶部出红色横幅,「重试 / 修改地址」就在横幅上。

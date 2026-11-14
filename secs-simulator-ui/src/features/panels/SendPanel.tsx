@@ -35,12 +35,12 @@ function remoteCommandSml(rcmdid: number): string {
 }
 
 /**
- * 手动发送面板。
+ * 手动与压测发送面板。
  *
  * <p>发出去之后，"发出去了但主机没回"和"根本没发出去"是两回事，
  * 必须分开说：结果区把回复内容、超时与否、耗时都列出来。
  * 常用预设留在按钮上,示例 S2F41 与五个远程命令收进下拉;
- * 批量重复发送走「压测」子页(服务端循环,消除 HTTP 往返失真),这里只做单发。</p>
+ * 压测（单条 SML 循环 / 事件上报循环）都在本面板，服务端循环消除 HTTP 往返失真。</p>
  */
 export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [draft, setDraft] = useState('S1F1 W.');
@@ -52,9 +52,43 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [stressInterval, setStressInterval] = useState('0');
   const [stressRunning, setStressRunning] = useState(false);
   const [stressResult, setStressResult] = useState<string | null>(null);
+  /* 事件上报压测（原「事件与报告」页迁入） */
+  const [burstCeid, setBurstCeid] = useState('');
+  const [burstCount, setBurstCount] = useState('100');
+  const [burstInterval, setBurstInterval] = useState('0');
+  const [burstRunning, setBurstRunning] = useState(false);
 
-  const { activeSession } = backend;
+  const { activeSession, catalog } = backend;
   const disabled = activeSession === '';
+  const ceidRows = catalog?.ceids ?? [];
+
+  /** 对某个 CEID 在服务端循环手动上报。 */
+  const runBurst = async () => {
+    const ceid = Number.parseInt(burstCeid, 10);
+    const count = Number.parseInt(burstCount, 10);
+    if (!Number.isFinite(ceid) || ceid < 1) {
+      notifier.error('CEID 必须是正整数');
+      return;
+    }
+    if (!Number.isFinite(count) || count < 1 || count > 5000) {
+      notifier.error('次数要在 1..5000 之间');
+      return;
+    }
+    setBurstRunning(true);
+    try {
+      const stats = await backend.burst(activeSession, {
+        kind: 'ceid',
+        ceid,
+        count,
+        intervalMs: Number.parseInt(burstInterval, 10) || 0,
+      });
+      notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
+    } catch (error) {
+      notifier.error(`压测失败: ${(error as Error).message}`);
+    } finally {
+      setBurstRunning(false);
+    }
+  };
 
   /** 把编辑框里的这条消息在服务端循环发送 N 次,统计成功率与延迟。 */
   const runStress = async () => {
@@ -192,6 +226,39 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
       {stressResult !== null && (
         <div className="burst-result">{stressResult}</div>
       )}
+
+      <h3 className="sub-title">事件上报压测（对某个 CEID 循环上报）</h3>
+      <div className="toolbar">
+        <label className="field">
+          CEID
+          <select
+            value={burstCeid}
+            onChange={(event) => setBurstCeid(event.target.value)}
+          >
+            <option value="">选择事件…</option>
+            {ceidRows.map((row) => (
+              <option key={row.ceid} value={row.ceid}>{row.ceid} · {row.slot}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          次数
+          <input value={burstCount} onChange={(event) => setBurstCount(event.target.value)} inputMode="numeric" />
+        </label>
+        <label className="field">
+          间隔 ms
+          <input value={burstInterval} onChange={(event) => setBurstInterval(event.target.value)} inputMode="numeric" title="0 = 全速" />
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={disabled || burstRunning || burstCeid === ''}
+          onClick={() => void runBurst()}
+          title="在服务端循环上报该 CEID(走手动上报路径,不受 events.maxPerSec 限制)"
+        >
+          {burstRunning ? '压测中…' : '开始压测'}
+        </button>
+      </div>
       {error !== '' && (
         <pre className="sml-result error-result">发送失败：{error}</pre>
       )}

@@ -11,8 +11,8 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 
 | 目录 | 内容 |
 |---|---|
-| `secs-simulator-service/` | Java 后端（父 POM + 下表 8 个 Maven 模块）、`openapi.yaml`、`packaging/`（打进 Linux 包的启动素材）、`tools/host-e2e/`（实机协议探针）、`scripts/`（后端门禁） |
-| `secs-simulator-ui/` | Web 前端（Vite + React），含 mock/实机 Playwright 探针与 `scripts/`（前端门禁） |
+| `secs-simulator-service/` | Java 后端（父 POM + 下表 8 个 Maven 模块）；脚本与工具统一收在 `scripts/`（后端门禁 `check.ps1`、`openapi.yaml` 与契约校验、`packaging/` 打进 Linux 包的启动素材、`tools/host-e2e/` 实机协议探针） |
+| `secs-simulator-ui/` | Web 前端（Vite + React）；门禁与 Playwright 探针统一收在 `scripts/`（`check.ps1`、`e2e/` mock 探针、`e2e-real/` 实机探针） |
 | `secs-simulator-gui/` | Tauri 桌面壳，`assets/`（图标源）与 `scripts/make-icon.py` |
 | `scripts/` | 全仓唯一脚本 `package.ps1`：生成安装包（产物落 `scripts/out/`） |
 | `docs/` | 文档（分区见 [docs/README.md](docs/README.md)） |
@@ -57,6 +57,20 @@ mvn -B verify
 mvn -B -Pnative verify       # 原生镜像 + NativeRuntimeIT（需先构建 secs-simulator-ui/dist）
 ```
 
+### IDEA 里启动后端
+
+共享运行配置已随仓库提交（`.run/`，IDEA 直接识别）：
+
+- **CliMain (integrated, :5000)**——HTTP 固定 5000（对齐 vite 代理）、
+  work-dir `build/run`、托管 `secs-simulator-ui/dist`。设备的 SECS 口以各自
+  配置（数据库）为准：「新建设备」自动从 5010 起分配；只有 port=0 的配置
+  `--hsms-port` 仅 probe 模式使用（设备会话的 SECS 口一律来自数据库配置，必填无兜底）；
+- **CliMain (server, 0.0.0.0:8080)**——远程形态冒烟。
+
+使用前提：IDEA 打开仓库根，导入 `secs-simulator-service/pom.xml`（Maven 项目），
+Project JDK 选 25（本机为 graalvm-25）。启动后界面在 `http://127.0.0.1:5000`
+（或 `npm run dev` 走 vite 代理），设备列表来自数据库，均为「停止」状态，点「启动」开始。
+
 `-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
 `NativeRuntimeIT`（API、SSE ticket、HSMS S1F1、S1F3、优雅停机）。
 日常门禁不覆盖原生链路；CI 里由夜间任务 `native-nightly.yml` 构建（非阻断），
@@ -86,26 +100,27 @@ Linux 与 Windows 两个平台矩阵上跑（端口/SO_REUSEADDR 语义不同，
 同一个可执行文件，三种形态：
 
 ```powershell
-# 一体化（桌面壳调用）：只绑回环，默认开放访问（免令牌）
+# 一体化（桌面壳调用）：默认监听 0.0.0.0，开放访问（免令牌）
 secs-sim --mode=integrated
 
-# 带一个两腔体演示会话：主机可以连上来问 S1F3
-secs-sim --mode=integrated --demo-session --hsms-port 5000
+# 启动模型：设备存于数据库（config.db），起来后界面里是「停止」状态，
+# 在界面点「启动」才监听 HSMS；演示设备 JSON 仅作测试资产，可显式导入并启动：
+secs-sim --mode=integrated --config secs-simulator-service/secs-runtime/target/classes/defaults/demo-etch.json
 
 # 从配置文件装载设备（格式见 docs/guides/schema-v5.md）
-secs-sim --mode=integrated --config ./device.json --hsms-port 5000
+secs-sim --mode=integrated --config ./device.json
 
 # 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
 secs-simulator-ui\scripts\build.ps1
-secs-sim --mode=integrated --demo-session --web-root secs-simulator-ui/dist
+secs-sim --mode=integrated --web-root secs-simulator-ui/dist
 
-# 服务端：默认只绑回环（127.0.0.1），对外绑定必须显式 --bind
+# 服务端：默认监听 0.0.0.0；需要收窄时显式 --bind
 # 内部工具不做鉴权，浏览器/脚本直连即可；提供 keystore 时走 HTTPS
 secs-sim --mode=server --bind 0.0.0.0 --port 8443 `
     --tls-keystore ./server.p12 --tls-password $env:SECS_TLS_PASSWORD
 
 # 无 TLS 的内网直连
-secs-sim --mode=server --bind 0.0.0.0 --port 8080
+secs-sim --mode=server --port 8080                       # 内网全放行，绑 0.0.0.0
 
 # keystore 示例：
 # keytool -genkeypair -alias secs-sim -keyalg RSA -storetype PKCS12 `
@@ -124,7 +139,7 @@ READY mode=integrated http=53466 utf8=true sessions=1 hsms=5000 work=C:\Users\..
 `http=` 是界面/API 地址；`sessions=` 是已启动会话数。同时会把 http/端口写进
 `<work-dir>/ready.txt`（不含任何凭据），供部署脚本读取。
 
-`--mode=server` 默认绑回环，跨机访问必须显式 `--bind 0.0.0.0`（或具体网卡地址）。
+`--mode=server` 默认监听 0.0.0.0（所有网卡）；需要收窄时显式 `--bind 127.0.0.1`（或具体网卡地址）。
 **本工具是内部工具，不做鉴权**：没有令牌、账号或角色门槛；对外暴露时请用网络策略隔离。
 
 HTTP API（v1）。下表「原角色」是历史能力分级，仅作语义参考——现在所有端点直连可调用：
@@ -175,20 +190,16 @@ HTTP API（v1）。下表「原角色」是历史能力分级，仅作语义参�
 
 ### 访问控制
 
-内部工具定位：**直连访问**。历史上存在过的 `--token` 与 `--auth-users` 已移除，
-启动参数里再写它们会直接报"未知参数"。默认只绑回环；需要跨机时显式 `--bind`，
-对外部署请用防火墙/网段隔离，必要时加 `--tls-keystore` 保护链路。
+内部工具定位（[ADR-0018](docs/adr/0018-intranet-open-access.md)）：**不做鉴权、跨域全放行、默认监听 `0.0.0.0`（所有网卡）**。
+历史上存在过的 `--token` 与 `--auth-users` 已移除，启动参数里再写它们会直接报"未知参数"；
+2026-10 曾加回的 Host 白名单与写请求 Origin 校验也已随 ADR-0018 移除——任意来源的请求都照常处理，
+响应统一带 `Access-Control-Allow-Origin: *`。需要收窄监听范围时显式 `--bind`（如 `--bind 127.0.0.1`），
+请自行用防火墙/网段控制暴露范围。
 
 审计日志仍记录操作主体（直连访问下为 `local`），用于回答"谁在什么时候改了什么"。
 
-**浏览器侧防护**（不引入账号体系）：
+**运行时防护**（与跨域无关）：
 
-- **Host 白名单**：只接受回环名/IP、`--bind` 地址、本机网卡地址，其余 `Host` 一律 403。
-  这是 DNS rebinding 的唯一有效防线（浏览器同源判定看 Host）。用**域名**访问远程服务时，
-  把域名加进 `SECS_SIM_ALLOWED_HOSTS`（逗号分隔）或 `-Dsecssim.allowedHosts`。
-- **写请求 Origin 校验**：`PUT/POST/DELETE` 带 `Origin` 且不在白名单时，**在执行前**回 403——
-  CORS 只决定浏览器能不能读响应，挡不住无正文的跨站简单请求（停机、触发上报）。
-  没有 `Origin` 的 curl / 脚本 / 桌面壳首跳不受影响。
 - **请求截止时间**：单请求默认 120 秒（`-Dsecssim.http.requestTimeoutMs`），到点关闭连接，
   避免慢速正文长期占住请求线程；SSE 长连接由各自的看门狗负责。
 
@@ -211,8 +222,8 @@ curl -X DELETE http://127.0.0.1:PORT/api/v1/sessions/line1
 - **重载先编译再动旧会话**：配置有错时旧会话原样跑着，只返回失败。
   一个手滑的逗号不该让设备凭空消失。
 - 内置演示会话（`demo`）没有配置来源，重载返回 **409 `not-reloadable`**，而不是笼统的 500。
-- 配置没指定端口时会用 `--hsms-port` 的值，因此**多个会话要在配置里各自写明端口**，
-  否则第二个会话会撞端口。
+- **配置必须写明端口**（`session.port`，1..65535，无兜底）——设备的 SECS 口以
+  数据库配置为准；多个会话各写各的端口，第二个会话不会自动换口。
 - 界面上的「新建 / 重载 / 关闭」与「上报 / 报警」一样要 operator 及以上。
 - 会话列表新增 `controlState`：`OFFLINE` / `COMMUNICATING` / `ONLINE`。
   HSMS selected 或 S1F13 后进入 COMMUNICATING，S1F17 接受后 ONLINE，
@@ -308,7 +319,7 @@ curl -X POST --data-binary @docs/examples/sml/equip/s5f1-example.sml \
 
 ### OpenAPI
 
-HTTP API 的机器可读契约在 [secs-simulator-service/openapi.yaml](secs-simulator-service/openapi.yaml)（OpenAPI 3.0.3）。
+HTTP API 的机器可读契约在 [secs-simulator-service/scripts/openapi.yaml](secs-simulator-service/scripts/openapi.yaml)（OpenAPI 3.0.3）。
 改接口时请同步这个文件；同一个 path 的多个方法写在一个声明里（YAML 不允许重复键）。
 
 ### 审计
@@ -390,7 +401,7 @@ npm run test:e2e
 - **Mock E2E**：Vite preview + Playwright 路由拦截 API，不启动 Java；
   36 条用例覆盖页面能力与焦点管理 / 密度 / 侧栏折叠等交互契约
   （另有 37 条截图回归默认跳过，见下文）。
-- **真实后端 E2E**：先启动 `secs-sim --demo-session`，再指向它：
+- **真实后端 E2E**：先启动 `secs-sim --mode=integrated` 并在界面里启动设备（或 `--config <设备.json>`），再指向它：
 
 ```powershell
 $env:E2E_REAL_URL='http://127.0.0.1:5000'
@@ -398,7 +409,7 @@ npm --prefix secs-simulator-ui run test:e2e:real
 ```
 
 这条真实链路不在模块门禁脚本里：它需要一个已经起来的后端，按上面的命令手动跑
-（一键编排见 `secs-simulator-service/tools/host-e2e/run-e2e.ps1`）。
+（一键编排见 `secs-simulator-service/scripts/tools`）。
 
 ### 界面结构
 
@@ -574,12 +585,13 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 - [ADR 0014 · 协议层 SML 实现下线](docs/adr/0014-protocol-sml-retired.md)
 - [ADR 0015 · 补 CI；Jetty/SQLite/签名/Spooling 暂不做](docs/adr/0015-ci-and-deferred-upgrades.md)
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
+- [ADR 0018 · 内网工具全放行](docs/adr/0018-intranet-open-access.md) — 监听 0.0.0.0、移除 Host/Origin 防护（2026-11-14）
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
 - [3.0.1 发布说明](docs/reports/release-notes-3.0.1.md) — 缺陷修复版：Trace 重连停发、重载失败丢运行态编辑、界面轮询与导入假成功
 - [3.0.0 发布说明](docs/reports/release-notes-3.0.0.md)
 - [2.0.1 发布说明](docs/reports/release-notes-2.0.1.md)
 - [2.0.0 发布说明](docs/reports/release-notes-2.0.0.md)
-- [OpenAPI 3.0 契约](secs-simulator-service/openapi.yaml)
+- [OpenAPI 3.0 契约](secs-simulator-service/scripts/openapi.yaml)
 - [二进制曲线预览格式](docs/guides/preview-binary.md)
 - [M0](docs/reports/m0-report.md) · [M1](docs/reports/m1-report.md) · [M2](docs/reports/m2-report.md) · [M3](docs/reports/m3-report.md) · [M4](docs/reports/m4-report.md) · [M4-b](docs/reports/m4b-report.md) · [M5](docs/reports/m5-report.md) · [M6](docs/reports/m6-report.md) · [M7](docs/reports/m7-report.md) · [M6-b](docs/reports/m6b-report.md) · [M6-c](docs/reports/m6c-report.md) · [M8-a](docs/reports/m8a-report.md) · [M8-b](docs/reports/m8b-report.md) · [M8-c](docs/reports/m8c-report.md) · [M8-d](docs/reports/m8d-report.md) · [M8-e](docs/reports/m8e-report.md) · [M9](docs/reports/m9-report.md) · [M9-b / M9-c](docs/reports/m9b-report.md)
 - [全量代码评审 2026-10-17](docs/reports/code-review-2026-10-17.md)

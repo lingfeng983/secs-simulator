@@ -36,12 +36,13 @@ class RuntimeOptionsTest {
     }
 
     @Test
-    void defaultBindIsLoopbackInEveryMode() {
-        assertEquals("127.0.0.1", RuntimeOptions.parse(new String[] {"--mode=server"}).bindHost());
-        assertEquals("127.0.0.1", RuntimeOptions.parse(new String[] {"--mode=integrated"}).bindHost());
-        assertEquals("0.0.0.0",
-                RuntimeOptions.parse(new String[] {"--mode=server", "--bind=0.0.0.0"}).bindHost(),
-                "对外绑定必须是显式选择");
+    void defaultBindIsWildcardInEveryMode() {
+        assertEquals("0.0.0.0", RuntimeOptions.parse(new String[] {"--mode=server"}).bindHost(),
+                "内网工具默认监听所有网卡");
+        assertEquals("0.0.0.0", RuntimeOptions.parse(new String[] {"--mode=integrated"}).bindHost());
+        assertEquals("127.0.0.1",
+                RuntimeOptions.parse(new String[] {"--mode=server", "--bind=127.0.0.1"}).bindHost(),
+                "需要收窄时仍可显式指定");
     }
 
     /**

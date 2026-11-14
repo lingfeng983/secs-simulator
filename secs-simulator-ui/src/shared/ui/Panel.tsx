@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 
-/** 面板外壳：标题、说明、操作区、内容。 */
+/** 面板外壳：标题、悬浮说明、操作区、内容。 */
 export interface PanelProps {
   title: string;
-  /** 一句话说清这个面板能干什么；支持换行（\n 会按行展示）。 */
+  /** 一句话说清这个面板能干什么；支持换行（\n 会按行展示）。悬浮标题时弹出，不常驻。 */
   description?: ReactNode;
   /** 标题右侧的操作区。 */
   actions?: ReactNode;
@@ -21,14 +21,14 @@ export interface PanelProps {
 /**
  * 面板外壳。
  *
- * <p>标题 / 说明 / 操作 / 内容四段固定，间距与分隔线由 CSS 决定；
+ * <p>标题 / 操作 / 内容三段固定，说明悬浮标题时弹出；间距与分隔线由 CSS 决定；
  * 面板自己不再排版，加一个面板不用重新调样式。</p>
  */
 export function Panel({ title, description, actions, stats, children, id, index, status }: PanelProps): JSX.Element {
   return (
     <section className="panel" id={id}>
       <div className="panel-head">
-        <div className="panel-title-wrap">
+        <div className="panel-title-wrap" tabIndex={description !== undefined ? 0 : undefined}>
           <div className="panel-title-row">
             <h2 className="panel-title">
               {index !== undefined && <span className="panel-index">{index}</span>}
@@ -36,7 +36,9 @@ export function Panel({ title, description, actions, stats, children, id, index,
             </h2>
             {status}
           </div>
-          {description !== undefined && <p className="panel-desc">{description}</p>}
+          {description !== undefined && (
+            <div className="panel-tip" role="tooltip">{description}</div>
+          )}
         </div>
         {actions !== undefined && (
           <div className="panel-actions" role="toolbar" aria-label={`${title} 操作`}>

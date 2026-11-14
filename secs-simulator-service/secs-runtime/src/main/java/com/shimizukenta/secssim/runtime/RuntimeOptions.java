@@ -16,9 +16,8 @@ import java.util.Set;
  * @param mode        运行形态
  * @param bindHost    绑定地址
  * @param httpPort    HTTP 端口，0 表示由系统分配
- * @param hsmsPort    SECS 端口（探针或演示会话）
+ * @param hsmsPort    SECS 端口（仅 probe 模式的监听口）
  * @param deviceId    SECS device-id
- * @param demoSession 是否开一个演示会话（两腔体，应答 S1F3）
  * @param configFile  配置文件路径，{@code null} 表示不用配置
  * @param webRoot     静态前端目录，{@code null} 表示只提供 API
  * @param workDir     工作目录（配置、日志、模板）
@@ -33,7 +32,7 @@ import java.util.Set;
  * @param resetRuntime   启动前删除 runtime.db
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
-                             int hsmsPort, int deviceId, boolean demoSession,
+                             int hsmsPort, int deviceId,
                              Path configFile, Path webRoot, Path workDir,
                              Path tlsKeystore, String tlsPassword, boolean help,
                              com.shimizukenta.secssim.app.log.Log.Level logLevel,
@@ -53,7 +52,6 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
      * @param httpPort    HTTP 端口
      * @param hsmsPort    SECS 端口
      * @param deviceId    device-id
-     * @param demoSession 是否演示会话
      * @param configFile  配置文件
      * @param webRoot     静态前端目录
      * @param workDir     工作目录
@@ -115,7 +113,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
         }
 
         Set<String> known = Set.of("mode", "bind", "port", "hsms-port",
-                "device-id", "demo-session", "config", "web-root", "work-dir",
+                "device-id", "config", "web-root", "work-dir",
                 "tls-keystore", "tls-password", "help", "log-level",
                 "messages-recent", "audit-recent",
                 "migrate-config", "export-config", "reset-runtime");
@@ -129,12 +127,12 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
 
         return new RuntimeOptions(
                 mode,
-                /* 默认一律只绑回环：对外开放必须是显式选择 */
-                values.getOrDefault("bind", "127.0.0.1"),
+                /* 内网工具：默认监听所有网卡，需要收窄时显式 --bind */
+                values.getOrDefault("bind", "0.0.0.0"),
                 intValue(values, "port", 0),
+                /* 仅 probe 模式的监听口；设备会话的 SECS 口一律来自各自配置（数据库） */
                 intValue(values, "hsms-port", 5000),
                 intValue(values, "device-id", 10),
-                Boolean.parseBoolean(values.getOrDefault("demo-session", "false")),
                 values.containsKey("config") ? Path.of(values.get("config")) : null,
                 values.containsKey("web-root") ? Path.of(values.get("web-root")) : null,
                 Path.of(values.getOrDefault("work-dir", defaultWorkDir())),
@@ -161,11 +159,12 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
 
                   --log-level <error|info|debug>     日志级别，默认 info（debug 输出报文级细节）
                   --mode <integrated|server|probe>  运行形态，默认 integrated
-                  --bind <host>                     绑定地址，默认 127.0.0.1（对外必须显式指定）
+                  --bind <host>                     绑定地址，默认 0.0.0.0（需要收窄时显式指定）
                   --port <n>                        HTTP 端口，默认 0（系统分配）
-                  --hsms-port <n>                   SECS 端口，默认 5000
+                  --hsms-port <n>                   probe 模式的 SECS 监听口，默认 5000
+                                                  （设备会话的 SECS 口以各自配置为准，无兜底）
                   --device-id <n>                   SECS device-id，默认 10
-                  --demo-session                    开一个两腔体演示会话（应答 S1F1 / S1F3）
+                  --config <path>                   把一份设备配置导入数据库并立即启动（显式动作）
                   --config <path>                   从 Schema v5 JSON 装载设备与会话配置（v4 兼容）
                   --web-root <dir>                  托管静态前端（与 API 同源，浏览器直接打开）
                   --work-dir <path>                 工作目录
@@ -180,7 +179,10 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                   --help                            打印本帮助
 
                 访问：内部工具，不做鉴权——浏览器/脚本直连地址即可，没有令牌或账号。
-                默认只绑回环；跨机访问需显式 --bind，对外部署建议同时配 TLS。
+                默认监听 0.0.0.0（所有网卡）；需要收窄时显式 --bind 127.0.0.1。
+
+                设备模型：设备存于数据库（config.db），启动后界面里显示为「停止」状态，
+                由用户点击「启动」才建立会话并监听 HSMS；--config 是显式的导入并启动动作。
 
                 启动后：stdout 打印一行 READY 供桌面壳握手；同时把 http/端口写进
                 <work-dir>/ready.txt（权限 600），供部署脚本读取。

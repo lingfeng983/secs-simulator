@@ -731,57 +731,43 @@ class HttpApiServerTest {
     }
 
     /**
-     * 跨域白名单：任意网站不能再驱动本机 API；Tauri 壳与回环开发服务器仍可用。
+     * 跨域全放行：任意来源的预检与请求都照常处理，响应统一带 {@code Allow-Origin: *}。
      *
-     * <p>旧实现回 {@code Allow-Origin: *}，用户在浏览器里打开任意页面就可能被它
-     * 建会话、改配置、停机（本机形态默认开放访问）。</p>
+     * <p>内网工具定位（ADR-0018）：不做鉴权、不设来源白名单。</p>
      */
     @Test
-    void corsOnlyEchoesAllowedOrigins() throws Exception {
-        HttpResponse<String> evilPreflight = send(
+    void corsAllowsEveryOrigin() throws Exception {
+        HttpResponse<String> preflight = send(
                 HttpRequest.newBuilder(URI.create(this.base + "/api/v1/health"))
                         .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
                         .header("Origin", "https://evil.example"),
                 null);
-        assertEquals(403, evilPreflight.statusCode(), "白名单外来源的预检必须被拒绝");
-        assertTrue(evilPreflight.headers().firstValue("Access-Control-Allow-Origin").isEmpty());
+        assertEquals(204, preflight.statusCode(), "任意来源的预检一律 204");
+        assertEquals("*", preflight.headers().firstValue("Access-Control-Allow-Origin").orElse(""));
 
-        HttpResponse<String> tauriPreflight = send(
-                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/health"))
-                        .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
-                        .header("Origin", "http://tauri.localhost"),
-                null);
-        assertEquals(204, tauriPreflight.statusCode());
-        assertEquals("http://tauri.localhost",
-                tauriPreflight.headers().firstValue("Access-Control-Allow-Origin").orElse(""));
-
-        HttpResponse<String> evilGet = send(
+        HttpResponse<String> get = send(
                 HttpRequest.newBuilder(URI.create(this.base + "/api/v1/health"))
                         .GET()
                         .header("Origin", "https://evil.example"),
                 null);
-        assertEquals(200, evilGet.statusCode());
-        assertTrue(evilGet.headers().firstValue("Access-Control-Allow-Origin").isEmpty(),
-                "白名单之外不下发 CORS 头，浏览器读不到响应");
+        assertEquals(200, get.statusCode());
+        assertEquals("*", get.headers().firstValue("Access-Control-Allow-Origin").orElse(""),
+                "任意来源都能读到响应");
     }
 
     /**
-     * 跨站“简单请求”不能执行副作用。
-     *
-     * <p>{@code POST /shutdown} 没有正文、没有自定义头，浏览器不触发预检——只挡预检和响应头
-     * 挡不住它：页面照样能让本机停服。这里断言白名单之外的 Origin 在**执行之前**被拒。</p>
+     * 任意来源的写请求照常执行（内网工具，无跨站限制）。
      */
     @Test
-    void writeFromDisallowedOriginIsRejectedBeforeExecution() throws Exception {
+    void writeFromAnyOriginIsExecuted() throws Exception {
         HttpResponse<String> response = send(
                 HttpRequest.newBuilder(URI.create(this.base + "/api/v1/shutdown"))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .header("Origin", "https://evil.example"),
                 null);
 
-        assertEquals(403, response.statusCode(), response.body());
-        assertTrue(response.body().contains("origin-not-allowed"), response.body());
-        assertEquals(0, this.shutdownCalls, "被拒的跨站写操作不得执行 handler");
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals(1, this.shutdownCalls, "写请求不受来源限制");
     }
 
     /** 没有 Origin 的客户端（curl/脚本/桌面壳首跳）不受影响：它不是浏览器发起的跨站请求。 */
@@ -793,19 +779,11 @@ class HttpApiServerTest {
         assertEquals(1, this.shutdownCalls);
     }
 
-    /**
-     * 陌生 Host 一律拒绝。
-     *
-     * <p>DNS rebinding 后浏览器认为 `evil.example` 与页面同源，请求会带
-     * `Host: evil.example` 打进来；只校验 Origin 等于 Host 的话，白名单会自己放过自己。</p>
-     *
-     * <p>用裸 socket 发包：Java 的 HttpClient 不允许覆写 Host。</p>
-     */
+    /** Host 头不再校验：内网工具，任何 Host 都照常响应（裸 socket 发包，HttpClient 不允许覆写 Host）。 */
     @Test
-    void foreignHostIsRejected() throws Exception {
+    void foreignHostIsAccepted() throws Exception {
         String response = rawGet("/api/v1/health", "evil.example");
-        assertTrue(response.startsWith("HTTP/1.1 403"), response);
-        assertTrue(response.contains("host-not-allowed"), response);
+        assertTrue(response.startsWith("HTTP/1.1 200"), response);
 
         String local = rawGet("/api/v1/health", "127.0.0.1:" + this.server.port());
         assertTrue(local.startsWith("HTTP/1.1 200"), local);

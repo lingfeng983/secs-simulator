@@ -1,18 +1,18 @@
 ﻿$ErrorActionPreference = 'Continue'
-# 本脚本位于 secs-simulator-service/tools/host-e2e/，service 根在上两级
-$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+﻿# 本脚本位于 secs-simulator-service/scripts/tools/host-e2e/，service 根在上三级
+$root = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $work = Join-Path $env:TEMP ('secs-probe-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $work | Out-Null
-$hsms = 15720
+$hsms = 15730   # demo-etch.json 里写死的 SECS 口
 $out = Join-Path $work 'out.log'; $errf = Join-Path $work 'err.log'
-$proc = Start-Process -FilePath (Join-Path $root 'secs-cli\target\secs-sim.exe') -ArgumentList @('--mode=integrated','--demo-session','--hsms-port',"$hsms",'--work-dir',$work) -PassThru -RedirectStandardOutput $out -RedirectStandardError $errf
+$proc = Start-Process -FilePath (Join-Path $root 'secs-cli\target\secs-sim.exe') -ArgumentList @('--mode=integrated','--config',(Join-Path $root 'secs-runtime	arget\classes\defaults\demo-etch.json'),'--work-dir',$work) -PassThru -RedirectStandardOutput $out -RedirectStandardError $errf
 $ready = Join-Path $work 'ready.txt'
 $dl = (Get-Date).AddSeconds(60)
 while (-not (Test-Path $ready)) { if ((Get-Date) -gt $dl) { break }; Start-Sleep -Milliseconds 150 }
 if (-not (Test-Path $ready)) { 'NO READY'; Get-Content $out,$errf -Tail 20; Stop-Process -Id $proc.Id -Force; exit 1 }
 'READY'
-Set-Location (Join-Path $root 'tools\host-e2e')
-$cp = '..\..\secs-protocol\target\classes'
+Set-Location $PSScriptRoot
+$cp = '..\..\..\secs-protocol\target\classes'
 cmd /c "$env:JAVA_HOME\bin\javac.exe -cp $cp MinProbe.java > jc.log 2>&1"
 'JAVAC=' + $LASTEXITCODE
 if ($LASTEXITCODE -ne 0) { Get-Content jc.log }

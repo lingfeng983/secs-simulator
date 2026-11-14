@@ -324,4 +324,75 @@ public final class HostRepository {
             return null;
         });
     }
+
+    /* ---------- 主机方案（Trace / S1F3 采集，配置区落库） ---------- */
+
+    /** 列出某台主机某一类方案（body 为前端结构原样的 JSON），按创建顺序。 */
+    public List<String> listPlans(String hostId, String kind) {
+        try (Connection connection = this.db.readConfig();
+             PreparedStatement st = connection.prepareStatement(
+                     "SELECT body FROM host_plan WHERE host_id=? AND kind=? ORDER BY created_at, plan_id")) {
+            st.setString(1, hostId);
+            st.setString(2, kind);
+            List<String> out = new ArrayList<>();
+            try (ResultSet rs = st.executeQuery()) {
+                while (rs.next()) {
+                    out.add(rs.getString(1));
+                }
+            }
+            return out;
+        } catch (SQLException e) {
+            throw new StoreException("查主机方案失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 主机是否存在（方案挂在主机下，主机删了方案没有意义）。 */
+    public boolean hostExists(String hostId) {
+        try (Connection connection = this.db.readConfig();
+             PreparedStatement st = connection.prepareStatement(
+                     "SELECT 1 FROM host WHERE id=? AND deleted_at IS NULL")) {
+            st.setString(1, hostId);
+            try (ResultSet rs = st.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new StoreException("查主机失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 保存（upsert）一条主机方案；planId 由调用方保证唯一。 */
+    public void savePlan(String hostId, String kind, String planId, String body) {
+        this.db.writeConfig(connection -> {
+            try (PreparedStatement st = connection.prepareStatement(
+                    "INSERT INTO host_plan (host_id, kind, plan_id, body, created_at) "
+                            + "VALUES (?, ?, ?, ?, ?) "
+                            + "ON CONFLICT (host_id, kind, plan_id) "
+                            + "DO UPDATE SET body=excluded.body")) {
+                st.setString(1, hostId);
+                st.setString(2, kind);
+                st.setString(3, planId);
+                st.setString(4, body);
+                st.setLong(5, System.currentTimeMillis());
+                st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("保存主机方案失败: " + e.getMessage(), e);
+            }
+            return null;
+        });
+    }
+
+    /** 删除一条主机方案；不存在返回 false。 */
+    public boolean deletePlan(String hostId, String kind, String planId) {
+        return this.db.writeConfig(connection -> {
+            try (PreparedStatement st = connection.prepareStatement(
+                    "DELETE FROM host_plan WHERE host_id=? AND kind=? AND plan_id=?")) {
+                st.setString(1, hostId);
+                st.setString(2, kind);
+                st.setString(3, planId);
+                return st.executeUpdate() > 0;
+            } catch (SQLException e) {
+                throw new StoreException("删除主机方案失败: " + e.getMessage(), e);
+            }
+        });
+    }
 }

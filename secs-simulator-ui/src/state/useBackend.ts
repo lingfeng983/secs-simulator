@@ -5,7 +5,6 @@ import {
   type BurstRequest,
   type BurstResult,
   type Catalog,
-  type CeidInput,
   type CollectorConfigInput,
   type CollectorState,
   type ConfigEntry,
@@ -13,18 +12,15 @@ import {
   type ConfigSaveResult,
   type ConfigTemplateEntry,
   type ConfigTextSnapshot,
-  type EventPlanInput,
   type EventPlanView,
   type Health,
   type HostSimTarget,
   type OverviewRow,
   type PreviewData,
-  type ReportInput,
   type SentMessageResult,
   type SessionBulkParams,
   type SessionBulkResult,
   type SessionSummary,
-  type SvidInput,
 } from '../api';
 import type { Notifier } from './useToasts';
 import { createRequestSeq } from './requestSeq';
@@ -135,24 +131,7 @@ export interface BackendController {
   trigger: (sessionId: string, ceid: number) => Promise<void>;
   setAlarm: (sessionId: string, alid: number, set: boolean, text: string, category: number) => Promise<void>;
   toggleEvent: (plan: EventPlanView) => Promise<void>;
-  /* ---------- 运行时编辑(设备页·事件/报告/状态变量;不写回配置,重载后失效) ---------- */
-  addEventPlan: (plan: EventPlanInput) => Promise<boolean>;
-  updateEventPlan: (planId: string, plan: EventPlanInput) => Promise<boolean>;
-  deleteEventPlan: (planId: string) => Promise<boolean>;
-  addReport: (report: ReportInput) => Promise<boolean>;
-  /** 运行时新增采集事件(事件设置页)。 */
-  addCeid: (ceid: CeidInput) => Promise<boolean>;
-  updateCeid: (ceid: number, def: CeidInput) => Promise<boolean>;
-  deleteCeid: (ceid: number) => Promise<boolean>;
-  updateReport: (rptid: number, report: ReportInput) => Promise<boolean>;
-  deleteReport: (rptid: number) => Promise<boolean>;
-  addSvid: (def: SvidInput) => Promise<boolean>;
-  updateSvid: (svid: number, def: SvidInput) => Promise<boolean>;
-  deleteSvid: (svid: number) => Promise<boolean>;
-  setSvidValue: (svid: number, value: number) => Promise<boolean>;
-  clearSvidValue: (svid: number) => Promise<boolean>;
-  /** 单个状态变量的曲线预览（窗口右端点取进程 uptime，即"最近 N 毫秒"）。 */
-  previewSvid: (sessionId: string, svid: number, windowMs: number) => Promise<PreviewData | null>;
+  /* 定义类编辑已上收配置区（写配置草稿）；运行时目录编辑端点不再从前端调用。 */
   /** 只回放某一条编排计划的预览（事件及其效果）。 */
   previewPlan: (sessionId: string, planId: string, windowMs: number) => Promise<PreviewData | null>;
   /** 拉整台设备的曲线(全部 SVID + 事件标记),用于"事件串起来"的预览。 */
@@ -274,7 +253,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   /* ---------- 各域 hook ---------- */
 
   const audit = useAuditFeed(client, notifier);
-  const edits = useDeviceEdits({ client, notifier, activeSession, refreshSessionDetail });
+  const edits = useDeviceEdits({ client, notifier });
   const ops = useDeviceOps({ client, notifier, activeSession, refreshSessionDetail });
   const serverOps = useServerOps(client);
   const logLevel = useLogLevel(client, notifier);

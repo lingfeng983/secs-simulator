@@ -21,8 +21,9 @@ export interface ConfigDraftState {
   reload: () => Promise<void>;
 }
 
-export function useConfigDraft(backend: BackendController, sessionId: string): ConfigDraftState {
-  const configName = backend.sessions.find((session) => session.id === sessionId)?.config ?? '';
+export function useConfigDraft(backend: BackendController, sessionId: string, configNameOverride?: string): ConfigDraftState {
+  /* 显式配置名优先：数据库里还没启动的设备没有会话行，设备页直接给它配置文件名。 */
+  const configName = configNameOverride ?? backend.sessions.find((session) => session.id === sessionId)?.config ?? '';
   const [text, setTextState] = useState('');
   const [baseline, setBaseline] = useState('');
   const [loadedMs, setLoadedMs] = useState<number | null>(null);

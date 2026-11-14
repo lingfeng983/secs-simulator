@@ -151,8 +151,15 @@ class NativeRuntimeIT {
         Path exePath = Path.of(exe);
         assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
 
-        int hsmsPort = freePort();
         Path workDir = Files.createTempDirectory("secs-sim-demo-");
+        /* 演示设备的 SECS 口写死在 JSON 里（15730，测试专用段） */
+        int hsmsPort = 15730;
+
+        /* 演示设备 JSON 已降级为测试资产（ADR-0019：启动不自动开会话），
+           用 --config 显式导入并启动一台 etch */
+        Path demoConfig = Path.of("..", "..", "secs-runtime", "target", "classes",
+                "defaults", "demo-etch.json").toAbsolutePath().normalize();
+        assumeTrue(Files.isRegularFile(demoConfig), "skip: demo-etch.json not built: " + demoConfig);
 
         /* 前端产物：先在 secs-simulator-ui/ 里 npm run build；没构建就跳过这条用例 */
         Path webRoot = Path.of("..", "..", "secs-simulator-ui", "dist").toAbsolutePath().normalize();
@@ -160,9 +167,8 @@ class NativeRuntimeIT {
 
         Process process = new ProcessBuilder(
                 exePath.toString(),
-                "--mode=probe",
-                "--demo-session",
-                "--hsms-port", Integer.toString(hsmsPort),
+                "--mode=integrated",
+                "--config", demoConfig.toString(),
                 "--web-root", webRoot.toString(),
                 "--work-dir", workDir.toString())
                 .redirectErrorStream(true)
@@ -171,15 +177,15 @@ class NativeRuntimeIT {
         try {
             String ready = awaitReady(process);
             int httpPort = intToken(ready, "http=");
-            /* --demo-session 现在开两台内置设备（etch-01 / cvd-01），不是一台 */
-            assertTrue(ready.contains("sessions=2"), "演示会话未创建: " + ready);
+            /* --config 显式启动一台设备（etch-01） */
+            assertTrue(ready.contains("sessions=1"), "会话未创建: " + ready);
 
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             HttpResponse<String> health = client.send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + httpPort + "/api/v1/health"))
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            assertTrue(health.body().contains("\"sessions\":2"), health.body());
+            assertTrue(health.body().contains("\"sessions\":1"), health.body());
 
             /* 静态前端：与 API 同源，浏览器直接打开即可 */
             HttpResponse<String> page = client.send(
@@ -196,7 +202,6 @@ class NativeRuntimeIT {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, sessions.statusCode(), sessions.body());
             assertTrue(sessions.body().contains("\"id\":\"etch-01\""), sessions.body());
-            assertTrue(sessions.body().contains("\"id\":\"cvd-01\""), sessions.body());
             assertTrue(sessions.body().contains("\"state\":\"OPEN\""), sessions.body());
             assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
 

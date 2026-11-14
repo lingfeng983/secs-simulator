@@ -38,7 +38,7 @@ public final class SecsProbe implements AutoCloseable {
     public static SecsProbe open(int port) throws IOException {
         HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
         config.protocol(HsmsSsProtocol.PASSIVE);
-        config.socketAddress(new InetSocketAddress("127.0.0.1", port));
+        config.socketAddress(new InetSocketAddress("0.0.0.0", port));
         config.deviceId(10);
         config.isEquip(true);
 

@@ -14,7 +14,7 @@ import type { PanelBaseProps } from './types';
  * 「连接」（session）与「结构」（equipment / templates）页——同一份配置
  * 不该有两个互相不知道对方改过什么的表单入口。</p>
  */
-export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & { sessionId?: string }): JSX.Element {
+export function ConfigPanel({ backend, sessionId, configName: configNameOverride, notifier }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { configList, refreshConfigs, configTemplates } = backend;
 
   const [configName, setConfigName] = useState('');
@@ -71,8 +71,14 @@ export function ConfigPanel({ backend, sessionId, notifier }: PanelBaseProps & {
      首次渲染时还是上一台设备,靠它会打开"上一个设备"的配置。 */
   const activeSessionId = sessionId ?? backend.activeSession;
   const sessionConfig = backend.sessions.find((session) => session.id === activeSessionId)?.config ?? '';
-  const fallbackConfig = sessionConfig === '' && configList.length === 1 ? configList[0].name : '';
-  const targetConfig = sessionConfig !== '' ? sessionConfig : fallbackConfig;
+  /* 显式配置名：数据库里还没启动的设备没有会话行，设备页直接给配置文件名 */
+  const explicitConfig = sessionConfig === ''
+    && configNameOverride !== undefined
+    && configList.some((entry) => entry.name === configNameOverride)
+    ? configNameOverride
+    : '';
+  const fallbackConfig = sessionConfig === '' && explicitConfig === '' && configList.length === 1 ? configList[0].name : '';
+  const targetConfig = sessionConfig !== '' ? sessionConfig : (explicitConfig !== '' ? explicitConfig : fallbackConfig);
   useEffect(() => {
     if (configName !== '' || targetConfig === '' || !configList.some((entry) => entry.name === targetConfig)) {
       return;

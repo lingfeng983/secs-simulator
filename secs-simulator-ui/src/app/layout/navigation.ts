@@ -7,7 +7,7 @@ import type { Route } from '../router';
  * <ol>
  *   <li>设备清单——工作台入口 + 动态设备树（Sidebar 渲染在组内）；</li>
  *   <li>主机清单——主机模拟列表入口 + 动态主机实例树；</li>
- *   <li>独立工具——主机模板 / 设备模板 / 审计。</li>
+ *   <li>独立工具——主机模板 / 设备模板 / 参数模板 / 审计。</li>
  * </ol>
  */
 
@@ -74,9 +74,16 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'templates',
         label: '设备模板',
-        description: '设备模板增删改查',
+        description: '设备模板增删改查（新建设备的整套配置）',
         icon: 'config',
         route: { name: 'templates' },
+      },
+      {
+        id: 'svid-templates',
+        label: '参数模板',
+        description: 'SVID 变化模板（曲线/组合/实例）按设备维护',
+        icon: 'config',
+        route: { name: 'svid-templates' },
       },
       {
         id: 'audit',
@@ -101,6 +108,7 @@ export function routeTitle(route: Route): { group: string; label: string; descri
         || (route.name === 'hosts' && item.id === 'hosts')
         || (route.name === 'host-templates' && item.id === 'host-templates')
         || (route.name === 'templates' && item.id === 'templates')
+        || (route.name === 'svid-templates' && item.id === 'svid-templates')
         || (route.name === 'system' && item.id === route.page)
       ) {
         /* group 保留在数据结构里供命令面板/测试用，顶栏不再展示它 */

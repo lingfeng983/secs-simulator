@@ -120,7 +120,7 @@ mvn -B -ntp -Pnative verify -pl secs-cli -am # 原生闸门（M0 后保持绿）
 - [x] **Linux 包补 secs-store**：`scripts/package-linux.ps1` 的 `$modules` 与 `packaging/start-server.sh` 的 classpath 都加了 `secs-store.jar`（漏了的话打包脚本自己能过、启动时才 `NoClassDefFoundError`）。
 - [ ] Windows 安装包：原生 exe 构建 `-am` 已含 secs-store；安装后首次启动会释放 `native/sqlitejdbc.dll` 到工作目录——在干净机器上实测一次首启。
 - [x] 版本号统一 3.0.0：`pom.xml` 及 8 个子模块、`frontend/package.json`、`gui/package.json`、`gui/src-tauri/tauri.conf.json`、`Cargo.toml` + `Cargo.lock`、两个 `package-lock.json`、`BuildInfo.VERSION`。
-- [x] 文档：README / `docs/README.md` / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy/运行态写透段）/ ADR 0017 状态「已接受」/ `secs-simulator-service/openapi.yaml` 错误响应补齐（72 path 全绿）。
+- [x] 文档：README / `docs/README.md` / `docs/guides/user-guide.md` / `docs/guides/schema-v5.md`（补 actions/offlinePolicy/运行态写透段）/ ADR 0017 状态「已接受」/ `../../secs-simulator-service/scripts/openapi.yaml` 错误响应补齐（72 path 全绿）。
 - [x] 两个模块的 `scripts/check.ps1`（原 check-all，已拆分） 全绿（mvn、openapi、tsc、文案门禁、Vitest、Playwright 83 passed / 48 skipped）。
 - [ ] 发布说明 + 打 tag `v3.0.0`。
 

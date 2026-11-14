@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
+import { BUILTIN_CURVE_PRESETS, BUILTIN_CURVE_PRESET_COUNT, findCurvePreset } from './builtinCurvePresets';
 import {
   CURVE_TYPES,
   arrayField,
@@ -142,6 +143,18 @@ export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Ele
     });
   };
 
+  /** 从内置变化模板库新建曲线：预设带好典型波形与量纲，用户再微调。 */
+  const addCurveFromPreset = (presetName: string) => {
+    const preset = findCurvePreset(presetName);
+    if (preset === undefined) {
+      return;
+    }
+    edit((templates) => {
+      const id = uniqueId(templates.curves.map((item) => item.id), preset.curve.type as string ?? 'curve');
+      templates.curves.push({ id, ...preset.curve });
+    });
+  };
+
   const addComposite = () => {
     edit((templates) => {
       const id = uniqueId(
@@ -188,6 +201,24 @@ export function TemplateEditor({ text, onChange }: TemplateEditorProps): JSX.Ele
       <div className="template-head">
         <h3>模板（结构化编辑）</h3>
         <div className="template-actions">
+          <select
+            value=""
+            aria-label="从内置变化模板新建曲线"
+            onChange={(event) => addCurveFromPreset(event.target.value)}
+            title={`内置 ${BUILTIN_CURVE_PRESET_COUNT} 套真实参数变化模板，选一条即建好曲线再微调`}
+            style={{ maxWidth: 200 }}
+          >
+            <option value="">内置变化模板…</option>
+            {BUILTIN_CURVE_PRESETS.map((group) => (
+              <optgroup key={group.category} label={group.category}>
+                {group.items.map((preset) => (
+                  <option key={preset.name} value={preset.name} title={preset.description}>
+                    {preset.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
           <button type="button" onClick={addCurve}>
             + 曲线
           </button>

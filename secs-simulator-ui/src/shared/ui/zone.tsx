@@ -97,7 +97,7 @@ export function SubTabs({
   active,
   onSelect,
 }: {
-  pages: ReadonlyArray<{ id: string; label: string }>;
+  pages: ReadonlyArray<{ id: string; label: string; note?: string }>;
   active: string;
   onSelect: (page: string) => void;
 }): JSX.Element {
@@ -110,6 +110,7 @@ export function SubTabs({
           role="tab"
           aria-selected={active === page.id}
           className={`subtab${active === page.id ? ' active' : ''}`}
+          title={page.note}
           onClick={() => onSelect(page.id)}
         >
           {page.label}

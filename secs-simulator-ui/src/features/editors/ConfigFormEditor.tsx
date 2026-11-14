@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { SvidSourceEditor, EffectsEditor } from './SvidSourceEditors';
+import { RefMultiSelect, type RefChoice } from './RefMultiSelect';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import { Collapsible } from '../../shared/ui/Collapsible';
 import {
@@ -115,7 +116,7 @@ export function templateIdsOf(root: JsonObject): string[] {
 
 /* ---------- 通用小件 ---------- */
 
-function SectionHead({ title, children }: { title: string; children?: ReactNode }): JSX.Element {
+export function SectionHead({ title, children }: { title: string; children?: ReactNode }): JSX.Element {
   return (
     <div className="template-head">
       <h4>{title}</h4>
@@ -131,7 +132,7 @@ function SectionHead({ title, children }: { title: string; children?: ReactNode 
  * 字段各占一段，列对不齐、右侧还留一大片空白。grid 的列宽由整组行共享，
  * 每一列的输入框左边缘天然对齐。</p>
  */
-function FormRow({ onRemove, children, cols }: {
+export function FormRow({ onRemove, children, cols }: {
   onRemove: () => void;
   children: ReactNode;
   /** 列数：决定栅格模板，与表头一致。 */
@@ -153,7 +154,7 @@ function FormRow({ onRemove, children, cols }: {
  * <p>列名写在表头而不是每个字段旁边，是为了让"这一列是什么"只说一遍，
  * 行内就只剩控件本身。</p>
  */
-function FormGridHead({ columns }: { columns: string[] }): JSX.Element {
+export function FormGridHead({ columns }: { columns: string[] }): JSX.Element {
   return (
     <div className={`form-grid-row form-grid-head form-grid-row--${columns.length}`}>
       {columns.map((column) => (
@@ -164,7 +165,7 @@ function FormGridHead({ columns }: { columns: string[] }): JSX.Element {
   );
 }
 
-function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: string) => void }): JSX.Element {
+export function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: string) => void }): JSX.Element {
   return (
     <label className="field field-cell">
       <span className="field-cell-name">类型</span>
@@ -179,30 +180,9 @@ function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: strin
   );
 }
 
-/** 逗号分隔的字符串列表（报告引用、CEID 引用等）；全角逗号也认。 */
-function StringListField({ values, onCommit }: { values: string[]; onCommit: (next: string[]) => void }): JSX.Element {
-  return (
-    <label className="field field-cell">
-      <span className="field-cell-name">引用（逗号分隔）</span>
-      <TextField
-        allowBlank
-        wide
-        value={values.join(', ')}
-        onCommit={(next) =>
-          onCommit(
-            next
-              .split(/[,，]/)
-              .map((item) => item.trim())
-              .filter((item) => item !== ''),
-          )
-        }
-      />
-    </label>
-  );
-}
 
 /** 数组里最大数值 id + 1；空数组用 fallback。 */
-function nextId(items: readonly JsonObject[], key: string, fallback: number): number {
+export function nextId(items: readonly JsonObject[], key: string, fallback: number): number {
   let max = fallback - 1;
   for (const item of items) {
     const id = numberField(item, key);
@@ -230,7 +210,7 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
         <button
           type="button"
           onClick={() => edit((draft) => {
-            draft.session = { id: 'dev-01', passive: true, port: 5000 };
+            draft.session = { id: 'dev-01', passive: true, port: 5010, bindHost: '127.0.0.1' };
           })}
         >
           插入 session 段
@@ -251,14 +231,23 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
         <SessionField label="会话 id" help="唯一标识，用于 URL、日志、主机选择；改动会重建连接。">
           <TextField value={stringField(session, 'id')} onCommit={(next) => set('id', next)} />
         </SessionField>
-        <SessionField label="HSMS 端口" help="被动监听端口，必须与主机连接的目标端口一致，且不能与其他会话冲突。">
-          <NumberField value={numberField(session, 'port')} integer onCommit={(next) => set('port', next)} />
+        <SessionField label="HSMS 端口" help="必填（1–65535）：被动监听端口，必须与主机连接的目标端口一致，且不能与其他会话冲突。">
+          <NumberField
+            value={numberField(session, 'port')}
+            integer
+            onCommit={(next) => {
+              /* 端口必填且不能为 0：非法值不写入，失焦恢复原值 */
+              if (next >= 1 && next <= 65535) {
+                set('port', next);
+              }
+            }}
+          />
         </SessionField>
-        <SessionField label="绑定地址" help="留空监听所有网卡；填 127.0.0.1 则只允许本机连接。">
+        <SessionField label="绑定地址" help="默认 127.0.0.1（只允许本机连接）；填 0.0.0.0 监听所有网卡。">
           <TextField
             allowBlank
-            value={stringField(session, 'bindHost')}
-            onCommit={(next) => set('bindHost', next === '' ? undefined : next)}
+            value={stringField(session, 'bindHost', '127.0.0.1')}
+            onCommit={(next) => set('bindHost', next.trim() === '' ? '127.0.0.1' : next)}
           />
         </SessionField>
         <SessionField label="deviceId" help="HSMS Device ID（0–32767），主机按它区分设备，两侧必须一致。">
@@ -613,7 +602,7 @@ function reserveOf(root: JsonObject): unknown[] {
   return idSpace.reserve as unknown[];
 }
 
-function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
+export function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
   equipment: JsonObject;
   edit: Edit;
   templateIds: string[];
@@ -712,6 +701,12 @@ function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid }: {
         <SvidSourceEditor
           key={`gsrc-${index}`}
           def={item}
+          mutate={(fn) => edit((draft) => {
+            const items = globalSvidsOf(draft);
+            if (isJsonObject(items[index])) {
+              fn(items[index]);
+            }
+          })}
           templateIds={templateIds}
           absoluteId={numberField(item, 'id') ?? 0}
           onPreviewSvid={onPreviewSvid}
@@ -730,7 +725,7 @@ function globalSvidsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(items) ? (items as JsonObject[]) : [];
 }
 
-function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
+export function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
   const list = readObjectArray(equipment, 'globalCeids', 'equipment');
 
   return (
@@ -761,7 +756,7 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
         <p className="hint">没有全局 CEID。</p>
       ) : (
         <>
-          <FormGridHead columns={['绝对 id', '名称', '引用（逗号分隔）']} />
+          <FormGridHead columns={['绝对 id', '名称', '引用（勾选引用）']} />
           {list.map((item, index) => (
           <FormRow
             key={index}
@@ -792,11 +787,13 @@ function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edi
                 })}
               />
             </label>
-            <StringListField
+            <RefMultiSelect
+              choices={globalReportChoices(equipment)}
               values={stringListOf(item, 'reports')}
-              onCommit={(next) => edit((draft) => {
+              onChange={(next) => edit((draft) => {
                 globalCeidsOf(draft)[index].reports = next;
               })}
+              emptyHint="还没有任何单元报告；先到单元里建报告"
             />
           </FormRow>
           ))}
@@ -812,7 +809,30 @@ function globalCeidsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(items) ? (items as JsonObject[]) : [];
 }
 
-function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
+/** 全部单元报告的「单元名.报告名」清单（全局 CEID 引用候选）。 */
+function globalReportChoices(equipment: JsonObject): RefChoice[] {
+  const units = readObjectArray(equipment, 'units', 'equipment');
+  if (typeof units === 'string') {
+    return [];
+  }
+  const out: RefChoice[] = [];
+  for (const unit of units) {
+    const unitName = stringField(unit, 'name');
+    const reports = readObjectArray(unit, 'reports', 'unit');
+    if (typeof reports === 'string') {
+      continue;
+    }
+    for (const report of reports) {
+      const slot = stringField(report, 'slot');
+      if (slot !== '') {
+        out.push({ value: `${unitName}.${slot}` });
+      }
+    }
+  }
+  return out;
+}
+
+export function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
   const list = readObjectArray(equipment, 'constants', 'equipment');
 
   return (
@@ -914,12 +934,12 @@ function constantsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(items) ? (items as JsonObject[]) : [];
 }
 
-function stringListOf(item: JsonObject, key: string): string[] {
+export function stringListOf(item: JsonObject, key: string): string[] {
   const value = item[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
-function unitsOf(root: JsonObject): JsonObject[] {
+export function unitsOf(root: JsonObject): JsonObject[] {
   const units = objectField(root, 'equipment').units;
   return Array.isArray(units) ? (units as JsonObject[]) : [];
 }
@@ -1032,7 +1052,7 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
   afterEvent: '事件后（afterEvent）',
 };
 
-function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const events = isJsonObject(root.events) ? root.events : null;
   const ceidChoices = useMemo(() => collectCeids(root), [root]);
   const svidChoices = useMemo(() => collectSvids(root), [root]);

@@ -27,8 +27,17 @@ http.createServer(async (req, res) => {
     if (path === '/api/v1/sessions/line1/catalog') return json(res, { ceids: [{ ceid: 2001, owner: 'CH1', slot: 'TEMP_HIGH', reports: [1], source: 'local' }], reports: [{ rptid: 1, owner: 'CH1', slot: 'TEMP', svids: [1001], source: 'local' }], svids: [{ svid: 1001, owner: 'CH1', slot: 'TEMP', type: 'F4', unit: 'C' }] });
     if (path === '/api/v1/preview') return json(res, { from: 0, to: 60000, buckets: 4, bucketMs: 15000, svidTotal: 2, truncated: false, series: [{ svid: 1001, owner: 'CH1', unit: 'C', min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] }] });
     if (path === '/api/v1/messages') return json(res, { messages: [{ sessionId: 'line1', direction: 'in', stream: 1, function: 1, wbit: false, body: 'S1F1\n<L\n  <B 0x81>\n>.', at: 1700000000000 }], total: 1, limit: 500, truncated: false });
-    if (path === '/api/v1/configs') return json(res, { configs: [{ name: 'line1.json', sizeBytes: 100, modifiedMs: 1 }] });
+    if (path === '/api/v1/configs') return json(res, { configs: [
+      { name: 'line1.json', sizeBytes: 100, modifiedMs: 1 },
+      /* 库内还没启动的设备：不在 /sessions 里，用于走查停止态设备页 */
+      { name: 'line2.json', sizeBytes: 260, modifiedMs: 2 },
+    ] });
     if (path === '/api/v1/configs/line1.json') return json(res, { name: 'line1.json', text: '{"schemaVersion":5}' });
+    if (path === '/api/v1/configs/line2.json') return json(res, { name: 'line2.json', modifiedMs: 2, text: JSON.stringify({
+      schemaVersion: 5,
+      session: { id: 'line2', passive: true, port: 5010, bindHost: '127.0.0.1', deviceId: 1 },
+      equipment: { name: 'LINE2', idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 }, units: [] },
+    }) });
     if (path === '/api/v1/audit') return json(res, { audit: [{ at: 1700000000000, actor: 'dev', role: 'admin', action: 'trigger-ceid', target: 'line1', detail: 'ceid=2001 outcome=OK' }], limit: 200 });
     return json(res, {});
   }
@@ -50,6 +59,36 @@ http.createServer(async (req, res) => {
   ];
   if (path === '/api/v2/hosts') {
     return json(res, { hosts: v2Hosts });
+  }
+  /* ---- 主机配置区方案库（落"库"=内存 Map，重启即清，仅走查用） ---- */
+  const hostPlans = new Map(); // `${hostId}|${kind}` -> plan[]
+  if (/^\/api\/v2\/hosts\/[^/]+\/plans$/.test(path)) {
+    const hostId = path.split('/')[4];
+    const kind = url.searchParams.get('kind') ?? '';
+    if (kind !== 'trace' && kind !== 'collect') return json(res, { ok: false, error: 'bad-kind' }, 400);
+    if (req.method === 'GET') {
+      return json(res, hostPlans.get(`${hostId}|${kind}`) ?? []);
+    }
+    if (req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      let plan;
+      try { plan = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json(res, { ok: false, error: 'bad-body' }, 400); }
+      if (!plan?.id) return json(res, { ok: false, error: 'bad-body' }, 400);
+      const key = `${hostId}|${kind}`;
+      const list = (hostPlans.get(key) ?? []).filter((item) => item.id !== plan.id);
+      list.push(plan);
+      hostPlans.set(key, list);
+      return json(res, { ok: true });
+    }
+    return json(res, { ok: false, error: 'method-not-allowed' }, 405);
+  }
+  if (/^\/api\/v2\/hosts\/[^/]+\/plans\/[^/]+$/.test(path) && req.method === 'DELETE') {
+    const [, , , , hostId, , planId] = path.split('/');
+    const kind = url.searchParams.get('kind') ?? '';
+    const key = `${hostId}|${kind}`;
+    hostPlans.set(key, (hostPlans.get(key) ?? []).filter((item) => item.id !== planId));
+    return json(res, { ok: true });
   }
   if (path.startsWith('/api/v2/hosts/')) {
     const host = v2Hosts.find((h) => path === `/api/v2/hosts/${h.id}`);

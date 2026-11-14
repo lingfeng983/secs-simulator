@@ -5,8 +5,6 @@
  * 超时、错误归一化与后端地址解析都在这里，避免每个端点各写一遍。</p>
  */
 
-import type { EventPlanInput } from './types';
-
 /** 后端地址的本地存储键；空串 = 同源（界面由后端托管时的默认）。 */
 const API_BASE_KEY = 'secs-sim-api-base';
 
@@ -37,29 +35,6 @@ export function saveApiBase(base: string): void {
   } else {
     window.localStorage.setItem(API_BASE_KEY, trimmed);
   }
-}
-
-/** 把事件计划输入转成后端 wire 形状(trigger 打包成对象)。 */
-export function planToWire(plan: EventPlanInput): Record<string, unknown> {
-  const trigger: Record<string, unknown> = { type: plan.triggerType };
-  if (plan.triggerType === 'at') {
-    trigger.atMs = plan.atMs ?? 0;
-  } else if (plan.triggerType === 'periodic') {
-    trigger.periodMs = plan.periodMs ?? 1000;
-    trigger.jitterMs = plan.jitterMs ?? 0;
-  } else if (plan.triggerType === 'onCondition') {
-    trigger.expression = plan.expression ?? '';
-    trigger.debounceMs = plan.debounceMs ?? 0;
-  } else {
-    trigger.sourcePlan = plan.sourcePlan ?? '';
-    trigger.delayMs = plan.delayMs ?? 0;
-  }
-  return {
-    id: plan.id,
-    ceid: plan.ceid,
-    trigger,
-    effects: plan.effects ?? [],
-  };
 }
 
 /** 拼出 API 地址：本地模式同源，远程模式带后端地址。 */

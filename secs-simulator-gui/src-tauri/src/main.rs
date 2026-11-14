@@ -273,20 +273,6 @@ fn attach_to_kill_on_close_job(_child: &Child) -> Result<(), String> {
     Ok(())
 }
 
-/// 选一个能绑定的 HSMS 端口：5000 起，被占用就顺延，最多试到 5010。
-///
-/// 探测是「试绑一下立刻放掉」，后端真正绑定时仍可能被抢；但先把最常见的
-/// 「上一个后端进程没退干净、5000 还占着」挡掉，比让后端起不来有用。
-fn pick_hsms_port() -> u16 {
-    for port in 5000..=5010u16 {
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return port;
-        }
-    }
-    eprintln!("HSMS 端口 5000-5010 都被占用，仍交给后端 5000（预计会启动失败）");
-    5000
-}
-
 /// 拉起本机后端并读 READY；成功返回子进程与 API 地址，调用方负责接管子进程。
 fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
     let resources = resource_root(app);
@@ -298,13 +284,10 @@ fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
     let work = work_dir(app);
     std::fs::create_dir_all(&work).map_err(|e| format!("创建工作目录失败: {e}"))?;
 
-    let hsms_port = pick_hsms_port();
     let mut command = Command::new(&backend);
     command
         .arg("--mode=integrated")
         .arg("--port=0")
-        .arg(format!("--hsms-port={hsms_port}"))
-        .arg("--demo-session")
         .arg(format!("--work-dir={}", work.display()));
     {
         use std::os::windows::process::CommandExt;
@@ -477,8 +460,6 @@ fn self_test() {
     command
         .arg("--mode=integrated")
         .arg("--port=0")
-        .arg("--hsms-port=5001")
-        .arg("--demo-session")
         .arg(format!("--work-dir={}", work.display()));
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().expect("spawn backend");

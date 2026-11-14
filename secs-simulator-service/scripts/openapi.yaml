@@ -6,6 +6,8 @@ info:
     SECS/GEM 模拟器的 REST + SSE 接口。
 
     内部工具，不做鉴权：所有端点直连可调用，没有令牌、账号或登录，也不回 401/403。
+    内网全放行（ADR-0018）：跨域不设限，任意来源的请求都照常处理（响应带 CORS *），
+    HTTP 与 HSMS 默认监听 0.0.0.0。
 
     SSE 不能设置请求头，先用 `POST /api/v1/ticket` 换一次性票据，
     再连 `GET /api/v1/events?ticket=...`。
@@ -1096,6 +1098,14 @@ paths:
       responses:
         '200': { description: 台账数组（items/count；含 messages 与 effects） }
         '400': { description: limit 越界 }
+    delete:
+      tags: [devices]
+      summary: 清空该设备的执行台账（界面「清理历史」）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已清空 }
+        '404': { description: 设备不存在 }
   /api/v2/devices/{id}/runtime/plans/{planId}/step:
     post:
       tags: [devices]
@@ -1288,6 +1298,47 @@ paths:
       responses:
         '200': { description: 报文数组 }
         '400': { description: limit 非整数或越界 }
+  /api/v2/hosts/{hostId}/plans:
+    get:
+      tags: [host-sims]
+      summary: 列出该主机配置区方案（kind=trace|collect，落 config.db）
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [trace, collect] } }
+      responses:
+        '200': { description: 方案数组（前端结构原样的 JSON） }
+        '400': { description: kind 非法 }
+        '404': { description: 主机不存在 }
+    post:
+      tags: [host-sims]
+      summary: 保存（upsert）一条配置区方案
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind: { type: string, enum: [trace, collect] }
+                id: { type: string }
+      responses:
+        '200': { description: 已保存 }
+        '400': { description: body/kind/id 非法 }
+        '404': { description: 主机不存在 }
+  /api/v2/hosts/{hostId}/plans/{planId}:
+    delete:
+      tags: [host-sims]
+      summary: 删除一条配置区方案
+      parameters:
+        - { name: hostId, in: path, required: true, schema: { type: string } }
+        - { name: planId, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [trace, collect] } }
+      responses:
+        '200': { description: 已删除 }
+        '400': { description: kind 非法 }
+        '404': { description: 主机或方案不存在 }
   /api/v2/hosts/{hostId}/variables:
     post:
       tags: [host-sims]

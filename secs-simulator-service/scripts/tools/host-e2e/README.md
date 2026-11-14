@@ -9,15 +9,15 @@
 | `run-e2e.ps1` | 一键：启动原生 exe → Playwright 实机 E2E → SimHost 全量 → 优雅停机；末行输出 `RESULT=PASS/FAIL` |
 | `run-probe.ps1` | 一键：启动原生 exe → MinProbe 排障 |
 
-前置条件：先构建原生镜像（在 `secs-simulator-service/` 下执行 `mvn -B -Pnative -pl secs-cli -am -DskipTests package`）
+前置条件：先构建原生镜像（在 `../../..` 下执行 `mvn -B -Pnative -pl secs-cli -am -DskipTests package`）
 与前端（`secs-simulator-ui/scripts/build.ps1`），并设置 `JAVA_HOME`（脚本用 `$env:JAVA_HOME\bin\javac.exe` 编译）。
 
-编译与运行（在 `secs-simulator-service/` 目录执行）：
+编译与运行（在 `../../..` 目录执行）：
 
 ```powershell
 $cp = 'secs-protocol\target\classes;secs-json\target\classes'
-& "$env:JAVA_HOME\bin\javac.exe" -cp $cp -d tools\host-e2e tools\host-e2e\SimHost.java
-& "$env:JAVA_HOME\bin\java.exe" -cp "tools\host-e2e;$cp" SimHost <httpPort> <hsmsPort> <deviceId>
+& "$env:JAVA_HOME\bin\javac.exe" -cp $cp -d scripts\tools\host-e2e scripts\tools\host-e2e\SimHost.java
+& "$env:JAVA_HOME\bin\java.exe" -cp "scripts\tools\host-e2e;$cp" SimHost <httpPort> <hsmsPort> <deviceId>
 ```
 
-`*.class` 与 `*.log` 是本目录的编译/运行产物，不入库（见 `.gitignore`）。
+`*.class` 与 `*.log` 是本目录的编译/运行产物，不入库（见 `../../../../.gitignore`）。

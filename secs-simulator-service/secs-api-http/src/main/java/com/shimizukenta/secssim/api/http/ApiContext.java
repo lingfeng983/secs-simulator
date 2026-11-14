@@ -505,6 +505,16 @@ public interface ApiContext {
     }
 
     /**
+     * v2：清空某台设备的执行台账（界面「清理历史」按钮）。
+     *
+     * @param deviceId 设备 id
+     * @return 结果（设备不存在回 UNKNOWN_SESSION 语义）
+     */
+    default SessionOutcome clearExecutionsV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
      * v2：运行时启停计划，并持久化到 runtime.db。
      *
      * @param deviceId 设备 id
@@ -810,6 +820,44 @@ public interface ApiContext {
     /** v2：主机模板列表 / 新建 / 更新 / 删除。 */
     default String hostTemplatesJson() {
         return "{\"ok\":false,\"error\":\"not-supported\"}";
+    }
+
+    /* ---------- v2：主机配置区方案库（Trace / S1F3 采集，落 config.db） ---------- */
+
+    /**
+     * v2：列出某台主机某一类配置区方案。
+     *
+     * @param hostId 主机实例 id
+     * @param kind   {@code trace} / {@code collect}
+     * @return JSON 数组文本；主机不存在返回 {@code null}
+     */
+    default String hostPlansV2Json(String hostId, String kind) {
+        return null;
+    }
+
+    /**
+     * v2：保存（upsert）一条配置区方案。
+     *
+     * @param hostId 主机实例 id
+     * @param kind   {@code trace} / {@code collect}
+     * @param planId 方案 id（客户端生成）
+     * @param body   方案正文 JSON（前端结构原样）
+     * @return 结果
+     */
+    default SessionOutcome saveHostPlanV2(String hostId, String kind, String planId, String body) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：删除一条配置区方案。
+     *
+     * @param hostId 主机实例 id
+     * @param kind   {@code trace} / {@code collect}
+     * @param planId 方案 id
+     * @return 结果（不存在回 NOT_FOUND 语义）
+     */
+    default SessionOutcome deleteHostPlanV2(String hostId, String kind, String planId) {
+        return SessionOutcome.UNKNOWN_SESSION;
     }
 
     default SessionOutcome createHostTemplateV2(String id, String name, String host, int port,

@@ -133,7 +133,7 @@ public final class Bootstrap {
          * 整个进程只有一个启动器：它记着"哪个会话的配置从哪来"，
          * 热重载全靠这份记忆。每次调用现造一个的话，重载接口会永远说"没有配置来源"。
          */
-        SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir(), options.hsmsPort());
+        SessionLauncher launcher = new SessionLauncher(sessions, bus, options.workDir());
         launcher.noticeBus(notices);
 
         /*
@@ -157,7 +157,6 @@ public final class Bootstrap {
                     + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
         }
         seedTemplates(templateRepo);
-        seedDefaultDevices(configRepo);
 
         ConfigStore configStore = new ConfigStore(configRepo, templateRepo, options.workDir());
         TemplateStore templates = new TemplateStore(options.workDir(), templateRepo);
@@ -228,15 +227,6 @@ public final class Bootstrap {
 
         if (options.configFile() != null) {
             int code = startConfiguredSession(options, launcher);
-            if (code != 0) {
-                planFired.close();
-                closeStorage(db, planExecutions);
-                closeMessageLog(messageSubscription, messageLog);
-                closeAuditLog(auditLog);
-                return code;
-            }
-        } else if (options.demoSession()) {
-            int code = startDemoSession(options, launcher, configStore);
             if (code != 0) {
                 planFired.close();
                 closeStorage(db, planExecutions);
@@ -320,7 +310,7 @@ public final class Bootstrap {
                 + " utf8=" + utf8Ok
                 + " tls=" + (tls != null)
                 + " sessions=" + sessions.list().size()
-                + ((probe == null && !options.demoSession()) ? "" : " hsms=" + options.hsmsPort())
+                + (probe == null ? "" : " hsms=" + options.hsmsPort())
                 + " work=" + options.workDir());
         System.out.flush();
 
@@ -490,81 +480,11 @@ public final class Bootstrap {
     private static int startConfiguredSession(RuntimeOptions options, SessionLauncher launcher)
             throws IOException {
         try {
-            launcher.startFromFile(options.configFile(), options.hsmsPort());
+            launcher.startFromFile(options.configFile());
             return 0;
         } catch (ConfigException e) {
             Log.error("配置错误", e);
             return 3;
-        }
-    }
-
-    private static int startDemoSession(RuntimeOptions options, SessionLauncher launcher,
-                                        ConfigStore configStore) throws IOException {
-        int basePort = options.hsmsPort();
-        int baseDeviceId = options.deviceId();
-        int lastPort = basePort + DEFAULT_CONFIGS.length - 1;
-        int lastDeviceId = baseDeviceId + DEFAULT_CONFIGS.length - 1;
-        /* 两台演示会话的端口/deviceId 都要错开；越界时配置编译会失败并留下坏数据，
-           这里提前拒绝 */
-        if (basePort < 1 || lastPort > 65_535 || baseDeviceId < 0 || lastDeviceId > 32_767) {
-            Log.error("演示会话参数越界: port " + basePort + ".." + lastPort
-                    + "（1..65535）, deviceId " + baseDeviceId + ".." + lastDeviceId + "（0..32767）");
-            return 3;
-        }
-
-        for (int i = 0; i < DEFAULT_CONFIGS.length; i++) {
-            String name = DEFAULT_CONFIGS[i];
-            try {
-                /* 端口/deviceId 由启动参数覆盖（不写回配置）：每次启动都生效 */
-                launcher.startFromConfig(name, configStore.read(name), basePort,
-                        new SessionOverrides(null, null, basePort + i, baseDeviceId + i));
-            } catch (com.shimizukenta.secssim.app.config.ConfigException e) {
-                Log.error("内置演示配置编译失败: " + name, e);
-                return 3;
-            }
-        }
-        return 0;
-    }
-
-    /** 内置默认配置文件名（播种与 --demo-session 共用）。 */
-    private static final String[] DEFAULT_CONFIGS = {"demo-etch.json", "demo-cvd.json"};
-
-    /**
-     * 播种内置默认设备（schema v6 的需求:开箱即有两台可用设备）。
-     *
-     * <p>3.0 起播种进 config.db（不再写 work-dir 文件）：幂等不覆盖——库里已有
-     * 同名 legacy（含迁移进来的、用户改过的）一律不动；要恢复默认就删除该设备。</p>
-     */
-    private static void seedDefaultDevices(ConfigRepository configs) {
-        for (String name : DEFAULT_CONFIGS) {
-            String stem = name.substring(0, name.length() - ".json".length());
-            if (configs.findDevice(stem).isPresent()) {
-                continue;
-            }
-            String text = classpathDefaults(name);
-            if (text == null) {
-                continue;
-            }
-            try {
-                configs.createDevice(stem, stem, "demo", text, true, "seed");
-                Log.info("已播种默认设备: " + name);
-            } catch (RuntimeException e) {
-                Log.error("播种默认设备失败: " + name, e);
-            }
-        }
-    }
-
-    /** 读 classpath 里的内置默认配置；缺失返回 null（只警告一次）。 */
-    private static String classpathDefaults(String name) {
-        try (java.io.InputStream in = Bootstrap.class.getResourceAsStream("/defaults/" + name)) {
-            if (in == null) {
-                Log.warn("内置默认配置缺失（不播种）: /defaults/" + name);
-                return null;
-            }
-            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            Log.error("读取内置默认配置失败: " + name, e);
-            return null;
         }
     }
 

@@ -12,9 +12,9 @@ import { useConfigDraft } from '../../state/useConfigDraft';
  * 现在配置页只编辑原文，连接参数在这里结构化编辑，保存后仍然走
  * 「校验 → 保存 → 相关会话重载」的同一路径。</p>
  */
-export function ConnectionPanel({ backend, sessionId }: PanelBaseProps & { sessionId?: string }): JSX.Element {
+export function ConnectionPanel({ backend, sessionId, configName }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const deviceId = sessionId ?? backend.activeSession;
-  const draft = useConfigDraft(backend, deviceId);
+  const draft = useConfigDraft(backend, deviceId, configName);
   const parsed = useMemo(() => parseConfigDocument(draft.text), [draft.text]);
 
   const edit = (mutate: (root: JsonObject) => void) => {

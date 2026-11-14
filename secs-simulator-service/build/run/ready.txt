@@ -1,0 +1,5 @@
+mode=integrated
+http=5000
+bind=0.0.0.0
+hsms=5000
+work=build\run

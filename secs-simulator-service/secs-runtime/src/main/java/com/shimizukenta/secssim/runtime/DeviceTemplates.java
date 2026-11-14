@@ -45,10 +45,18 @@ public final class DeviceTemplates {
                 new Entry(BARE_ID, "空骨架", "最小可编译配置，从零开始搭"),
                 new Entry("etch", "刻蚀腔", "温场/射频/腔压曲线 + 过热与腔压异常事件"),
                 new Entry("cvd", "CVD 沉积腔", "温度/气流/膜厚累积曲线 + 膜厚到位与过热事件"),
-                new Entry("tester", "测试机（双 SITE）", "双单元测试位、BIN 计数与低良率事件"));
+                new Entry("tester", "测试机（双 SITE）", "双单元测试位、BIN 计数与低良率事件"),
+                new Entry("furnace", "立式炉管（退火）", "多段炉温程序 + 氮气流量 + 降温完成事件"),
+                new Entry("loadlock", "装载锁室（Loadlock）", "抽真空/破真空 pwl 曲线 + 门阀与晶圆到位事件"),
+                new Entry("pump", "真空泵组", "泵速/压力游走 + 振动 + 异常停机报警事件"),
+                new Entry("pvd", "PVD 镀膜腔", "溅射功率/靶材寿命/膜厚累积 + 靶材耗尽事件"),
+                new Entry("cmp", "CMP 抛光机", "抛光压力/转速/去除量 + 终点检测事件"),
+                new Entry("clean", "湿法清洗腔", "液位/流量脉冲 + 温度均匀性 + 干燥完成事件"),
+                new Entry("metro", "量测站（Metrology）", "测量值波动/重复性 + SPC 超限事件"),
+                new Entry("robot", "晶圆传送机械手", "臂位阶跃 + 晶圆计数 + 传送超时事件"));
     }
 
-    /** 供错误提示的模板 id 清单，如 {@code bare / etch / cvd / tester}。 */
+    /** 供错误提示的模板 id 清单，如 {@code bare / etch / cvd / tester / …}。 */
     public static String ids() {
         return String.join(" / ", catalog().stream().map(Entry::id).toList());
     }
@@ -88,6 +96,14 @@ public final class DeviceTemplates {
             case "etch" -> Optional.of(etch(id));
             case "cvd" -> Optional.of(cvd(id));
             case "tester" -> Optional.of(tester(id));
+            case "furnace" -> Optional.of(furnace(id));
+            case "loadlock" -> Optional.of(loadlock(id));
+            case "pump" -> Optional.of(pump(id));
+            case "pvd" -> Optional.of(pvd(id));
+            case "cmp" -> Optional.of(cmp(id));
+            case "clean" -> Optional.of(clean(id));
+            case "metro" -> Optional.of(metro(id));
+            case "robot" -> Optional.of(robot(id));
             default -> Optional.empty();
         };
     }
@@ -115,7 +131,7 @@ public final class DeviceTemplates {
                     "id": "%s",
                     "passive": true,
                     "bindHost": "127.0.0.1",
-                    "port": 0,
+                    "port": 5010,
                     "deviceId": 101,
                     "seed": 20260101
                   },
@@ -210,7 +226,7 @@ public final class DeviceTemplates {
                     "id": "%s",
                     "passive": true,
                     "bindHost": "127.0.0.1",
-                    "port": 0,
+                    "port": 5010,
                     "deviceId": 102,
                     "seed": 20260102
                   },
@@ -310,7 +326,7 @@ public final class DeviceTemplates {
                     "id": "%s",
                     "passive": true,
                     "bindHost": "127.0.0.1",
-                    "port": 0,
+                    "port": 5010,
                     "deviceId": 103,
                     "seed": 20260103
                   },
@@ -415,6 +431,602 @@ public final class DeviceTemplates {
                 }
                 """.formatted(id, id.toUpperCase(Locale.ROOT));
     }
+
+    /**
+     * 立式炉管（退火）：三段炉温程序（pwl）、氮气流量、压力缓变 + 降温完成事件。
+     */
+    private static String furnace(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 104, "seed": 20260104
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "FURNACE_TEMP_MAX", "type": "F4", "value": 1100.0, "unit": "C" },
+                      { "id": 502, "name": "SOAK_TIME", "type": "U4", "value": 1800, "unit": "s" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "FUR", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 1200 },
+                          { "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2 },
+                          { "offset": 3, "slot": "N2_FLOW", "type": "F4", "unit": "sccm", "decimals": 1 },
+                          { "offset": 4, "slot": "PRESS_MBAR", "type": "F4", "unit": "mbar", "decimals": 3, "min": 0, "max": 5 },
+                          { "offset": 5, "slot": "STEP_ID", "type": "U2" },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS_MBAR", "STEP_ID"] },
+                          { "offset": 2, "slot": "GAS", "svids": ["N2_FLOW"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "RUN_START", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "RUN_END", "reports": ["STATUS", "GAS"] },
+                          { "offset": 3, "slot": "TEMP_OVERSHOOT", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "fur-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 10000, "jitterMs": 400 } },
+                      { "id": "fur-overshoot", "ceid": 2003,
+                        "trigger": { "type": "onCondition", "expression": "svid.1001 > 1000", "debounceMs": 2000 } },
+                      { "id": "fur-end", "ceid": 2002,
+                        "trigger": { "type": "afterEvent", "sourcePlan": "fur-status", "delayMs": 30000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "fur-temp-pwl", "type": "pwl",
+                        "points": [ { "tMs": 0, "value": 25 }, { "tMs": 600000, "value": 950 },
+                                    { "tMs": 1500000, "value": 950 }, { "tMs": 2400000, "value": 60 } ] },
+                      { "id": "fur-n2", "type": "uniform", "min": 800, "max": 1200, "resampleMs": 4000 },
+                      { "id": "fur-press", "type": "randomWalk",
+                        "start": 0.6, "driftPerSec": 0, "sigma": 0.02, "gridMs": 2000,
+                        "octaves": 1, "min": 0.4, "max": 1.2, "policy": "CLAMP" }
+                    ],
+                    "composites": [
+                      { "id": "fur-tsv", "outputs": { "SV": "in.furtemp.V * 0.98 + 2" } }
+                    ],
+                    "instances": [
+                      { "id": "furtemp", "template": "fur-temp-pwl", "svids": { "V": 1001 } },
+                      { "id": "fur-tsv", "template": "fur-tsv", "svids": { "SV": 1002 } },
+                      { "id": "fur-n2", "template": "fur-n2", "svids": { "V": 1003 } },
+                      { "id": "fur-press", "template": "fur-press", "svids": { "V": 1004 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 装载锁室（Loadlock）：抽真空/破真空 pwl、门阀状态阶跃、晶圆到位事件。
+     */
+    private static String loadlock(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 105, "seed": 20260105
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "LL_VAC_TARGET", "type": "F4", "value": 0.01, "unit": "Torr" },
+                      { "id": 502, "name": "LL_VENT_TARGET", "type": "F4", "value": 760.0, "unit": "Torr" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "LL", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "PRESS_TORR", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0 },
+                          { "offset": 2, "slot": "GATE_VALVE", "type": "U1" },
+                          { "offset": 3, "slot": "SLOT_COUNT", "type": "U4", "min": 0 },
+                          { "offset": 4, "slot": "WAFER_PRESENT", "type": "U1" },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "PRESS_TORR", "GATE_VALVE", "WAFER_PRESENT"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "LL_VACUUM_OK", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "LL_VENTED", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "WAFER_LOADED", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "ll-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 8000, "jitterMs": 300 } },
+                      { "id": "ll-vac", "ceid": 2003,
+                        "trigger": { "type": "onCondition", "expression": "svid.1001 < 0.05", "debounceMs": 3000 } },
+                      { "id": "ll-load", "ceid": 2003,
+                        "trigger": { "type": "afterEvent", "sourcePlan": "ll-vac", "delayMs": 8000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "ll-press-cycle", "type": "pwl",
+                        "points": [ { "tMs": 0, "value": 760 }, { "tMs": 120000, "value": 0.01 },
+                                    { "tMs": 300000, "value": 0.01 }, { "tMs": 360000, "value": 760 } ] },
+                      { "id": "ll-gate", "type": "step",
+                        "steps": [ { "fromMs": 0, "value": 0 }, { "fromMs": 180000, "value": 1 } ] },
+                      { "id": "ll-slotcount", "type": "ramp", "from": 0, "to": 25, "durationMs": 600000, "cyclic": true },
+                      { "id": "ll-wafer", "type": "step",
+                        "steps": [ { "fromMs": 0, "value": 0 }, { "fromMs": 150000, "value": 1 },
+                                   { "fromMs": 300000, "value": 0 } ] }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "ll-press", "template": "ll-press-cycle", "svids": { "V": 1001 } },
+                      { "id": "ll-gate", "template": "ll-gate", "svids": { "V": 1002 } },
+                      { "id": "ll-count", "template": "ll-slotcount", "svids": { "V": 1003 } },
+                      { "id": "ll-wfr", "template": "ll-wafer", "svids": { "V": 1004 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 真空泵组：泵速/压力游走、振动与温度 + 异常停机报警事件。
+     */
+    private static String pump(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 106, "seed": 20260106
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "PUMP_SPEED_NOMINAL", "type": "F4", "value": 27000.0, "unit": "rpm" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "PUMP", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "PUMP_SPEED", "type": "F4", "unit": "rpm", "decimals": 0, "min": 0, "max": 30000 },
+                          { "offset": 2, "slot": "EXHAUST_PRESS", "type": "F4", "unit": "Torr", "decimals": 3 },
+                          { "offset": 3, "slot": "PUMP_TEMP", "type": "F4", "unit": "C", "decimals": 1 },
+                          { "offset": 4, "slot": "VIBRATION", "type": "F4", "unit": "mm/s", "decimals": 2 },
+                          { "offset": 5, "slot": "RUN_HOURS", "type": "F4", "unit": "h", "decimals": 1, "min": 0 },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "PUMP_SPEED", "EXHAUST_PRESS", "PUMP_TEMP"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "PUMP_READY", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "PUMP_FAULT", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "MAINT_DUE", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "pump-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 15000, "jitterMs": 500 } },
+                      { "id": "pump-fault", "ceid": 2002,
+                        "trigger": { "type": "onCondition", "expression": "svid.1004 > 4.5", "debounceMs": 3000 } },
+                      { "id": "pump-maint", "ceid": 2003,
+                        "trigger": { "type": "onCondition", "expression": "svid.1005 > 5000", "debounceMs": 60000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "pump-speed", "type": "randomWalk",
+                        "start": 27000, "driftPerSec": 0, "sigma": 40, "gridMs": 2000,
+                        "octaves": 1, "min": 26000, "max": 28000, "policy": "CLAMP" },
+                      { "id": "pump-press", "type": "randomWalk",
+                        "start": 0.02, "driftPerSec": 0, "sigma": 0.005, "gridMs": 2000,
+                        "octaves": 1, "min": 0.005, "max": 0.08, "policy": "REFLECT" },
+                      { "id": "pump-temp", "type": "sine", "min": 45, "max": 62, "periodMs": 180000, "phaseMs": 0 },
+                      { "id": "pump-vib", "type": "uniform", "min": 0.8, "max": 2.2, "resampleMs": 1500 },
+                      { "id": "pump-hours", "type": "ramp", "from": 0, "to": 8000, "durationMs": 3600000, "cyclic": false }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "pump-spd", "template": "pump-speed", "svids": { "V": 1001 } },
+                      { "id": "pump-prs", "template": "pump-press", "svids": { "V": 1002 } },
+                      { "id": "pump-tmp", "template": "pump-temp", "svids": { "V": 1003 } },
+                      { "id": "pump-vib", "template": "pump-vib", "svids": { "V": 1004 } },
+                      { "id": "pump-hrs", "template": "pump-hours", "svids": { "V": 1005 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * PVD 镀膜腔：溅射功率、氩气流量、靶材寿命（衰减）、膜厚累积 + 靶材耗尽事件。
+     */
+    private static String pvd(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 107, "seed": 20260107
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "TARGET_LIFE_LIMIT", "type": "F4", "value": 2000.0, "unit": "kWh" },
+                      { "id": 502, "name": "FILM_TARGET", "type": "F4", "value": 3000.0, "unit": "A" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "PVD", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "DC_POWER", "type": "F4", "unit": "kW", "decimals": 2 },
+                          { "offset": 2, "slot": "AR_FLOW", "type": "F4", "unit": "sccm", "decimals": 1 },
+                          { "offset": 3, "slot": "CHAMBER_PRESS", "type": "F4", "unit": "mTorr", "decimals": 2 },
+                          { "offset": 4, "slot": "TARGET_LIFE", "type": "F4", "unit": "kWh", "decimals": 1, "min": 0 },
+                          { "offset": 5, "slot": "FILM_THICK", "type": "F4", "unit": "A", "decimals": 1, "min": 0 },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "DC_POWER", "CHAMBER_PRESS", "FILM_THICK"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "DEP_START", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "DEP_END", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "TARGET_EXHAUSTED", "reports": ["STATUS"] },
+                          { "offset": 4, "slot": "FILM_REACHED", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "pvd-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 10000, "jitterMs": 400 } },
+                      { "id": "pvd-target", "ceid": 2003,
+                        "trigger": { "type": "onCondition", "expression": "svid.1004 > 1990", "debounceMs": 3000 } },
+                      { "id": "pvd-film", "ceid": 2004,
+                        "trigger": { "type": "onCondition", "expression": "svid.1005 > 2900", "debounceMs": 2000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "pvd-power", "type": "sine", "min": 9.5, "max": 10.5, "periodMs": 30000, "phaseMs": 0 },
+                      { "id": "pvd-ar", "type": "uniform", "min": 40, "max": 60, "resampleMs": 2500 },
+                      { "id": "pvd-press", "type": "randomWalk",
+                        "start": 3.0, "driftPerSec": 0, "sigma": 0.15, "gridMs": 2000,
+                        "octaves": 1, "min": 2.0, "max": 5.0, "policy": "CLAMP" },
+                      { "id": "pvd-life", "type": "ramp", "from": 0, "to": 2000, "durationMs": 1800000, "cyclic": true },
+                      { "id": "pvd-film", "type": "ramp", "from": 0, "to": 3000, "durationMs": 300000, "cyclic": true }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "pvd-pwr", "template": "pvd-power", "svids": { "V": 1001 } },
+                      { "id": "pvd-ar", "template": "pvd-ar", "svids": { "V": 1002 } },
+                      { "id": "pvd-prs", "template": "pvd-press", "svids": { "V": 1003 } },
+                      { "id": "pvd-life", "template": "pvd-life", "svids": { "V": 1004 } },
+                      { "id": "pvd-film", "template": "pvd-film", "svids": { "V": 1005 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * CMP 抛光机：抛光压力/转速、去除量累积 + 终点检测事件。
+     */
+    private static String cmp(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 108, "seed": 20260108
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "REMOVE_TARGET", "type": "F4", "value": 1500.0, "unit": "A" },
+                      { "id": 502, "name": "PLATEN_SPEED_MAX", "type": "F4", "value": 120.0, "unit": "rpm" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "CMP", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "POLISH_PRESS", "type": "F4", "unit": "psi", "decimals": 2 },
+                          { "offset": 2, "slot": "PLATEN_RPM", "type": "F4", "unit": "rpm", "decimals": 1 },
+                          { "offset": 3, "slot": "HEAD_RPM", "type": "F4", "unit": "rpm", "decimals": 1 },
+                          { "offset": 4, "slot": "SLURRY_FLOW", "type": "F4", "unit": "ml/min", "decimals": 1 },
+                          { "offset": 5, "slot": "REMOVED_A", "type": "F4", "unit": "A", "decimals": 1, "min": 0 },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "POLISH_PRESS", "PLATEN_RPM", "REMOVED_A"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "POLISH_START", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "POLISH_END", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "ENDPOINT_DETECTED", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "cmp-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 8000, "jitterMs": 300 } },
+                      { "id": "cmp-endpoint", "ceid": 2003,
+                        "trigger": { "type": "onCondition", "expression": "svid.1005 > 1400", "debounceMs": 2000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "cmp-press", "type": "randomWalk",
+                        "start": 2.5, "driftPerSec": 0, "sigma": 0.08, "gridMs": 2000,
+                        "octaves": 1, "min": 2.0, "max": 3.5, "policy": "CLAMP" },
+                      { "id": "cmp-platen", "type": "sine", "min": 80, "max": 110, "periodMs": 45000, "phaseMs": 0 },
+                      { "id": "cmp-head", "type": "sine", "min": 40, "max": 70, "periodMs": 30000, "phaseMs": 5000 },
+                      { "id": "cmp-slurry", "type": "uniform", "min": 180, "max": 220, "resampleMs": 3000 },
+                      { "id": "cmp-remove", "type": "ramp", "from": 0, "to": 1500, "durationMs": 240000, "cyclic": true }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "cmp-prs", "template": "cmp-press", "svids": { "V": 1001 } },
+                      { "id": "cmp-pln", "template": "cmp-platen", "svids": { "V": 1002 } },
+                      { "id": "cmp-hd", "template": "cmp-head", "svids": { "V": 1003 } },
+                      { "id": "cmp-slr", "template": "cmp-slurry", "svids": { "V": 1004 } },
+                      { "id": "cmp-rmv", "template": "cmp-remove", "svids": { "V": 1005 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 湿法清洗腔：药液液位/流量脉冲、温度均匀性 + 干燥完成事件。
+     */
+    private static String clean(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 109, "seed": 20260109
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "BATH_TEMP_TARGET", "type": "F4", "value": 65.0, "unit": "C" },
+                      { "id": 502, "name": "RINSE_TIME", "type": "U4", "value": 300, "unit": "s" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "CLN", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "BATH_TEMP", "type": "F4", "unit": "C", "decimals": 2 },
+                          { "offset": 2, "slot": "BATH_LEVEL", "type": "F4", "unit": "%%", "decimals": 1, "min": 0, "max": 100 },
+                          { "offset": 3, "slot": "RINSE_FLOW", "type": "F4", "unit": "L/min", "decimals": 1 },
+                          { "offset": 4, "slot": "DRY_N2_TEMP", "type": "F4", "unit": "C", "decimals": 1 },
+                          { "offset": 5, "slot": "STEP_ID", "type": "U2" },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "BATH_TEMP", "BATH_LEVEL", "STEP_ID"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "CLEAN_START", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "CLEAN_END", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "DRY_DONE", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "cln-status", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 9000, "jitterMs": 300 } },
+                      { "id": "cln-done", "ceid": 2003,
+                        "trigger": { "type": "afterEvent", "sourcePlan": "cln-status", "delayMs": 27000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "cln-temp", "type": "randomWalk",
+                        "start": 65, "driftPerSec": 0, "sigma": 0.4, "gridMs": 2000,
+                        "octaves": 1, "min": 63, "max": 67, "policy": "CLAMP" },
+                      { "id": "cln-level", "type": "sine", "min": 78, "max": 92, "periodMs": 50000, "phaseMs": 0 },
+                      { "id": "cln-rinse", "type": "step",
+                        "steps": [ { "fromMs": 0, "value": 0 }, { "fromMs": 30000, "value": 12 } ] },
+                      { "id": "cln-dry", "type": "sine", "min": 80, "max": 120, "periodMs": 40000, "phaseMs": 8000 }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "cln-tmp", "template": "cln-temp", "svids": { "V": 1001 } },
+                      { "id": "cln-lvl", "template": "cln-level", "svids": { "V": 1002 } },
+                      { "id": "cln-rns", "template": "cln-rinse", "svids": { "V": 1003 } },
+                      { "id": "cln-dry", "template": "cln-dry", "svids": { "V": 1004 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 量测站（Metrology）：膜厚/CD 测量值波动、重复性 + SPC 超限事件。
+     */
+    private static String metro(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 110, "seed": 20260110
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "SPC_THICK_UCL", "type": "F4", "value": 520.0, "unit": "A" },
+                      { "id": 502, "name": "SPC_THICK_LCL", "type": "F4", "value": 480.0, "unit": "A" }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "MET", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "FILM_THICK", "type": "F4", "unit": "A", "decimals": 2, "min": 0 },
+                          { "offset": 2, "slot": "CD_MEAN", "type": "F4", "unit": "nm", "decimals": 3 },
+                          { "offset": 3, "slot": "CD_SIGMA", "type": "F4", "unit": "nm", "decimals": 3, "min": 0 },
+                          { "offset": 4, "slot": "MEAS_COUNT", "type": "U4", "min": 0 },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "FILM_THICK", "CD_MEAN", "MEAS_COUNT"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "MEAS_DONE", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "SPC_VIOLATION", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "met-done", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 12000, "jitterMs": 600 } },
+                      { "id": "met-spc", "ceid": 2002,
+                        "trigger": { "type": "onCondition", "expression": "svid.1001 > 520", "debounceMs": 5000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "met-thick", "type": "randomWalk",
+                        "start": 500, "driftPerSec": 0.3, "sigma": 3, "gridMs": 3000,
+                        "octaves": 1, "min": 470, "max": 530, "policy": "REFLECT" },
+                      { "id": "met-cd", "type": "randomWalk",
+                        "start": 45, "driftPerSec": 0, "sigma": 0.2, "gridMs": 3000,
+                        "octaves": 1, "min": 44, "max": 46, "policy": "REFLECT" },
+                      { "id": "met-sigma", "type": "uniform", "min": 0.8, "max": 1.6, "resampleMs": 4000 },
+                      { "id": "met-count", "type": "ramp", "from": 0, "to": 500, "durationMs": 600000, "cyclic": true }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "met-thk", "template": "met-thick", "svids": { "V": 1001 } },
+                      { "id": "met-cd", "template": "met-cd", "svids": { "V": 1002 } },
+                      { "id": "met-sig", "template": "met-sigma", "svids": { "V": 1003 } },
+                      { "id": "met-cnt", "template": "met-count", "svids": { "V": 1004 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 晶圆传送机械手（Robot）：臂位阶跃、晶圆计数循环 + 传送超时事件。
+     */
+    private static String robot(String id) {
+        return """
+                {
+                  "schemaVersion": 5,
+                  "session": {
+                    "id": "%s", "passive": true, "bindHost": "127.0.0.1",
+                    "port": 5010, "deviceId": 111, "seed": 20260111
+                  },
+                  "equipment": {
+                    "name": "%s",
+                    "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+                                 "svidStride": 100, "ceidStride": 100, "reportStride": 100, "reserve": [[1, 999]] },
+                    "constants": [
+                      { "id": 501, "name": "MOVE_TIMEOUT", "type": "F4", "value": 15.0, "unit": "s" },
+                      { "id": 502, "name": "ARM_COUNT", "type": "U1", "value": 2 }
+                    ],
+                    "units": [
+                      {
+                        "unitId": 1, "name": "ROBOT", "injectUnitId": true,
+                        "svids": [
+                          { "offset": 1, "slot": "ARM_POS", "type": "U2" },
+                          { "offset": 2, "slot": "WAFER_ON_ARM", "type": "U1" },
+                          { "offset": 3, "slot": "TRANSFER_COUNT", "type": "U4", "min": 0 },
+                          { "offset": 4, "slot": "MOVE_TIME", "type": "F4", "unit": "s", "decimals": 2 },
+                          { "offset": 5, "slot": "LAST_ERROR", "type": "ASCII" },
+                          { "offset": 90, "slot": "UNIT_ID", "type": "U4" }
+                        ],
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "ARM_POS", "WAFER_ON_ARM", "TRANSFER_COUNT"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "TRANSFER_DONE", "reports": ["STATUS"] },
+                          { "offset": 2, "slot": "TRANSFER_TIMEOUT", "reports": ["STATUS"] },
+                          { "offset": 3, "slot": "ARM_HOME", "reports": ["STATUS"] }
+                        ]
+                      }
+                    ]
+                  },
+                  "events": {
+                    "maxPerSec": 20, "s6f11Wbit": true, "s6f1Wbit": true,
+                    "plans": [
+                      { "id": "rb-done", "ceid": 2001,
+                        "trigger": { "type": "periodic", "periodMs": 6000, "jitterMs": 800 } },
+                      { "id": "rb-timeout", "ceid": 2002,
+                        "trigger": { "type": "onCondition", "expression": "svid.1004 > 14", "debounceMs": 1000 } },
+                      { "id": "rb-home", "ceid": 2003,
+                        "trigger": { "type": "afterEvent", "sourcePlan": "rb-done", "delayMs": 2000 } }
+                    ]
+                  },
+                  "templates": {
+                    "curves": [
+                      { "id": "rb-pos", "type": "step",
+                        "steps": [ { "fromMs": 0, "value": 1 }, { "fromMs": 3000, "value": 2 },
+                                   { "fromMs": 6000, "value": 3 }, { "fromMs": 9000, "value": 4 } ] },
+                      { "id": "rb-wafer", "type": "step",
+                        "steps": [ { "fromMs": 0, "value": 0 }, { "fromMs": 2000, "value": 1 },
+                                   { "fromMs": 6000, "value": 0 } ] },
+                      { "id": "rb-count", "type": "ramp", "from": 0, "to": 999, "durationMs": 600000, "cyclic": true },
+                      { "id": "rb-time", "type": "uniform", "min": 3.5, "max": 8.0, "resampleMs": 4000 }
+                    ],
+                    "composites": [],
+                    "instances": [
+                      { "id": "rb-pos", "template": "rb-pos", "svids": { "V": 1001 } },
+                      { "id": "rb-wfr", "template": "rb-wafer", "svids": { "V": 1002 } },
+                      { "id": "rb-cnt", "template": "rb-count", "svids": { "V": 1003 } },
+                      { "id": "rb-time", "template": "rb-time", "svids": { "V": 1004 } }
+                    ]
+                  }
+                }
+                """.formatted(id, id.toUpperCase(Locale.ROOT));
+    }
+
 
     /** JSON 字符串转义；目录文案是常量，这里只为稳妥。 */
     private static String escape(String value) {

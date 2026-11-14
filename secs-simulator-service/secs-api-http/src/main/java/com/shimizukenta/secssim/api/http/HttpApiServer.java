@@ -2,10 +2,7 @@ package com.shimizukenta.secssim.api.http;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -96,47 +93,12 @@ public final class HttpApiServer {
     /** SSE 线程数上限：每个连接一根线程，超出直接 503，而不是无限堆积。 */
     private static final int SSE_THREADS_MAX = 64;
 
-    /**
-     * 额外允许的跨域来源（逗号分隔）。
-     *
-     * <p>用于"界面由别的机器托管、API 在本机"这类部署；默认空，只有同源、
-     * 回环开发服务器与 Tauri 壳被放行。系统属性 {@code secssim.corsOrigins}
-     * 或环境变量 {@code SECS_SIM_CORS_ORIGINS} 配置。</p>
-     */
-    private static final java.util.List<String> CORS_ORIGINS = parseCorsOrigins(
-            System.getProperty("secssim.corsOrigins",
-                    System.getenv().getOrDefault("SECS_SIM_CORS_ORIGINS", "")));
-
-    private static java.util.List<String> parseCorsOrigins(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return java.util.List.of();
-        }
-        java.util.List<String> origins = new java.util.ArrayList<>();
-        for (String piece : raw.split(",")) {
-            String trimmed = piece.trim();
-            if (!trimmed.isEmpty()) {
-                origins.add(trimmed);
-            }
-        }
-        return java.util.List.copyOf(origins);
-    }
-
     private final HttpServer server;
     private final ExecutorService executor;
     private final ApiContext context;
     private final AccessControl access;
     private final AuditSink audit;
     private final Path webRoot;
-
-    /**
-     * 允许的 Host 头（小写、不含端口）。
-     *
-     * <p>没有这道检查时，DNS rebinding 可以让任意域名"变成同源"：攻击者域名先解析到自己
-     * 的服务器提供页面，再 rebind 到 127.0.0.1，浏览器随后发出的请求带
-     * {@code Host: evil.example}，而 {@code allowedOrigin} 是拿这个头做同源比较的——
-     * 白名单会被自己绕过去，响应也可读（报文历史、审计都在里面）。</p>
-     */
-    private final java.util.Set<String> allowedHosts;
 
     /**
      * 慢请求专用池。
@@ -180,7 +142,6 @@ public final class HttpApiServer {
                           AccessControl access, AuditSink audit, Path webRoot, long stallTimeoutMs) {
         this.server = server;
         this.executor = executor;
-        this.allowedHosts = allowedHostNames(server.getAddress());
 
         java.util.concurrent.atomic.AtomicInteger slowSeq = new java.util.concurrent.atomic.AtomicInteger();
         /* 慢路由保留"并发上限 + 排队上限"：挡的是 CPU/内存型重活（编译草稿、压测、
@@ -341,16 +302,6 @@ public final class HttpApiServer {
         api.startWatchdog();
 
         http.start();
-
-        /* 本工具没有账号体系（{@code AccessControl.open()} 恒返回管理员）：
-           绑到非回环地址等于把设备控制、报文历史、审计全部暴露给同网段。
-           默认只监听 127.0.0.1，用 --bind 0.0.0.0 是显式选择，但必须让人看见风险。 */
-        java.net.InetSocketAddress boundAddress = http.getAddress();
-        java.net.InetAddress boundIp = boundAddress == null ? null : boundAddress.getAddress();
-        if (boundIp != null && !boundIp.isLoopbackAddress()) {
-            Log.warn("HTTP 绑定在非回环地址 " + boundAddress
-                    + "：本工具没有登录鉴权，同网段任何人都能读写设备配置与报文。请仅在可信网络使用。");
-        }
         return api;
     }
 
@@ -643,49 +594,20 @@ public final class HttpApiServer {
     /**
      * 给处理器包一层跨域放行。
      *
-     * <p>CORS 只解决"浏览器让不让发"，鉴权仍在业务处理器里照常执行。但
-     * {@code Allow-Origin: *} 会让<b>任意网站</b>都能读本机 API 的响应：
-     * 开放访问的本机形态下，用户随便打开一个页面就可能被它建会话、改配置、停机。
-     * 因此这里改成来源白名单：同源、回环地址（开发用）、Tauri 壳，以及显式
-     * {@code --cors-origin} 配置的来源；其余来源不下发任何 CORS 头。</p>
+     * <p>内网工具定位：不做鉴权，跨域全放行——任意来源的请求都照常处理，
+     * 响应统一带 {@code Access-Control-Allow-Origin: *}。预检（OPTIONS）一律 204，
+     * 预检放行的请求头包含保存配置用的 {@code If-Match}。</p>
      */
     private HttpHandler withCors(HttpHandler handler) {
         return ex -> {
-            /* Host 检查先于一切：DNS rebinding 的攻击面在这里，不在 CORS。 */
-            if (!hostAllowed(ex)) {
-                respond(ex, 403, "{\"ok\":false,\"error\":\"host-not-allowed\"}");
-                return;
-            }
+            ex.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+            ex.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            /* If-Match 是保存配置时的并发保护头：预检不放行它保存必失败 */
+            ex.getResponseHeaders().add("Access-Control-Allow-Headers", "Authorization, Content-Type, If-Match");
 
-            String method = ex.getRequestMethod();
-            String originHeader = ex.getRequestHeaders().getFirst("Origin");
-            String origin = allowedOrigin(ex);
-
-            if (origin != null) {
-                ex.getResponseHeaders().add("Access-Control-Allow-Origin", origin);
-                ex.getResponseHeaders().add("Vary", "Origin");
-                ex.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-                /* If-Match 是保存配置时的并发保护头：桌面壳是跨源请求，预检不放行它保存必失败 */
-                ex.getResponseHeaders().add("Access-Control-Allow-Headers", "Authorization, Content-Type, If-Match");
-            }
-
-            if ("OPTIONS".equalsIgnoreCase(method)) {
-                if (origin == null && originHeader != null && !originHeader.isBlank()) {
-                    /* 预检来自白名单之外的来源：明确拒绝，不要回 204 让它以为放行了 */
-                    respond(ex, 403, "{\"ok\":false,\"error\":\"origin-not-allowed\"}");
-                    return;
-                }
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
                 ex.sendResponseHeaders(204, -1);
                 ex.close();
-                return;
-            }
-
-            /* 写操作的副作用不能靠“浏览器读不到响应”来防：
-               停机/触发上报/改配置都是无正文的 CORS 简单请求，不触发预检。
-               白名单之外的 Origin 一律拒绝执行；没有 Origin（curl/脚本/桌面壳首跳）放行。 */
-            if (origin == null && originHeader != null && !originHeader.isBlank()
-                    && !isSafeMethod(method)) {
-                respond(ex, 403, "{\"ok\":false,\"error\":\"origin-not-allowed\"}");
                 return;
             }
 
@@ -778,141 +700,6 @@ public final class HttpApiServer {
                 /* 交换已经结束：关闭失败无需处理 */
             }
         }, REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-    }
-
-    /**
-     * 计算允许的 Host 名集合（小写、不含端口）。
-     *
-     * <p>来源：回环名、绑定地址、本机所有网卡地址，以及显式配置
-     * {@code SECS_SIM_ALLOWED_HOSTS} / {@code -Dsecssim.allowedHosts}。
-     * 用域名访问远程服务时，把该域名加进后者即可。</p>
-     *
-     * @param bind 实际绑定地址
-     * @return 允许的 Host 名
-     */
-    private static java.util.Set<String> allowedHostNames(InetSocketAddress bind) {
-        java.util.Set<String> names = new java.util.LinkedHashSet<>();
-        names.add("127.0.0.1");
-        names.add("localhost");
-        names.add("::1");
-
-        if (bind != null) {
-            String bindHost = bind.getAddress() != null
-                    ? bind.getAddress().getHostAddress()
-                    : bind.getHostString();
-            if (bindHost != null && !bindHost.isBlank()) {
-                names.add(bindHost);
-            }
-        }
-
-        try {
-            for (NetworkInterface ni : java.util.Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                for (InetAddress address : java.util.Collections.list(ni.getInetAddresses())) {
-                    names.add(address.getHostAddress());
-                }
-            }
-        } catch (SocketException e) {
-            Log.warn("枚举本机网卡失败（Host 白名单只含回环与绑定地址）: " + e.getMessage());
-        }
-
-        String extra = System.getProperty("secssim.allowedHosts",
-                System.getenv().getOrDefault("SECS_SIM_ALLOWED_HOSTS", ""));
-        for (String piece : extra.split(",")) {
-            String trimmed = piece.trim();
-            if (!trimmed.isEmpty()) {
-                names.add(trimmed);
-            }
-        }
-
-        java.util.Set<String> lower = new java.util.LinkedHashSet<>();
-        for (String name : names) {
-            lower.add(name.toLowerCase(Locale.ROOT));
-        }
-        return java.util.Set.copyOf(lower);
-    }
-
-    /**
-     * 请求的 Host 是否可信。
-     *
-     * <p>没有 Host 头（HTTP/1.0、部分代理）时放行——浏览器发请求必然带 Host，
-     * 这条放行不会削弱 rebinding 防护。带 Host 时只认白名单。</p>
-     *
-     * @param ex 请求
-     * @return 允许返回 {@code true}
-     */
-    private boolean hostAllowed(HttpExchange ex) {
-        String header = ex.getRequestHeaders().getFirst("Host");
-        if (header == null || header.isBlank()) {
-            return true;
-        }
-        return this.allowedHosts.contains(normalizeHost(header));
-    }
-
-    /** 去掉端口与 IPv6 方括号，统一小写。 */
-    private static String normalizeHost(String header) {
-        String value = header.trim();
-        if (value.startsWith("[")) {
-            int end = value.indexOf(']');
-            if (end > 0) {
-                value = value.substring(1, end);
-            }
-        } else {
-            int first = value.indexOf(':');
-            if (first > 0 && first == value.lastIndexOf(':')) {
-                value = value.substring(0, first);
-            }
-        }
-        return value.toLowerCase(Locale.ROOT);
-    }
-
-    /** GET/HEAD/OPTIONS 不改变设备状态，跨站执行也没有副作用。 */
-    private static boolean isSafeMethod(String method) {
-        return "GET".equalsIgnoreCase(method)
-                || "HEAD".equalsIgnoreCase(method)
-                || "OPTIONS".equalsIgnoreCase(method);
-    }
-
-    /** 该请求的来源是否允许跨域。
-     *
-     * <p>没有 {@code Origin} 头（curl、同源导航、桌面壳的首跳）不涉及 CORS，返回 null
-     * 即可；浏览器跨源请求必须命中白名单。白名单刻意写死而不是通配：本机 API 的
-     * 威胁模型是"用户浏览器里的任意页面"，不是"陌生主机"。</p>
-     *
-     * @param ex 请求
-     * @return 允许回显的 Origin；{@code null} 表示不需要/不允许 CORS
-     */
-    private static String allowedOrigin(HttpExchange ex) {
-        String origin = ex.getRequestHeaders().getFirst("Origin");
-        if (origin == null || origin.isBlank()) {
-            return null;
-        }
-
-        /* 同源：浏览器不会发这类跨源预检，但代理/壳可能带 Origin */
-        String host = ex.getRequestHeaders().getFirst("Host");
-        if (host != null) {
-            if (origin.equalsIgnoreCase("http://" + host) || origin.equalsIgnoreCase("https://" + host)) {
-                return origin;
-            }
-        }
-
-        /* Tauri v2 桌面壳（Windows 用 http://tauri.localhost，其它平台 tauri://localhost） */
-        if (origin.equalsIgnoreCase("tauri://localhost")
-                || origin.equalsIgnoreCase("http://tauri.localhost")
-                || origin.equalsIgnoreCase("https://tauri.localhost")) {
-            return origin;
-        }
-
-        /* 本机开发服务器（Vite 5173 / preview 4173 等） */
-        if (origin.matches("^https?://(127\\.0\\.0\\.1|localhost|\\[::1\\]):\\d+$")) {
-            return origin;
-        }
-
-        for (String allowed : CORS_ORIGINS) {
-            if (allowed.equalsIgnoreCase(origin)) {
-                return origin;
-            }
-        }
-        return null;
     }
 
     /* ===== 下面几个薄封装:让本类不必继承 HttpSupport 也能用共享设施 ===== */

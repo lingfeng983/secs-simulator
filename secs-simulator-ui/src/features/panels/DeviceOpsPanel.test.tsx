@@ -155,4 +155,20 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).toContain('>启动</button>');
     expect(html).not.toContain('>停止</button>');
   });
+
+  it('renders idle database devices as stopped rows without session actions', () => {
+    const backend = makeBackend();
+    /* 数据库里有、还没启动会话的设备：显示「停止」行 + 仅「启动」一个动作，
+       不渲染勾选框（批量操作不适用）、设备名不可点（没有会话 id）。 */
+    backend.configList = [
+      { name: 'demo-etch.json', sizeBytes: 10, modifiedMs: 1 },
+    ] as never;
+    const html = renderPanel(backend);
+    expect(html).toContain('demo-etch');
+    expect(html).toContain('按已保存的设备配置创建会话');
+    /* 会话行的勾选框还在(2 个),库内行没有勾选框 */
+    expect((html.match(/aria-label="选择 /g) ?? []).length).toBe(2);
+    /* 会话数脚注只数会话,库内设备行不计入 */
+    expect(html).toContain('会话数 2');
+  });
 });

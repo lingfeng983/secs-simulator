@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  * 测试证明的是"页面在真实 Chromium 里能加载、能点击、能渲染 uPlot"。
  */
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './scripts/e2e',
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

@@ -26,7 +26,7 @@ describe('router fallback for removed pages', () => {
     expect(parseHash('#/device/line%201/svids')).toEqual({
       name: 'device',
       sessionId: 'line 1',
-      zone: 'runtime',
+      zone: 'config',
       page: 'svids',
     });
   });
@@ -40,10 +40,10 @@ describe('3.0 two-zone routes', () => {
       zone: 'config',
       page: 'connection',
     });
-    expect(parseHash('#/device/line1/runtime/svids')).toEqual({
+    expect(parseHash('#/device/line1/config/svids')).toEqual({
       name: 'device',
       sessionId: 'line1',
-      zone: 'runtime',
+      zone: 'config',
       page: 'svids',
     });
   });
@@ -52,8 +52,8 @@ describe('3.0 two-zone routes', () => {
     expect(parseHash('#/device/line1/ceids')).toEqual({
       name: 'device',
       sessionId: 'line1',
-      zone: 'runtime',
-      page: 'catalog',
+      zone: 'config',
+      page: 'events',
     });
     expect(parseHash('#/device/line1/config')).toEqual({
       name: 'device',
@@ -82,7 +82,7 @@ describe('3.0 two-zone routes', () => {
       name: 'host',
       hostId: 'h1',
       zone: 'runtime',
-      page: 'status',
+      page: 'messages',
     });
   });
 
@@ -99,7 +99,7 @@ describe('3.0 two-zone routes', () => {
       name: 'host',
       hostId: 'host-1',
       zone: 'runtime',
-      page: 'status',
+      page: 'messages',
     });
     expect(parseHash('#/hostsim/monitor')).toEqual({ name: 'hosts' });
   });
@@ -131,7 +131,7 @@ describe('3.0 two-zone routes', () => {
       zone: 'runtime',
       page: 'manual',
     });
-    /* 主机连接页与手动操作页已删除 */
+    /* 主机连接页与手动操作页已删除；实时状态页也已下线（状态在实例头） */
     expect(parseHash('#/hosts/h1/config/connection')).toEqual({
       name: 'host',
       hostId: 'h1',
@@ -142,7 +142,13 @@ describe('3.0 two-zone routes', () => {
       name: 'host',
       hostId: 'h1',
       zone: 'runtime',
-      page: 'status',
+      page: 'messages',
+    });
+    expect(parseHash('#/hosts/h1/runtime/status')).toEqual({
+      name: 'host',
+      hostId: 'h1',
+      zone: 'runtime',
+      page: 'messages',
     });
   });
 

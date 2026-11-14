@@ -176,6 +176,28 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
     }
   }, [deviceId, refresh]);
 
+  /** 清空本设备的台账（界面「清理历史」）。 */
+  const clear = useCallback(async (): Promise<boolean> => {
+    if (deviceId === '') {
+      return false;
+    }
+    try {
+      const response = await request(
+        apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/runtime/executions`),
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        setError(`清理失败：${response.status}`);
+        return false;
+      }
+      await refresh();
+      return true;
+    } catch (cause) {
+      setError((cause as Error).message);
+      return false;
+    }
+  }, [deviceId, refresh]);
+
   const visible = useMemo(
     () => onlyFailures ? rows.filter((row) => row.status !== 'SENT') : rows,
     [onlyFailures, rows],
@@ -213,6 +235,7 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
     setLimit,
     refresh,
     step,
+    clear,
     exportCsv,
   };
 }

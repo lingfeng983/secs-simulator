@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
+let process;
 /**
  * 真实后端 E2E：页面由 Java 进程同源托管，API 不做拦截。
  *
@@ -7,7 +8,7 @@ import { defineConfig, devices } from '@playwright/test';
  * （内部工具直连访问，不需要令牌）。
  */
 export default defineConfig({
-  testDir: './e2e-real',
+  testDir: './scripts/e2e-real',
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

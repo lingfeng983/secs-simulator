@@ -225,7 +225,7 @@ SVID 直配值来源（`svids[].curve | svids[].template`）。v4/v5 配置零�
 - `demo-cvd.json`——CVD：`templates.instances` 组合模板 + 参数、
   一对适合做 S1F3 采集启停的 CEID（2001/2002）。
 
-`--demo-session` 直接开这两台（端口取 `--hsms-port` 与 +1,deviceId 错开）。
+这两台演示 JSON 现仅作测试资产(host-e2e/IT 用 `--config` 显式启动),不再自动播种或启动。
 
 ### 主机模拟（运行时能力,不占 schema）
 

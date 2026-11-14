@@ -33,7 +33,42 @@
 }
 
 .panel-title-wrap {
+  position: relative;
   min-width: 0;
+  cursor: default;
+}
+
+/*
+ * 面板说明改成悬浮气泡：平时不占版面，悬浮/聚焦标题区才弹出。
+ * white-space: pre-line 让 description 里的 \n 按行展示（与原 panel-desc 一致）。
+ */
+.panel-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  max-width: min(480px, 72vw);
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+  color: var(--muted);
+  font-size: 11.8px;
+  line-height: 1.6;
+  white-space: pre-line;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity var(--fast), transform var(--fast), visibility var(--fast);
+  pointer-events: none;
+}
+
+.panel-title-wrap:hover .panel-tip,
+.panel-title-wrap:focus-within .panel-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .panel-title-row {
@@ -502,4 +537,13 @@
 .data-table th.align-right {
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* 引用多选框：报告引用 SVID、事件引用报告的勾选区 */
+.ref-multiselect {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  min-width: 0;
 }

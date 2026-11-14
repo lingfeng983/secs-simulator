@@ -5,11 +5,11 @@
 | 分区 | 内容 | 维护状态 |
 |---|---|---|
 | [`guides/`](guides/) | 使用手册、配置 Schema、值引擎规则、二进制预览格式、工作台重设计方案 | **活文档**，随代码同步更新 |
-| [`adr/`](adr/) | 0001–0016：分层、ID 空间、纯函数曲线、模板 DAG、事件编排、API 角色、配置编辑器、报文日志、虚拟线程、CI、目录与分层收敛等决策 | 决策记录，已接受的不再修改 |
+| [`adr/`](adr/) | 0001–0018：分层、ID 空间、纯函数曲线、模板 DAG、事件编排、API 角色、配置编辑器、报文日志、虚拟线程、CI、目录与分层收敛等决策 | 决策记录，已接受的不再修改 |
 | [`reports/`](reports/) | 里程碑验收（M0–M9）、全量审计 / 代码评审、实机测试、未完成清单 | **归档**，只追加不修改 |
 | [`examples/`](examples/) | `sml/`（39 个主机/设备侧 SML 报文样例）、`config-v5-example.json` | 示例素材，供手动发送与配置编写参考 |
 | [`reference/`](reference/) | SEMI E4/E5/E30/E37 中文整理、项目对照表；`pdf/` 为付费标准原文（不入库） | 参考资料 |
-| [`../secs-simulator-service/openapi.yaml`](../secs-simulator-service/openapi.yaml) | HTTP API 机器可读契约（OpenAPI 3.0.3），由 `secs-simulator-service/scripts/check-openapi.py` 校验重复键 | 契约，改接口必须同步 |
+| [`../secs-simulator-service/scripts/openapi.yaml`](../secs-simulator-service/scripts/openapi.yaml) | HTTP API 机器可读契约（OpenAPI 3.0.3），由 `secs-simulator-service/scripts/check-openapi.py` 校验重复键 | 契约，改接口必须同步 |
 
 ## guides
 

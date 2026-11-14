@@ -124,7 +124,7 @@ class SessionConfigJsonTest {
     void badSvidTypeReportsFieldPath() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"TEMP","type":"FLOAT"}],
@@ -138,7 +138,7 @@ class SessionConfigJsonTest {
     @Test
     void missingUnitArrayIsRejected() {
         String json = """
-                {"schemaVersion":4,"session":{"id":"s1"},"equipment":{"name":"E","idSpace":{}}}
+                {"schemaVersion":4,"session":{"id":"s1","port":5010},"equipment":{"name":"E","idSpace":{}}}
                 """;
 
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
@@ -149,7 +149,7 @@ class SessionConfigJsonTest {
     void semanticErrorsAreLeftToTheCompiler() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"A","type":"F4"},{"offset":1,"slot":"B","type":"F4"}],
@@ -175,7 +175,7 @@ class SessionConfigJsonTest {
     void templateConfigBuildsGraph() {
         String json = """
                 {"schemaVersion":5,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
                      "svids":[{"offset":1,"slot":"TEMP","type":"F4"},
@@ -205,7 +205,7 @@ class SessionConfigJsonTest {
     void afterEventTriggerRoundTrips() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
@@ -229,7 +229,7 @@ class SessionConfigJsonTest {
     void afterEventUnknownSourceIsRejected() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
@@ -245,7 +245,7 @@ class SessionConfigJsonTest {
     void onConditionTriggerRoundTrips() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
@@ -291,7 +291,7 @@ class SessionConfigJsonTest {
     void globalSvidRangeRoundTrips() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "globalSvids":[{"id":9001,"name":"FACILITY_TEMP","type":"F4","min":18.0,"max":26.0}],
                    "units":[{"unitId":1,"name":"CH1",
@@ -313,7 +313,7 @@ class SessionConfigJsonTest {
     void unknownTriggerTypeReportsPath() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
                      "svids":[{"offset":1,"slot":"A","type":"F4"}],"reports":[],"ceids":[]}]},
@@ -324,10 +324,32 @@ class SessionConfigJsonTest {
         assertEquals("$.events.plans[0].trigger.type", e.path());
     }
     @Test
+    void portIsRequiredAndCannotBeZero() {
+        /* 端口必填（1..65535）：没有兜底，设备的 SECS 口以配置（数据库）为准 */
+        String missing = """
+                {"schemaVersion": 5,
+                 "session": {"id": "t", "passive": true, "deviceId": 1},
+                 "equipment": {"name": "T", "idSpace": {}, "units": []},
+                 "events": {"plans": []}}
+                """;
+        ConfigException missingError = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(missing));
+        assertTrue(missingError.getMessage().contains("port"), missingError.getMessage());
+
+        String zero = """
+                {"schemaVersion": 5,
+                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
+                 "equipment": {"name": "T", "idSpace": {}, "units": []},
+                 "events": {"plans": []}}
+                """;
+        ConfigException zeroError = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(zero));
+        assertTrue(zeroError.getMessage().contains("1..65535"), zeroError.getMessage());
+    }
+
+    @Test
     void parsesOptionalHsmsTimeouts() {
         SessionConfig parsed = SessionConfigJson.parse("""
                 {"schemaVersion": 5,
-                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                 "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                              "timeouts": {"t3": 60, "t7": 15}},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                  "events": {"plans": []}}
@@ -344,7 +366,7 @@ class SessionConfigJsonTest {
     void timeoutsSectionIsOptional() {
         SessionConfig parsed = SessionConfigJson.parse("""
                 {"schemaVersion": 5,
-                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
+                 "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                  "events": {"plans": []}}
                 """);
@@ -358,7 +380,7 @@ class SessionConfigJsonTest {
                 assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
                         () -> SessionConfigJson.parse("""
                                 {"schemaVersion": 5,
-                                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                                 "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                                              "timeouts": {"t3": 0}},
                                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                                  "events": {"plans": []}}
@@ -368,7 +390,7 @@ class SessionConfigJsonTest {
 
     @Test
     void hsmsTimeoutsSurviveRoundTrip() {
-        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers(),
+        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 5010, 1, 3L, twoChambers(),
                 new HsmsTimeouts(60.0, null, null, 15.0, null));
         SessionConfig config = new SessionConfig(spec, EventSchedule.empty(), 20);
 
@@ -382,7 +404,7 @@ class SessionConfigJsonTest {
 
         /* 没有 timeouts 的配置不应凭空多出一个空对象 */
         SessionConfig noTimeouts = new SessionConfig(
-                new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers()),
+                new SessionSpec("t", true, "127.0.0.1", 5010, 1, 3L, twoChambers()),
                 EventSchedule.empty(), 20);
         assertFalse(SessionConfigJson.toJson(noTimeouts).contains("\"timeouts\""));
     }
@@ -391,7 +413,7 @@ class SessionConfigJsonTest {
     void traceSectionIsOptional() {
         SessionConfig parsed = SessionConfigJson.parse("""
                 {"schemaVersion": 5,
-                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
+                 "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                  "events": {"plans": []}}
                 """);
@@ -405,7 +427,7 @@ class SessionConfigJsonTest {
                 assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
                         () -> SessionConfigJson.parse("""
                                 {"schemaVersion": 5,
-                                 "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1,
+                                 "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                                              "trace": {"maxTraces": 0}},
                                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                                  "events": {"plans": []}}
@@ -415,7 +437,7 @@ class SessionConfigJsonTest {
 
     @Test
     void traceLimitsSurviveRoundTrip() {
-        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers(),
+        SessionSpec spec = new SessionSpec("t", true, "127.0.0.1", 5010, 1, 3L, twoChambers(),
                 HsmsTimeouts.DEFAULTS, new TraceLimits(4, 32));
         SessionConfig config = new SessionConfig(spec, EventSchedule.empty(), 20);
 
@@ -428,7 +450,7 @@ class SessionConfigJsonTest {
 
         /* 没有 trace 的配置不应凭空多出一个空对象 */
         SessionConfig noTrace = new SessionConfig(
-                new SessionSpec("t", true, "127.0.0.1", 0, 1, 3L, twoChambers()),
+                new SessionSpec("t", true, "127.0.0.1", 5010, 1, 3L, twoChambers()),
                 EventSchedule.empty(), 20);
         assertFalse(SessionConfigJson.toJson(noTrace).contains("\"trace\""));
     }
@@ -437,7 +459,7 @@ class SessionConfigJsonTest {
     void unknownPlanCeidIsACompileError() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
                      "svids":[{"offset":1,"slot":"TEMP","type":"F4"}],"reports":[],"ceids":[]}]},
@@ -457,7 +479,7 @@ class SessionConfigJsonTest {
     void duplicateGlobalSvidNameIsAWarning() {
         String json = """
                 {"schemaVersion":4,
-                 "session":{"id":"s1"},
+                 "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "globalSvids":[
                      {"id":9001,"name":"FACILITY_TEMP","type":"F4"},

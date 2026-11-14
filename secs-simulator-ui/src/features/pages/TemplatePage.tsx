@@ -9,10 +9,11 @@ import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { saveHint, saveTextFile } from '../../shared/lib/saveFile';
 
 /**
- * 模板管理：设备模板的增删改查。
+ * 设备模板（独立工具）：设备模板的增删改查。
  *
  * <p>模板是完整设备配置。内置模板只读，自定义模板以 {@code <work-dir>/templates/<id>.json}
- * 存储；工作台新建设备只从模板列表里选，不再让用户手填配置文件。</p>
+ * 存储；工作台新建设备只从模板列表里选，不再让用户手填配置文件。
+ * SVID 变化模板在「参数模板」页维护。</p>
  */
 export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element {
   const client = backend.client;
@@ -196,7 +197,7 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
   return (
     <Panel
       id="panel-templates"
-      title="模板管理"
+      title="设备模板"
       description="设备模板即完整设备配置。内置模板只读，可复制成自定义模板后修改；工作台新建设备只选模板。"
       actions={
         <button type="button" className="primary" onClick={() => setCreateOpen(true)}>新建模板</button>
@@ -340,3 +341,4 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
     </Panel>
   );
 }
+

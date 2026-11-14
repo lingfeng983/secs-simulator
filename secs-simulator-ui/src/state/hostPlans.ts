@@ -1,11 +1,13 @@
+import { useCallback, useEffect, useState } from 'react';
+import { createClient } from '../api';
 import { usePersistentState } from './usePersistentState';
 
 /**
- * 主机域的「配置区 → 运行区」共享草稿与已保存采集计划。
+ * 主机域的「配置区 → 运行区」共享草稿与已保存方案。
  *
- * <p>全部按 hostId 分桶落在 localStorage：配置区保存的多份 Trace / S1F3
- * 采集配置，运行区一键载入即可发送；表单草稿、要画哪几个参数也在同一个
- * 命名空间里，切页签/切区域后不会丢。</p>
+ * <p>表单草稿、勾选等界面状态按 hostId 分桶落在 localStorage；**方案库**
+ * （Trace / S1F3 采集配置）落 config.db（/api/v2/hosts/{id}/plans）——
+ * 配置区的「保存为方案」是配置数据，换机器、重启后端都不丢。</p>
  */
 
 /** 一条已保存的 Trace 采集计划（对应一条 S2F23）。 */
@@ -71,11 +73,85 @@ export function planId(): string {
 }
 
 export function useTracePlans(hostId: string) {
-  return usePersistentState<TracePlan[]>(hostKey(hostId, 'trace-plans'), []);
+  return useHostPlansDb<TracePlan>(hostId, 'trace');
 }
 
 export function useCollectPlans(hostId: string) {
-  return usePersistentState<CollectPlan[]>(hostKey(hostId, 'collect-plans'), []);
+  return useHostPlansDb<CollectPlan>(hostId, 'collect');
+}
+
+/**
+ * 方案库（配置区）：落 config.db（/api/v2/hosts/{id}/plans）。
+ *
+ * <p>载入按 hostId 拉一次；setPlans 仍保持旧签名（updater），内部对前后
+ * 两个列表做差量同步——新增的 POST、删除的 DELETE，失败只记控制台，
+ * 本地列表保持乐观更新。</p>
+ */
+function useHostPlansDb<T extends { id: string }>(
+  hostId: string,
+  kind: 'trace' | 'collect',
+): [T[], (updater: (previous: T[]) => T[]) => void] {
+  const [plans, setPlansLocal] = useState<T[]>([]);
+  useEffect(() => {
+    if (hostId === '') {
+      setPlansLocal([]);
+      return;
+    }
+    let cancelled = false;
+    void createClient().listHostPlansV2(hostId, kind)
+      .then((list) => {
+        if (!cancelled) {
+          setPlansLocal(list as T[]);
+        }
+      })
+      .catch(() => {
+        /* 后端不可达时保持空列表；本地改动走乐观更新 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, kind]);
+  const setPlans = useCallback((updater: (previous: T[]) => T[]) => {
+    setPlansLocal((previous) => {
+      const next = updater(previous);
+      void syncHostPlans(hostId, kind, previous, next);
+      return next;
+    });
+  }, [hostId, kind]);
+  return [plans, setPlans];
+}
+
+/** 对前后两个列表做差量同步：新增 POST、删除 DELETE。 */
+async function syncHostPlans(
+  hostId: string,
+  kind: 'trace' | 'collect',
+  previous: ReadonlyArray<{ id: string }>,
+  next: ReadonlyArray<{ id: string }>,
+): Promise<void> {
+  if (hostId === '') {
+    return;
+  }
+  const client = createClient();
+  const previousIds = new Set(previous.map((plan) => plan.id));
+  const nextIds = new Set(next.map((plan) => plan.id));
+  for (const plan of next) {
+    if (!previousIds.has(plan.id)) {
+      try {
+        await client.saveHostPlanV2(hostId, kind, plan as unknown as Record<string, unknown>);
+      } catch (error) {
+        console.error('保存主机方案失败', error);
+      }
+    }
+  }
+  for (const plan of previous) {
+    if (!nextIds.has(plan.id)) {
+      try {
+        await client.deleteHostPlanV2(hostId, kind, plan.id);
+      } catch (error) {
+        console.error('删除主机方案失败', error);
+      }
+    }
+  }
 }
 
 export function useTraceDraft(hostId: string) {

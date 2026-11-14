@@ -52,6 +52,9 @@ type HostsV2Api = Pick<
   | 'hostTemplatesV2'
   | 'saveHostTemplateV2'
   | 'deleteHostTemplateV2'
+  | 'listHostPlansV2'
+  | 'saveHostPlanV2'
+  | 'deleteHostPlanV2'
 >;
 
 export const hostsV2Api: HostsV2Api = {
@@ -139,5 +142,32 @@ export const hostsV2Api: HostsV2Api = {
   async deleteHostTemplateV2(id) {
     const response = await request(apiUrl(`/api/v2/host-templates/${encodeURIComponent(id)}`), { method: 'DELETE' });
     return response.ok;
+  },
+  async listHostPlansV2(hostId, kind) {
+    const body = await readJson<Record<string, unknown>[]>(
+      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/plans?kind=${kind}`)),
+    );
+    return Array.isArray(body) ? body : [];
+  },
+  async saveHostPlanV2(hostId, kind, plan) {
+    const body = await readJson<{ ok?: boolean; error?: string }>(
+      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/plans`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ ...plan, kind }),
+      }),
+    );
+    if (!body.ok) {
+      throw new Error(body.error ?? '保存方案失败');
+    }
+  },
+  async deleteHostPlanV2(hostId, kind, planId) {
+    const body = await readJson<{ ok?: boolean; error?: string }>(
+      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/plans/${encodeURIComponent(planId)}?kind=${kind}`),
+        { method: 'DELETE' }),
+    );
+    if (!body.ok) {
+      throw new Error(body.error ?? '删除方案失败');
+    }
   },
 };

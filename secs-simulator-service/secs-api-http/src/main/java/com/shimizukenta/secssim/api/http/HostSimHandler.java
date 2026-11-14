@@ -298,6 +298,17 @@ final class HostSimHandler extends HttpSupport {
         };
     }
 
+    /** 方案类别只有 trace / collect 两类，与前端方案库一一对应。 */
+    private static boolean isPlanKind(String kind) {
+        return "trace".equals(kind) || "collect".equals(kind);
+    }
+
+    /** 读一个查询参数；缺失返回空串。 */
+    private static String queryParam(HttpExchange ex, String name) {
+        String value = parseQuery(ex.getRequestURI().getQuery()).get(name);
+        return value == null ? "" : value;
+    }
+
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     /** v2 主机集合：GET 列表 / POST 新建。 */
@@ -434,6 +445,77 @@ final class HostSimHandler extends HttpSupport {
                 return;
             }
             respond(ex, 200, this.context.hostMessagesV2(hostId, limit));
+            return;
+        }
+        /* 配置区方案库：Trace / S1F3 采集方案落 config.db（方案正文是前端结构原样的 JSON）。 */
+        if (parts.length == 2 && "plans".equals(action)) {
+            if ("GET".equals(method)) {
+                if (!requireRole(ex, ApiRole.VIEWER)) {
+                    return;
+                }
+                String kind = queryParam(ex, "kind");
+                if (!isPlanKind(kind)) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-kind\"}");
+                    return;
+                }
+                String body = this.context.hostPlansV2Json(hostId, kind);
+                if (body == null) {
+                    respond(ex, 404, "{\"ok\":false,\"error\":\"host-not-found\"}");
+                    return;
+                }
+                respond(ex, 200, body);
+                return;
+            }
+            if ("POST".equals(method)) {
+                if (!requireRole(ex, ApiRole.OPERATOR)) {
+                    return;
+                }
+                String request = readBody(ex);
+                if (request == null || request.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                JsonHub parsed;
+                try {
+                    parsed = JsonHub.fromJson(request);
+                } catch (RuntimeException e) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                String kind;
+                String planId;
+                try {
+                    kind = str(parsed, "kind");
+                    planId = str(parsed, "id");
+                } catch (RuntimeException e) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                if (!isPlanKind(kind) || planId.isBlank()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                    return;
+                }
+                SessionOutcome outcome = this.context.saveHostPlanV2(hostId, kind, planId, request);
+                audit(ex, "host-plan-save", hostId + "/" + kind + "/" + planId, "outcome=" + outcome);
+                respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+                return;
+            }
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (parts.length == 3 && "plans".equals(action) && "DELETE".equals(method)) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            String kind = queryParam(ex, "kind");
+            String planId = parts[2];
+            if (!isPlanKind(kind) || planId.isBlank()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\"}");
+                return;
+            }
+            SessionOutcome outcome = this.context.deleteHostPlanV2(hostId, kind, planId);
+            audit(ex, "host-plan-delete", hostId + "/" + kind + "/" + planId, "outcome=" + outcome);
+            respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
             return;
         }
         if ("POST".equals(method)) {

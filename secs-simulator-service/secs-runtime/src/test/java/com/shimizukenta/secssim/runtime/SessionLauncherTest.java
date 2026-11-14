@@ -43,19 +43,13 @@ class SessionLauncherTest {
     @BeforeEach
     void setUp() {
         this.sessions = new SessionManager();
-        this.launcher = new SessionLauncher(this.sessions, new EventBus(), this.workDir, freePort());
+        this.launcher = new SessionLauncher(this.sessions, new EventBus(), this.workDir);
         /* 3.0：配置正文在 config.db，launcher 经门面读写 */
         var db = com.shimizukenta.secssim.store.Db.open(this.workDir.resolve("db").normalize());
         this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
                 db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
         this.launcher.configStore(new ConfigStore(this.repo,
                 new com.shimizukenta.secssim.store.TemplateRepository(db), this.workDir));
-    }
-
-    @Test
-    void createsDemoSession() throws Exception {
-        assertEquals("demo", this.launcher.create("demo"));
-        assertEquals(SessionState.OPEN, this.sessions.find("demo").orElseThrow().state());
     }
 
     @Test
@@ -94,13 +88,6 @@ class SessionLauncherTest {
 
         assertTrue(error.getMessage().contains("不存在"), error.getMessage());
         assertTrue(this.sessions.list().isEmpty());
-    }
-
-    @Test
-    void duplicateIdIsRejected() throws Exception {
-        this.launcher.create("demo");
-
-        assertThrows(IllegalArgumentException.class, () -> this.launcher.create("demo"));
     }
 
     /**
@@ -177,15 +164,6 @@ class SessionLauncherTest {
         assertFalse(this.sessions.find("line1").isPresent());
         assertFalse(this.launcher.sourceOf("line1").isPresent());
         assertFalse(this.launcher.close("line1"), "重复关闭应如实返回 false");
-    }
-
-    @Test
-    void demoSessionHasNoSourceAndIsNotReloadable() throws Exception {
-        this.launcher.create("demo");
-
-        assertFalse(this.launcher.reload("demo"), "演示会话没有配置来源，要如实说不可重载");
-        assertEquals(SessionState.OPEN, this.sessions.find("demo").orElseThrow().state(),
-                "拒绝重载时不能顺手把会话弄没了");
     }
 
     @Test
@@ -274,8 +252,7 @@ class SessionLauncherTest {
     /**
      * 部署期覆盖：端口/deviceId 只作用于运行中的会话，不写回配置文件。
      *
-     * <p>Bootstrap 的 {@code --demo-session} 靠这条路径给两台演示设备错开端口；
-     * 一旦覆盖变成改写文件，第二次启动就会把模板里的端口固定住。</p>
+     * <p>覆盖只在启动期生效（不写回文件），重载时会原样再套一遍。</p>
      */
     @Test
     void overridesChangePortWithoutRewritingFile() throws Exception {
@@ -291,7 +268,7 @@ class SessionLauncherTest {
         Files.writeString(file, configWithPort("ov", "OV", filePort), StandardCharsets.UTF_8);
         String before = Files.readString(file, StandardCharsets.UTF_8);
 
-        var session = this.launcher.startFromFile(file, filePort,
+        var session = this.launcher.startFromFile(file,
                 new SessionOverrides(null, null, overridePort, 62));
         try {
             assertEquals(SessionState.OPEN, session.state());
@@ -334,16 +311,11 @@ class SessionLauncherTest {
     }
 
     /** 同 config，但带一个周期事件计划（热生效测试用）。 */
-    private static String configWithPlan(String id, String marker, String planId, int periodMs) {
+    private String configWithPlan(String id, String marker, String planId, int periodMs) {
         return config(id, marker).replace(
                 "\"plans\": []",
                 "\"plans\": [{ \"id\": \"" + planId + "\", \"ceid\": 2001, "
                         + "\"trigger\": { \"type\": \"periodic\", \"periodMs\": " + periodMs + ", \"jitterMs\": 0 } }]");
-    }
-
-    /** 同 config，但显式指定端口（连接标识变化测试用）。 */
-    private static String configWithPort(String id, String marker, int port) {
-        return config(id, marker).replace("\"port\": 0", "\"port\": " + port);
     }
 
     /**
@@ -353,18 +325,35 @@ class SessionLauncherTest {
      * 而不是只看接口回了 200。
      * </p>
      */
-    private static String config(String id, String marker) {
+    /* 每份配置一个唯一端口:端口现在必填,多台设备不能共用一个口。
+       按 id 记忆——热生效测试对同一 id 写两次配置,两次必须同口(连接标识不变才算热生效);
+       放在实例上,@TempDir 每用例新建,跨用例互不残留。 */
+    private final java.util.concurrent.ConcurrentMap<String, Integer> portById =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /* 类级递增:上个用例的监听器不一定显式关闭,端口在整个测试类里绝不能复用 */
+    private static final java.util.concurrent.atomic.AtomicInteger portSeq =
+            new java.util.concurrent.atomic.AtomicInteger(5020);
+
+    private int nextPort() {
+        return portSeq.getAndIncrement();
+    }
+
+    private String config(String id, String marker) {
+        return configWithPort(id, marker, portById.computeIfAbsent(id, (key) -> this.nextPort()));
+    }
+
+    private String configWithPort(String id, String marker, int port) {
         return """
                 {"schemaVersion": 5,
                  "session": {"id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                             "port": 0, "deviceId": 61, "seed": 3},
+                             "port": %d, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "LINE-%s", "idSpace": {},
                    "units": [{ "unitId": 1, "name": "CH1", "injectUnitId": false,
                      "svids": [{ "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C" }],
                      "reports": [],
                      "ceids": [{ "offset": 1, "slot": "BEAT", "reports": [] }] }]},
                  "events": {"maxPerSec": 5, "plans": []}}
-                """.formatted(id, marker);
+                """.formatted(id, port, marker);
     }
 
     private static int freePort() {

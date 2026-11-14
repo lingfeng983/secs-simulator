@@ -4,7 +4,7 @@
  * <p>这里没有任何会话状态：配置是磁盘上的文件，改完要重载会话才生效。</p>
  */
 
-import type { ApiClient, ConfigEntry, ConfigProblems, ConfigTemplateEntry } from './types';
+import type { ApiClient, ConfigEntry, ConfigProblems, ConfigTemplateEntry, PreviewData } from './types';
 import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
 
 type ConfigApi = Pick<
@@ -21,9 +21,33 @@ type ConfigApi = Pick<
   | 'validateConfig'
   | 'saveConfig'
   | 'configRevisions'
->;;
+  | 'previewConfigDraft'
+>;
+
+/** 按配置草稿算确定性预览（不落盘、不需要运行中的会话）；编译失败返回 null。 */
+async function previewConfigDraft(text: string, fromMs: number, toMs: number,
+                                  buckets: number, withEvents: boolean): Promise<PreviewData | null> {
+  const query = new URLSearchParams({
+    from: String(fromMs),
+    to: String(toMs),
+    buckets: String(buckets),
+  });
+  if (!withEvents) {
+    query.set('withEvents', 'false');
+  }
+  const response = await request(apiUrl(`/api/v1/config-preview?${query}`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    body: text,
+  }, LONG_REQUEST_TIMEOUT_MS);
+  if (!response.ok) {
+    return null;
+  }
+  return readJson<PreviewData>(response);
+}
 
 export const configApi: ConfigApi = {
+  previewConfigDraft,
   async configs() {
     const body = await readJson<{ configs?: ConfigEntry[] }>(
       await request(apiUrl('/api/v1/configs')),

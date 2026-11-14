@@ -22,40 +22,41 @@ import { useCallback, useEffect, useState } from 'react';
 export type DeviceConfigPage =
   | 'overview'    // 概览：名称/模板/自动连接
   | 'connection'  // 连接：session 段
-  | 'structure'   // 结构：单元/SVID/曲线/组合/实例
+  | 'structure'   // 结构：单元/模板/组合 整体模型
+  | 'svids'       // 变量配置：SVID 定义（写入配置草稿）
+  | 'events'      // 事件与报告：CEID/RPT 定义（写入配置草稿）
+  | 'plans'       // 事件计划：events.plans 定义（写入配置草稿）
   | 'document'    // 配置原文
   | 'constants'   // 设备常量（ECV）
   | 'revisions';  // 版本历史
 
-/** 设备运行区子页：当前运行（仅本次有效）。 */
+/** 设备运行区子页：当前运行（仅本次有效）。
+ *  定义类编辑已全部上收配置区，运行区只留"要动手"的页。 */
 export type DeviceRuntimePage =
-  | 'plans'     // 事件计划与执行：计划 CRUD + 启停 + 本设备实时事件
-  | 'catalog'   // 事件与报告：CEID/RPTID 运行时增删改 + 手动触发
-  | 'svids'     // 状态变量：曲线预览 + 值设定
-  | 'manual';   // 手动操作：SML 发送 + 报警置位/清除
+  | 'plans'     // 事件执行：计划启停 + 本设备实时事件
+  | 'manual';   // 手动与压测：SML 发送 + 压测 + 报警置位/清除
 
 export type DeviceZone = 'config' | 'runtime';
 export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
 
 export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
-  'overview', 'connection', 'structure', 'document', 'constants', 'revisions',
+  'overview', 'connection', 'structure', 'svids', 'events', 'plans', 'document', 'constants', 'revisions',
 ];
-/* 运行区只留"要动手"的页：实时状态并入实例头（停止/启动/链接三态 + 计数），
-   报文监控统一收进右侧抽屉，因此不再单独列 status / messages 两个子页。 */
+/* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
+   报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */
 export const DEVICE_RUNTIME_PAGES: readonly DeviceRuntimePage[] = [
-  'plans', 'catalog', 'svids', 'manual',
+  'plans', 'manual',
 ];
 
 /** 主机配置区子页（连接参数并入概览，不再单列一页）。 */
 export type HostConfigPage =
   | 'overview'   // 概览：名称/目标/设置版本/自动重连
   | 'presets'    // 报文模板：16 条预设 + 说明
-  | 'trace'      // Trace 设置：S2F23 表单
-  | 'collect';   // 采集设置：启停 CEID + SVID
+  | 'trace'      // Trace 设置：S2F23 方案库
+  | 'collect';   // 采集设置：S1F3 配置库
 
-/** 主机运行区子页。 */
+/** 主机运行区子页：实时状态页已删（状态在实例头）。 */
 export type HostRuntimePage =
-  | 'status'   // 实时状态
   | 'messages' // 消息发送（只发本主机）
   | 'trace'    // Trace 采集
   | 'collect'; // 数据采集
@@ -67,24 +68,25 @@ export type HostPage = HostConfigPage | HostRuntimePage;
 export const HOST_CONFIG_PAGES: readonly HostConfigPage[] = [
   'overview', 'presets', 'trace', 'collect',
 ];
-/* 收发记录并入右侧抽屉，手动操作页签删除；连接/断开/使设置生效在实例头。 */
+/* 收发记录并入右侧抽屉；连接/断开/使设置生效在实例头；实时状态并入实例头。 */
 export const HOST_RUNTIME_PAGES: readonly HostRuntimePage[] = [
-  'status', 'messages', 'trace', 'collect',
+  'messages', 'trace', 'collect',
 ];
 
 export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
   overview: '概览',
   connection: '连接',
   structure: '结构',
+  svids: '变量配置',
+  events: '事件与报告',
+  plans: '事件计划',
   document: '配置原文',
   constants: '设备常量',
   revisions: '版本历史',
 };
 export const DEVICE_RUNTIME_PAGE_LABELS: Record<DeviceRuntimePage, string> = {
-  plans: '事件计划',
-  catalog: '事件与报告',
-  svids: '状态变量',
-  manual: '手动操作',
+  plans: '事件执行',
+  manual: '手动与压测',
 };
 export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
   overview: '概览',
@@ -93,10 +95,37 @@ export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
   collect: '采集设置',
 };
 export const HOST_RUNTIME_PAGE_LABELS: Record<HostRuntimePage, string> = {
-  status: '实时状态',
   messages: '消息发送',
   trace: 'Trace 采集',
   collect: '数据采集',
+};
+
+/** 子页签悬浮说明（SubTabs note）：一句话说清这页管什么。 */
+export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
+  overview: '设备身份与模板选择；保存后需重载生效。',
+  connection: 'HSMS 连接参数（session 段）：地址、端口、模式。',
+  structure: '单元/模板/组合的整体模型编辑；保存后需重载生效。',
+  svids: '状态变量（SVID）定义：写入配置草稿，校验后保存。',
+  events: '事件（CEID）与报告（RPT）定义：写入配置草稿，校验后保存。',
+  plans: '事件计划（触发规则/effects/actions）定义：写入配置草稿，校验后保存。',
+  document: '配置原文 JSON 与版本 diff。',
+  constants: '设备常量（ECV）定义：写入配置草稿，校验后保存。',
+  revisions: '配置版本历史与回看。',
+};
+export const DEVICE_RUNTIME_PAGE_NOTES: Record<DeviceRuntimePage, string> = {
+  plans: '计划启停等运行态设置；改动仅本次运行有效。',
+  manual: '手动 SML 发送、压测发送与报警置位/清除。',
+};
+export const HOST_CONFIG_PAGE_NOTES: Record<HostConfigPage, string> = {
+  overview: '主机身份与目标；保存后需「使设置生效」。',
+  presets: '主机侧 16 条报文预设与说明。',
+  trace: 'S2F23 采样方案库：只管理方案与参数，发送在运行区。',
+  collect: 'S1F3 采集配置库：只管理配置方案，下发与采集在运行区。',
+};
+export const HOST_RUNTIME_PAGE_NOTES: Record<HostRuntimePage, string> = {
+  messages: '向本主机发送报文。',
+  trace: '下发 S2F23 采样并查看 S6F1 参数趋势。',
+  collect: '下发采集配置、启停采集并查看数据曲线。',
 };
 
 /** 全局单功能页已精简掉；旧 hash 一律回落工作台。 */
@@ -105,19 +134,21 @@ export type SystemPage = 'audit';
 export type Route =
   | { name: 'workbench' }
   | { name: 'templates' }
+  | { name: 'svid-templates' }
   | { name: 'device'; sessionId: string; zone: DeviceZone; page: DevicePage }
   | { name: 'hosts' }
   | { name: 'host'; hostId: string; zone: HostZone; page: HostPage }
   | { name: 'host-templates' }
   | { name: 'system'; page: SystemPage };
 
-/** 旧设备扁平子页 → 两段式新家（一次性迁移映射）。 */
+/** 旧设备扁平子页 → 两段式新家（一次性迁移映射）。
+ *  定义类编辑已上收配置区：旧运行区 catalog/svids 深链迁到配置区对应页。 */
 const LEGACY_DEVICE_PAGE: Record<string, [DeviceZone, DevicePage]> = {
-  ceids: ['runtime', 'catalog'],
-  reports: ['runtime', 'catalog'],
-  events: ['runtime', 'plans'],
+  ceids: ['config', 'events'],
+  reports: ['config', 'events'],
+  events: ['config', 'plans'],
   alarms: ['runtime', 'manual'],
-  svids: ['runtime', 'svids'],
+  svids: ['config', 'svids'],
   /* 报文监控已并入右侧抽屉：旧消息深链回落到运行区首页，由 App 顺手拉开抽屉。 */
   messages: ['runtime', 'plans'],
   send: ['runtime', 'manual'],
@@ -189,6 +220,9 @@ export function parseHash(hash: string, legacyTab?: string): Route {
     if (parts[0] === 'templates') {
       return { name: 'templates' };
     }
+    if (parts[0] === 'svid-templates') {
+      return { name: 'svid-templates' };
+    }
   } catch {
     /* 地址里是坏的 %-转义：回工作台，别让解析异常把整页打白 */
   }
@@ -212,6 +246,8 @@ export function toHash(route: Route): string {
       return '#/workbench';
     case 'templates':
       return '#/templates';
+    case 'svid-templates':
+      return '#/svid-templates';
     case 'device':
       return `#/device/${encodeURIComponent(route.sessionId)}/${route.zone}/${route.page}`;
     case 'hosts':

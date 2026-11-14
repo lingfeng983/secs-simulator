@@ -197,8 +197,8 @@ function CreateHostModal({
   onClose: () => void;
   onCreate: (request: { name?: string; host: string; port: number; deviceId?: number }) => void;
 }): JSX.Element {
-  const [name, setName] = useState('');
-  const [host, setHost] = useState('');
+  const [name, setName] = useState('host');
+  const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState('5000');
   const [deviceId, setDeviceId] = useState('0');
 
@@ -239,32 +239,44 @@ function CreateHostModal({
           }}
         />
       )}
-      <div className="form-row">
-        <label className="field">
-          名称
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="可空,默认用实例 id" />
-        </label>
-        <label className="field">
-          目标地址
-          <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="任意设备或第三方模拟器地址" />
-        </label>
+      <div className="session-form">
+        <div className="session-fields">
+          <label className="session-field">
+            <span className="session-field-text">
+              <span className="session-field-name">名称</span>
+              <span className="session-field-help">实例列表里显示的名字;多台主机各起一个好认的。</span>
+            </span>
+            <input value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label className="session-field">
+            <span className="session-field-text">
+              <span className="session-field-name">目标地址</span>
+              <span className="session-field-help">设备或第三方模拟器的 IP / 主机名;清空则禁用创建。</span>
+            </span>
+            <input value={host} onChange={(event) => setHost(event.target.value)} />
+          </label>
+          <label className="session-field">
+            <span className="session-field-text">
+              <span className="session-field-name">端口</span>
+              <span className="session-field-help">目标设备的 HSMS 端口(1–65535)。</span>
+            </span>
+            <input type="number" min={1} max={65535} value={port}
+              onChange={(event) => setPort(event.target.value)} />
+          </label>
+          <label className="session-field">
+            <span className="session-field-text">
+              <span className="session-field-name">Device ID</span>
+              <span className="session-field-help">目标设备的 HSMS Device ID(0–32767),两侧必须一致。</span>
+            </span>
+            <input type="number" min={0} max={32767} value={deviceId}
+              onChange={(event) => setDeviceId(event.target.value)} />
+          </label>
+        </div>
+        <p className="hint">
+          目标可以是任意设备或第三方模拟器地址;与设备列表无关。可连续新建多台,多台可指向同一地址
+          （先连上的保持「已连接」,后来者停在「连接失败 · 目标已有主机」,互不影响）。
+        </p>
       </div>
-      <div className="form-row">
-        <label className="field">
-          端口
-          <input type="number" min={1} max={65535} value={port}
-            onChange={(event) => setPort(event.target.value)} />
-        </label>
-        <label className="field">
-          Device ID
-          <input type="number" min={0} value={deviceId}
-            onChange={(event) => setDeviceId(event.target.value)} />
-        </label>
-      </div>
-      <p className="hint">
-        目标可以是任意设备或第三方模拟器地址;与设备列表无关。可连续新建多台,多台可指向同一地址
-        （先连上的保持「已连接」,后来者停在「连接失败 · 目标已有主机」,互不影响）。
-      </p>
     </Modal>
   );
 }

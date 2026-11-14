@@ -142,46 +142,6 @@ export interface EventEffectView {
   decayMs?: number;
 }
 
-/** 新增/更新编排计划的输入;triggerType 决定哪些参数生效。 */
-export interface EventPlanInput {
-  id: string;
-  ceid: number;
-  triggerType: 'at' | 'periodic' | 'onCondition' | 'afterEvent';
-  atMs?: number;
-  periodMs?: number;
-  jitterMs?: number;
-  expression?: string;
-  debounceMs?: number;
-  sourcePlan?: string;
-  delayMs?: number;
-  effects?: EventEffectInput[];
-}
-
-export type EventEffectInput = EventEffectView;
-
-/** 新增/更新报告的输入。 */
-export interface ReportInput {
-  id: number;
-  slot: string;
-  svids: number[];
-}
-
-/** 新增/更新采集事件的输入(reports 是绑定的 RPTID 列表)。 */
-export interface CeidInput {
-  id: number;
-  slot: string;
-  reports: number[];
-}
-
-/** 新增/更新状态变量的输入。 */
-export interface SvidInput {
-  id: number;
-  slot: string;
-  type: string;
-  owner?: string;
-  unit?: string;
-}
-
 /** 手动发送 SML 的结果。 */
 export interface SentMessageResult {
   ok: boolean;
@@ -463,34 +423,6 @@ export interface ApiClient {
   events(sessionId: string): Promise<EventPlanView[]>;
   /** 运行时启用/禁用一个计划。 */
   setEventEnabled(sessionId: string, planId: string, enabled: boolean): Promise<number>;
-  /** 运行时新增编排计划(不写回配置,重载后失效)。返回 HTTP 状态码。 */
-  addEventPlan(sessionId: string, plan: EventPlanInput): Promise<number>;
-  /** 运行时更新编排计划。 */
-  updateEventPlan(sessionId: string, planId: string, plan: EventPlanInput): Promise<number>;
-  /** 运行时删除编排计划。 */
-  deleteEventPlan(sessionId: string, planId: string): Promise<number>;
-  /** 运行时新增报告。 */
-  addReport(sessionId: string, report: ReportInput): Promise<number>;
-  /** 运行时更新报告。 */
-  updateReport(sessionId: string, rptid: number, report: ReportInput): Promise<number>;
-  /** 运行时删除报告。 */
-  deleteReport(sessionId: string, rptid: number): Promise<number>;
-  /** 运行时新增状态变量(默认恒 0 曲线,可用 setSvidValue 钉值)。 */
-  addSvid(sessionId: string, svid: SvidInput): Promise<number>;
-  /** 运行时更新状态变量。 */
-  updateSvid(sessionId: string, svid: number, def: SvidInput): Promise<number>;
-  /** 运行时删除状态变量。 */
-  deleteSvid(sessionId: string, svid: number): Promise<number>;
-  /** 运行时新增采集事件(事件设置页)。 */
-  addCeid(sessionId: string, ceid: CeidInput): Promise<number>;
-  /** 运行时更新采集事件(符号名/绑定报告)。 */
-  updateCeid(sessionId: string, ceid: number, def: CeidInput): Promise<number>;
-  /** 运行时删除采集事件。 */
-  deleteCeid(sessionId: string, ceid: number): Promise<number>;
-  /** 「设定」状态变量的值(钉住,覆盖曲线与事件效果)。 */
-  setSvidValue(sessionId: string, svid: number, value: number): Promise<number>;
-  /** 取消「设定」。 */
-  clearSvidValue(sessionId: string, svid: number): Promise<number>;
   /** 手动发送一条 SML 报文。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */
@@ -553,6 +485,8 @@ export interface ApiClient {
   configRevisions(name: string, limit?: number): Promise<Array<{
     revision: number; sha256: string; createdAt: number; createdBy: string; note: string;
   }>>;
+  /** 按配置草稿算确定性预览（含事件时间线）；草稿编译失败返回 null。 */
+  previewConfigDraft(text: string, fromMs: number, toMs: number, buckets: number, withEvents?: boolean): Promise<PreviewData | null>;
 }
 
 /** 3.0 v2：主机独立命名空间（实现见 api/hostsV2.ts）。 */
@@ -577,6 +511,10 @@ export interface ApiClient {
   applyHostV2(hostId: string): Promise<void>;
   sendHostV2(hostId: string, sml: string): Promise<SentMessageResult>;
   hostTemplatesV2(): Promise<import('./hostsV2').HostTemplate[]>;
+  /** 主机配置区方案库（Trace / S1F3 采集，落 config.db）。 */
+  listHostPlansV2(hostId: string, kind: 'trace' | 'collect'): Promise<Record<string, unknown>[]>;
+  saveHostPlanV2(hostId: string, kind: 'trace' | 'collect', plan: Record<string, unknown>): Promise<void>;
+  deleteHostPlanV2(hostId: string, kind: 'trace' | 'collect', planId: string): Promise<void>;
   saveHostTemplateV2(request: {
     id?: string;
     name: string;

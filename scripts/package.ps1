@@ -243,8 +243,8 @@ function Invoke-LinuxPackage {
         $sqliteZip.Dispose()
     }
     Copy-Item "$web/*" (Join-Path $stage 'web') -Recurse
-    Copy-Item (Join-Path $service 'packaging/start-server.sh') $stage
-    Copy-Item (Join-Path $service 'packaging/README-linux.txt') (Join-Path $stage 'README.txt')
+    Copy-Item (Join-Path $service 'scripts/packaging/start-server.sh') $stage
+    Copy-Item (Join-Path $service 'scripts/packaging/README-linux.txt') (Join-Path $stage 'README.txt')
     Copy-Item (Join-Path $root 'docs/guides/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
     Set-Content -Path (Join-Path $stage 'VERSION') -Value $version -Encoding ASCII
     (Get-Content (Join-Path $stage 'README.txt') -Raw -Encoding UTF8).Replace('<版本>', $version) |

@@ -85,8 +85,14 @@ public final class SessionConfigJson {
 
         String id = JsonAccess.string(session, "id", sessionPath);
         boolean passive = JsonAccess.bool(session, "passive", true, sessionPath);
-        String bindHost = JsonAccess.optionalString(session, "bindHost", sessionPath).orElse("127.0.0.1");
-        int port = JsonAccess.optionalInt(session, "port", sessionPath).orElse(0);
+        String bindHost = JsonAccess.optionalString(session, "bindHost", sessionPath).orElse("0.0.0.0");
+        /* 端口必填：设备的 SECS 口以配置（数据库）为准，没有兜底 */
+        int port = JsonAccess.optionalInt(session, "port", sessionPath).orElseGet(() -> {
+            throw new ConfigException(sessionPath + ".port", "端口必须填写（1..65535）");
+        });
+        if (port < 1 || port > 65_535) {
+            throw new ConfigException(sessionPath + ".port", "端口必须填写（1..65535），实际 " + port);
+        }
         int deviceId = JsonAccess.optionalInt(session, "deviceId", sessionPath).orElse(10);
         long seed = session.containsKey("seed") ? JsonAccess.longValue(session, "seed", sessionPath) : 0L;
 

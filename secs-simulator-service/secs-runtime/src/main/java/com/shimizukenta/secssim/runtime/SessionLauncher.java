@@ -26,7 +26,6 @@ import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.value.ValueSource;
-import com.shimizukenta.secssim.runtime.session.DemoEquipment;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
 /**
@@ -44,18 +43,11 @@ import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
  */
 public final class SessionLauncher {
 
-    /** 请求里代表"建一个内置演示会话"的关键字。 */
-    public static final String DEMO = "demo";
-
-    private static final long DEMO_SEED = 20240601L;
-    private static final String DEMO_ID = "demo";
-
     private final SessionManager sessions;
     private final EventBus bus;
     private final Path workDir;
     /** 配置门面（3.0：正文在 config.db）；create/reload/常量回写都经它。 */
     private ConfigStore configStore;
-    private final int defaultHsmsPort;
     /** 状态通知总线(v6);默认 null,可用 {@link #noticeBus(NoticeBus)} 挂上。 */
     private volatile NoticeBus noticeBus;
 
@@ -90,22 +82,20 @@ public final class SessionLauncher {
     /**
      * 创建启动器。
      *
-     * @param sessions        会话注册表
-     * @param bus             事件总线
-     * @param workDir         配置目录
-     * @param defaultHsmsPort 配置未指定端口时使用的 SECS 端口
+     * @param sessions 会话注册表
+     * @param bus      事件总线
+     * @param workDir  配置目录
      */
-    public SessionLauncher(SessionManager sessions, EventBus bus, Path workDir, int defaultHsmsPort) {
+    public SessionLauncher(SessionManager sessions, EventBus bus, Path workDir) {
         this.sessions = sessions;
         this.bus = bus;
         this.workDir = workDir;
-        this.defaultHsmsPort = defaultHsmsPort;
     }
 
     /**
      * 按请求创建一个会话。
      *
-     * @param name {@code demo} 或 {@code work-dir} 下的配置文件名
+     * @name work-dir 下的配置文件名（数据库设备的正文）
      * @return 新建的会话标识
      * @throws ConfigException 名称非法、配置读不了或编译不过
      * @throws IOException     端口绑定失败
@@ -120,7 +110,7 @@ public final class SessionLauncher {
      * <p>多台设备复用同一份设备配置时，只有 id / 端口 / device-id 需要逐台给；
      * 覆盖不写回配置文件，重载时会原样再套一遍。</p>
      *
-     * @param name      {@code demo} 或 {@code work-dir} 下的配置文件名
+     * @param name      work-dir 下的配置文件名
      * @param overrides 部署期覆盖；{@code null} 视为不覆盖
      * @return 新建的会话标识
      * @throws ConfigException 名称非法、配置读不了或编译不过
@@ -129,18 +119,13 @@ public final class SessionLauncher {
     public String create(String name, SessionOverrides overrides) throws ConfigException, IOException {
         String trimmed = name == null ? "" : name.trim();
         if (trimmed.isEmpty()) {
-            throw new ConfigException("$.config", "不能为空（填 demo 或 work-dir 下的配置文件名）");
+            throw new ConfigException("$.config", "不能为空（填 work-dir 下的配置文件名）");
         }
         SessionOverrides safe = overrides == null ? SessionOverrides.NONE : overrides;
 
-        if (DEMO.equalsIgnoreCase(trimmed)) {
-            /* 演示会话是内置样品，不参与部署覆盖 */
-            return startDemo(DEMO_ID, this.defaultHsmsPort, 10);
-        }
-
         String configName = resolveConfigName(trimmed);
         String body = this.configStore.read(configName);
-        return startFromConfig(configName, body, this.defaultHsmsPort, safe).id();
+        return startFromConfig(configName, body, safe).id();
     }
 
     /**
@@ -185,7 +170,7 @@ public final class SessionLauncher {
             /* 先构造新的：编译不过时旧会话还好端端地跑着。
                部署覆盖与来源配置一起带上——否则重载第 2 台会抢第 1 台的端口。 */
             String body = this.configStore.read(source.configName());
-            Prepared prepared = prepare(source.configName(), body, this.defaultHsmsPort, source.overrides());
+            Prepared prepared = prepare(source.configName(), body, source.overrides());
             String fingerprint = structureFingerprint(body);
             SessionRuntime current = this.sessions.find(id).orElse(null);
 
@@ -295,60 +280,15 @@ public final class SessionLauncher {
     }
 
     /**
-     * 启动进程内置的演示会话。
-     *
-     * @param id       会话标识
-     * @param hsmsPort SECS 端口
-     * @param deviceId device-id
-     * @return 会话标识
-     * @throws IOException 端口绑定失败
-     */
-    public String startDemo(String id, int hsmsPort, int deviceId) throws IOException {
-        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", deviceId);
-        CompilationResult compiled = EquipmentCompiler.compile(demo);
-        if (!compiled.ok()) {
-            throw new ConfigException("$.demo", "内置演示设备编译失败");
-        }
-
-        SessionSpec spec = new SessionSpec(id, true, "127.0.0.1", hsmsPort, deviceId, DEMO_SEED, demo);
-        this.lifecycleLock.lock();
-        try {
-            /* 先判标识冲突：否则同一端口的既有会话会让端口预检先命中，
-               把「标识重复」报成「端口被占」，用户会去改一个没问题的端口。
-               （startFromFile 一直有这一步，演示会话漏了。） */
-            if (this.sessions.find(id).isPresent()) {
-                throw new IllegalArgumentException("session already registered: " + id);
-            }
-            requirePortFree(id, spec);
-            HsmsSessionRuntime runtime = new HsmsSessionRuntime(spec, compiled.equipment());
-            this.bus(runtime);
-            runtime.enableSchedule(new EventSchedule(List.of(
-                    new EventPlan("demo-process-start", 2001, new Trigger.Periodic(5_000L, 200L)))), 20);
-            runtime.open();
-            try {
-                this.sessions.register(runtime);
-            } catch (RuntimeException e) {
-                /* 注册失败（重复 id / 管理器已关闭）时已经 open 的会话必须关掉 */
-                runtime.close();
-                throw e;
-            }
-            return id;
-        } finally {
-            this.lifecycleLock.unlock();
-        }
-    }
-
-    /**
      * 从配置文件启动一个会话（外部 {@code --config} 场景：文件在 work-dir 之外）。
      *
-     * @param file        配置文件
-     * @param defaultPort 配置未指定端口时使用的 SECS 端口
+     * @param file 配置文件
      * @return 会话
      * @throws ConfigException 配置读不了或编译不过
      * @throws IOException     端口绑定失败
      */
-    public HsmsSessionRuntime startFromFile(Path file, int defaultPort) throws ConfigException, IOException {
-        return this.startFromFile(file, defaultPort, SessionOverrides.NONE);
+    public HsmsSessionRuntime startFromFile(Path file) throws ConfigException, IOException {
+        return this.startFromFile(file, SessionOverrides.NONE);
     }
 
     /**
@@ -357,14 +297,13 @@ public final class SessionLauncher {
      * <p>3.0 里 work-dir 内的配置存 config.db；这条入口只服务 work-dir 之外的
      * 外部文件（{@code --config}），读进正文后与库内配置走同一条组装路径。</p>
      *
-     * @param file        配置文件
-     * @param defaultPort 配置未指定端口时使用的 SECS 端口
-     * @param overrides   部署期覆盖
+     * @param file      配置文件
+     * @param overrides 部署期覆盖
      * @return 会话
      * @throws ConfigException 配置读不了或编译不过
      * @throws IOException     端口绑定失败
      */
-    public HsmsSessionRuntime startFromFile(Path file, int defaultPort, SessionOverrides overrides)
+    public HsmsSessionRuntime startFromFile(Path file, SessionOverrides overrides)
             throws ConfigException, IOException {
         String body;
         try {
@@ -373,7 +312,7 @@ public final class SessionLauncher {
             throw new ConfigException("$.config", "读不了配置文件 " + file.getFileName() + ": " + e.getMessage());
         }
         String configName = file.getFileName().toString();
-        return startFromConfig(configName, body, defaultPort, overrides);
+        return startFromConfig(configName, body, overrides);
     }
 
     /**
@@ -381,16 +320,14 @@ public final class SessionLauncher {
      *
      * @param configName 配置名（文件名，诊断与常量回写定位用）
      * @param body       配置正文
-     * @param defaultPort 配置未指定端口时使用的 SECS 端口
      * @param overrides  部署期覆盖
      * @return 会话
      * @throws ConfigException 配置编译不过
      * @throws IOException     端口绑定失败
      */
-    public HsmsSessionRuntime startFromConfig(String configName, String body, int defaultPort,
-                                              SessionOverrides overrides)
+    public HsmsSessionRuntime startFromConfig(String configName, String body, SessionOverrides overrides)
             throws ConfigException, IOException {
-        Prepared prepared = prepare(configName, body, defaultPort, overrides);
+        Prepared prepared = prepare(configName, body, overrides);
         this.lifecycleLock.lock();
         try {
             /* 先把"会话 id 已存在"判掉：否则同一端口的既有会话会让端口检查先命中，
@@ -418,7 +355,7 @@ public final class SessionLauncher {
     }
 
     /** 读配置、编译、组装好但还没 open。 */
-    private Prepared prepare(String configName, String body, int defaultPort, SessionOverrides overrides)
+    private Prepared prepare(String configName, String body, SessionOverrides overrides)
             throws ConfigException {
         SessionConfig config;
         try {
@@ -436,8 +373,8 @@ public final class SessionLauncher {
         SessionSpec configured = config.spec();
         String id = overrides.sessionId() != null ? overrides.sessionId() : configured.id();
         String bindHost = overrides.bindHost() != null ? overrides.bindHost() : configured.bindHost();
-        int port = overrides.port() != null ? overrides.port()
-                : configured.port() == 0 ? defaultPort : configured.port();
+        /* 端口以配置（数据库）为准，没有兜底；部署期覆盖仍可替换 */
+        int port = overrides.port() != null ? overrides.port() : configured.port();
         int deviceId = overrides.deviceId() != null ? overrides.deviceId() : configured.deviceId();
         SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
                 configured.seed(), configured.equipment(), configured.timeouts());

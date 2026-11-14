@@ -329,6 +329,18 @@ public final class PlanExecutionRepository implements Closeable {
         });
     }
 
+    /** 清空某台设备的台账（界面「清理」按钮）；返回删除行数。 */
+    public int clearForDevice(String deviceId) {
+        return this.db.writeRuntime(connection -> {
+            try (var st = connection.prepareStatement("DELETE FROM plan_execution WHERE device_id=?")) {
+                st.setString(1, deviceId);
+                return st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("清理台账失败: " + e.getMessage(), e);
+            }
+        });
+    }
+
     @Override
     public synchronized void close() {
         if (this.closed) {

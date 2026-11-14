@@ -37,6 +37,7 @@ import { HostDetailPage } from '../features/pages/HostDetailPage';
 import { HostTemplatePage } from '../features/pages/HostTemplatePage';
 import { SystemPage } from '../features/pages/SystemPage';
 import { TemplatePage } from '../features/pages/TemplatePage';
+import { SvidTemplatePage } from '../features/pages/SvidTemplatePage';
 import { MessageMonitorDrawer, type MonitorScope, type MonitorTarget } from '../features/panels/MessageMonitorDrawer';
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
@@ -75,7 +76,7 @@ export function App(): JSX.Element {
   const [helpOpen, setHelpOpen] = useState(false);
   /** 右侧实时消息监控：展开状态与宽度都记住，收起后不占版面。 */
   const [monitorOpen, setMonitorOpen] = usePersistentState<boolean>('secs.ui.monitor.open', false);
-  const [monitorWidth, setMonitorWidth] = usePersistentState<number>('secs.ui.monitor.width', 420);
+  const [monitorWidth, setMonitorWidth] = usePersistentState<number>('secs.ui.monitor.width', 620);
   const [liveEvents, setLiveEvents] = useState<NoticeWire[]>([]);
   /** 实时报文缓冲：SSE 增量 + 历史补拉，消息监视面板消费。 */
   const [liveMessages, setLiveMessages] = useState<WireMessage[]>([]);
@@ -188,12 +189,12 @@ export function App(): JSX.Element {
   const goTo = useCallback(
     (id: string) => {
       if (id.startsWith('device-tab:')) {
-        /* 旧面板 id:映射进两段式（命令面板只传 svids，其余旧 id 归运行区首页） */
+        /* 旧面板 id:映射进两段式（定义类页签迁到配置区，其余旧 id 归运行区首页） */
         const [, sessionId, tab] = id.split(':');
         const mapped: Record<string, [DeviceZone, DevicePage]> = {
-          svids: ['runtime', 'svids'],
+          svids: ['config', 'svids'],
         };
-        const hit = mapped[tab] ?? ['runtime', 'catalog'];
+        const hit = mapped[tab] ?? ['runtime', 'plans'];
         navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
         return;
       }
@@ -209,12 +210,12 @@ export function App(): JSX.Element {
       }
       if (id.startsWith('host-open:')) {
         /* 从左侧菜单/列表进主机，默认落在运行区；配置区由实例头上的切换按钮进入。 */
-        navigate({ name: 'host', hostId: id.slice('host-open:'.length), zone: 'runtime', page: 'status' });
+        navigate({ name: 'host', hostId: id.slice('host-open:'.length), zone: 'runtime', page: 'messages' });
         return;
       }
       if (id.startsWith('host-zone:')) {
         const [, hostId, zone] = id.split(':');
-        navigate({ name: 'host', hostId, zone: zone as HostZone, page: zone === 'config' ? 'overview' : 'status' });
+        navigate({ name: 'host', hostId, zone: zone as HostZone, page: zone === 'config' ? 'overview' : 'messages' });
         return;
       }
       if (id.startsWith('host-page:')) {
@@ -228,6 +229,10 @@ export function App(): JSX.Element {
       }
       if (id === 'host-templates') {
         navigate({ name: 'host-templates' });
+        return;
+      }
+      if (id === 'svid-templates') {
+        navigate({ name: 'svid-templates' });
         return;
       }
       if (id.startsWith('device:')) {
@@ -254,9 +259,9 @@ export function App(): JSX.Element {
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
             const mapped: Record<string, [DeviceZone, DevicePage]> = {
-              catalog: ['runtime', 'catalog'],
+              catalog: ['config', 'events'],
             };
-            const hit = mapped[id] ?? ['runtime', 'catalog'];
+            const hit = mapped[id] ?? ['runtime', 'plans'];
             navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
           } else {
             navigate({ name: 'workbench' });
@@ -279,7 +284,7 @@ export function App(): JSX.Element {
       : route.name === 'hosts' ? 'hosts'
         : route.name === 'host-templates' ? 'host-templates'
           : route.name === 'system' ? `system:${route.page}`
-            : route.name === 'templates' ? 'templates' : 'workbench';
+            : route.name === 'templates' || route.name === 'svid-templates' ? 'templates' : 'workbench';
 
   useEffect(() => {
     void refreshRef.current();
@@ -500,14 +505,27 @@ export function App(): JSX.Element {
       ? hostTitle
       : routeTitle(route);
 
-  const sidebarDevices: SidebarDevice[] = backend.sessions.map((session) => ({
-    id: session.id,
-    label: `${session.device}`,
-    state: session.state,
-    controlState: session.controlState,
-    template: backend.configList.find((entry) => entry.name === session.config)?.template ?? '',
-    config: session.config,
-  }));
+  const sidebarDevices: SidebarDevice[] = [
+    ...backend.sessions.map((session) => ({
+      id: session.id,
+      label: `${session.device}`,
+      state: session.state,
+      controlState: session.controlState,
+      template: backend.configList.find((entry) => entry.name === session.config)?.template ?? '',
+      config: session.config,
+    })),
+    /* 数据库里还没启动的设备也进树：配置区照常可看可改，点「启动」才创建会话 */
+    ...backend.configList
+      .filter((entry) => !backend.sessions.some((session) => session.config === entry.name))
+      .map((entry) => ({
+        id: entry.name,
+        label: entry.name.replace(/\.json$/i, ''),
+        state: 'CLOSED',
+        template: entry.template ?? '',
+        config: entry.name,
+        notStarted: true,
+      })),
+  ];
 
   const panelProps = {
     backend,
@@ -587,6 +605,7 @@ export function App(): JSX.Element {
           )}
           {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
       {route.name === 'templates' && <TemplatePage {...panelProps} />}
+      {route.name === 'svid-templates' && <SvidTemplatePage {...panelProps} />}
         </main>
       </div>
 

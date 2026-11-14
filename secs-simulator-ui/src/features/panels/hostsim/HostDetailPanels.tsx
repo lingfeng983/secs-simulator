@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
+import { DataTable, type Column } from '../../../shared/ui/DataTable';
 import { SmlResult } from '../../../shared/ui/SmlResult';
+import { Modal } from '../../../shared/ui/Modal';
 import { VariableChart } from '../../charts/VariableChart';
 import type { PanelBaseProps } from '../types';
 import type { HostPage, HostZone } from '../../../app/router';
@@ -8,18 +10,14 @@ import { HOST_PRESETS, PRESET_GROUPS } from './hostPresets';
 import type { HostsV2State } from '../../../state/useHostsV2';
 import type { ApiClient, CollectorState, PreviewSeries, SentMessageResult, WireMessage } from '../../../api';
 import {
-  DEFAULT_COLLECT_DRAFT,
   DEFAULT_TRACE_DRAFT,
   parseIdList,
   planId,
-  useCollectDraft,
   useCollectPlans,
-  useCollectSelection,
   useHostSendDraft,
-  useTraceDraft,
   useTracePlans,
-  useTraceSelection,
   type CollectPlan,
+  type TraceDraft,
   type TracePlan,
 } from '../../../state/hostPlans';
 import { ceidFromS6f11, traceFrameFromS6f1, type TraceFrame } from '../../../shared/lib/smlValues';
@@ -27,9 +25,9 @@ import { ceidFromS6f11, traceFrameFromS6f1, type TraceFrame } from '../../../sha
 /**
  * 主机详情子页分发。
  *
- * <p>配置区 5 页 + 运行区 5 页（消息监控已移到右侧抽屉）。配置区的
- * Trace / 采集设置可以保存多份方案，运行区一键载入并下发；Trace 运行页
- * 直接从实时 S6F1 报文里取参数值画趋势，按 TRID 分别选择要看的参数。</p>
+ * <p>配置区 4 页 + 运行区 3 页（消息监控已移到右侧抽屉，实时状态并入实例头）。
+ * 配置区的 Trace / 采集设置只管理方案与参数；下发、发送与曲线都在运行区。
+ * Trace 运行页直接从实时 S6F1 报文里取参数值画趋势，按 TRID 分别选择要看的参数。</p>
  */
 export function HostDetailPanels({
   hostId,
@@ -56,24 +54,22 @@ export function HostDetailPanels({
       case 'presets':
         return <HostPresetsPanel {...base} />;
       case 'trace':
-        return <HostTracePanel {...base} readOnly />;
+        return <HostTracePanel {...base} readOnly key="trace-config" />;
       case 'collect':
-        return <HostCollectPanel {...base} readOnly />;
+        return <HostCollectPanel {...base} readOnly key="collect-config" />;
       default:
         return <HostOverviewPanel {...base} />;
     }
   }
   switch (page) {
-    case 'status':
-      return <HostRuntimeStatusPanel {...base} />;
     case 'messages':
       return <HostSendPanel {...base} />;
     case 'trace':
-      return <HostTracePanel {...base} />;
+      return <HostTracePanel {...base} key="trace-runtime" />;
     case 'collect':
-      return <HostCollectPanel {...base} />;
+      return <HostCollectPanel {...base} key="collect-runtime" />;
     default:
-      return <HostRuntimeStatusPanel {...base} />;
+      return <HostSendPanel {...base} />;
   }
 }
 
@@ -298,40 +294,7 @@ function HostPresetsPanel({ hostId }: PanelArgs): JSX.Element {
 
 /* ---------- 运行区 ---------- */
 
-/** 实时状态:相位/版本/重试。 */
-function HostRuntimeStatusPanel({ hostId, hosts }: PanelArgs): JSX.Element {
-  const host = hosts.find(hostId);
-  if (host === null) {
-    return <p className="hint">主机不存在。</p>;
-  }
-  return (
-    <section className="panel-section">
-      <div className="section-head">
-        <h2>实时状态</h2>
-      </div>
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-value">{host.phase === 'CONNECTED' ? '链接' : '停止'}</div>
-          <div className="kpi-label">链路状态</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{host.open ? `v${host.appliedRevision}` : '—'}</div>
-          <div className="kpi-label">当前生效版本</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">v{host.settingRevision}</div>
-          <div className="kpi-label">最新设置版本</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{host.autoReconnect ? host.retryCount : '—'}</div>
-          <div className="kpi-label">重试次数</div>
-        </div>
-      </div>
-      {host.lastError ? <p className="inline-note danger">{host.lastError}</p> : null}
-      <p className="hint">断开只关连接;重新连接后按设置恢复,采集会自动恢复。报文收发在右侧「实时消息监控」查看。</p>
-    </section>
-  );
-}
+/** 实时状态页已下线：链路/版本/重试都收进实例头，报文收发在右侧抽屉。 */
 
 /** 消息发送(单主机):预设 + SML 编辑 + 发送 + 压测。 */
 function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
@@ -419,33 +382,90 @@ function buildS2f23(draft: { trid: string; dsper: string; totsmp: string; repgsz
     + '>.';
 }
 
-/** 已保存方案的列表行（配置区用：载入 / 删除）。 */
-function TracePlanRows({
+/** 已保存方案列表（DataTable）：配置区编辑/删除，运行区启停。 */
+function TracePlanTable({
   plans,
+  mode,
   onLoad,
   onDelete,
+  onStart,
+  onStop,
+  busy,
 }: {
   plans: readonly TracePlan[];
+  mode: 'config' | 'runtime';
   onLoad: (plan: TracePlan) => void;
   onDelete: (id: string) => void;
+  onStart: (plan: TracePlan) => void;
+  onStop: (plan: TracePlan) => void;
+  busy: boolean;
 }): JSX.Element {
-  if (plans.length === 0) {
-    return <p className="hint">还没有保存的 Trace 采集方案。填好下面的参数后点「保存为方案」，运行区就能一键使用。</p>;
-  }
-  return (
-    <div className="plan-list">
-      {plans.map((plan) => (
-        <div className="plan-row" key={plan.id}>
-          <span className="plan-name">{plan.name}</span>
-          <span className="plan-meta mono">
-            TRID {plan.trid} · {plan.dsper}ms · {plan.totsmp} 点 · REPGSZ {plan.repgsz} · SVID {plan.svids}
-          </span>
-          <span className="spacer" />
-          <button type="button" onClick={() => onLoad(plan)}>载入</button>
-          <button type="button" className="danger" onClick={() => onDelete(plan.id)}>删除</button>
+  const editing = mode === 'config';
+  const columns: Column<TracePlan>[] = [
+    { key: 'name', header: '方案', sortValue: (row) => row.name, render: (row) => row.name },
+    { key: 'trid', header: 'TRID', align: 'right', sortValue: (row) => row.trid, render: (row) => <span className="mono">{row.trid}</span> },
+    { key: 'dsper', header: '采样周期', align: 'right', sortValue: (row) => row.dsper, render: (row) => <span className="mono">{row.dsper}ms</span> },
+    { key: 'totsmp', header: '样本数', align: 'right', sortValue: (row) => row.totsmp, render: (row) => <span className="mono">{row.totsmp}</span> },
+    { key: 'repgsz', header: 'REPGSZ', align: 'right', sortValue: (row) => row.repgsz, render: (row) => <span className="mono">{row.repgsz}</span> },
+    { key: 'svids', header: 'SVID', render: (row) => <span className="mono hint-inline">{row.svids}</span> },
+    {
+      key: 'actions',
+      header: '操作',
+      render: (row) => (
+        <div className="row-actions">
+          {editing ? (
+            <>
+              <button type="button" onClick={() => onLoad(row)} title="载入到上方表单修改，再点「保存修改」写回">
+                编辑
+              </button>
+              <button type="button" className="danger" onClick={() => onDelete(row.id)} title="删除方案（配置库同步删除）">
+                删除
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => onStart(row)}
+                title="载入方案并下发 S2F23 开始采样"
+              >
+                启动
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onStop(row)}
+                title="对该 TRID 下发 TOTSMP=0，提前终止采样"
+              >
+                停止
+              </button>
+            </>
+          )}
         </div>
-      ))}
-    </div>
+      ),
+    },
+  ];
+  return (
+    <DataTable
+      tableKey={`host-trace-plans-${mode}`}
+      columns={columns}
+      rows={plans}
+      rowKey={(row) => row.id}
+      searchPlaceholder="搜索方案 / TRID / SVID"
+      exportName={`trace-plans-${mode}`}
+      emptyText={editing
+        ? '还没有保存的 Trace 方案。填好上方参数与方案名称后点「保存为方案」。'
+        : '还没有 Trace 方案；到配置区「Trace 设置」新增后这里即可启停。'}
+      exportColumns={[
+        { header: '方案', value: (row) => row.name },
+        { header: 'TRID', value: (row) => String(row.trid) },
+        { header: '采样周期ms', value: (row) => String(row.dsper) },
+        { header: '样本数', value: (row) => String(row.totsmp) },
+        { header: 'SVID', value: (row) => row.svids },
+      ]}
+    />
   );
 }
 
@@ -456,58 +476,114 @@ function TracePlanRows({
  * 顶部直接列出这些方案，点一下就载入并下发。运行区下方把设备推来的
  * S6F1 按 TRID 分组、按变量画趋势，每个 TRID 单独记一组要看的参数。</p>
  */
+/** Trace 方案参数字段（新增/编辑弹窗共用）。 */
+function TracePlanFields({ form, update }: {
+  form: TraceDraft;
+  update: (patch: Partial<TraceDraft>) => void;
+}): JSX.Element {
+  return (
+    <>
+      <div className="form-row">
+        <label className="field">TRID
+          <input type="number" min={1} value={form.trid} onChange={(event) => update({ trid: event.target.value })} />
+        </label>
+        <label className="field">采样周期 ms
+          <input type="number" min={1000} step={1000} value={form.dsper} onChange={(event) => update({ dsper: event.target.value })} />
+        </label>
+        <label className="field">总样本数
+          <input type="number" min={0} value={form.totsmp} onChange={(event) => update({ totsmp: event.target.value })} />
+        </label>
+        <label className="field">每条样本数
+          <input type="number" min={1} value={form.repgsz} onChange={(event) => update({ repgsz: event.target.value })} />
+        </label>
+      </div>
+      <label className="field field-wide">
+        采集变量(逗号/空格分隔)
+        <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />
+      </label>
+    </>
+  );
+}
+
+interface TracePlanForm extends TraceDraft {
+  name: string;
+}
+
+/**
+ * Trace 设置 / 采集。
+ *
+ * <p>配置区只管方案库：列表 + 新增/编辑弹窗 + 删除。运行区同一份方案列表
+ * 提供启停（启动 = 下发 S2F23 开始采样，停止 = 该 TRID 下发 TOTSMP=0）；
+ * 数据曲线按方案折叠，点「查看曲线」才计算绘制，默认不展示。</p>
+ */
 function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
-  const [draft, setDraft] = useTraceDraft(hostId);
   const [plans, setPlans] = useTracePlans(hostId);
-  const [selection, setSelection] = useTraceSelection(hostId);
-  const [planName, setPlanName] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SentMessageResult | null>(null);
   const [error, setError] = useState('');
-  const [preview, setPreview] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<TracePlanForm>({
+    trid: '1', dsper: '1000', totsmp: '100', repgsz: '1', svids: '1001, 1003', name: '',
+  });
+  const [viewingTrid, setViewingTrid] = useState<number | null>(null);
 
-  const update = (patch: Partial<typeof DEFAULT_TRACE_DRAFT>) => setDraft((previous) => ({ ...previous, ...patch }));
+  const updateForm = (patch: Partial<TracePlanForm>) => setForm((previous) => ({ ...previous, ...patch }));
 
-  const savePlan = () => {
-    const label = planName.trim() || `TRID ${draft.trid} · ${draft.dsper}ms`;
-    const next: TracePlan = {
-      id: planId(), name: label,
-      trid: Number(draft.trid) || 1,
-      dsper: Number(draft.dsper) || 1000,
-      totsmp: Number(draft.totsmp) || 0,
-      repgsz: Number(draft.repgsz) || 1,
-      svids: draft.svids,
-      createdAt: Date.now(),
-    };
-    setPlans((previous) => [...previous, next]);
-    setPlanName('');
+  const openCreate = () => {
+    setForm({ trid: '1', dsper: '1000', totsmp: '100', repgsz: '1', svids: '1001, 1003', name: '' });
+    setEditingId(null);
+    setModalOpen(true);
   };
 
-  const loadPlan = (plan: TracePlan) => {
-    setDraft({
+  const openEdit = (plan: TracePlan) => {
+    setForm({
       trid: String(plan.trid), dsper: String(plan.dsper), totsmp: String(plan.totsmp),
-      repgsz: String(plan.repgsz), svids: plan.svids,
+      repgsz: String(plan.repgsz), svids: plan.svids, name: plan.name,
     });
-    setPreview(buildS2f23({
-      trid: String(plan.trid), dsper: String(plan.dsper), totsmp: String(plan.totsmp),
-      repgsz: String(plan.repgsz), svids: plan.svids,
-    }));
+    setEditingId(plan.id);
+    setModalOpen(true);
   };
 
-  const send = async (sml?: string) => {
+  const saveModal = () => {
+    const label = form.name.trim() || `TRID ${form.trid} · ${form.dsper}ms`;
+    const body = {
+      name: label,
+      trid: Number(form.trid) || 1,
+      dsper: Number(form.dsper) || 1000,
+      totsmp: Number(form.totsmp) || 0,
+      repgsz: Number(form.repgsz) || 1,
+      svids: form.svids,
+    };
+    setPlans((previous) => editingId !== null
+      ? previous.map((plan) => (plan.id === editingId ? { ...plan, ...body } : plan))
+      : [...previous, { id: planId(), createdAt: Date.now(), ...body }]);
+    setModalOpen(false);
+  };
+
+  const send = async (sml: string) => {
     setBusy(true);
     setError('');
     try {
-      const body = sml ?? buildS2f23(draft);
-      setPreview(body);
-      setResult(await requireClient(client).sendHostV2(hostId, body));
+      setResult(await requireClient(client).sendHostV2(hostId, sml));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
+
+  const startPlan = (plan: TracePlan) => send(buildS2f23({
+    trid: String(plan.trid), dsper: String(plan.dsper), totsmp: String(plan.totsmp),
+    repgsz: String(plan.repgsz), svids: plan.svids,
+  }));
+
+  const stopPlan = (plan: TracePlan) => send(buildS2f23({
+    /* TOTSMP=0 提前终止该 TRID 的采样 */
+    trid: String(plan.trid), dsper: String(plan.dsper), totsmp: '0',
+    repgsz: String(plan.repgsz), svids: plan.svids,
+  }));
 
   /* 只认本主机收到的 S6F1：主机视角 direction=out 表示设备发来 */
   const frames = useMemo(() => {
@@ -527,7 +603,7 @@ function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: Pane
     return result;
   }, [messages, hostId]);
 
-  const traceGroups = useMemo(() => buildTraceGroups(frames, plans, draft), [frames, plans, draft]);
+  const groups = useMemo(() => buildTraceGroups(frames, plans, DEFAULT_TRACE_DRAFT), [frames, plans]);
 
   if (host === null) {
     return <p className="hint">主机不存在。</p>;
@@ -538,160 +614,111 @@ function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: Pane
       <Panel
         id="panel-host-trace"
         title={readOnly ? 'Trace 设置（S2F23 方案库）' : 'Trace 采集（S2F23 → S6F1）'}
-        description="设备按 DSPER 采样、REPGSZ 分条上报 S6F1;DSPER 是 hhmmss 六位数字(整秒)。可保存多份方案，运行区一键调用。"
+        description={readOnly
+          ? 'S2F23 方案库：新增 / 编辑 / 删除方案（DSPER 是 hhmmss 六位数字、整秒）。\n下发与趋势曲线在运行区「Trace 采集」。'
+          : '设备按 DSPER 采样、REPGSZ 分条上报 S6F1。方案列表里启停；点「查看曲线」看对应 TRID 的趋势。'}
+        actions={readOnly
+          ? <button type="button" className="primary" onClick={openCreate}>新增方案</button>
+          : undefined}
       >
         {error !== '' && <p className="inline-note danger">{error}</p>}
         {host.open && !readOnly && host.phase !== 'CONNECTED' && (
           <p className="problems">主机还没连接,先到实例头点「连接」。</p>
         )}
 
-        {!readOnly && plans.length > 0 && (
-          <div className="plan-chips">
-            <span className="hint-inline">一键使用已存方案：</span>
-            {plans.map((plan) => (
-              <button
-                className="plan-chip"
-                type="button"
-                key={plan.id}
-                disabled={busy || !host.open}
-                title={`载入 ${plan.name} 并立即发送 S2F23`}
-                onClick={() => {
-                  loadPlan(plan);
-                  void send(buildS2f23({
-                    trid: String(plan.trid), dsper: String(plan.dsper), totsmp: String(plan.totsmp),
-                    repgsz: String(plan.repgsz), svids: plan.svids,
-                  }));
-                }}
-              >
-                {plan.name} · TRID {plan.trid}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="form-row">
-          <label className="field">TRID
-            <input type="number" min={1} value={draft.trid} onChange={(event) => update({ trid: event.target.value })} />
-          </label>
-          <label className="field">采样周期 ms
-            <input type="number" min={1000} step={1000} value={draft.dsper} onChange={(event) => update({ dsper: event.target.value })} />
-          </label>
-          <label className="field">总样本数
-            <input type="number" min={0} value={draft.totsmp} onChange={(event) => update({ totsmp: event.target.value })} />
-          </label>
-          <label className="field">每条样本数
-            <input type="number" min={1} value={draft.repgsz} onChange={(event) => update({ repgsz: event.target.value })} />
-          </label>
-        </div>
-        <label className="field field-wide">
-          采集变量(逗号/空格分隔)
-          <input value={draft.svids} onChange={(event) => update({ svids: event.target.value })} />
-        </label>
-
-        <div className="form-row" style={{ marginTop: 8 }}>
-          <label className="field field-wide">
-            方案名称（留空自动生成）
-            <input value={planName} onChange={(event) => setPlanName(event.target.value)} placeholder="如：温度曲线 1s" />
-          </label>
-          <div className="toolbar" style={{ alignItems: 'flex-end' }}>
-            <button type="button" onClick={savePlan}>保存为方案</button>
-            <button type="button" onClick={() => setDraft({ ...DEFAULT_TRACE_DRAFT })}>恢复默认</button>
-            <button type="button" onClick={() => setPreview(buildS2f23(draft))}>生成 S2F23</button>
-            {!readOnly && (
-              <button type="button" className="primary" disabled={busy || !host.open} onClick={() => void send()}>
-                {busy ? '发送中…' : '生成并发送'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <TracePlanRows
+        <TracePlanTable
+          mode={readOnly ? 'config' : 'runtime'}
           plans={plans}
-          onLoad={loadPlan}
+          onLoad={openEdit}
           onDelete={(id) => setPlans((previous) => previous.filter((plan) => plan.id !== id))}
+          onStart={startPlan}
+          onStop={stopPlan}
+          busy={busy}
         />
 
-        {preview !== '' && <pre className="sml-result">{preview}</pre>}
-        {result !== null && (
+        {!readOnly && result !== null && (
           <SmlResult
             header={`发送 ${host.id}  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`}
             result={result}
             peerLabel="设备"
           />
         )}
-        <p className="hint">TOTSMP=0 可提前终止该 TRID。已保存的方案按主机保存在本机，切页签/重启页面不会丢。</p>
+        <p className="hint">TOTSMP=0 可提前终止该 TRID。方案按主机落配置库（config.db），重启后端、换机器都不丢。</p>
       </Panel>
 
       {!readOnly && (
         <Panel
           id="panel-host-trace-charts"
           title="S6F1 参数趋势"
-          description="实时解析本主机收到的 S6F1 报文体，按 TRID 分组画曲线。每个 Trace 计划可以单独勾选要看的参数。"
+          description="按方案折叠；点「查看曲线」才解析绘制该 TRID 的趋势，默认不展示。"
         >
-          {traceGroups.length === 0 ? (
-            <p className="hint">还没有收到 S6F1。下发一条 S2F23 并等设备上报后，这里会出现每个 TRID 的参数曲线。</p>
-          ) : (
-            traceGroups.map((group) => {
-              const selected = selection[group.key] ?? group.defaultSelection;
-              return (
-                <section className="trace-group" key={group.key}>
-                  <div className="section-head">
-                    <h3>TRID {group.trid} <span className="hint-inline">{group.label} · {group.frames.length} 帧</span></h3>
-                  </div>
-                  <div className="param-picker">
-                    <span className="hint-inline">要看的参数：</span>
-                    {group.svids.map((svid) => (
-                      <label className="check-inline" key={svid}>
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(svid)}
-                          onChange={(event) => {
-                            const next = event.target.checked
-                              ? [...selected, svid]
-                              : selected.filter((id) => id !== svid);
-                            setSelection((previous) => ({ ...previous, [group.key]: next }));
-                          }}
-                        />
-                        <span className="mono">{svid}</span>
-                      </label>
-                    ))}
-                    <span className="spacer" />
-                    <button type="button" onClick={() => setSelection((previous) => ({ ...previous, [group.key]: group.svids }))}>全选</button>
-                    <button type="button" onClick={() => setSelection((previous) => ({ ...previous, [group.key]: [] }))}>全不选</button>
-                  </div>
-                  {selected.length === 0 ? (
-                    <p className="hint">没有勾选参数；点上面的变量或「全选」后显示曲线。</p>
-                  ) : (
+          {plans.length === 0 && <p className="hint">还没有 Trace 方案；到配置区新增后这里按方案看趋势。</p>}
+          {plans.map((plan) => {
+            const open = viewingTrid === plan.trid;
+            const group = groups.find((item) => item.trid === plan.trid);
+            return (
+              <section key={plan.id} className="panel-section">
+                <div className="section-head">
+                  <h3>{plan.name} <span className="mono hint-inline">TRID {plan.trid} · {plan.dsper}ms</span></h3>
+                  <button type="button" onClick={() => setViewingTrid(open ? null : plan.trid)}>
+                    {open ? '收起曲线' : '查看曲线'}
+                  </button>
+                </div>
+                {open && (group === undefined
+                  ? <p className="hint">该 TRID 还没有收到 S6F1 报文；先「启动」并等设备上报。</p>
+                  : (
                     <div className="collector-charts">
-                      {group.series
-                        .filter((item) => selected.includes(item.svid))
-                        .map((item) => (
-                          <div className="collector-chart collector-chart-large" key={item.svid}>
-                            <div className="collector-chart-head">
-                              <span className="mono">{item.svid}</span>
-                              <span>{item.label}</span>
-                              <span className="spacer" />
-                              <span className="hint-inline">
-                                {item.v.length} 点 · 最近 {item.v.length > 0 ? item.v[item.v.length - 1].toFixed(2) : '—'}
-                              </span>
-                            </div>
-                            <VariableChart
-                              series={{ svid: item.svid, owner: item.label, unit: '', min: item.v, max: item.v, avg: item.v }}
-                              fromMs={item.t.length > 0 ? item.t[0] : Date.now()}
-                              bucketMs={item.bucketMs}
-                              height={170}
-                              eventLabel="事件"
-                            />
+                      {group.series.map((item) => (
+                        <div className="collector-chart collector-chart-large" key={item.svid}>
+                          <div className="collector-chart-head">
+                            <span className="mono">{item.svid}</span>
+                            <span>{item.label}</span>
+                            <span className="spacer" />
+                            <span className="hint-inline">
+                              {item.v.length} 点 · 最近 {item.v.length > 0 ? item.v[item.v.length - 1].toFixed(2) : '—'}
+                            </span>
                           </div>
-                        ))}
+                          <VariableChart
+                            series={{ svid: item.svid, owner: item.label, unit: '', min: item.v, max: item.v, avg: item.v }}
+                            fromMs={item.t.length > 0 ? item.t[0] : Date.now()}
+                            bucketMs={item.bucketMs}
+                            height={170}
+                            eventLabel="事件"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </section>
-              );
-            })
-          )}
+                  ))}
+              </section>
+            );
+          })}
         </Panel>
       )}
+
+      <Modal
+        open={modalOpen}
+        title={editingId !== null ? '编辑 Trace 方案' : '新增 Trace 方案'}
+        onClose={() => setModalOpen(false)}
+        footer={
+          <>
+            <button type="button" onClick={() => setModalOpen(false)}>取消</button>
+            <button type="button" className="primary" onClick={saveModal}>保存</button>
+          </>
+        }
+      >
+        <div className="form-row">
+          <label className="field field-wide">
+            方案名称（留空自动生成）
+            <input
+              value={form.name}
+              onChange={(event) => updateForm({ name: event.target.value })}
+              placeholder="如：温度曲线 1s"
+            />
+          </label>
+        </div>
+        <TracePlanFields form={form} update={updateForm} />
+        <p className="hint">DSPER 是 hhmmss 六位数字（整秒）；TOTSMP=0 表示提前终止该 TRID。</p>
+      </Modal>
     </div>
   );
 }
@@ -783,46 +810,142 @@ function buildTraceGroups(
 /* ---------- S1F3 数据采集 ---------- */
 
 /** 已保存的 S1F3 采集配置列表。 */
-function CollectPlanRows({
+/** 已保存采集配置列表（DataTable）：配置区编辑/删除，运行区启停。 */
+function CollectPlanTable({
   plans,
+  mode,
   onLoad,
   onDelete,
+  onStart,
+  onStop,
+  busy,
 }: {
   plans: readonly CollectPlan[];
+  mode: 'config' | 'runtime';
   onLoad: (plan: CollectPlan) => void;
   onDelete: (id: string) => void;
+  onStart: (plan: CollectPlan) => void;
+  onStop: () => void;
+  busy: boolean;
 }): JSX.Element {
-  if (plans.length === 0) {
-    return <p className="hint">还没有保存的采集配置。填好下面的参数后点「保存为配置」，运行区就能一键下发。</p>;
-  }
-  return (
-    <div className="plan-list">
-      {plans.map((plan) => (
-        <div className="plan-row" key={plan.id}>
-          <span className="plan-name">{plan.name}</span>
-          <span className="plan-meta mono">
-            CEID {plan.startCeid}/{plan.stopCeid} · {plan.intervalMs}ms · SVID {plan.svids}
-          </span>
-          <span className="spacer" />
-          <button type="button" onClick={() => onLoad(plan)}>载入</button>
-          <button type="button" className="danger" onClick={() => onDelete(plan.id)}>删除</button>
+  const editing = mode === 'config';
+  const columns: Column<CollectPlan>[] = [
+    { key: 'name', header: '配置', sortValue: (row) => row.name, render: (row) => row.name },
+    { key: 'startCeid', header: '启动 CEID', align: 'right', sortValue: (row) => Number(row.startCeid) || 0, render: (row) => <span className="mono">{row.startCeid}</span> },
+    { key: 'stopCeid', header: '停止 CEID', align: 'right', sortValue: (row) => Number(row.stopCeid) || 0, render: (row) => <span className="mono">{row.stopCeid}</span> },
+    { key: 'intervalMs', header: '周期', align: 'right', sortValue: (row) => Number(row.intervalMs) || 0, render: (row) => <span className="mono">{row.intervalMs}ms</span> },
+    { key: 'svids', header: 'SVID', render: (row) => <span className="mono hint-inline">{row.svids}</span> },
+    {
+      key: 'actions',
+      header: '操作',
+      render: (row) => (
+        <div className="row-actions">
+          {editing ? (
+            <>
+              <button type="button" onClick={() => onLoad(row)} title="载入到上方表单修改，再点「保存修改」写回">
+                编辑
+              </button>
+              <button type="button" className="danger" onClick={() => onDelete(row.id)} title="删除配置（配置库同步删除）">
+                删除
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => onStart(row)}
+                title="下发该配置并启动采集"
+              >
+                启动
+              </button>
+              <button type="button" disabled={busy} onClick={onStop} title="停止采集">
+                停止
+              </button>
+            </>
+          )}
         </div>
-      ))}
-    </div>
+      ),
+    },
+  ];
+  return (
+    <DataTable
+      tableKey={`host-collect-plans-${mode}`}
+      columns={columns}
+      rows={plans}
+      rowKey={(row) => row.id}
+      searchPlaceholder="搜索配置 / CEID / SVID"
+      exportName={`collect-plans-${mode}`}
+      emptyText={editing
+        ? '还没有保存的采集配置。填好上方参数与配置名称后点「保存为配置」。'
+        : '还没有采集配置；到配置区「采集设置」新增后这里即可启停。'}
+      exportColumns={[
+        { header: '配置', value: (row) => row.name },
+        { header: '启动CEID', value: (row) => row.startCeid },
+        { header: '停止CEID', value: (row) => row.stopCeid },
+        { header: '周期ms', value: (row) => row.intervalMs },
+        { header: 'SVID', value: (row) => row.svids },
+      ]}
+    />
   );
 }
 
 /** 数据采集(S1F3 轮询):多份配置 + 启停 CEID 兜底触发 + 可选参数曲线。 */
+/** 采集配置字段（新增/编辑弹窗共用）。 */
+function CollectPlanFields({ form, update }: {
+  form: CollectPlanForm;
+  update: (patch: Partial<CollectPlanForm>) => void;
+}): JSX.Element {
+  return (
+    <>
+      <div className="form-row">
+        <label className="field">启动 CEID
+          <input value={form.startCeid} onChange={(event) => update({ startCeid: event.target.value })} />
+        </label>
+        <label className="field">停止 CEID
+          <input value={form.stopCeid} onChange={(event) => update({ stopCeid: event.target.value })} />
+        </label>
+        <label className="field">周期 ms
+          <input value={form.intervalMs} onChange={(event) => update({ intervalMs: event.target.value })} />
+        </label>
+      </div>
+      <label className="field field-wide">
+        采集变量(逗号/空格分隔)
+        <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />
+      </label>
+    </>
+  );
+}
+
+interface CollectPlanForm {
+  name: string;
+  startCeid: string;
+  stopCeid: string;
+  intervalMs: string;
+  svids: string;
+}
+
+/**
+ * 数据采集（S1F3 轮询）。
+ *
+ * <p>配置区只管配置库：列表 + 新增/编辑弹窗 + 删除。运行区同一份列表提供
+ * 启停（启动 = 下发该配置并开始采集，停止 = 停止采集）；数据曲线按配置
+ * 折叠，点「查看曲线」才展示，默认不展示。</p>
+ */
 function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
-  const [draft, setDraft] = useCollectDraft(hostId);
   const [plans, setPlans] = useCollectPlans(hostId);
-  const [selection, setSelection] = useCollectSelection(hostId);
-  const [planName, setPlanName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [state, setState] = useState<CollectorState | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<CollectPlanForm>({
+    name: '', startCeid: '2001', stopCeid: '2002', intervalMs: '1000', svids: '1001, 1003',
+  });
+  const [viewingPlanId, setViewingPlanId] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
   /** 只处理本次打开页面之后到达的报文，避免历史补拉把采集器反复启动。 */
   const sinceRef = useRef(Date.now());
@@ -841,6 +964,10 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
   };
 
   useEffect(() => {
+    /* 配置区只管方案定义：不下发、不采集，也就不需要运行态轮询。 */
+    if (readOnly) {
+      return;
+    }
     void loadState();
     const timer = window.setInterval(() => void loadState(), 2_000);
     timerRef.current = timer;
@@ -850,12 +977,13 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hostId, client]);
+  }, [hostId, client, readOnly]);
 
-  const update = (patch: Partial<typeof DEFAULT_COLLECT_DRAFT>) => setDraft((previous) => ({ ...previous, ...patch }));
-
-  const applyConfig = async (override?: CollectPlan | typeof DEFAULT_COLLECT_DRAFT) => {
-    const source = override ?? draft;
+  const applyConfig = async (override?: CollectPlan) => {
+    const source = override;
+    if (source === undefined) {
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -866,7 +994,6 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
         svids: parseIdList(source.svids).map((id) => ({ id })),
       });
       await loadState();
-      setNotice('采集配置已下发，等待启动 CEID 触发或点「手动开始」。');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -888,31 +1015,46 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
     }
   };
 
-  const savePlan = () => {
-    const label = planName.trim() || `CEID ${draft.startCeid} · ${draft.intervalMs}ms`;
-    setPlans((previous) => [...previous, {
-      id: planId(), name: label,
-      startCeid: draft.startCeid, stopCeid: draft.stopCeid,
-      intervalMs: draft.intervalMs, svids: draft.svids,
-      createdAt: Date.now(),
-    }]);
-    setPlanName('');
+  const startPlan = async (plan: CollectPlan) => {
+    await applyConfig(plan);
+    await command(true);
   };
 
-  const loadPlan = (plan: CollectPlan) => {
-    setDraft({
-      startCeid: plan.startCeid, stopCeid: plan.stopCeid,
+  const openCreate = () => {
+    setForm({ name: '', startCeid: '2001', stopCeid: '2002', intervalMs: '1000', svids: '1001, 1003' });
+    setEditingId(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (plan: CollectPlan) => {
+    setForm({
+      name: plan.name, startCeid: plan.startCeid, stopCeid: plan.stopCeid,
       intervalMs: plan.intervalMs, svids: plan.svids,
     });
+    setEditingId(plan.id);
+    setModalOpen(true);
+  };
+
+  const saveModal = () => {
+    const label = form.name.trim() || `CEID ${form.startCeid} · ${form.intervalMs}ms`;
+    const body = {
+      name: label,
+      startCeid: form.startCeid, stopCeid: form.stopCeid,
+      intervalMs: form.intervalMs, svids: form.svids,
+    };
+    setPlans((previous) => editingId !== null
+      ? previous.map((plan) => (plan.id === editingId ? { ...plan, ...body } : plan))
+      : [...previous, { id: planId(), createdAt: Date.now(), ...body }]);
+    setModalOpen(false);
   };
 
   /* 需求 9 的前端兜底：设备推来启动/停止 CEID 的 S6F11 时，
      即使后端链路侧的判定漏掉，也由界面显式下发启停命令。
      只认本主机视角 + 本次打开之后的新报文，每条只处理一次。 */
-  const startCeid = state?.startCeid ?? Number(draft.startCeid);
-  const stopCeid = state?.stopCeid ?? Number(draft.stopCeid);
+  const startCeid = state?.startCeid ?? 0;
+  const stopCeid = state?.stopCeid ?? 0;
   useEffect(() => {
-    if (client === null || !host?.open) {
+    if (client === null || !host?.open || readOnly) {
       return;
     }
     for (const message of messages) {
@@ -931,16 +1073,16 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
       if (ceid === null) {
         continue;
       }
-      if (ceid === startCeid && !state?.running) {
+      if (ceid === startCeid && startCeid > 0 && !state?.running) {
         setNotice(`收到启动 CEID ${ceid}，正在启动采集…`);
         void command(true);
-      } else if (ceid === stopCeid && state?.running) {
+      } else if (ceid === stopCeid && stopCeid > 0 && state?.running) {
         setNotice(`收到停止 CEID ${ceid}，正在停止采集…`);
         void command(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, client, hostId, host?.open, startCeid, stopCeid, state?.running]);
+  }, [messages, client, hostId, host?.open, readOnly, startCeid, stopCeid, state?.running]);
 
   /* 采集样本是逐点值(min=max=avg);时间轴用样本自带的 epoch 毫秒。 */
   const charts = (state?.series ?? []).map((item) => {
@@ -962,8 +1104,6 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
       bucketMs: Math.max(1, Math.round((to - from) / Math.max(1, item.v.length - 1))),
     };
   });
-  const allSvids = charts.map((chart) => chart.svid);
-  const selectedSvids = selection.length === 0 ? allSvids.slice(0, 2) : selection.filter((id) => allSvids.includes(id));
 
   if (host === null) {
     return <p className="hint">主机不存在。</p>;
@@ -973,134 +1113,116 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
     <Panel
       id="panel-host-collect"
       title={readOnly ? '采集设置（S1F3 配置库）' : '数据采集（S1F3 轮询）'}
-      description="主机侧按周期拉取 SVID,设备推 S6F11 触发启停。可保存多份配置，运行区一键下发；曲线只看勾选的参数。"
+      description={readOnly
+        ? '采集配置库：新增 / 编辑 / 删除配置方案（启停 CEID / 周期 / SVID 清单）。\n下发、启停与数据曲线在运行区「数据采集」页。'
+        : '配置列表里启停（启动 = 下发该配置并开始采集）；点「查看曲线」看该配置的 SVID 曲线，默认不展示。'}
+      actions={readOnly
+        ? <button type="button" className="primary" onClick={openCreate}>新增配置</button>
+        : undefined}
     >
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {notice !== '' && <p className="inline-note">{notice}</p>}
 
-      {!readOnly && plans.length > 0 && (
-        <div className="plan-chips">
-          <span className="hint-inline">一键下发已存配置：</span>
-          {plans.map((plan) => (
-            <button
-              className="plan-chip"
-              type="button"
-              key={plan.id}
-              disabled={busy}
-              title={`载入 ${plan.name} 并立即下发采集配置`}
-              onClick={() => { loadPlan(plan); void applyConfig(plan); }}
-            >
-              {plan.name} · CEID {plan.startCeid}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="form-row">
-        <label className="field">启动 CEID
-          <input value={draft.startCeid} onChange={(event) => update({ startCeid: event.target.value })} />
-        </label>
-        <label className="field">停止 CEID
-          <input value={draft.stopCeid} onChange={(event) => update({ stopCeid: event.target.value })} />
-        </label>
-        <label className="field">周期 ms
-          <input value={draft.intervalMs} onChange={(event) => update({ intervalMs: event.target.value })} />
-        </label>
-      </div>
-      <label className="field field-wide">
-        采集变量(逗号/空格分隔)
-        <input value={draft.svids} onChange={(event) => update({ svids: event.target.value })} />
-      </label>
-
-      <div className="form-row" style={{ marginTop: 8 }}>
-        <label className="field field-wide">
-          配置名称（留空自动生成）
-          <input value={planName} onChange={(event) => setPlanName(event.target.value)} placeholder="如：温度+压力 1s" />
-        </label>
-        <div className="toolbar" style={{ alignItems: 'flex-end' }}>
-          <button type="button" onClick={savePlan}>保存为配置</button>
-          <button type="button" onClick={() => setDraft({ ...DEFAULT_COLLECT_DRAFT })}>恢复默认</button>
-          <button type="button" className="primary" disabled={busy} onClick={() => void applyConfig()}>
-            下发配置
-          </button>
-        </div>
-      </div>
-      <CollectPlanRows
+      <CollectPlanTable
+        mode={readOnly ? 'config' : 'runtime'}
         plans={plans}
-        onLoad={loadPlan}
+        onLoad={openEdit}
         onDelete={(id) => setPlans((previous) => previous.filter((plan) => plan.id !== id))}
+        onStart={(plan) => void startPlan(plan)}
+        onStop={() => void command(false)}
+        busy={busy}
       />
 
-      <div className="toolbar">
-        <button type="button" disabled={busy || !state?.configured || state?.running} onClick={() => void command(true)}>
-          手动开始
-        </button>
-        <button type="button" disabled={busy || !state?.running} onClick={() => void command(false)}>
-          手动停止
-        </button>
-        <span className="hint-inline">
-          {state?.running
-            ? `采集中 · ${state.samples ?? 0} 点 · 解码错误 ${state.decodeErrors ?? 0}`
-            : state?.configured
-              ? `已配置 · 等待启动 CEID ${startCeid} 或点「手动开始」`
-              : '未配置 · 先点「下发配置」'}
-        </span>
-      </div>
-
-      <div className="param-picker">
-        <span className="hint-inline">曲线要看的参数：</span>
-        {allSvids.length === 0 && <span className="hint-inline">还没有采集数据</span>}
-        {allSvids.map((svid) => (
-          <label className="check-inline" key={svid}>
-            <input
-              type="checkbox"
-              checked={selectedSvids.includes(svid)}
-              onChange={(event) => {
-                const next = event.target.checked
-                  ? [...selectedSvids, svid]
-                  : selectedSvids.filter((id) => id !== svid);
-                setSelection(next);
-              }}
-            />
-            <span className="mono">{svid}</span>
-          </label>
-        ))}
-        {allSvids.length > 0 && (
-          <>
-            <span className="spacer" />
-            <button type="button" onClick={() => setSelection(allSvids)}>全选</button>
-            <button type="button" onClick={() => setSelection([])}>全不选</button>
-          </>
-        )}
-      </div>
-
-      {selectedSvids.length === 0 ? (
-        <p className="hint">没有勾选参数；下发配置并开始采集后，勾选要看的 SVID 就会画出曲线。</p>
-      ) : (
-        <div className="collector-charts">
-          {charts.filter((chart) => selectedSvids.includes(chart.svid)).map((chart) => (
-            <div className="collector-chart collector-chart-large" key={chart.svid}>
-              <div className="collector-chart-head">
-                <span className="mono">{chart.svid}</span>
-                <span>{chart.series.owner}</span>
-                {(chart.series.unit ?? '') !== '' && <span className="hint-inline">{chart.series.unit}</span>}
-                <span className="spacer" />
-                <span className="hint-inline">
-                  {chart.series.avg.length} 点 · 最近{' '}
-                  {chart.series.avg.length > 0 ? chart.series.avg[chart.series.avg.length - 1].toFixed(2) : '—'}
-                </span>
-              </div>
-              <VariableChart
-                series={chart.series}
-                fromMs={chart.fromMs}
-                bucketMs={chart.bucketMs}
-                height={200}
-                eventLabel="事件"
-              />
-            </div>
-          ))}
+      {!readOnly && (
+        <div className="toolbar">
+          <span className="hint-inline">
+            {state?.running
+              ? `采集中 · ${state.samples ?? 0} 点 · 解码错误 ${state.decodeErrors ?? 0}`
+              : state?.configured
+                ? `已配置 · 等待启动 CEID ${startCeid}，或在方案列表点「启动」`
+                : '未配置 · 在方案列表点「启动」下发配置'}
+          </span>
         </div>
       )}
+
+      {!readOnly && (
+        <section className="panel-section block">
+          <div className="section-head">
+            <h2 style={{ margin: 0 }}>采集曲线</h2>
+            <span className="hint-inline">按配置折叠，点「查看曲线」才展示</span>
+          </div>
+          {plans.length === 0 && <p className="hint">还没有采集配置；到配置区新增后这里按配置看曲线。</p>}
+          {plans.map((plan) => {
+            const open = viewingPlanId === plan.id;
+            const planSvids = parseIdList(plan.svids);
+            const planCharts = charts.filter((chart) => planSvids.includes(chart.svid));
+            return (
+              <section key={plan.id} className="panel-section">
+                <div className="section-head">
+                  <h3>{plan.name} <span className="mono hint-inline">CEID {plan.startCeid}/{plan.stopCeid} · {plan.intervalMs}ms</span></h3>
+                  <button type="button" onClick={() => setViewingPlanId(open ? null : plan.id)}>
+                    {open ? '收起曲线' : '查看曲线'}
+                  </button>
+                </div>
+                {open && (planCharts.length === 0
+                  ? <p className="hint">还没有该配置的采集数据；「启动」并等几秒后再看。</p>
+                  : (
+                    <div className="collector-charts">
+                      {planCharts.map((chart) => (
+                        <div className="collector-chart collector-chart-large" key={chart.svid}>
+                          <div className="collector-chart-head">
+                            <span className="mono">{chart.svid}</span>
+                            <span>{chart.series.owner}</span>
+                            {(chart.series.unit ?? '') !== '' && <span className="hint-inline">{chart.series.unit}</span>}
+                            <span className="spacer" />
+                            <span className="hint-inline">
+                              {chart.series.avg.length} 点 · 最近{' '}
+                              {chart.series.avg.length > 0 ? chart.series.avg[chart.series.avg.length - 1].toFixed(2) : '—'}
+                            </span>
+                          </div>
+                          <VariableChart
+                            series={chart.series}
+                            fromMs={chart.fromMs}
+                            bucketMs={chart.bucketMs}
+                            height={200}
+                            eventLabel="事件"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+              </section>
+            );
+          })}
+        </section>
+      )}
+
+      <Modal
+        open={modalOpen}
+        title={editingId !== null ? '编辑采集配置' : '新增采集配置'}
+        onClose={() => setModalOpen(false)}
+        footer={
+          <>
+            <button type="button" onClick={() => setModalOpen(false)}>取消</button>
+            <button type="button" className="primary" onClick={saveModal}>保存</button>
+          </>
+        }
+      >
+        <div className="form-row">
+          <label className="field field-wide">
+            配置名称（留空自动生成）
+            <input
+              value={form.name}
+              onChange={(event) => setForm((previous) => ({ ...previous, name: event.target.value }))}
+              placeholder="如：温度+压力 1s"
+            />
+          </label>
+        </div>
+        <CollectPlanFields
+          form={form}
+          update={(patch) => setForm((previous) => ({ ...previous, ...patch }))}
+        />
+      </Modal>
     </Panel>
   );
 }

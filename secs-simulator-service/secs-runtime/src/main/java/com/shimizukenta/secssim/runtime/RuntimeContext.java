@@ -461,6 +461,21 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
+    public SessionOutcome clearExecutionsV2(String deviceId) {
+        String canonical = canonicalDeviceId(deviceId);
+        if (this.configRepository.findDevice(canonical).isEmpty()) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        try {
+            this.planExecutions.clearForDevice(canonical);
+            return SessionOutcome.OK;
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            com.shimizukenta.secssim.app.log.Log.error("清理执行台账失败: " + canonical, e);
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    @Override
     public TriggerOutcome stepPlanV2(String deviceId, String planId) {
         HsmsSessionRuntime session = sessionFor(deviceId);
         if (session == null) {
@@ -852,6 +867,53 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public String hostTemplatesJson() {
         return this.hostRepository.listTemplatesJson();
+    }
+
+    /* ---------- v2：主机配置区方案库（Trace / S1F3 采集，落 config.db） ---------- */
+
+    @Override
+    public String hostPlansV2Json(String hostId, String kind) {
+        if (!this.hostRepository.hostExists(hostId)) {
+            return null;
+        }
+        List<String> bodies = this.hostRepository.listPlans(hostId, kind);
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < bodies.size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            out.append(bodies.get(i));
+        }
+        return out.append(']').toString();
+    }
+
+    @Override
+    public SessionOutcome saveHostPlanV2(String hostId, String kind, String planId, String body) {
+        try {
+            if (!this.hostRepository.hostExists(hostId)) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            this.hostRepository.savePlan(hostId, kind, planId, body);
+            return SessionOutcome.OK;
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            com.shimizukenta.secssim.app.log.Log.error("保存主机方案失败: " + hostId + "/" + kind + "/" + planId, e);
+            return SessionOutcome.FAILED;
+        }
+    }
+
+    @Override
+    public SessionOutcome deleteHostPlanV2(String hostId, String kind, String planId) {
+        try {
+            if (!this.hostRepository.hostExists(hostId)) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            return this.hostRepository.deletePlan(hostId, kind, planId)
+                    ? SessionOutcome.OK
+                    : SessionOutcome.UNKNOWN_SESSION;
+        } catch (com.shimizukenta.secssim.store.StoreException e) {
+            com.shimizukenta.secssim.app.log.Log.error("删除主机方案失败: " + hostId + "/" + kind + "/" + planId, e);
+            return SessionOutcome.FAILED;
+        }
     }
 
     @Override

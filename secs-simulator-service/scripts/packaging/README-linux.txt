@@ -24,18 +24,17 @@ SECS Simulator — Linux 服务端（<版本>）
 安全提示
 --------
 本工具不做鉴权：没有令牌、账号或登录，所有端点直连可调用（不会回 401/403）。
-start-server.sh 默认绑 0.0.0.0 只为现场联调方便；若部署在不受信任的网段，请用
-防火墙/网段隔离限制来源，必要时在反向代理上加 TLS 与访问控制。
-
+start-server.sh 默认绑 0.0.0.0（内网工具全放行，见 ADR-0018）；需要收窄监听范围时用
+防火墙/网段隔离或改绑定地址。
 只想改绑定地址可以不改脚本：
 
     ./start-server.sh -b 127.0.0.1
 
 等价的手工启动命令（排查启动问题时对照用）：
 
-    java -cp 'secs-cli.jar:secs-runtime.jar:secs-api-http.jar:secs-app.jar:secs-core.jar:secs-protocol.jar:secs-json.jar' \
+    java -cp 'secs-cli.jar:secs-runtime.jar:secs-api-http.jar:secs-app.jar:secs-store.jar:secs-core.jar:secs-protocol.jar:secs-json.jar:thirdparty/sqlite-jdbc.jar' \
       com.shimizukenta.secssim.cli.CliMain \
-      --mode=server --bind 127.0.0.1 --port 8080 --hsms-port 5000 \
+      --mode=server --port 8080 --hsms-port 5000 \
       --web-root web --work-dir work
 
 目录

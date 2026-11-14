@@ -45,7 +45,7 @@ class ConfigDrivenSessionTest {
             {
               "schemaVersion": 4,
               "session": { "id": "cfg-1", "passive": true, "bindHost": "127.0.0.1",
-                           "port": 0, "deviceId": 33, "seed": 99 },
+                           "port": 5010, "deviceId": 33, "seed": 99 },
               "equipment": {
                 "name": "CFG-EQ",
                 "idSpace": {},
@@ -67,7 +67,7 @@ class ConfigDrivenSessionTest {
             {
               "schemaVersion": 5,
               "session": { "id": "tpl-1", "passive": true, "bindHost": "127.0.0.1",
-                           "port": 0, "deviceId": 44, "seed": 99 },
+                           "port": 5010, "deviceId": 44, "seed": 99 },
               "equipment": {
                 "name": "TPL-EQ", "idSpace": {},
                 "units": [ { "unitId": 1, "name": "CH1", "injectUnitId": false,

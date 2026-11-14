@@ -765,9 +765,22 @@ final class ConfigHandler extends HttpSupport {
         return true;
     }
 
-    /** GET /api/v2/devices/{id}/runtime/executions：执行台账（缺省不含试跑）。 */
+    /** GET /api/v2/devices/{id}/runtime/executions：执行台账（缺省不含试跑）。DELETE：清空台账。 */
     private void handleExecutionsV2(HttpExchange ex, String deviceId) throws IOException {
         if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            SessionOutcome outcome = this.context.clearExecutionsV2(deviceId);
+            audit(ex, "plan-executions-clear", deviceId, "outcome=" + outcome);
+            switch (outcome) {
+                case OK -> respond(ex, 200, "{\"ok\":true}");
+                case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+                default -> respond(ex, 502, "{\"ok\":false,\"error\":\"clear-failed\"}");
+            }
             return;
         }
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {

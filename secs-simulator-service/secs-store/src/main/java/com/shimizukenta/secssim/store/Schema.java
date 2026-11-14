@@ -210,6 +210,16 @@ public final class Schema {
           CHECK (target_port BETWEEN 1 AND 65535)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS host_plan (
+          host_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('trace','collect')),
+          plan_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (host_id, kind, plan_id)
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS idx_plan_device ON event_plan(device_id, ordinal)",
         "CREATE INDEX IF NOT EXISTS idx_effect_plan ON event_effect(device_id, plan_id)",
         "CREATE INDEX IF NOT EXISTS idx_svid_owner ON svid_def(device_id, owner)",

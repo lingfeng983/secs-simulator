@@ -3,8 +3,10 @@ import type { PanelBaseProps } from '../panels/types';
 import {
   HOST_CONFIG_PAGES,
   HOST_CONFIG_PAGE_LABELS,
+  HOST_CONFIG_PAGE_NOTES,
   HOST_RUNTIME_PAGES,
   HOST_RUNTIME_PAGE_LABELS,
+  HOST_RUNTIME_PAGE_NOTES,
   type HostPage,
   type HostZone,
 } from '../../app/router';
@@ -13,7 +15,7 @@ import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
 import { HostDetailPanels } from '../panels/hostsim/HostDetailPanels';
 /**
- * 主机详情页（设计 §3.4）：实例头 + 配置区(5 页) / 运行区(6 页)。
+ * 主机详情页（设计 §3.4）：实例头 + 配置区(4 页) / 运行区(3 页)。
  * 运行区所有操作只作用于本主机（第三轮修订 13）；收发记录只看本主机。
  */
 export function HostDetailPage({
@@ -76,11 +78,10 @@ export function HostDetailPage({
   const badge = (
     <span className={`badge tone-${hostPhaseTone(host.phase)}`}>{hostPhaseLabel(host.phase)}</span>
   );
-  const settingsPending = host.settingRevision !== host.appliedRevision;
 
   const pages = zone === 'config'
-    ? HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id] }))
-    : HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id] }));
+    ? HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id], note: HOST_CONFIG_PAGE_NOTES[id] }))
+    : HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id], note: HOST_RUNTIME_PAGE_NOTES[id] }));
 
   return (
     <div className="panel-stack">
@@ -124,28 +125,6 @@ export function HostDetailPage({
       />
 
       {error !== '' && <p className="inline-note danger">{error}</p>}
-      {settingsPending && (
-        <div className="pending-banner settings" role="status">
-          <span className="pending-tag">设置待生效</span>
-          <span className="pending-text">
-            设置已更新到 <b>v{host.settingRevision}</b>，当前生效仍是{' '}
-            <b>{host.open ? `v${host.appliedRevision}` : '—'}</b>
-          </span>
-          <span className="spacer" />
-          <button type="button" className="primary" disabled={busy} onClick={applySettings}>
-            使设置生效
-          </button>
-        </div>
-      )}
-      {!host.open && zone === 'runtime' && (
-        <div className="empty-zone" role="status">
-          <strong>链路已断开，主机仍在列表里</strong>
-          <div>目标地址已释放，设置照常可以编辑。</div>
-          <div style={{ marginTop: 10 }}>
-            <button type="button" className="primary" disabled={busy} onClick={openHost}>重新连接</button>
-          </div>
-        </div>
-      )}
 
       <SubTabs
         pages={pages}

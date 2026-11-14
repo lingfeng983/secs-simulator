@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { BUILTIN_CURVE_PRESETS, BUILTIN_CURVE_PRESET_COUNT, findCurvePreset } from './builtinCurvePresets';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import {
   booleanField,
@@ -28,9 +29,15 @@ type ObjectEdit = (fn: (target: JsonObject) => void) => void;
  * <p>默认（随机游走）/ 内联曲线 / 模板引用 三选一,写回落在 SVID 定义
  * 对象的 curve/template/output/params 四个键上,与后端 schema v6 一一对应。
  * 「预览曲线」把绝对 SVID 交给上层,按草稿 + 事件标记画单变量曲线。</p>
+ *
+ * <p>所有改动经 {@code mutate} 写穿（editDocument 重新解析原文定位到这条
+ * 定义）,而不是改解析树上的活引用——直接改引用会在下一次重渲染重新解析
+ * 原文时被丢掉,表现为"值来源设置完又自己切回默认"。</p>
  */
-export function SvidSourceEditor({ def, templateIds, absoluteId, onPreviewSvid }: {
+export function SvidSourceEditor({ def, mutate, templateIds, absoluteId, onPreviewSvid }: {
   def: JsonObject;
+  /** 写穿：fn 拿到这条 SVID 定义在<b>新文档</b>里的活引用。 */
+  mutate: (fn: (def: JsonObject) => void) => void;
   templateIds: string[];
   absoluteId: number;
   onPreviewSvid?: (svid: number) => void;
@@ -38,19 +45,24 @@ export function SvidSourceEditor({ def, templateIds, absoluteId, onPreviewSvid }
   const kind = svidSourceKind(def);
   const [editing, setEditing] = useState(false);
   const expanded = kind !== 'default' && editing;
+  /* 焦点离开值来源区域就收起：改完参数不必手动点「收起」；
+     relatedTarget 还在区域内（字段间 tab/点击）时不收。 */
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const setKind = (next: SourceKind) => {
     if (next === 'default') {
-      clearSourceKeys(def);
+      mutate(clearSourceKeys);
       setEditing(false);
       return;
     }
-    clearSourceKeys(def);
-    if (next === 'curve') {
-      def.curve = defaultCurveFields('sine');
-    } else {
-      def.template = templateIds[0] ?? '';
-    }
+    mutate((target) => {
+      clearSourceKeys(target);
+      if (next === 'curve') {
+        target.curve = defaultCurveFields('sine');
+      } else {
+        target.template = templateIds[0] ?? '';
+      }
+    });
     setEditing(true);
   };
 
@@ -62,7 +74,16 @@ export function SvidSourceEditor({ def, templateIds, absoluteId, onPreviewSvid }
         : '值来源:默认';
 
   return (
-    <div className="svid-source">
+    <div
+      className="svid-source"
+      ref={containerRef}
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (expanded && (next === null || !containerRef.current?.contains(next))) {
+          setEditing(false);
+        }
+      }}
+    >
       <div className="svid-source-bar">
         <span className="svid-source-label" title={label}>{label}</span>
         <select
@@ -87,8 +108,19 @@ export function SvidSourceEditor({ def, templateIds, absoluteId, onPreviewSvid }
         )}
       </div>
 
-      {expanded && kind === 'curve' && <CurveSourceEditor def={def} />}
-      {expanded && kind === 'template' && <TemplateSourceEditor def={def} templateIds={templateIds} />}
+      {expanded && kind === 'curve' && (
+        <CurveSourceEditor
+          curve={objectField(def, 'curve')}
+          mutateCurve={(fn) => mutate((target) => fn(objectField(target, 'curve')))}
+        />
+      )}
+      {expanded && kind === 'template' && (
+        <TemplateSourceEditor
+          def={def}
+          mutate={mutate}
+          templateIds={templateIds}
+        />
+      )}
     </div>
   );
 }
@@ -101,17 +133,14 @@ function clearSourceKeys(def: JsonObject): void {
   delete def.params;
 }
 
-/** 内联曲线的参数编辑(step/pwl 的关键帧用 JSON 文本编辑)。 */
-export function CurveSourceEditor({ def }: { def: JsonObject }): JSX.Element {
-  const curve = objectField(def, 'curve');
+/** 内联曲线的参数编辑(step/pwl 的关键帧用 JSON 文本编辑)；mutateCurve 写穿到文档。 */
+export function CurveSourceEditor({ curve, mutateCurve }: {
+  curve: JsonObject;
+  mutateCurve: (fn: (target: JsonObject) => void) => void;
+}): JSX.Element {
   const rawType = stringField(curve, 'type', 'sine');
   const type = isCurveType(rawType) ? rawType : null;
   const specs = type !== null ? curveFieldSpecs(type) : [];
-
-  const mutateCurve = (fn: (target: JsonObject) => void) => {
-    fn(objectField(def, 'curve'));
-  };
-
   return (
     <div className="form-row svid-source-detail">
       <label className="field">
@@ -135,6 +164,37 @@ export function CurveSourceEditor({ def }: { def: JsonObject }): JSX.Element {
             <option key={item.type} value={item.type}>
               {item.label}
             </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        内置变化模板（{BUILTIN_CURVE_PRESET_COUNT} 套）
+        <select
+          value=""
+          aria-label="从内置变化模板填入"
+          onChange={(event) => {
+            const preset = findCurvePreset(event.target.value);
+            if (preset !== undefined) {
+              mutateCurve((target) => {
+                for (const key of Object.keys(target)) {
+                  delete target[key];
+                }
+                Object.assign(target, preset.curve);
+              });
+            }
+          }}
+          title="选一条预设，把该类参数典型的波形与量纲填进来，再微调"
+        >
+          <option value="">从内置模板填入…</option>
+          {BUILTIN_CURVE_PRESETS.map((group) => (
+            <optgroup key={group.category} label={group.category}>
+              {group.items.map((preset) => (
+                <option key={preset.name} value={preset.name} title={preset.description}>
+                  {preset.name}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
@@ -188,13 +248,17 @@ export function CurveSourceEditor({ def }: { def: JsonObject }): JSX.Element {
         );
       })}
 
-      {(type === 'step' || type === 'pwl') && <CurveFramesField curve={curve} kind={type} />}
+      {(type === 'step' || type === 'pwl') && <CurveFramesField curve={curve} kind={type} mutateCurve={mutateCurve} />}
     </div>
   );
 }
 
-/** step/pwl 的关键帧编辑:数组以 JSON 文本编辑,blur 时解析写回。 */
-function CurveFramesField({ curve, kind }: { curve: JsonObject; kind: 'step' | 'pwl' }): JSX.Element {
+/** step/pwl 的关键帧编辑:数组以 JSON 文本编辑,blur 时解析写回（写穿）。 */
+function CurveFramesField({ curve, kind, mutateCurve }: {
+  curve: JsonObject;
+  kind: 'step' | 'pwl';
+  mutateCurve: (fn: (target: JsonObject) => void) => void;
+}): JSX.Element {
   const key = kind === 'step' ? 'steps' : 'points';
   const [text, setText] = useState(() => JSON.stringify(Array.isArray(curve[key]) ? curve[key] : [], null, 1));
   const [bad, setBad] = useState(false);
@@ -206,7 +270,9 @@ function CurveFramesField({ curve, kind }: { curve: JsonObject; kind: 'step' | '
         setBad(true);
         return;
       }
-      curve[key] = parsed;
+      mutateCurve((target) => {
+        target[key] = parsed;
+      });
       setBad(false);
     } catch {
       setBad(true);
@@ -229,9 +295,10 @@ function CurveFramesField({ curve, kind }: { curve: JsonObject; kind: 'step' | '
   );
 }
 
-/** 模板引用编辑:模板选择 + 可选输出 + 参数(JSON 对象,值为数字)。 */
-export function TemplateSourceEditor({ def, templateIds }: {
+/** 模板引用编辑:模板选择 + 可选输出 + 参数(JSON 对象,值为数字)；mutate 写穿。 */
+export function TemplateSourceEditor({ def, mutate, templateIds }: {
   def: JsonObject;
+  mutate: (fn: (target: JsonObject) => void) => void;
   templateIds: string[];
 }): JSX.Element {
   const params = objectField(def, 'params');
@@ -243,7 +310,9 @@ export function TemplateSourceEditor({ def, templateIds }: {
 
   const commitParams = () => {
     if (paramsText.trim() === '') {
-      delete def.params;
+      mutate((target) => {
+        delete target.params;
+      });
       setBad(false);
       return;
     }
@@ -253,7 +322,9 @@ export function TemplateSourceEditor({ def, templateIds }: {
         setBad(true);
         return;
       }
-      def.params = parsed;
+      mutate((target) => {
+        target.params = parsed;
+      });
       setBad(false);
     } catch {
       setBad(true);
@@ -267,7 +338,9 @@ export function TemplateSourceEditor({ def, templateIds }: {
         <select
           value={stringField(def, 'template')}
           onChange={(event) => {
-            def.template = event.target.value;
+            mutate((target) => {
+              target.template = event.target.value;
+            });
           }}
         >
           {templateIds.length === 0 && <option value="">（尚无模板）</option>}
@@ -284,11 +357,13 @@ export function TemplateSourceEditor({ def, templateIds }: {
           allowBlank
           value={stringField(def, 'output')}
           onCommit={(next) => {
-            if (next === '') {
-              delete def.output;
-            } else {
-              def.output = next;
-            }
+            mutate((target) => {
+              if (next === '') {
+                delete target.output;
+              } else {
+                target.output = next;
+              }
+            });
           }}
         />
       </label>

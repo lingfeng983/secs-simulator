@@ -34,7 +34,7 @@ public final class ConfigTemplate {
                     "id": "%s",
                     "passive": true,
                     "bindHost": "127.0.0.1",
-                    "port": 0,
+                    "port": 5010,
                     "deviceId": 61,
                     "seed": 3
                   },

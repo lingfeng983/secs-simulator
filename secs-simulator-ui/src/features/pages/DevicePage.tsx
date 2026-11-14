@@ -7,20 +7,23 @@ import {
   deviceStatusHint,
 } from '../../shared/lib/deviceStatus';
 import { EventsPanel } from '../panels/EventsPanel';
-import { CeidPanel } from '../panels/CeidPanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
-import { SvidPanel } from '../panels/SvidPanel';
 import { ConfigPanel } from '../panels/ConfigPanel';
 import { ConnectionPanel } from '../panels/ConnectionPanel';
 import { StructurePanel } from '../panels/StructurePanel';
 import { SendPanel } from '../panels/SendPanel';
-import { LiveEventList } from '../../shared/ui/LiveEventList';
+import { ConstantsConfigPanel } from '../panels/ConstantsConfigPanel';
+import { SvidConfigPanel } from '../panels/SvidConfigPanel';
+import { CeidReportConfigPanel } from '../panels/CeidReportConfigPanel';
+import { PlanConfigPanel } from '../panels/PlanConfigPanel';
 import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
+  DEVICE_CONFIG_PAGE_NOTES,
   DEVICE_RUNTIME_PAGES,
   DEVICE_RUNTIME_PAGE_LABELS,
+  DEVICE_RUNTIME_PAGE_NOTES,
   type DevicePage,
   type DeviceZone,
 } from '../../app/router';
@@ -44,14 +47,26 @@ export function DevicePage({
   messages,
 }: PanelBaseProps & { sessionId: string; zone: DeviceZone; page: DevicePage }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
+  /* 数据库里还没启动的设备没有会话行：路由 key 允许是配置文件名（带或不带 .json）。
+     只要配置库里找得到，这台设备的页面就照常展示——不卡设备状态。 */
+  const configOnly = summary === undefined
+    ? (backend.configList.find((entry) => entry.name === sessionId || entry.name === `${sessionId}.json`) ?? null)
+    : null;
+  const isConfigOnly = configOnly !== null;
+  const configOnlyName = configOnly?.name ?? '';
+  const configName = summary?.config ?? configOnlyName;
   const [busy, setBusy] = useState(false);
 
   /* 四态判据统一走 deviceStatus：设备页头、侧栏、设备清单必须说同一句话 */
-  const status = deviceStatus(summary ?? {});
+  const status = isConfigOnly ? deviceStatus({ state: 'CLOSED' }) : deviceStatus(summary ?? {});
 
   const startDevice = () => {
     setBusy(true);
-    void backend.connectSession(sessionId).finally(() => setBusy(false));
+    /* 未启动的库内设备：「启动」= 按配置创建会话（与设备清单的「启动」同一动作） */
+    const action = isConfigOnly
+      ? backend.createSession(configOnlyName)
+      : backend.connectSession(sessionId);
+    void action.finally(() => setBusy(false));
   };
   const stopDevice = () => {
     setBusy(true);
@@ -85,13 +100,9 @@ export function DevicePage({
     messages,
   };
 
-  const deviceEvents = (liveEvents ?? []).filter(
-    (notice) => notice.type === 's6f11' && notice.sessionId === sessionId,
-  );
-
-  /* 会话不存在（被关掉、或手输/收藏了旧地址）时不要继续渲染面板：
+  /* 会话与配置库里都找不到（被删掉、或手输/收藏了旧地址）时不要继续渲染面板：
      面板按 activeSession 取数，会把"上一台设备"的数据挂在这个不存在的 id 下。 */
-  const sessionKnown = backend.sessions.length === 0 || summary !== undefined;
+  const sessionKnown = summary !== undefined || isConfigOnly || backend.sessions.length === 0;
   if (!sessionKnown) {
     return (
       <div className="panel-stack">
@@ -109,13 +120,13 @@ export function DevicePage({
   }
 
   const pages = zone === 'config'
-    ? DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id] }))
-    : DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id] }));
+    ? DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id], note: DEVICE_CONFIG_PAGE_NOTES[id] }))
+    : DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], note: DEVICE_RUNTIME_PAGE_NOTES[id] }));
 
   return (
     <div className="panel-stack">
       <InstanceHead
-        title={summary?.device ?? sessionId}
+        title={summary?.device ?? (isConfigOnly ? configOnlyName.replace(/\.json$/i, '') : sessionId)}
         badge={
           <span className={`badge tone-${DEVICE_STATUS_TONE[status]}`} title={deviceStatusHint(status)}>
             {DEVICE_STATUS_LABEL[status]}
@@ -123,7 +134,8 @@ export function DevicePage({
         }
         subtitle={
           <>
-            <span className="mono">{sessionId}</span> · {DEVICE_STATUS_LABEL[status]}
+            <span className="mono">{summary?.id ?? (isConfigOnly ? configOnlyName : sessionId)}</span> · {DEVICE_STATUS_LABEL[status]}
+            {isConfigOnly ? ` · 配置 ${configOnlyName}` : ''}
             {summary?.units !== undefined ? ` · ${summary.units} 个单元` : ''}
             {summary?.lastError ? <span className="danger"> · {summary.lastError}</span> : ''}
           </>
@@ -141,7 +153,9 @@ export function DevicePage({
                 className="primary"
                 disabled={busy}
                 onClick={startDevice}
-                title="启动端口监听：主机随后可以连上来"
+                title={isConfigOnly
+                  ? '按已保存的设备配置创建会话并启动端口监听'
+                  : '启动端口监听：主机随后可以连上来'}
               >
                 启动设备
               </button>
@@ -177,9 +191,6 @@ export function DevicePage({
                 下线
               </button>
             )}
-            <button type="button" onClick={() => goTo?.('workbench')}>
-              ← 设备清单
-            </button>
           </>
         }
         zoneSwitch={
@@ -201,41 +212,48 @@ export function DevicePage({
       {/* 面板按会话重挂：切设备时编辑器/自动打开的配置不能沿用上一台设备的状态 */}
       <div className="tab-page">
         {zone === 'config' && page === 'overview' && (
-          <DeviceOverviewPanel {...baseProps} sessionId={sessionId} />
+          <DeviceOverviewPanel {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'connection' && (
-          <ConnectionPanel key={sessionId} {...baseProps} sessionId={sessionId} />
+          <ConnectionPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'structure' && (
-          <StructurePanel key={sessionId} {...baseProps} sessionId={sessionId} />
+          <StructurePanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+        )}
+        {zone === 'config' && page === 'svids' && (
+          <SvidConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+        )}
+        {zone === 'config' && page === 'events' && (
+          <CeidReportConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+        )}
+        {zone === 'config' && page === 'plans' && (
+          <PlanConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'document' && (
-          <ConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} />
+          <ConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'constants' && (
-          <DeviceConstantsPanel {...baseProps} sessionId={sessionId} />
+          <ConstantsConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'revisions' && (
-          <DeviceRevisionsPanel {...baseProps} sessionId={sessionId} />
+          <DeviceRevisionsPanel {...baseProps} sessionId={sessionId} configName={configName} />
         )}
 
-        {zone === 'runtime' && page === 'plans' && (
-          <div className="panel-stack">
-            <EventsPanel key={sessionId} {...baseProps} />
-            <section className="panel-section">
-              <div className="section-head">
-                <h2>本设备实时事件</h2>
-              </div>
-              <LiveEventList
-                events={deviceEvents}
-                emptyText="暂无实时事件;编排触发或手动上报后这里实时滚动。"
-              />
-            </section>
+        {zone === 'runtime' && isConfigOnly && (
+          <div className="empty-zone" role="status">
+            <strong>设备未启动</strong>
+            <div>运行态页面要等设备启动后才有数据；先到配置区检查定义，或点「启动设备」。</div>
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="primary" disabled={busy} onClick={startDevice}>
+                启动设备
+              </button>
+            </div>
           </div>
         )}
-        {zone === 'runtime' && page === 'catalog' && <CeidPanel key={sessionId} {...baseProps} mode="both" />}
-        {zone === 'runtime' && page === 'svids' && <SvidPanel key={sessionId} {...baseProps} />}
-        {zone === 'runtime' && page === 'manual' && (
+        {zone === 'runtime' && !isConfigOnly && page === 'plans' && (
+          <EventsPanel key={sessionId} {...baseProps} />
+        )}
+        {zone === 'runtime' && !isConfigOnly && page === 'manual' && (
           <div className="panel-stack">
             <SendPanel key={sessionId} {...baseProps} />
             <AlarmsPanel key={sessionId + ':alarms'} {...baseProps} />
@@ -249,10 +267,13 @@ export function DevicePage({
 /** 配置区·概览:设备定义摘要(从配置原文提炼,不重复编辑入口)。 */
 function DeviceOverviewPanel({
   sessionId,
+  configName,
   backend,
-}: PanelBaseProps & { sessionId: string }): JSX.Element {
+}: PanelBaseProps & { sessionId: string; configName: string }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
-  const config = backend.configList.find((entry) => entry.name === summary?.config);
+  const config = backend.configList.find((entry) => entry.name === configName);
+  /* 未启动的库内设备没有会话行：设备名退回配置文件名（去 .json） */
+  const deviceLabel = summary?.device ?? configName.replace(/\.json$/i, '');
   return (
     <section className="panel-section">
       <div className="section-head">
@@ -260,9 +281,9 @@ function DeviceOverviewPanel({
       </div>
       <table className="effects-table">
         <tbody>
-          <tr><th>会话 id</th><td className="mono">{sessionId}</td></tr>
-          <tr><th>设备名</th><td>{summary?.device ?? '—'}</td></tr>
-          <tr><th>配置文件</th><td className="mono">{summary?.config ?? '—'}</td></tr>
+          <tr><th>会话 id</th><td className="mono">{summary?.id ?? '—（未启动）'}</td></tr>
+          <tr><th>设备名</th><td>{deviceLabel}</td></tr>
+          <tr><th>配置文件</th><td className="mono">{configName || '—'}</td></tr>
           <tr><th>模板</th><td>{config?.template ?? '—'}</td></tr>
           <tr><th>单元数</th><td>{summary?.units ?? '—'}</td></tr>
           <tr><th>大小 / 修改时间</th><td className="mono">
@@ -270,111 +291,31 @@ function DeviceOverviewPanel({
           </td></tr>
         </tbody>
       </table>
-      <p className="hint">连接 / 结构 / 常量 / 原文的编辑在配置区的其它子页;保存后需重载使生效。</p>
+      <p className="hint">连接 / 变量 / 事件与报告 / 事件计划 / 常量 / 原文的编辑在配置区的其它子页;保存后需重载使生效。</p>
     </section>
   );
-}
-
-/** 配置区·设备常量:从配置原文提炼 ECV 列表(只读快照;S2F15 回写后此处随之更新)。 */
-function DeviceConstantsPanel({
-  sessionId,
-  backend,
-}: PanelBaseProps & { sessionId: string }): JSX.Element {
-  const summary = backend.sessions.find((session) => session.id === sessionId);
-  const configName = summary?.config ?? '';
-  const [text, setText] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (configName === '' || backend.client === null) {
-      return;
-    }
-    let cancelled = false;
-    backend.client.configText(configName)
-      .then((body) => {
-        if (!cancelled) {
-          setText(body.text);
-        }
-      })
-      .catch(() => {
-        /* 读不到就显示空列表 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [configName, backend.client]);
-  const constants = useMemoConstants(text, configName);
-  return (
-    <section className="panel-section">
-      <div className="section-head">
-        <h2>设备常量（ECV）</h2>
-      </div>
-      {constants.length === 0 ? (
-        <p className="hint">配置里没有 equipment.constants 段:主机用 S2F13 查询会得到空列表,S2F15 会回 EAC=1。</p>
-      ) : (
-        <table className="effects-table">
-          <thead>
-            <tr><th>ECID</th><th>名称</th><th>类型</th><th>当前值</th><th>单位</th></tr>
-          </thead>
-          <tbody>
-            {constants.map((constant) => (
-              <tr key={constant.id}>
-                <td className="mono">{constant.id}</td>
-                <td>{constant.name}</td>
-                <td className="mono">{constant.type}</td>
-                <td className="mono">{constant.value}</td>
-                <td>{constant.unit || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p className="hint">主机写 S2F15 后,值写回配置正文(只替换 constants 子树)并升一个版本;此处随正文刷新。</p>
-    </section>
-  );
-}
-
-/** 从配置原文解析 constants(轻量 JSON 解析;原文坏了就显示空)。 */
-function useMemoConstants(text: string | undefined, configName: string):
-  ReadonlyArray<{ id: number; name: string; type: string; value: number; unit: string }> {
-  return useMemo(() => {
-    if (text === undefined || configName === '') {
-      return [];
-    }
-    try {
-      const root = JSON.parse(text) as {
-        equipment?: { constants?: Array<{ id: number; name?: string; type?: string; value?: number; unit?: string }> };
-      };
-      return (root.equipment?.constants ?? []).map((constant) => ({
-        id: constant.id,
-        name: constant.name ?? '',
-        type: constant.type ?? '',
-        value: constant.value ?? 0,
-        unit: constant.unit ?? '',
-      }));
-    } catch {
-      return [];
-    }
-  }, [text, configName]);
 }
 
 /** 配置区·版本历史:config_revision 快照(v2 端点)。 */
 function DeviceRevisionsPanel({
   sessionId,
+  configName,
   backend,
   notifier,
-}: PanelBaseProps & { sessionId: string }): JSX.Element {
+}: PanelBaseProps & { sessionId: string; configName?: string }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
-  const configName = summary?.config ?? '';
+  const name = summary?.config ?? configName ?? '';
   const [revisions, setRevisions] = useState<ReadonlyArray<{
     revision: number; sha256: string; createdAt: number; createdBy: string; note: string;
   }>>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (configName === '' || backend.client === null) {
+    if (name === '' || backend.client === null) {
       return;
     }
     let cancelled = false;
-    backend.client.configRevisions(configName, 50)
+    backend.client.configRevisions(name, 50)
       .then((body) => {
         if (!cancelled) {
           setRevisions(body);
@@ -390,7 +331,7 @@ function DeviceRevisionsPanel({
     return () => {
       cancelled = true;
     };
-  }, [configName, backend.client, notifier]);
+  }, [name, backend.client, notifier]);
 
   return (
     <section className="panel-section">

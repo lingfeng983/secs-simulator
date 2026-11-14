@@ -14,8 +14,8 @@ from pathlib import Path
 
 import yaml
 
-# 默认校验 service 根下的 openapi.yaml（本脚本位于 secs-simulator-service/scripts/）。
-DEFAULT_PATH = Path(__file__).resolve().parent.parent / "openapi.yaml"
+# openapi.yaml 与本脚本同目录（secs-simulator-service/scripts/）。
+DEFAULT_PATH = Path(__file__).resolve().parent / "openapi.yaml"
 
 
 class UniqueKeyLoader(yaml.SafeLoader):

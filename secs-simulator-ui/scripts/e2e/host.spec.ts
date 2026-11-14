@@ -75,6 +75,9 @@ test('新建主机：模板一键填入 + 创建后进详情', async ({ page }) 
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('新建主机');
+  /* 默认值：名称 host、目标地址 127.0.0.1 */
+  await expect(dialog.getByLabel('名称')).toHaveValue('host');
+  await expect(dialog.getByLabel('目标地址')).toHaveValue('127.0.0.1');
   /* 模板填入：名称/地址/端口/Device ID 一次带过来 */
   await dialog.getByLabel('从主机模板填入').selectOption('ht-1');
   await expect(dialog.getByLabel('名称')).toHaveValue('产线 A 目标');
@@ -85,10 +88,13 @@ test('新建主机：模板一键填入 + 创建后进详情', async ({ page }) 
   await expect(page.locator('.instance-head')).toContainText('产线 A 目标');
 });
 
-test('新建主机：目标地址为空时创建按钮禁用', async ({ page }) => {
+test('新建主机：默认值即可创建，清空目标地址才禁用', async ({ page }) => {
   await openHosts(page);
   await page.locator('#panel-hosts-v2').getByRole('button', { name: '＋ 新建主机' }).click();
   const dialog = page.getByRole('dialog');
+  /* 默认名称 host / 默认地址 127.0.0.1：打开即可创建 */
+  await expect(dialog.getByRole('button', { name: '创建' })).toBeEnabled();
+  await dialog.getByLabel('目标地址').fill('');
   await expect(dialog.getByRole('button', { name: '创建' })).toBeDisabled();
   await dialog.getByLabel('目标地址').fill('10.0.0.9');
   await dialog.getByLabel('端口').fill('7000');

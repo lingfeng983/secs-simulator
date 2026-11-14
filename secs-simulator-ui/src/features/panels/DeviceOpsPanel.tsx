@@ -17,7 +17,8 @@ import {
 import type { PanelBaseProps } from './types';
 import { saveHint } from '../../shared/lib/saveFile';
 
-/** 合并行:会话摘要打底,速率/端口/角色来自 /overview,同一台设备只占一行。 */
+/** 合并行:会话摘要打底,速率/端口/角色来自 /overview,同一台设备只占一行。
+ *  configOnly 非空 = 数据库里还没启动的设备（无会话 id），「启动」= 按配置创建会话。 */
 interface DeviceRow extends SessionSummary {
   port: number;
   hostSim: boolean;
@@ -25,6 +26,7 @@ interface DeviceRow extends SessionSummary {
   s6f11PerMin: number;
   lastEventAt: number;
   activeAlarms: number;
+  configOnly?: string;
 }
 
 /**
@@ -36,7 +38,6 @@ interface DeviceRow extends SessionSummary {
  * 点行进设备页。批量工具条常驻在表格下方,勾选后才可用。</p>
  */
 export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX.Element {
-  const [newConfig, setNewConfig] = useState('demo');
   const [stateFilter, setStateFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkConfig, setBulkConfig] = useState('');
@@ -81,21 +82,48 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
 
   /* /overview 按 id 并进会话行:计数以会话为准,速率/端口/角色以总览为准 */
   const overviewById = useMemo(() => new Map((overview ?? []).map((row) => [row.id, row])), [overview]);
-  const rows = useMemo<DeviceRow[]>(() => sessions.map((session) => {
-    const info = overviewById.get(session.id);
-    return {
-      ...session,
-      controlState: session.controlState ?? info?.controlState,
-      device: info?.device ?? session.device,
-      units: info?.units ?? session.units,
-      port: info?.port ?? 0,
-      hostSim: info?.hostSim ?? false,
-      msgsPerMin: info?.msgsPerMin ?? 0,
-      s6f11PerMin: info?.s6f11PerMin ?? 0,
-      lastEventAt: info?.lastEventAt ?? 0,
-      activeAlarms: info?.counters.activeAlarms ?? 0,
-    };
-  }), [sessions, overviewById]);
+  const rows = useMemo<DeviceRow[]>(() => {
+    /* 清单以配置库为准：一台设备一行（按配置文件名去重），运行状态并入会话数据。
+       会话没带 config（外部 --config 场景）的行单独排在后面，不参与按配置合并。 */
+    const byConfig = new Map<string, DeviceRow>();
+    const others: DeviceRow[] = [];
+    for (const session of sessions) {
+      const info = overviewById.get(session.id);
+      const row: DeviceRow = {
+        ...session,
+        controlState: session.controlState ?? info?.controlState,
+        device: info?.device ?? session.device,
+        units: info?.units ?? session.units,
+        port: info?.port ?? 0,
+        hostSim: info?.hostSim ?? false,
+        msgsPerMin: info?.msgsPerMin ?? 0,
+        s6f11PerMin: info?.s6f11PerMin ?? 0,
+        lastEventAt: info?.lastEventAt ?? 0,
+        activeAlarms: info?.counters.activeAlarms ?? 0,
+      };
+      if (session.config !== undefined && session.config !== '') {
+        byConfig.set(session.config, row);
+      } else {
+        others.push(row);
+      }
+    }
+    /* 配置库里有、还没有会话行的设备：显示为「停止」，点「启动」才创建会话 */
+    for (const entry of configList) {
+      if (!byConfig.has(entry.name)) {
+        byConfig.set(entry.name, {
+          id: `config:${entry.name}`,
+          state: 'CLOSED',
+          device: entry.name.replace(/\.json$/i, ''),
+          config: entry.name,
+          units: 0,
+          lastError: '',
+          counters: {},
+          configOnly: entry.name,
+        } as DeviceRow);
+      }
+    }
+    return [...others, ...[...byConfig.values()]];
+  }, [sessions, overviewById, configList]);
 
   /* "在线"只认 GEM 的 ONLINE：端口开着（启动）、或连着但主机没让上线（离线）
      都不算在线，否则列表里会出现"显示在线、报文一条都没有"。 */
@@ -123,21 +151,23 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       key: 'select',
       header: '选择',
       render: (row) => (
-        <input
-          type="checkbox"
-          checked={selected.has(row.id)}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => {
-            const next = new Set(selected);
-            if (event.target.checked) {
-              next.add(row.id);
-            } else {
-              next.delete(row.id);
-            }
-            setSelected(next);
-          }}
-          aria-label={`选择 ${row.id}`}
-        />
+        row.configOnly === undefined ? (
+          <input
+            type="checkbox"
+            checked={selected.has(row.id)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              const next = new Set(selected);
+              if (event.target.checked) {
+                next.add(row.id);
+              } else {
+                next.delete(row.id);
+              }
+              setSelected(next);
+            }}
+            aria-label={`选择 ${row.id}`}
+          />
+        ) : null
       ),
     },
     {
@@ -145,17 +175,31 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       header: '设备',
       sortValue: (row) => row.device,
       render: (row) => (
-        <button
-          type="button"
-          className="link"
-          onClick={(event) => {
-            event.stopPropagation();
-            goTo?.(`device:${row.id}`);
-          }}
-          title="进入设备页"
-        >
-          {row.device}
-        </button>
+        row.configOnly === undefined ? (
+          <button
+            type="button"
+            className="link"
+            onClick={(event) => {
+              event.stopPropagation();
+              goTo?.(`device:${row.id}`);
+            }}
+            title="进入设备页"
+          >
+            {row.device}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="link"
+            onClick={(event) => {
+              event.stopPropagation();
+              goTo?.(`device-open:${row.configOnly}`);
+            }}
+            title="查看设备页（未启动）：配置区的定义照常可编辑，运行区等启动后再看"
+          >
+            {row.device}
+          </button>
+        )
       ),
     },
     {
@@ -236,50 +280,64 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         const status = deviceStatus(row);
         return (
           <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => void backend.reloadSession(row.id)}
-              title="重载（重启）：按配置文件重新装载，配置有问题时旧会话不受影响"
-            >
-              重载
-            </button>
-            {status === 'stopped' ? (
+            {row.configOnly !== undefined ? (
+              /* 数据库里还没启动的设备：只有「启动」一个动作 = 按配置创建会话 */
               <button
                 type="button"
                 className="primary"
-                onClick={() => void backend.connectSession(row.id)}
-                title="启动端口监听（设备开始等主机连接）"
+                onClick={() => void backend.createSession(row.configOnly as string)}
+                title="按已保存的设备配置创建会话并启动端口监听"
               >
                 启动
               </button>
             ) : (
-              <button
-                type="button"
-                className="danger"
-                onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
-                title="停止端口监听：链路断开、端口立即释放，设备保留在清单里"
-              >
-                停止
-              </button>
-            )}
-            {status === 'offline' && (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void backend.setDeviceOnline(row.id, true)}
-                title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
-              >
-                上线
-              </button>
-            )}
-            {status === 'online' && (
-              <button
-                type="button"
-                onClick={() => void backend.setDeviceOnline(row.id, false)}
-                title="设备下线（等价主机发 S1F15）：主动上报立即停止"
-              >
-                下线
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => void backend.reloadSession(row.id)}
+                  title="重载（重启）：按配置文件重新装载，配置有问题时旧会话不受影响"
+                >
+                  重载
+                </button>
+                {status === 'stopped' ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void backend.connectSession(row.id)}
+                    title="启动端口监听（设备开始等主机连接）"
+                  >
+                    启动
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
+                    title="停止端口监听：链路断开、端口立即释放，设备保留在清单里"
+                  >
+                    停止
+                  </button>
+                )}
+                {status === 'offline' && (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void backend.setDeviceOnline(row.id, true)}
+                    title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
+                  >
+                    上线
+                  </button>
+                )}
+                {status === 'online' && (
+                  <button
+                    type="button"
+                    onClick={() => void backend.setDeviceOnline(row.id, false)}
+                    title="设备下线（等价主机发 S1F15）：主动上报立即停止"
+                  >
+                    下线
+                  </button>
+                )}
+              </>
             )}
           </div>
         );
@@ -393,7 +451,8 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         /* 坏配置跳过 */
       }
     }
-    let port = 5000;
+    /* 5000 留给 HTTP(开发期 vite 代理也指向它),设备 HSMS 从 5010 起分配 */
+    let port = 5010;
     while (usedPorts.has(port)) {
       port += 1;
     }
@@ -478,7 +537,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         tableKey="sessions"
         columns={columns}
         rows={visible}
-        rowKey={(row) => row.id}
+        rowKey={(row) => (row.configOnly !== undefined ? `config:${row.configOnly}` : row.id)}
         searchPlaceholder="搜索会话 id / 设备 / 状态"
         exportName="sessions"
         onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
@@ -519,7 +578,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
             notifier.success(`已按配置导入 ${done} 个会话`, tail);
           }
         }}
-        emptyText="暂无会话(用 --demo-session / --config 启动,或在右上角新建)"
+        emptyText="暂无设备:点「新建设备」创建;已保存的设备会显示为「停止」状态,点「启动」开始"
         defaultSort={{ key: 'id', direction: 'asc' }}
         toolbar={
           <div className="segmented" role="tablist">
@@ -712,7 +771,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
                     config: bulkConfig,
                     count: Math.min(100, Math.max(1, Math.round(bulkCount))),
                     sessionIdPrefix: bulkPrefix.trim() === '' ? 'dev-' : bulkPrefix.trim(),
-                    portBase: Math.max(0, Math.round(bulkPortBase)),
+                    portBase: Math.max(1, Math.round(bulkPortBase)),
                     deviceIdBase: Math.max(0, Math.round(bulkDeviceBase)),
                   })
                   .then((result) => {
@@ -748,7 +807,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           </label>
           <label className="field">
             起始端口
-            <NumberField value={bulkPortBase} integer onCommit={setBulkPortBase} />
+            <NumberField value={bulkPortBase} integer onCommit={(next) => setBulkPortBase(Math.max(1, next))} />
           </label>
           <label className="field">
             device-id 起始
@@ -793,7 +852,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         <p className="hint">
           第 i 台:会话 id = 前缀 + i,端口 = 起始端口 + i − 1,device-id = 起始 + i − 1。
           设备本体(单元、变量、事件、模板)全部来自所选配置模板;这些连接标识只在运行期覆盖,
-          不写回模板文件。端口从 0 或留空表示全部沿用模板端口(多台会因端口冲突而失败)。
+          不写回模板文件。起始端口必填(≥1),每台递增;模板里写了端口的也可留作单一设备使用。
         </p>
         {idConflicts.length > 0 && bulkResult === null && (
           <p className="problems">
