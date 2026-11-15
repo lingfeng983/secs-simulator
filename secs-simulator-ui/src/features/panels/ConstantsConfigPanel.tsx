@@ -65,7 +65,7 @@ function valueText(item: JsonObject): string {
   return value === undefined ? '—' : String(value);
 }
 
-function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
+export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
   const raw = Array.isArray(equipment.constants) ? (equipment.constants as unknown[]) : [];
   const rows: ConstantRow[] = raw.flatMap((item, index) => (isJsonObject(item) ? [{ index, item }] : []));
   /** 正在编辑的下标；null = 新建；undefined = 弹窗关闭。 */

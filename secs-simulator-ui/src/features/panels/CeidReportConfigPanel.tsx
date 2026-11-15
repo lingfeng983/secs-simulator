@@ -37,18 +37,21 @@ export function CeidReportConfigPanel(props: PanelBaseProps & { sessionId?: stri
       panelId="panel-ceid-report-config"
       title="事件与报告（CEID / RPT 定义）"
     >
-      {({ root, edit }) => (
-        isJsonObject(root.equipment)
-          ? (
-            <>
-              <GlobalCeidsForm equipment={root.equipment} edit={edit} />
-              <UnitForms root={root} edit={edit} />
-            </>
-          )
-          : <MissingEquipment edit={edit} />
-      )}
+      {({ root, edit }) => <CeidReportEditor root={root} edit={edit} />}
     </ConfigEditShell>
   );
+}
+
+export function CeidReportEditor({ root, edit }: {
+  root: JsonObject;
+  edit: (mutate: (root: JsonObject) => void) => void;
+}): JSX.Element {
+  return isJsonObject(root.equipment) ? (
+    <>
+      <GlobalCeidsForm equipment={root.equipment} edit={edit} />
+      <UnitForms root={root} edit={edit} />
+    </>
+  ) : <MissingEquipment edit={edit} />;
 }
 
 function UnitForms({ root, edit }: {

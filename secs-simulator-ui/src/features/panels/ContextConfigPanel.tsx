@@ -65,7 +65,7 @@ function contextIn(draft: JsonObject): JsonObject[] {
   return draft.context as JsonObject[];
 }
 
-function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const raw = Array.isArray(root.context) ? (root.context as unknown[]) : [];
   const rows: ContextRow[] = raw.flatMap((item, index) => (isJsonObject(item) ? [{ index, item }] : []));
   /** 正在编辑的下标；null = 新建；undefined = 弹窗关闭。 */

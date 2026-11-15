@@ -40,7 +40,7 @@ export function PlanConfigPanel(props: PanelBaseProps & { sessionId?: string; co
   );
 }
 
-function PlanEditor({ root, edit, text, backend }: {
+export function PlanEditor({ root, edit, text, backend }: {
   root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
   text: string;

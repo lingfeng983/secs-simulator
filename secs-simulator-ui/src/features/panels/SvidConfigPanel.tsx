@@ -175,7 +175,7 @@ function rangeText(item: JsonObject): string {
   return `${min ?? '−∞'} ~ ${max ?? '+∞'}`;
 }
 
-function SvidTable({ equipment, edit, library }: {
+export function SvidTable({ equipment, edit, library }: {
   equipment: JsonObject;
   edit: Edit;
   library: ParamTemplate[];

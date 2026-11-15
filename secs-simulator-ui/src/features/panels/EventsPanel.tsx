@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { filterRows } from '../../shared/lib/table';
+import { setPlansEnabled, type PlanBatchResult } from './eventBatch';
 import type { EventPlanView } from '../../api';
 import { Panel, PanelFootnote } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
@@ -123,21 +125,55 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
 
   const svidChoices = catalog?.svids ?? [];
 
-  /* 全部启动 / 全部停止：计划默认禁用，逐条点「启动」在几十条计划时不现实。
-     只在设备在线后才有意义（离线时调度器会跳过，不会积压）。 */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [query, setQuery] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
-  const setAllEnabled = async (next: boolean) => {
-    const targets = eventPlans.filter((plan) => plan.enabled !== next);
-    if (targets.length === 0) {
-      return;
-    }
+  const [progress, setProgress] = useState('');
+  const [batchResult, setBatchResult] = useState<PlanBatchResult | null>(null);
+  const batchLock = useRef(false);
+  const generation = useRef(0);
+  const sessionRef = useRef(activeSession);
+  sessionRef.current = activeSession;
+
+  useEffect(() => {
+    setSelected(new Set());
+    setQuery('');
+    setOwnerFilter('');
+    setBulkBusy(false);
+    setProgress('');
+    setBatchResult(null);
+    batchLock.current = false;
+    return () => { generation.current += 1; };
+  }, [activeSession]);
+
+  const applyEnabled = async (next: boolean, plans: readonly EventPlanView[], ids: ReadonlySet<string>) => {
+    const client = backend.client;
+    if (client === null || activeSession === '' || batchLock.current) return;
+    const device = activeSession;
+    const token = generation.current;
+    const current = () => token === generation.current && sessionRef.current === device;
+    batchLock.current = true;
     setBulkBusy(true);
+    setBatchResult(null);
     try {
-      for (const plan of targets) {
-        await backend.toggleEvent(plan);
-      }
+      const result = await setPlansEnabled(plans, ids, next, device,
+        (sessionId, planId, enabled) => client.setEventEnabled(sessionId, planId, enabled),
+        (done, total) => {
+          if (current()) setProgress(`${next ? '启动' : '停止'} ${done}/${total}`);
+        });
+      if (!current()) return;
+      setBatchResult(result);
+      const summary = `成功 ${result.succeeded.length} 条，失败 ${result.failed.length} 条，跳过 ${result.skipped} 条`;
+      if (result.failed.length > 0) notifier.error('计划操作部分失败', summary);
+      else notifier.success('计划操作完成', summary);
+      /* 刷新失败不影响已经完成的启停结果，只补一条提示，别把异常抛成未处理拒绝 */
+      await backend.refreshAll().catch((error) => notifier.error('刷新计划状态失败', (error as Error).message));
     } finally {
-      setBulkBusy(false);
+      if (current()) {
+        batchLock.current = false;
+        setBulkBusy(false);
+        setProgress('');
+      }
     }
   };
 
@@ -147,9 +183,15 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     [eventPlans],
   );
   const [ownerFilter, setOwnerFilter] = useState('');
-  const visiblePlans = ownerFilter === ''
-    ? eventPlans
-    : eventPlans.filter((plan) => plan.owner === ownerFilter);
+  const visiblePlans = filterRows(
+    ownerFilter === '' ? eventPlans : eventPlans.filter((plan) => plan.owner === ownerFilter),
+    query,
+    (plan) => `${plan.id} ${plan.ceid} ${plan.owner ?? ''} ${triggerLabel(plan)}`,
+  );
+  const selectedPlans = visiblePlans.filter((plan) => selected.has(plan.id));
+  const allSelected = visiblePlans.length > 0 && selectedPlans.length === visiblePlans.length;
+  const canStartSelected = selectedPlans.some((plan) => !plan.enabled);
+  const canStopSelected = selectedPlans.some((plan) => plan.enabled);
 
   /**
    * 预览一个完整事件周期。
@@ -201,6 +243,27 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
   }, [svidChoices]);
 
   const columns: Column<EventPlanView>[] = [
+    {
+      key: 'select', header: '选择', width: '46px', className: 'select-column',
+      headerContent: (
+        <input type="checkbox" aria-label="全选当前筛选结果" checked={allSelected}
+          disabled={bulkBusy || visiblePlans.length === 0}
+          ref={(element) => { if (element !== null) element.indeterminate = selectedPlans.length > 0 && !allSelected; }}
+          onChange={() => setSelected(allSelected ? new Set() : new Set(visiblePlans.map((plan) => plan.id)))} />
+      ),
+      render: (plan) => (
+        <input type="checkbox" aria-label={`选择计划 ${plan.id}`} checked={selected.has(plan.id)} disabled={bulkBusy}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            setSelected((previous) => {
+              const next = new Set(previous);
+              if (checked) next.add(plan.id);
+              else next.delete(plan.id);
+              return next;
+            });
+          }} />
+      ),
+    },
     { key: 'id', header: '计划', sortValue: (row) => row.id, render: (row) => <span className="mono">{row.id}</span> },
     { key: 'ceid', header: 'CEID', sortValue: (row) => row.ceid, render: (row) => row.ceid },
     {
@@ -310,8 +373,8 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           </button>
           <button
             type="button"
-            onClick={() => void backend.toggleEvent(row)}
-            disabled={activeSession === ''}
+            onClick={() => void applyEnabled(!row.enabled, [row], new Set([row.id]))}
+            disabled={activeSession === '' || bulkBusy}
             title={row.enabled ? '停止后不再触发;已排队的延迟事件会清掉' : '启动后按触发规则发送事件(设备在线才真正发出);停止期间的事件不补发'}
           >
             {row.enabled ? '停止' : '启动'}
@@ -331,7 +394,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           <button
             type="button"
             disabled={activeSession === '' || bulkBusy || eventPlans.length === 0}
-            onClick={() => void setAllEnabled(true)}
+            onClick={() => void applyEnabled(true, eventPlans, new Set(eventPlans.map((plan) => plan.id)))}
             title="启动全部计划：设备在线时立即按各自的触发规则发送事件"
           >
             {bulkBusy ? '处理中…' : '全部启动'}
@@ -339,7 +402,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           <button
             type="button"
             disabled={activeSession === '' || bulkBusy || enabled === 0}
-            onClick={() => void setAllEnabled(false)}
+            onClick={() => void applyEnabled(false, eventPlans, new Set(eventPlans.map((plan) => plan.id)))}
             title="停止全部计划：已在队列里的延迟事件一并清除"
           >
             全部停止
@@ -360,20 +423,33 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         columns={columns}
         rows={visiblePlans}
         rowKey={(row) => row.id}
-        searchPlaceholder="搜索计划 / CEID / 归属 / 触发规则"
-        toolbar={owners.length > 1 ? (
-          <label className="field">
-            归属
-            <select
-              value={ownerFilter}
-              onChange={(event) => setOwnerFilter(event.target.value)}
-              aria-label="按归属单元过滤计划"
-            >
-              <option value="">全部</option>
-              {owners.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
-            </select>
-          </label>
-        ) : undefined}
+        toolbar={
+          <>
+            <input type="search" className="table-search" value={query} disabled={bulkBusy}
+              placeholder="搜索计划 / CEID / 归属 / 触发规则" aria-label="搜索计划 / CEID / 归属 / 触发规则"
+              onChange={(event) => { setQuery(event.target.value); setSelected(new Set()); }} />
+            {owners.length > 1 && (
+              <label className="field">
+                归属
+                <select value={ownerFilter} disabled={bulkBusy}
+                  onChange={(event) => { setOwnerFilter(event.target.value); setSelected(new Set()); }}
+                  aria-label="按归属单元过滤计划">
+                  <option value="">全部</option>
+                  {owners.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+                </select>
+              </label>
+            )}
+          </>
+        }
+        toolbarEnd={
+          <>
+            <span className="table-selection" role="status">{bulkBusy ? progress : `已选 ${selectedPlans.length} 条`}</span>
+            <button type="button" disabled={activeSession === '' || bulkBusy || !canStartSelected}
+              onClick={() => void applyEnabled(true, visiblePlans, selected)}>批量启动</button>
+            <button type="button" disabled={activeSession === '' || bulkBusy || !canStopSelected}
+              onClick={() => void applyEnabled(false, visiblePlans, selected)}>批量停止</button>
+          </>
+        }
         exportName="events"
         onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
         emptyText={activeSession === '' ? '暂无会话' : '该设备还没有事件计划——到配置区「事件计划」页定义'}
@@ -385,6 +461,17 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           { header: '状态', value: (row) => PLAN_STATUS_BADGE[planStatusOf(row)].text },
         ]}
       />
+
+      {batchResult !== null && (
+        <div className="inline-note" role="status">
+          成功 {batchResult.succeeded.length} 条，失败 {batchResult.failed.length} 条，跳过 {batchResult.skipped} 条
+          {batchResult.failed.length > 0 && (
+            <ul className="problems">
+              {batchResult.failed.map((item) => <li key={item.id}>{item.id}：{item.reason}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* 3.0 M4：执行明细（台账流；计划卡的信息并入上方列表列） */}
       <PlanExecutionTimeline

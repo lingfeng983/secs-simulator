@@ -41,7 +41,7 @@ export type DeviceZone = 'config' | 'runtime';
 export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
 
 export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
-  'overview', 'connection', 'structure', 'svids', 'context', 'events', 'plans', 'document', 'constants', 'revisions',
+  'overview', 'connection', 'structure', 'constants', 'context', 'svids', 'events', 'plans', 'document', 'revisions',
 ];
 /* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
    报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */

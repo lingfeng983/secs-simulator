@@ -90,6 +90,18 @@ describe('DevicePage 骨架', () => {
     expect(html).toContain('启动设备');
   });
 
+  it('配置导航按结构、常量、属性、变量的顺序展示', () => {
+    const html = renderDevice('overview', 'config');
+    const tabs = html.slice(html.indexOf('subtabs'), html.indexOf('tab-page'));
+    const labels = ['概览', '连接', '结构', '设备常量', '晶圆属性', '变量配置', '事件与报告', '事件计划', '配置原文', '版本历史'];
+    let position = -1;
+    for (const label of labels) {
+      const next = tabs.indexOf(`>${label}<`);
+      expect(next, label).toBeGreaterThan(position);
+      position = next;
+    }
+  });
+
   it('未启动的设备也有运行区的两页，不因状态少一页', () => {
     const html = renderDevice('plans', 'runtime');
     const tabs = html.slice(html.indexOf('subtabs'), html.indexOf('tab-page'));
