@@ -39,6 +39,8 @@ final class HostCollector {
 
     private final HostSimulator owner;
     private final String hostId;
+    /** 采集计划标识（界面方案库的 id）：一台主机可以同时挂多份，靠它区分。 */
+    private final String planId;
 
     private volatile HostSimulator.CollectorConfig config;
     private volatile boolean armed;
@@ -52,9 +54,45 @@ final class HostCollector {
     private final Map<Integer, Deque<double[]>> data = new ConcurrentHashMap<>();
     private volatile ScheduledExecutorService executor;
 
-    HostCollector(HostSimulator owner, String hostId) {
+    HostCollector(HostSimulator owner, String hostId, String planId) {
         this.owner = owner;
         this.hostId = hostId;
+        this.planId = planId == null || planId.isBlank() ? HostCollectors.DEFAULT_PLAN_ID : planId;
+    }
+
+    /** 采集计划标识。 */
+    String planId() {
+        return this.planId;
+    }
+
+    /** 当前是否在按周期轮询。 */
+    boolean isRunning() {
+        return this.running;
+    }
+
+    /** 当前是否在待命（等启动 CEID）。 */
+    boolean isArmed() {
+        return this.armed;
+    }
+
+    /** 已采样本点数（按 SVID 累加）。 */
+    long sampleCount() {
+        return this.samples.get();
+    }
+
+    /** 解码错误数。 */
+    long decodeErrorCount() {
+        return this.decodeErrors.get();
+    }
+
+    /** 最近一次 S1F3 往返耗时（ms）。 */
+    long lastRttMillis() {
+        return this.lastRttMs;
+    }
+
+    /** 当前配置；未下发过返回 null。 */
+    HostSimulator.CollectorConfig currentConfig() {
+        return this.config;
     }
 
     /**
@@ -83,6 +121,7 @@ final class HostCollector {
     /**
      * 手动启动：
      * <ul>
+     *   <li>已在采集 → 什么都不做（幂等）；</li>
      *   <li>配置了启动 CEID → 只是武装待命，等目标发 S6F11；</li>
      *   <li>没有启动 CEID（{@code startCeid<=0}）→ 直接开始轮询。</li>
      * </ul>
@@ -92,6 +131,16 @@ final class HostCollector {
         HostSimulator.CollectorConfig current = this.config;
         if (current == null) {
             throw new IllegalStateException("采集器还没有配置");
+        }
+        /*
+         * 已经在跑：手动「启动」必须幂等，绝不能把正在跑的轮询按回待命。
+         * 界面收到启动 CEID 的 S6F11 时会补一次启动（它每 2 秒才刷新一次采集器状态，
+         * 那一刻可能还以为没开始采）。老实现无条件走 standby → stop() 掉执行器，
+         * 现场看到的就是"设备发了启动 CEID，只收到一两条 S1F3 之后就没数据了"：
+         * 采集器挂在 armed 上，而那个 CEID 通常只来一次。
+         */
+        if (this.running) {
+            return;
         }
         if (current.startCeid() <= 0) {
             this.start("手动");
@@ -136,13 +185,13 @@ final class HostCollector {
         this.stoppedAt = 0;
 
         ScheduledExecutorService next = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "hostsim-collector-" + this.hostId);
+            Thread thread = new Thread(runnable, "hostsim-collector-" + this.hostId + "-" + this.planId);
             thread.setDaemon(true);
             return thread;
         });
         this.executor = next;
         next.scheduleAtFixedRate(this::tick, 0L, current.intervalMs(), TimeUnit.MILLISECONDS);
-        Log.info("主机采集器已启动（" + this.hostId + "，" + cause + "）");
+        Log.info("主机采集器已启动（" + this.hostId + " / " + this.planId + "，" + cause + "）");
     }
 
     synchronized void stop(String cause) {
@@ -156,7 +205,7 @@ final class HostCollector {
             current.shutdownNow();
             this.executor = null;
         }
-        Log.info("主机采集器已停止（" + this.hostId + "，" + cause + "）");
+        Log.info("主机采集器已停止（" + this.hostId + " / " + this.planId + "，" + cause + "）");
     }
 
     /** 销毁实例时的收尾：执行器已经停掉的状态下再兜一次底。 */
@@ -339,14 +388,15 @@ final class HostCollector {
     }
 
     /** 采集器状态与数据（未配置时 configured=false）。 */
-    String toJson() {
+    JsonHub toJsonHub() {
         JsonHubBuilder b = JsonHub.getBuilder();
         HostSimulator.CollectorConfig current = this.config;
 
         if (current == null) {
             return b.object(
+                    b.pair("planId", this.planId),
                     b.pair("configured", false),
-                    b.pair("running", false)).toJson();
+                    b.pair("running", false));
         }
 
         List<JsonHub> svids = new ArrayList<>();
@@ -402,6 +452,7 @@ final class HostCollector {
         }
 
         return b.object(
+                b.pair("planId", this.planId),
                 b.pair("configured", true),
                 b.pair("running", this.running),
                 b.pair("armed", this.armed),
@@ -416,7 +467,6 @@ final class HostCollector {
                 b.pair("lastRttMs", this.lastRttMs),
                 b.pair("truncated", truncated),
                 b.pair("staleSvids", b.array(stale)),
-                b.pair("series", b.array(series)))
-                .toJson();
+                b.pair("series", b.array(series)));
     }
 }

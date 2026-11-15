@@ -1242,12 +1242,14 @@ paths:
     post:
       tags: [host-sims]
       summary: 建链
+      description: |
+        幂等：已连接或正在连接时直接回 200，不会重复建链、也不报错
+        （新建主机时后端已顺手建链，重复点「连接」不该弹「连接失败」）。
       parameters:
         - { name: hostId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 已连上 }
+        '200': { description: 已连上（已连接/正在连接时同样回 200） }
         '404': { description: 主机不存在 }
-        '409': { description: 相位不允许（已在连接中） }
         '502': { description: 连不上（对端拒绝 / 超时 / 目标非法） }
   /api/v2/hosts/{hostId}/disconnect:
     post:
@@ -1534,9 +1536,13 @@ paths:
   /api/v1/host-sims/{hostId}/collector/start:
     post:
       tags: [host-sims]
-      summary: 手动启动该实例的采集器（v6）
+      summary: 手动启动该实例的采集器（v6）；可只启动其中一份采集计划
+      description: |
+        省略 planId = 启动全部已配置的计划。指定 planId 时只动那一份，
+        同一台主机上的其它计划照常采（一台主机可以同时跑多份采集器）。
       parameters:
         - $ref: '#/components/parameters/HostId'
+        - $ref: '#/components/parameters/CollectPlanId'
       responses:
         '200':
           description: 已启动
@@ -1556,9 +1562,11 @@ paths:
   /api/v1/host-sims/{hostId}/collector/stop:
     post:
       tags: [host-sims]
-      summary: 手动停止该实例的采集器（v6）
+      summary: 手动停止该实例的采集器（v6）；可只停其中一份采集计划
+      description: 省略 planId = 停止全部已配置的计划。
       parameters:
         - $ref: '#/components/parameters/HostId'
+        - $ref: '#/components/parameters/CollectPlanId'
       responses:
         '200':
           description: 已停止
@@ -1988,6 +1996,14 @@ components:
       required: true
       description: 主机实例 id（`host-1` 之类，由新建时指定或后端分配）
       schema: { type: string, example: host-1 }
+    CollectPlanId:
+      name: planId
+      in: query
+      required: false
+      description: |
+        采集计划 id（界面方案库里的 id）。省略 = 全部已配置的计划；
+        一台主机可以同时挂多份采集器，按它各启各停。
+      schema: { type: string }
   responses:
     NotFound:
       description: 目标不存在（404）
@@ -2219,9 +2235,12 @@ components:
             startedAt: { type: integer, format: int64, description: 运行中时的开始时间（epoch 毫秒） }
     CollectorConfig:
       type: object
-      description: 主机模拟 S1F3 采集器配置（v6）
+      description: 主机模拟 S1F3 采集器配置（v6）；一份配置 = 一个采集计划
       required: [startCeid, stopCeid, svids]
       properties:
+        planId:
+          type: string
+          description: 采集计划 id（界面方案库里的 id）。省略 = 默认计划（单份配置的老语义）
         startCeid: { type: integer }
         stopCeid: { type: integer }
         intervalMs: { type: integer, default: 1000, minimum: 200 }
@@ -2234,12 +2253,14 @@ components:
               id: { type: integer }
               name: { type: string }
               unit: { type: string }
-    CollectorState:
+    CollectorPlanState:
       type: object
-      description: 采集器状态与数据（v6）
+      description: 一份采集计划（这台主机上的一份采集器）的状态与数据
       properties:
+        planId: { type: string }
         configured: { type: boolean }
         running: { type: boolean }
+        armed: { type: boolean, description: 已待命、等 startCeid 的 S6F11 }
         mode: { type: string, enum: [local, remote] }
         startCeid: { type: integer }
         stopCeid: { type: integer }
@@ -2255,6 +2276,7 @@ components:
             properties:
               id: { type: integer }
               name: { type: string }
+              unit: { type: string }
         staleSvids:
           type: array
           items: { type: integer }
@@ -2272,6 +2294,18 @@ components:
               v:
                 type: array
                 items: { type: number }
+    CollectorState:
+      type: object
+      description: |
+        采集器总体状态。一台主机可以同时挂多份采集器（按采集计划分开），
+        顶层三个位是「任意一份」的汇总，明细看 collectors。
+      properties:
+        configured: { type: boolean, description: 任意一份已配置 }
+        running: { type: boolean, description: 任意一份在采 }
+        armed: { type: boolean, description: 任意一份待命 }
+        collectors:
+          type: array
+          items: { $ref: '#/components/schemas/CollectorPlanState' }
     MessagePage:
       type: object
       required: [messages, total, limit, truncated]

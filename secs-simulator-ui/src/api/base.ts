@@ -16,6 +16,21 @@ export function setRuntimeApiBase(base: string): void {
   runtimeApiBase = base;
 }
 
+/**
+ * 桌面壳里的后端启动失败原因；非空时所有请求立刻失败，不再发出去。
+ *
+ * <p>壳内页面来自桌面壳自带的资源，「同源」指向的是那堆静态文件本身：本机后端没起来时
+ * /api/* 会落到 index.html 上，浏览器拿到 200 + 一页 HTML，界面只好报
+ * "200 返回的不是 JSON"——真正的原因（后端起不来）反而看不见。记下原因，
+ * 让每条请求都带着它失败，横幅上就是能排查的那句话。</p>
+ */
+let runtimeApiFailure: string | null = null;
+
+/** 记录 / 清除后端启动失败原因；传 null 表示恢复（切后端后页面会重载）。 */
+export function setRuntimeApiFailure(reason: string | null): void {
+  runtimeApiFailure = reason;
+}
+
 /** 当前使用的后端地址；空串表示同源。 */
 export function readApiBase(): string {
   if (runtimeApiBase !== null) return runtimeApiBase;
@@ -94,6 +109,10 @@ export async function request(
   init: RequestInit = {},
   timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
+  /* 壳内后端根本没起来：发出去只会拿到 HTML 兜底页，就地失败更诚实 */
+  if (runtimeApiFailure !== null) {
+    throw new ApiError(0, 'backend-unavailable', runtimeApiFailure);
+  }
   const headers = new Headers(init.headers);
   const signal = init.signal ?? timeoutSignal(timeoutMs);
   try {
@@ -132,10 +151,15 @@ export async function readJson<T>(response: Response): Promise<T> {
   try {
     return JSON.parse(text) as T;
   } catch {
+    /* 200 却不是 JSON：最常见的两种是"地址指到了静态页"和"反代塞了错误页"。
+       把 HTML 原文直接弹出去，用户看到的是一堆尖括号，不知道该动哪里。 */
+    const looksHtml = /^<(!doctype\s+html|html)/i.test(text.trim());
     throw new ApiError(
       response.status,
       'bad-json',
-      `${response.status} 返回的不是 JSON：${text.slice(0, 120)}`,
+      looksHtml
+        ? `${response.status} 拿到的是网页而不是接口数据（后端地址指错了，或后端没启动）：${text.trim().slice(0, 80)}`
+        : `${response.status} 返回的不是 JSON：${text.slice(0, 120)}`,
     );
   }
 }

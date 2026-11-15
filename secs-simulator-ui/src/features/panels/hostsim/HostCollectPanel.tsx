@@ -8,6 +8,7 @@ import type {
   CatalogCeid,
   CatalogSvid,
   CollectorConfigInput,
+  CollectorPlanState,
   CollectorState,
   HostV2,
   PreviewSeries,
@@ -16,9 +17,7 @@ import { parseIdList, planId, useCollectPlans, type CollectPlan } from '../../..
 import { ceidFromS6f11 } from '../../../shared/lib/smlValues';
 import { hostOfTarget } from '../../../shared/lib/format';
 import { requireClient, type PanelArgs } from './hostPanelShared';
-
-/** 后端 C-COLLECTOR-STATE@1 新增的 armed 字段：前端公共类型尚未收录，按可选读取。 */
-type ArmedCollectorState = CollectorState & { armed?: boolean };
+import { collectorEngaged } from './hostRuntimeStatus';
 
 /** 采集器状态（由 armed/running 派生）。 */
 interface CollectorStatus {
@@ -27,14 +26,14 @@ interface CollectorStatus {
   hint: string;
 }
 
-function collectorStatus(state: CollectorState | null): CollectorStatus {
+function collectorStatus(state: CollectorPlanState | null): CollectorStatus {
   if (state === null || state.configured !== true) {
     return { text: '未配置', badge: 'badge-muted', hint: '还没有下发采集配置' };
   }
   if (state.running === true) {
     return { text: '采集中', badge: 'badge-ok', hint: '正在按周期轮询 S1F3' };
   }
-  if ((state as ArmedCollectorState).armed === true) {
+  if (state.armed === true) {
     return { text: '待命', badge: 'badge-warn', hint: '配置已下发，等待设备上报启动 CEID' };
   }
   return { text: '未启动', badge: 'badge-muted', hint: '配置已下发但未启动采集' };
@@ -86,25 +85,13 @@ async function readLocalCatalog(client: ApiClient, host: HostV2): Promise<LocalC
 
 function planConfig(plan: CollectPlan): CollectorConfigInput {
   return {
+    /* 计划 id 就是采集器的身份：一台主机可以同时挂多份，靠它各采各的 */
+    planId: plan.id,
     startCeid: Number(plan.startCeid) || 0,
     stopCeid: Number(plan.stopCeid) || 0,
     intervalMs: Number(plan.intervalMs) || 1000,
     svids: parseIdList(plan.svids).map((id) => ({ id })),
   };
-}
-
-/** 已生效配置与选中方案是否一致：批量启动据此跳过。 */
-function sameConfig(plan: CollectPlan, state: CollectorState): boolean {
-  const config = planConfig(plan);
-  if ((state.startCeid ?? 0) !== config.startCeid || (state.stopCeid ?? 0) !== config.stopCeid) {
-    return false;
-  }
-  if ((state.intervalMs ?? 0) !== config.intervalMs) {
-    return false;
-  }
-  const current = (state.svids ?? []).map((item) => item.id).sort((left, right) => left - right);
-  const wanted = config.svids.map((item) => item.id).sort((left, right) => left - right);
-  return current.length === wanted.length && current.every((id, index) => id === wanted[index]);
 }
 
 interface BatchFailure {
@@ -122,8 +109,7 @@ interface BatchResult {
 function CollectPlanTable({
   plans,
   mode,
-  status,
-  running,
+  planState,
   onLoad,
   onDelete,
   onToggle,
@@ -133,9 +119,8 @@ function CollectPlanTable({
 }: {
   plans: readonly CollectPlan[];
   mode: 'config' | 'runtime';
-  /** 运行区采集器状态（表格同一个采集器，所有行同一状态）。 */
-  status: CollectorStatus;
-  running: boolean;
+  /** 取某条配置对应的那份采集器状态（一台主机可以同时挂多份）。 */
+  planState: (plan: CollectPlan) => CollectorPlanState | null;
   onLoad: (plan: CollectPlan) => void;
   onDelete: (id: string) => void;
   onToggle: (plan: CollectPlan) => void;
@@ -189,9 +174,10 @@ function CollectPlanTable({
       : [{
         key: 'status',
         header: '状态',
-        render: () => (
-          <span className={`badge ${status.badge}`} title={status.hint}>{status.text}</span>
-        ),
+        render: (row: CollectPlan) => {
+          const status = collectorStatus(planState(row));
+          return <span className={`badge ${status.badge}`} title={status.hint}>{status.text}</span>;
+        },
       } as Column<CollectPlan>]),
     { key: 'startCeid', header: '启动 CEID', sortValue: (row) => Number(row.startCeid) || 0, render: (row) => <span className="mono">{row.startCeid}</span> },
     { key: 'stopCeid', header: '停止 CEID', sortValue: (row) => Number(row.stopCeid) || 0, render: (row) => <span className="mono">{row.stopCeid}</span> },
@@ -212,15 +198,22 @@ function CollectPlanTable({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              className={running ? 'danger' : 'primary'}
-              disabled={busy}
-              onClick={() => onToggle(row)}
-              title={running ? '停止采集' : '下发该配置并启动采集'}
-            >
-              {running ? '停止' : '启动'}
-            </button>
+            (() => {
+              const engaged = collectorEngaged(planState(row));
+              return (
+                <button
+                  type="button"
+                  className={engaged ? 'danger' : 'primary'}
+                  disabled={busy}
+                  onClick={() => onToggle(row)}
+                  title={engaged
+                    ? '停止这一份采集（同一台主机上其它计划照常在采）'
+                    : '下发该配置并启动采集'}
+                >
+                  {engaged ? '停止' : '启动'}
+                </button>
+              );
+            })()
           )}
         </div>
       ),
@@ -240,7 +233,7 @@ function CollectPlanTable({
         : '还没有采集配置；到配置区「采集设置」新增后这里即可启停。'}
       exportColumns={[
         { header: '配置', value: (row) => row.name },
-        ...(editing ? [] : [{ header: '状态', value: () => status.text }]),
+        ...(editing ? [] : [{ header: '状态', value: (row: CollectPlan) => collectorStatus(planState(row)).text }]),
         { header: '启动CEID', value: (row) => row.startCeid },
         { header: '停止CEID', value: (row) => row.stopCeid },
         { header: '周期ms', value: (row) => row.intervalMs },
@@ -403,13 +396,17 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostId, client, readOnly]);
 
-  const command = async (start: boolean) => {
+  /** 取某条配置对应的那份采集器状态（没下发过的配置没有状态）。 */
+  const stateOf = (plan: CollectPlan): CollectorPlanState | null =>
+    state?.collectors?.find((item) => item.planId === plan.id) ?? null;
+
+  /** 启停某一份采集计划：只动这一份，同一台主机上的其它计划照常采。 */
+  const command = async (planId: string, start: boolean) => {
     setBusy(true);
     setError('');
     try {
-      await requireClient(client).hostInstanceCollectorCommand(hostId, start);
+      await requireClient(client).hostInstanceCollectorCommand(hostId, start, planId);
       await loadState();
-      setNotice(start ? '采集已启动' : '采集已停止');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -423,7 +420,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     try {
       const api = requireClient(client);
       await api.setHostInstanceCollector(hostId, planConfig(plan));
-      await api.hostInstanceCollectorCommand(hostId, true);
+      await api.hostInstanceCollectorCommand(hostId, true, plan.id);
       await loadState();
       setNotice(`已下发并启动「${plan.name}」`);
     } catch (e) {
@@ -433,7 +430,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     }
   };
 
-  /** 批量启动：串行逐项启动；已在运行且配置一致的项跳过。 */
+  /** 批量启动：串行逐份下发 + 启动；已经启动的那几份自动跳过，不重复下发。 */
   const batchStart = async () => {
     if (client === null) {
       setError('后端未连接');
@@ -442,17 +439,13 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     const targets = plans.filter((plan) => selected.has(plan.id));
     setError('');
     setBatchResult(null);
-    setBatch({
-      action: 'start', done: 0, total: targets.length,
-    });
+    setBatch({ action: 'start', done: 0, total: targets.length });
     const failed: BatchFailure[] = [];
     let skipped = 0;
     let succeeded = 0;
-    let appliedName = '';
     let done = 0;
-    let snapshot: CollectorState | null = state;
     for (const plan of targets) {
-      if (snapshot !== null && snapshot.running === true && sameConfig(plan, snapshot)) {
+      if (collectorEngaged(stateOf(plan))) {
         skipped += 1;
         done += 1;
         setBatch({ action: 'start', done, total: targets.length });
@@ -460,25 +453,23 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
       }
       try {
         await client.setHostInstanceCollector(hostId, planConfig(plan));
-        await client.hostInstanceCollectorCommand(hostId, true);
-        snapshot = await client.hostInstanceCollector(hostId);
+        await client.hostInstanceCollectorCommand(hostId, true, plan.id);
         succeeded += 1;
-        appliedName = plan.name;
       } catch (e) {
         failed.push({ name: plan.name, message: (e as Error).message });
       }
       done += 1;
       setBatch({ action: 'start', done, total: targets.length });
     }
-    void loadState();
+    await loadState();
     setBatch(null);
     setBatchResult({ succeeded, skipped, failed });
-    if (appliedName !== '') {
-      setNotice(`生效配置：${appliedName}`);
+    if (succeeded > 0) {
+      setNotice(`已启动 ${succeeded} 份采集计划`);
     }
   };
 
-  /** 批量停止：采集器是整个主机一份，运行中只下发一次停止命令。 */
+  /** 批量停止：逐份停掉选中且正在采/待命的计划，其余跳过。 */
   const batchStop = async () => {
     if (client === null) {
       setError('后端未连接');
@@ -487,26 +478,33 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     const targets = plans.filter((plan) => selected.has(plan.id));
     setError('');
     setBatchResult(null);
-    setBatch({ action: 'stop', done: 0, total: 1 });
-    try {
-      if (state?.running === true) {
-        await client.hostInstanceCollectorCommand(hostId, false);
-        void loadState();
-        setBatch({ action: 'stop', done: 1, total: 1 });
-        setBatchResult({ succeeded: targets.length, skipped: 0, failed: [] });
-        setNotice(`采集已停止（${targets.length} 条选中配置）`);
-      } else {
-        setBatch({ action: 'stop', done: 1, total: 1 });
-        setBatchResult({ succeeded: 0, skipped: targets.length, failed: [] });
+    setBatch({ action: 'stop', done: 0, total: targets.length });
+    const failed: BatchFailure[] = [];
+    let skipped = 0;
+    let succeeded = 0;
+    let done = 0;
+    for (const plan of targets) {
+      if (!collectorEngaged(stateOf(plan))) {
+        skipped += 1;
+        done += 1;
+        setBatch({ action: 'stop', done, total: targets.length });
+        continue;
       }
-    } catch (e) {
-      setBatchResult({
-        succeeded: 0,
-        skipped: 0,
-        failed: [{ name: '停止采集', message: (e as Error).message }],
-      });
-    } finally {
-      setBatch(null);
+      try {
+        /* 待命也算"已启动"：这时候停掉要能真的解除待命，否则下次启动 CEID 又会开跑 */
+        await client.hostInstanceCollectorCommand(hostId, false, plan.id);
+        succeeded += 1;
+      } catch (e) {
+        failed.push({ name: plan.name, message: (e as Error).message });
+      }
+      done += 1;
+      setBatch({ action: 'stop', done, total: targets.length });
+    }
+    await loadState();
+    setBatch(null);
+    setBatchResult({ succeeded, skipped, failed });
+    if (succeeded > 0) {
+      setNotice(`已停止 ${succeeded} 份采集计划`);
     }
   };
 
@@ -587,9 +585,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
 
   /* 需求 9 的前端兜底：设备推来启动/停止 CEID 的 S6F11 时，
      即使后端链路侧的判定漏掉，也由界面显式下发启停命令。
-     只认本主机视角 + 本次打开之后的新报文，每条只处理一次。 */
-  const startCeid = state?.startCeid ?? 0;
-  const stopCeid = state?.stopCeid ?? 0;
+     只认本主机视角 + 本次打开之后的新报文，每条只处理一次；按计划各自匹配 CEID。 */
   useEffect(() => {
     if (client === null || !host?.open || readOnly) {
       return;
@@ -610,19 +606,24 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
       if (ceid === null) {
         continue;
       }
-      if (ceid === startCeid && startCeid > 0 && !state?.running) {
-        setNotice(`收到启动 CEID ${ceid}，正在启动采集…`);
-        void command(true);
-      } else if (ceid === stopCeid && stopCeid > 0 && state?.running) {
-        setNotice(`收到停止 CEID ${ceid}，正在停止采集…`);
-        void command(false);
+      for (const plan of plans) {
+        const planStart = Number(plan.startCeid) || 0;
+        const planStop = Number(plan.stopCeid) || 0;
+        const current = state?.collectors?.find((item) => item.planId === plan.id) ?? null;
+        if (planStart > 0 && ceid === planStart && current?.running !== true) {
+          setNotice(`收到启动 CEID ${ceid}，正在启动「${plan.name}」…`);
+          void command(plan.id, true);
+        } else if (planStop > 0 && ceid === planStop && current?.running === true) {
+          setNotice(`收到停止 CEID ${ceid}，正在停止「${plan.name}」…`);
+          void command(plan.id, false);
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, client, hostId, host?.open, readOnly, startCeid, stopCeid, state?.running]);
+  }, [messages, client, hostId, host?.open, readOnly, plans, state]);
 
   /* 采集样本是逐点值(min=max=avg);时间轴用样本自带的 epoch 毫秒。 */
-  const charts = (state?.series ?? []).map((item) => {
+  const chartsFor = (plan: CollectPlan) => (stateOf(plan)?.series ?? []).map((item) => {
     const times = item.t ?? [];
     const from = times.length > 0 ? times[0] : 0;
     const to = times.length > 1 ? times[times.length - 1] : from + 1000;
@@ -642,12 +643,15 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     };
   });
 
+
   if (host === null) {
     return <p className="hint">主机不存在。</p>;
   }
 
-  const running = state?.running === true;
-  const status = collectorStatus(state);
+  const runningPlans = (state?.collectors ?? []).filter((item) => item.running === true);
+  const armedPlans = (state?.collectors ?? []).filter((item) => item.running !== true && item.armed === true);
+  const totalSamples = runningPlans.reduce((sum, item) => sum + (item.samples ?? 0), 0);
+  const totalErrors = runningPlans.reduce((sum, item) => sum + (item.decodeErrors ?? 0), 0);
   const batchBusy = batch !== null;
 
   return (
@@ -662,13 +666,13 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
       <CollectPlanTable
         mode={readOnly ? 'config' : 'runtime'}
         plans={plans}
-        status={status}
-        running={running}
+        planState={stateOf}
         onLoad={openEdit}
         onDelete={(id) => setPlans((previous) => previous.filter((plan) => plan.id !== id))}
         onToggle={(plan) => {
-          if (running) {
-            void command(false);
+          /* 只切这一份：A 在采也不妨碍 B 启动，已启动的那份不会给「启动」 */
+          if (collectorEngaged(stateOf(plan))) {
+            void command(plan.id, false);
           } else {
             void startPlan(plan);
           }
@@ -691,7 +695,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
                 type="button"
                 disabled={client === null || batchBusy || selected.size === 0}
                 onClick={() => void batchStart()}
-                title="按选中顺序逐项下发配置并启动采集"
+                title="按选中顺序逐份下发配置并启动；已经启动的计划自动跳过"
               >
                 批量启动
               </button>
@@ -699,7 +703,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
                 type="button"
                 disabled={client === null || batchBusy || selected.size === 0}
                 onClick={() => void batchStop()}
-                title="停止当前采集（主机只跑一份采集器）"
+                title="停止选中且在采的计划；未启动的自动跳过"
               >
                 批量停止
               </button>
@@ -723,12 +727,12 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
       {!readOnly && (
         <div className="toolbar">
           <span className="hint-inline">
-            {running
-              ? `采集中 · ${state?.samples ?? 0} 点 · 解码错误 ${state?.decodeErrors ?? 0}`
-              : status.text === '待命'
-                ? `待命 · 已下发配置，等待启动 CEID ${startCeid}，或在方案列表点「启动」`
-                : state?.configured
-                  ? `已配置 · 等待启动 CEID ${startCeid}，或在方案列表点「启动」`
+            {runningPlans.length > 0
+              ? `采集中 ${runningPlans.length} 份 · ${totalSamples} 点 · 解码错误 ${totalErrors}`
+              : armedPlans.length > 0
+                ? `待命 ${armedPlans.length} 份 · 已下发配置，等待设备上报启动 CEID`
+                : (state?.collectors ?? []).length > 0
+                  ? '已配置 · 在方案列表点「启动」开跑（多份计划可同时采）'
                   : '未配置 · 在方案列表点「启动」下发配置'}
           </span>
         </div>
@@ -744,7 +748,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
           {plans.map((plan) => {
             const open = viewingPlanId === plan.id;
             const planSvids = parseIdList(plan.svids);
-            const planCharts = charts.filter((chart) => planSvids.includes(chart.svid));
+            const planCharts = chartsFor(plan);
             return (
               <section key={plan.id} className="panel-section">
                 <div className="section-head">

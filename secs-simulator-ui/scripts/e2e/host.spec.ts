@@ -194,12 +194,15 @@ test('主机配置区·报文模板：每条预设都给具体 SML 案例', asyn
   const panel = page.locator('#panel-host-presets');
   await expect(panel).toBeVisible();
 
-  /* 不再只有 SxFy 名字：每条都带 SML 正文 */
-  const cases = panel.locator('.preset-case');
-  expect(await cases.count()).toBeGreaterThan(8);
-  await expect(cases.first().locator('pre')).toContainText('S1F1 W');
-  await expect(panel.getByRole('button', { name: '填入运行区发送' }).first()).toBeVisible();
-  await expect(panel.getByRole('button', { name: '复制 SML' }).first()).toBeVisible();
+  /* 预设现在是表格：每条给 SxFy 与说明，双击行看具体 SML 案例 */
+  const rows = panel.locator('tbody tr');
+  expect(await rows.count()).toBeGreaterThan(8);
+  await expect(rows.first().locator('code')).toContainText('S1F1');
+  await rows.first().dblclick();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('pre')).toContainText('S1F1 W');
+  await expect(dialog.getByRole('button', { name: '填入运行区发送' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '复制 SML' })).toBeVisible();
 });
 
 /* ==================== 详情：运行区 ==================== */

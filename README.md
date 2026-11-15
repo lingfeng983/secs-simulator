@@ -107,7 +107,7 @@ secs-sim --mode=integrated
 # 在界面点「启动」才监听 HSMS；演示设备 JSON 仅作测试资产，可显式导入并启动：
 secs-sim --mode=integrated --config secs-simulator-service/secs-runtime/target/classes/defaults/demo-etch.json
 
-# 从配置文件装载设备（格式见 docs/guides/schema-v5.md）
+# 从配置文件装载设备（格式见 docs/guides/schema-v7.md）
 secs-sim --mode=integrated --config ./device.json
 
 # 同时托管前端（先构建，见下）：浏览器直接打开 READY 行里的 http 地址
@@ -600,6 +600,5 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 - [实机全量测试 2026-10-30（原生 exe + 真实主机 + 浏览器）](docs/reports/host-e2e-2026-10-30.md)
 - [SECS/GEM 标准参考资料](docs/reference/README.md)（E4/E5/E30/E37 中文整理 + 项目对照）
 - [未完成清单 2026-10-17](docs/reports/unfinished-2026-10-17.md)
-- [配置格式 Schema v5](docs/guides/schema-v5.md)（v4 仍兼容）
-- [配置格式 Schema v4](docs/guides/schema-v4.md)
+- [配置格式 Schema v7](docs/guides/schema-v7.md)（v4 / v5 仍兼容）
 - [SVID 值变化机制与规则](docs/guides/svid-value-model.md)（默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界）

@@ -254,18 +254,22 @@ export interface BurstStatus extends Partial<BurstResult> {
   error?: string;
 }
 
-/** 主机模拟 S1F3 采集器的配置。 */
+/** 主机模拟 S1F3 采集器的配置（一份配置 = 一个采集计划）。 */
 export interface CollectorConfigInput {
+  /** 采集计划 id（方案库里的 id）：一台主机可以挂多份采集器，按它区分。 */
+  planId?: string;
   startCeid: number;
   stopCeid: number;
   intervalMs: number;
   svids: { id: number; name?: string; unit?: string }[];
 }
 
-/** 主机模拟 S1F3 采集器的状态与数据。 */
-export interface CollectorState {
+/** 一份采集计划（= 这台主机上的一份采集器）的状态与数据。 */
+export interface CollectorPlanState {
+  planId: string;
   configured: boolean;
   running: boolean;
+  armed?: boolean;
   mode?: 'local' | 'remote';
   startCeid?: number;
   stopCeid?: number;
@@ -276,6 +280,19 @@ export interface CollectorState {
   lastRttMs?: number;
   staleSvids?: number[];
   series?: { svid: number; name?: string; unit?: string; t: number[]; v: number[] }[];
+}
+
+/**
+ * 主机 S1F3 采集器的总体状态。
+ *
+ * <p>一台主机可以同时挂多份采集器（按采集计划分开），各自独立启停；
+ * 顶层 configured/running/armed 是「任意一份」的汇总，明细在 collectors 里。</p>
+ */
+export interface CollectorState {
+  configured: boolean;
+  running: boolean;
+  armed?: boolean;
+  collectors?: CollectorPlanState[];
 }
 
 /** 主机模拟连接目标;remote 为 true 时连这个地址而不是本机。 */
@@ -451,8 +468,8 @@ export interface ApiClient {
   hostInstanceCollector(hostId: string): Promise<CollectorState | null>;
   /** 按实例 id 下发采集器配置。 */
   setHostInstanceCollector(hostId: string, config: CollectorConfigInput): Promise<{ ok: boolean; error?: string }>;
-  /** 按实例 id 手动启停采集器。 */
-  hostInstanceCollectorCommand(hostId: string, start: boolean): Promise<{ ok: boolean; error?: string }>;
+  /** 按实例 id 手动启停采集器；planId 给定时只动那一份采集计划。 */
+  hostInstanceCollectorCommand(hostId: string, start: boolean, planId?: string): Promise<{ ok: boolean; error?: string }>;
 
   /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
   openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;

@@ -47,9 +47,12 @@ export const hostSimApi: HostSimApi = {
     }
     return parsed;
   },
-  async hostInstanceCollectorCommand(hostId, start) {
+  async hostInstanceCollectorCommand(hostId, start, planId) {
+    const query = planId === undefined || planId === ''
+      ? ''
+      : `?planId=${encodeURIComponent(planId)}`;
     const response = await request(
-      apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector/${start ? 'start' : 'stop'}`),
+      apiUrl(`/api/v1/host-sims/${encodeURIComponent(hostId)}/collector/${start ? 'start' : 'stop'}${query}`),
       { method: 'POST' },
     );
     const text = await response.text();
@@ -95,16 +98,8 @@ export const hostSimApi: HostSimApi = {
     return {
       configured: body.configured ?? false,
       running: body.running ?? false,
-      mode: body.mode,
-      startCeid: body.startCeid,
-      stopCeid: body.stopCeid,
-      intervalMs: body.intervalMs,
-      svids: body.svids ?? [],
-      samples: body.samples ?? 0,
-      decodeErrors: body.decodeErrors ?? 0,
-      lastRttMs: body.lastRttMs,
-      staleSvids: body.staleSvids ?? [],
-      series: body.series ?? [],
+      armed: body.armed ?? false,
+      collectors: Array.isArray(body.collectors) ? body.collectors : [],
     };
   },
   async setCollector(sessionId, config: CollectorConfigInput) {

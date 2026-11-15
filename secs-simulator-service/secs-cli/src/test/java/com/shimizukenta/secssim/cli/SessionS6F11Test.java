@@ -157,6 +157,52 @@ class SessionS6F11Test {
         }
     }
 
+    /**
+     * 同一毫秒触发两个不同 CEID：两条都要发出去。
+     *
+     * <p>曾经第二条会撞上幂等键 {@code deviceId|manual|atMs} 被静默丢弃——手动触发的
+     * planId 传的是 null，两个不同 CEID 在同一毫秒就成了同一条"手动"记录。
+     * 现场表现：设备连报两个启动 CEID，第二份采集计划永远等不到它的启动事件。</p>
+     */
+    @Test
+    void twoCeidsEmittedInSameMillisecondBothGoOut() throws Exception {
+        int port = freePort();
+        EquipmentSpec demo = DemoEquipment.twoChambers("DEMO-01", 10);
+        CompilationResult compiled = EquipmentCompiler.compile(demo);
+
+        /* 手动时钟停在 0：两次触发拿到同一个 atMs，正是出问题的条件 */
+        SessionSpec spec = new SessionSpec("burst", true, "127.0.0.1", port, 10, 42L, demo);
+        HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));
+        session.open();
+
+        try (SecsCommunicator client = connect(port)) {
+            java.util.List<Integer> ceids = new java.util.concurrent.CopyOnWriteArrayList<>();
+            client.addSecsMessageReceiveListener(message -> {
+                if (message.getStream() == 6 && message.getFunction() == 11) {
+                    try {
+                        ceids.add(Secs2Read.asInt(message.secs2().get(1)));
+                    } catch (Exception e) {
+                        /* 解析不了就不记，断言里会把实际收到的一并打出来 */
+                    }
+                }
+            });
+            client.openAndWaitUntilCommunicating();
+            SessionTestSupport.awaitPeer(session);
+
+            session.emitCeid(2001);
+            session.emitCeid(2002);
+
+            long deadline = System.currentTimeMillis() + 5_000L;
+            while (System.currentTimeMillis() < deadline && ceids.size() < 2) {
+                Thread.sleep(20L);
+            }
+            assertTrue(ceids.contains(2001), "第一条 CEID 要发出去，实际=" + ceids);
+            assertTrue(ceids.contains(2002), "同一毫秒的第二条 CEID 也不能被幂等吞掉，实际=" + ceids);
+        } finally {
+            session.close();
+        }
+    }
+
     private static CompletableFuture<SecsMessage> captureS6F11(SecsCommunicator client) {
         CompletableFuture<SecsMessage> future = new CompletableFuture<>();
         client.addSecsMessageReceiveListener(message -> {

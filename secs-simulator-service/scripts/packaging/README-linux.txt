@@ -19,7 +19,7 @@ SECS Simulator — Linux 服务端（<版本>）
     -p 8080          API 端口
     -b 0.0.0.0       绑定地址
     -h 5000          HSMS 端口（配置文件未指定端口时用）
-    -w ./work        数据目录（设备配置与日志，一文件一设备）
+    -w ./work        数据目录（配置库、运行态与日志）
 
 安全提示
 --------
@@ -39,16 +39,20 @@ start-server.sh 默认绑 0.0.0.0（内网工具全放行，见 ADR-0018）；�
 
 目录
 --------
-    secs-*.jar        后端模块（cli / runtime / api-http / app / core / protocol / json）
+    secs-*.jar        后端模块（cli / runtime / api-http / app / store / core / protocol / json）
+    thirdparty/       sqlite-jdbc.jar（唯一 JNI 依赖）
+    native/           sqlite 平台本地库（排障/替换用，正常无需手动处理）
     web/              前端静态资源（服务端托管，供本机浏览器直接打开；
                       Windows 桌面端界面内嵌在安装程序里，不依赖它）
     start-server.sh   启动脚本
-    docs-schema-v5.md 设备配置格式说明
+    docs-schema-v7.md 设备配置格式说明
     VERSION           版本号
 
 数据
 --------
-work/          设备配置（*.json）与 logs/（app.log / messages.jsonl / audit.jsonl）
+work/          config.db（设备/模板配置库）、runtime.db（运行态）、ready.txt（启动握手）
+               与 logs/（messages.jsonl / audit.jsonl）
+首次启动会把内置的设备模板、主机模板与参数模板播种进 config.db（只补缺失项）。
 会话的配置在启动那一刻读入内存；改配置后在界面里「重载」该会话生效。
 
 故障排查

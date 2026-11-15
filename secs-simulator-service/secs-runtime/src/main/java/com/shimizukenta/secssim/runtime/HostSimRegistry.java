@@ -182,11 +182,22 @@ final class HostSimRegistry {
         return SessionOutcome.OK;
     }
 
-    /** 重连一个实例。 */
+    /** 重连一个实例（幂等：已连上 / 正在连时直接成功返回）。 */
     SessionOutcome connectById(String hostId) {
         HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
             return SessionOutcome.UNKNOWN_SESSION;
+        }
+        /*
+         * 幂等：已连接或正在连接时重复点「连接」不该报失败。
+         * HostSimulator.connect() 对"已有 communicator"抛 IOException（主机已连接），
+         * HTTP 层据此回 502，界面就弹「连接失败」——可链路其实好好的。
+         * 新建主机时后端会顺手建链，所以这个情况一点都不罕见（连着点两下按钮就能撞上）。
+         */
+        HostSimulator.HostLinkPhase phase = sim.phase();
+        if (phase == HostSimulator.HostLinkPhase.CONNECTED
+                || phase == HostSimulator.HostLinkPhase.CONNECTING) {
+            return SessionOutcome.OK;
         }
         try {
             if (sim.phase() == HostSimulator.HostLinkPhase.DISCONNECTED || !sim.isOpen()) {
@@ -278,23 +289,30 @@ final class HostSimRegistry {
         }
         try {
             sim.setCollectorConfig(requestJson);
-            /* 采集配置属于实例设置：持久化，重连/重启后恢复 */
+            /* 采集配置属于实例设置：持久化，重连/重启后恢复。
+               存的是「全部计划」的配置（一台主机多份采集器），不是这次请求的原文。 */
             this.hosts.find(hostId).ifPresent(view ->
                     this.hosts.save(hostId, view.name(), view.targetHost(), view.targetPort(),
-                            view.targetDeviceIdNum(), requestJson, view.autoReconnect(), view.note()));
+                            view.targetDeviceIdNum(), sim.collectorConfigJson(),
+                            view.autoReconnect(), view.note()));
             return CollectorResult.ok();
         } catch (IllegalArgumentException e) {
             return CollectorResult.invalid(e.getMessage());
         }
     }
 
-    /** 实例级：启停采集。 */
+    /** 实例级：启停采集（不指定计划 = 全部）。 */
     CollectorResult commandById(String hostId, boolean start) {
+        return this.commandById(hostId, start, null);
+    }
+
+    /** 实例级：启停某一份采集计划（planId 空 = 全部）。 */
+    CollectorResult commandById(String hostId, boolean start, String planId) {
         HostSimulator sim = this.hostSims.get(hostId);
         if (sim == null) {
             return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
         }
-        return this.command(sim, start);
+        return this.command(sim, start, planId);
     }
 
     /** 实例级：采集器状态 JSON；实例不存在返回 {@code null}（HTTP 404）。 */
@@ -306,13 +324,33 @@ final class HostSimRegistry {
         return sim.collectorJson();
     }
 
+    /**
+     * 采集方案被删除时，把它对应的那份采集器一起收掉并重存配置。
+     *
+     * <p>否则那份采集器还在后台按周期采、还留在 {@code collector_json} 里，
+     * 重启后复活，而界面上早已没有它那一行。</p>
+     */
+    void removeCollectorPlan(String hostId, String planId) {
+        HostSimulator sim = this.hostSims.get(hostId);
+        if (sim == null || planId == null || planId.isBlank()) {
+            return;
+        }
+        if (!sim.collectorRemove(planId)) {
+            return;
+        }
+        this.hosts.find(hostId).ifPresent(view ->
+                this.hosts.save(hostId, view.name(), view.targetHost(), view.targetPort(),
+                        view.targetDeviceIdNum(), sim.collectorConfigJson(),
+                        view.autoReconnect(), view.note()));
+    }
+
     /** 启停采集；"没有配置"是状态冲突（409），不是请求非法。 */
-    private CollectorResult command(HostSimulator sim, boolean start) {
+    private CollectorResult command(HostSimulator sim, boolean start, String planId) {
         try {
             if (start) {
-                sim.collectorStartManual();
+                sim.collectorStartManual(planId);
             } else {
-                sim.collectorStopManual();
+                sim.collectorStopManual(planId);
             }
             return CollectorResult.ok();
         } catch (IllegalStateException e) {
@@ -475,7 +513,7 @@ final class HostSimRegistry {
         if (sim == null) {
             return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
         }
-        return this.command(sim, start);
+        return this.command(sim, start, null);
     }
 
     /** v1:会话级采集器状态。 */

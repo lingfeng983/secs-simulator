@@ -188,6 +188,21 @@ public interface ApiContextHostOps {
      * @return 结构化结果
      */
     default CollectorResult hostSimCollectorCommandById(String hostId, boolean start) {
+        return hostSimCollectorCommandById(hostId, start, null);
+    }
+
+    /**
+     * 按实例 id 手动启停某一份采集计划的采集器。
+     *
+     * <p>一台主机可以挂多份采集器（按采集计划分开）：{@code planId} 指定要动哪一份，
+     * 空/null 表示"全部已配置的计划"（老客户端的单份语义）。</p>
+     *
+     * @param hostId 实例 id
+     * @param start  启动/停止
+     * @param planId 采集计划 id；空/null = 全部
+     * @return 结构化结果
+     */
+    default CollectorResult hostSimCollectorCommandById(String hostId, boolean start, String planId) {
         return new CollectorResult(CollectorOutcome.UNKNOWN_HOST, "host-sim-not-open");
     }
 

@@ -204,7 +204,10 @@ final class HostSimHandler extends HttpSupport {
                 if (!requireRole(ex, ApiRole.OPERATOR)) {
                     return;
                 }
-                CollectorResult result = this.context.hostSimCollectorCommandById(hostId, "start".equals(parts[2]));
+                /* ?planId= 指定动哪一份采集计划；省略 = 全部已配置的计划（老客户端的单份语义） */
+                String planId = queryParam(ex, "planId");
+                CollectorResult result = this.context.hostSimCollectorCommandById(
+                        hostId, "start".equals(parts[2]), planId.isEmpty() ? null : planId);
                 respondCollector(ex, result, "host-sim-collector-" + parts[2], hostId);
                 return;
             }

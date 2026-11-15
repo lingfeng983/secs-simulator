@@ -392,6 +392,12 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
+    public com.shimizukenta.secssim.api.http.CollectorResult hostSimCollectorCommandById(
+            String hostId, boolean start, String planId) {
+        return this.hosts.commandById(hostId, start, planId);
+    }
+
+    @Override
     public String hostSimCollectorJsonById(String hostId) {
         return this.hosts.collectorJsonById(hostId);
     }

@@ -89,14 +89,68 @@ Write-Host "--- version: $version（pom.xml / tauri.conf.json / Cargo.toml 一�
 # ---- 前端产物（安装程序内置；Linux 包由服务端 --web-root 同源托管）----
 function Build-FrontendIfNeeded {
     if (-not $SkipFrontend) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ui 'scripts/build.ps1')
-        if ($LASTEXITCODE -ne 0) { throw 'build.ps1 failed' }
+        # 子进程用 Start-Process -Wait 跑，输出直接进控制台、不进管道：
+        # 早先写成 `$web = & powershell.exe ... -File build.ps1`，build.ps1 里 Write-Host
+        # 的每一行（"--- install ---"、vite 输出、dist 清单…）都被当成函数返回值收进 $web，
+        # 于是 `Copy-Item "$web/*"` 被拼成 "--- install --- npm ci …\dist/*"，
+        # 报错"名为'--- install ---'的驱动器不存在"。函数的返回值只允许是路径一条。
+        $build = Start-Process -FilePath 'powershell.exe' `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ui 'scripts/build.ps1')) `
+            -NoNewWindow -Wait -PassThru
+        if ($build.ExitCode -ne 0) { throw "build.ps1 failed (exit $($build.ExitCode))" }
     }
     $web = Join-Path $ui 'dist'
     if (-not (Test-Path (Join-Path $web 'index.html'))) {
         throw "缺少前端产物: $web（先运行 secs-simulator-ui/scripts/build.ps1，或去掉 -SkipFrontend）"
     }
     return $web
+}
+
+# ---- 原生镜像冒烟：exe 必须能自己起来并回 JSON 健康检查 ----
+#
+# 只"打得出来"不代表"装完能用"：native-image 一旦漏了 classpath 资源（seed/*.json），
+# exe 会在播种内置模板那一步直接退出，桌面壳拿不到后端地址，界面只剩「后端不可达」，
+# 而安装包看上去完全正常。所以打包前用临时工作目录真跑一遍：等到 READY、
+# 再用 HTTP 取一次 /api/v1/health，确认回的是 JSON 而不是别的东西。
+function Test-NativeBackend {
+    param([Parameter(Mandatory = $true)][string]$Exe)
+
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ('secs-native-smoke-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $work | Out-Null
+    $outFile = Join-Path $work 'stdout.txt'
+    $errFile = Join-Path $work 'stderr.txt'
+
+    $process = Start-Process -FilePath $Exe `
+        -ArgumentList @('--mode=integrated', '--port=0', "--work-dir=$work") `
+        -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+        -PassThru -WindowStyle Hidden
+    try {
+        $deadline = (Get-Date).AddSeconds(90)
+        $ready = $null
+        while ((Get-Date) -lt $deadline) {
+            if ($process.HasExited) { break }
+            # 重定向文件刚建出来时是空的，Get-Content -Raw 对空文件返回 $null，
+            # 直接喂给 [regex]::Match 会抛"值不能为 null"——用拼接兜成空串
+            $text = '' + (Get-Content $outFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
+            $ready = [regex]::Match($text, 'READY[^\r\n]*http=(\d+)')
+            if ($ready.Success) { break }
+            Start-Sleep -Milliseconds 300
+        }
+        if ($null -eq $ready -or -not $ready.Success) {
+            $detail = if (Test-Path $errFile) { (Get-Content $errFile -Tail 25 -Encoding UTF8) -join "`n" } else { '' }
+            throw "原生后端冒烟失败：90 秒内没有 READY（后端起不来的安装包就是坏包）`n$detail"
+        }
+        $port = $ready.Groups[1].Value
+        $health = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri "http://127.0.0.1:$port/api/v1/health"
+        if ($health.Content -notmatch '"ok"\s*:\s*true') {
+            throw "原生后端冒烟失败：/api/v1/health 没回 ok=true（$($health.Content)）"
+        }
+    } finally {
+        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Milliseconds 300
+        Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host 'native smoke OK（READY + /api/v1/health）'
 }
 
 # ---- Windows：Tauri（NSIS）安装程序 ----
@@ -118,6 +172,9 @@ function Invoke-WindowsPackage {
         }
     }
     if (-not (Test-Path $exe)) { throw "缺少原生镜像: $exe（先构建，或去掉 -SkipNative）" }
+
+    # 冒烟放在拷贝进 resources 之前：坏 exe 在这里就拦住，不用等 tauri build 跑完
+    Test-NativeBackend -Exe $exe
 
     # 填充 Tauri resources（前端经 frontendDist 内嵌进壳，resources 只需本机后端）
     $resources = Join-Path $gui 'src-tauri\resources'
@@ -245,15 +302,30 @@ function Invoke-LinuxPackage {
     Copy-Item "$web/*" (Join-Path $stage 'web') -Recurse
     Copy-Item (Join-Path $service 'scripts/packaging/start-server.sh') $stage
     Copy-Item (Join-Path $service 'scripts/packaging/README-linux.txt') (Join-Path $stage 'README.txt')
-    Copy-Item (Join-Path $root 'docs/guides/schema-v5.md') (Join-Path $stage 'docs-schema-v5.md')
+    # 配置格式说明随包发布。文件名带 schema 版本，升版（v5 → v7）时这里必须跟着改：
+    # 漏改的话前面全绿，最后一步 Copy-Item 才报"找不到 schema-v5.md"，白等一次打包。
+    $schemaDoc = Join-Path $root 'docs/guides/schema-v7.md'
+    if (-not (Test-Path $schemaDoc)) {
+        $found = Get-ChildItem (Join-Path $root 'docs/guides') -Filter 'schema-*.md' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Name }
+        throw "缺少配置格式说明: $schemaDoc（docs/guides 里现有: $($found -join ', ')）"
+    }
+    Copy-Item $schemaDoc (Join-Path $stage 'docs-schema-v7.md')
     Set-Content -Path (Join-Path $stage 'VERSION') -Value $version -Encoding ASCII
     (Get-Content (Join-Path $stage 'README.txt') -Raw -Encoding UTF8).Replace('<版本>', $version) |
         Set-Content (Join-Path $stage 'README.txt') -Encoding UTF8 -NoNewline
 
-    # bash 语法自检（本机有 git-bash 即可）
-    $shCheck = & bash -n (Join-Path $stage 'start-server.sh') 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
-    Write-Host 'start-server.sh syntax check OK'
+    # bash 语法自检（本机有 git-bash 即可）：只是顺手检查，没有 bash 就跳过——
+    # 早先直接 `& bash -n ...`，PATH 里没 bash 的机器会以 CommandNotFoundException
+    # 把整套打包打断，而这时包其实已经组装完了。
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -ne $bash) {
+        $shCheck = & $bash.Source -n (Join-Path $stage 'start-server.sh') 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
+        Write-Host 'start-server.sh syntax check OK'
+    } else {
+        Write-Warning 'PATH 里没有 bash，跳过 start-server.sh 语法自检（本次未改该脚本可忽略）'
+    }
 
     $zip = Join-Path $outDir "secs-sim-server-$version-linux.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }

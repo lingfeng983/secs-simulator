@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { setRuntimeApiBase } from '../api';
+import { setRuntimeApiBase, setRuntimeApiFailure } from '../api';
 import { inDesktopShell, tauriInvoke, type ShellConnection } from '../shared/lib/tauri';
 import 'uplot/dist/uPlot.min.css';
 import './App.css';
@@ -21,8 +21,13 @@ async function boot(): Promise<void> {
     try {
       const info = await tauriInvoke<ShellConnection>('connection_info');
       setRuntimeApiBase(info.url);
-    } catch {
-      /* 后端未就绪：保持未注入，同源兜底 */
+    } catch (error) {
+      /* 不能退回同源：壳里的同源是内置前端资源，/api/* 会落到 index.html 上，
+         界面只会报"200 返回的不是 JSON"，把真正的原因（后端起不来）盖掉了。
+         记下失败原因，让请求直接带着它失败，横幅上就是能照着排查的话。 */
+      setRuntimeApiFailure(
+        `本机后端没有启动（${String(error)}）。可在托盘退出后重开，或在「修改地址」里改连远程服务端`,
+      );
     }
   }
   createRoot(container).render(

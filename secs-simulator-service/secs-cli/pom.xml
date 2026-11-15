@@ -74,6 +74,10 @@
                 <buildArg>-Dfile.encoding=UTF-8</buildArg>
                 <buildArg>-Os</buildArg>
                 <buildArg>-H:IncludeResources=defaults/.*</buildArg>
+                <!-- 3.0 内置模板正文全在 seed/*.json（设备/参数/主机三类）。漏了这一段，
+                     原生镜像启动会在播种内置模板时直接抛"classpath 里没有 seed/…"退出：
+                     安装包打得出来、装完却只剩"后端不可达"。冒烟门禁见 scripts/package.ps1 -->
+                <buildArg>-H:IncludeResources=seed/.*</buildArg>
                 <!-- M0 尖峰：sqlite-jdbc 平台本地库要进镜像（运行时由 DbSpike 释放到 work-dir） -->
                 <buildArg>-H:IncludeResources=org/sqlite/native/.*</buildArg>
               </buildArgs>

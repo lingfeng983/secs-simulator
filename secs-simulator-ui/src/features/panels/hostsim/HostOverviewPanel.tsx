@@ -47,6 +47,12 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
   if (host === null) {
     return <p className="hint">主机不存在。</p>;
   }
+  /* 一台主机可以同时挂多份采集器：概览只给份数与合计，明细在「数据采集」页 */
+  const collectorPlans = collector?.collectors ?? [];
+  const runningPlans = collectorPlans.filter((item) => item.running === true);
+  const totalSamples = runningPlans.reduce((sum, item) => sum + (item.samples ?? 0), 0);
+  const totalErrors = runningPlans.reduce((sum, item) => sum + (item.decodeErrors ?? 0), 0);
+  const totalSvids = collectorPlans.reduce((sum, item) => sum + (item.svids?.length ?? 0), 0);
   const dirty = name !== host.name
     || host_ !== host.target.split(':')[0]
     || Number(port) !== host.port
@@ -142,14 +148,15 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
           </div>
           <div className="overview-card">
             <h3>S1F3 采集器当前状态</h3>
-            <span className={`overview-value${collector?.running ? ' tone-ok' : ''}`}>
-              {collector?.running ? '采集中' : collector?.configured ? '已配置 · 待启动' : '未配置'}
+            <span className={`overview-value${runningPlans.length > 0 ? ' tone-ok' : ''}`}>
+              {runningPlans.length > 0
+                ? `采集中 ${runningPlans.length} 份`
+                : collectorPlans.length > 0 ? '已配置 · 待启动' : '未配置'}
             </span>
             <ul>
-              <li>启动 / 停止 CEID：{collector?.startCeid ?? '—'} / {collector?.stopCeid ?? '—'}</li>
-              <li>采样周期：{collector?.intervalMs ?? '—'} ms</li>
-              <li>样本点：{collector?.samples ?? 0} · 解码错误：{collector?.decodeErrors ?? 0}</li>
-              <li>采集变量：{collector?.svids?.length ?? 0} 个</li>
+              <li>采集计划：{collectorPlans.length} 份{runningPlans.length > 0 ? `（在采 ${runningPlans.length} 份）` : ''}</li>
+              <li>样本点：{totalSamples} · 解码错误：{totalErrors}</li>
+              <li>采集变量：{totalSvids} 个</li>
             </ul>
           </div>
         </div>

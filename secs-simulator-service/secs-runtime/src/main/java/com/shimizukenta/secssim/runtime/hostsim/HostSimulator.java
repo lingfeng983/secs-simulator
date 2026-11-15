@@ -115,8 +115,8 @@ public final class HostSimulator {
     /** 退避重试的创建/取消互斥：并发观察同一次断链会建出两个定时器，被覆盖的那个永不关闭。 */
     private final Object retryLock = new Object();
 
-    /** S1F3 采集器（状态机、轮询与 JSON 输出都在辅助类里）。 */
-    private final HostCollector collector;
+    /** S1F3 采集器组：一台主机可以同时挂多份（按采集计划分开管）。 */
+    private final HostCollectors collectors;
 
     /** 主机链路相位(host_link.phase)。 */
     public enum HostLinkPhase {
@@ -133,7 +133,7 @@ public final class HostSimulator {
         this.name = name;
         this.target = target;
         this.autoReconnect = autoReconnect;
-        this.collector = new HostCollector(this, hostId);
+        this.collectors = new HostCollectors(this, hostId);
         if (catalog != null) {
             this.variableCatalog.putAll(catalog);
         }
@@ -154,11 +154,13 @@ public final class HostSimulator {
         sim.eventBus = bus;
         sim.settingRevision.set(view.settingRevision());
         /* 采集配置随实例持久化：进程重启 / 主机重连后启停 CEID 判定必须还在，
-           否则用户「下发配置」后一重连就变成「收到 CEID 但什么都没发生」。 */
+           否则用户「下发配置」后一重连就变成「收到 CEID 但什么都没发生」。
+           新旧两种格式都认（老库是单份配置，新库是 collectors 数组）。 */
         String collectorJson = view.collectorJson();
-        if (collectorJson != null && collectorJson.contains("startCeid")) {
+        if (collectorJson != null
+                && (collectorJson.contains("startCeid") || collectorJson.contains("collectors"))) {
             try {
-                sim.setCollectorConfig(collectorJson);
+                sim.restoreCollectorConfig(collectorJson);
             } catch (RuntimeException e) {
                 Log.warn("主机采集配置恢复失败（" + view.id() + "）: " + e.getMessage());
             }
@@ -437,7 +439,7 @@ public final class HostSimulator {
         this.changePhase(HostLinkPhase.CONNECTED);
         Log.info("主机 " + this.hostId + " 已连接 " + current.bindHost() + ":" + current.port());
         /* 采集配置已在（重连恢复）：连接成功后自动恢复采集 */
-        this.collector.recoverAfterConnect();
+        this.collectors.recoverAfterConnect();
     }
 
     /**
@@ -484,7 +486,7 @@ public final class HostSimulator {
     private void disconnectLocked() {
         this.manualDisconnect = true;
         this.cancelRetry();
-        this.collector.stop("手动断开");
+        this.collectors.stopAll("手动断开");
         SecsCommunicator comm = this.communicator;
         this.communicator = null;
         this.open.set(false);
@@ -537,7 +539,7 @@ public final class HostSimulator {
     private void installPassThrough(SecsCommunicator comm) {
         comm.addReceiveMessagePassThroughListener(message -> {
             if (message.getStream() == 6 && message.getFunction() == 11) {
-                this.collector.onS6f11(message);
+                this.collectors.onS6f11(message);
             }
         });
         final com.shimizukenta.secssim.app.event.EventBus bus = this.eventBus;
@@ -646,21 +648,22 @@ public final class HostSimulator {
     }
 
     /**
-     * 下发采集配置（可在连接前后随时调用；会停止正在运行的采集并回到待命）。
+     * 下发一份采集配置（可在连接前后随时调用；只影响这一份，其它计划照常采）。
      *
      * <p>待命（armed）状态下不轮询，收到 {@code startCeid} 的 S6F11 才开始采集。</p>
      *
-     * @param json {@code {"startCeid":101,"stopCeid":102,"intervalMs":1000,"svids":[{"id":401,"name":"T","unit":"C"}]}}
+     * @param json {@code {"planId":"p1","startCeid":101,"stopCeid":102,"intervalMs":1000,"svids":[{"id":401,"name":"T","unit":"C"}]}}；
+     *             {@code planId} 可省，省略时落到默认计划（老客户端的单份配置）
      * @throws IllegalArgumentException 形状或取值非法
      */
     public void setCollectorConfig(String json) {
-        JsonHub root;
-        try {
-            root = JsonHub.fromJson(json);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("采集配置不是合法 JSON: " + e.getMessage(), e);
-        }
+        JsonHub root = parseCollectorJson(json);
+        String planId = JsonFieldReader.stringField(root, "planId");
+        this.applyCollectorConfig(planId, root);
+    }
 
+    /** 解析并校验一份配置，落到指定计划（planId 空串 = 默认计划）。 */
+    private void applyCollectorConfig(String planId, JsonHub root) {
         int startCeid = JsonFieldReader.intField(root, "startCeid");
         int stopCeid = JsonFieldReader.intField(root, "stopCeid");
         long intervalMs = JsonFieldReader.longField(root, "intervalMs", 1_000L);
@@ -688,17 +691,72 @@ public final class HostSimulator {
 
         /* 「停旧采集 + 换配置」在采集器内部整体完成：启动由链路线程在 S6F11
            里触发，两步之间被唤醒会用旧参数启动，之后不再重读。 */
-        this.collector.applyConfig(config);
+        this.collectors.apply(planId, config);
     }
 
-    /** 手动启动采集：配置了启动 CEID 时只是武装待命（等 S6F11），否则直接开始轮询。 */
+    private static JsonHub parseCollectorJson(String json) {
+        try {
+            return JsonHub.fromJson(json);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("采集配置不是合法 JSON: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 从持久行恢复采集配置：兼容两种格式。
+     *
+     * <ul>
+     *   <li>新格式 {@code {"collectors":[{planId,startCeid,...}, ...]}}：逐份恢复；</li>
+     *   <li>老格式（根上直接是 startCeid/stopCeid/svids）：当成默认计划的一份。</li>
+     * </ul>
+     */
+    private void restoreCollectorConfig(String json) {
+        JsonHub root = parseCollectorJson(json);
+        JsonHub list = root.get("collectors");
+        if (list != null && list.isArray()) {
+            for (JsonHub item : list.values()) {
+                String planId = JsonFieldReader.stringField(item, "planId");
+                this.applyCollectorConfig(planId, item);
+            }
+            return;
+        }
+        if (root.get("startCeid") != null) {
+            this.applyCollectorConfig("", root);
+        }
+    }
+
+    /** 全部计划的配置（持久化用，不含运行态）。 */
+    public String collectorConfigJson() {
+        return this.collectors.configsJson();
+    }
+
+    /** 手动启动采集（全部已配置的计划）：配置了启动 CEID 的只是武装待命。 */
     public void collectorStartManual() {
-        this.collector.startManual();
+        this.collectors.start(null);
     }
 
-    /** 手动停止采集：退出待命（armed=false），之后的启动 CEID 也不再触发轮询。 */
+    /** 手动启动某一份采集计划。 */
+    public void collectorStartManual(String planId) {
+        this.collectors.start(planId);
+    }
+
+    /** 手动停止全部采集：退出待命（armed=false），之后的启动 CEID 也不再触发轮询。 */
     public void collectorStopManual() {
-        this.collector.stopManual();
+        this.collectors.stop(null);
+    }
+
+    /** 手动停止某一份采集计划。 */
+    public void collectorStopManual(String planId) {
+        this.collectors.stop(planId);
+    }
+
+    /**
+     * 移除某一份采集计划的采集器（先停，再从配置里删掉）。
+     *
+     * @return 这份采集器原本是否存在
+     */
+    public boolean collectorRemove(String planId) {
+        return this.collectors.remove(planId);
     }
 
 
@@ -784,7 +842,7 @@ public final class HostSimulator {
      * @return JSON（running/config/series...;未配置时 configured=false）
      */
     public String collectorJson() {
-        return this.collector.toJson();
+        return this.collectors.toJson();
     }
 
     /* ===== SML 发送(原有能力) ===== */
@@ -854,7 +912,7 @@ public final class HostSimulator {
     public void destroy() {
         this.disconnect();
         this.cancelRetry();
-        this.collector.shutdown();
+        this.collectors.shutdown();
     }
 
     /** close() 保留为 destroy 的同义别名（旧调用方）。 */

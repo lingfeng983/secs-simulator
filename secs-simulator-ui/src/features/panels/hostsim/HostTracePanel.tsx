@@ -15,6 +15,7 @@ import {
 } from '../../../state/hostPlans';
 import { traceFrameFromS6f1, type TraceFrame } from '../../../shared/lib/smlValues';
 import { requireClient, type PanelArgs } from './hostPanelShared';
+import { traceStarted, type ManualSwitch } from './hostRuntimeStatus';
 
 /** 状态列判定窗口：最近 60 秒内收到同 TRID 的 S6F1 视为「采集中」。 */
 const RUNNING_WINDOW_MS = 60_000;
@@ -102,7 +103,7 @@ async function readLocalDeviceCatalog(client: ApiClient, host: HostV2): Promise<
 function TracePlanTable({
   plans,
   mode,
-  runningTrids,
+  engagedTrids,
   selected,
   onToggleSelect,
   onToggleAll,
@@ -114,7 +115,8 @@ function TracePlanTable({
 }: {
   plans: readonly TracePlan[];
   mode: 'config' | 'runtime';
-  runningTrids: ReadonlySet<number>;
+  /** 已启动的 TRID（报文里看到的 + 刚点过启动的）：有它就只给「停止」。 */
+  engagedTrids: ReadonlySet<number>;
   selected: ReadonlySet<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: () => void;
@@ -154,10 +156,10 @@ function TracePlanTable({
     ...(editing ? [] : [{
       key: 'status',
       header: '状态',
-      sortValue: (row: TracePlan) => (runningTrids.has(row.trid) ? '采集中' : '未启动'),
+      sortValue: (row: TracePlan) => (engagedTrids.has(row.trid) ? '采集中' : '未启动'),
       render: (row: TracePlan) => (
-        <span className={runningTrids.has(row.trid) ? 'mono' : 'hint-inline'}>
-          {runningTrids.has(row.trid) ? '采集中' : '未启动'}
+        <span className={engagedTrids.has(row.trid) ? 'mono' : 'hint-inline'}>
+          {engagedTrids.has(row.trid) ? '采集中' : '未启动'}
         </span>
       ),
     }]),
@@ -182,7 +184,7 @@ function TracePlanTable({
             </div>
           );
         }
-        const running = runningTrids.has(row.trid);
+        const running = engagedTrids.has(row.trid);
         return (
           <div className="row-actions">
             <button
@@ -324,6 +326,17 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
   const [progress, setProgress] = useState('');
   const [batch, setBatch] = useState<BatchSummary | null>(null);
   const [lookup, setLookup] = useState<LocalCatalog | null>(null);
+  /**
+   * 用户亲手点过的启停（TRID → 启动时刻 / 停止时刻）。
+   *
+   * <p>启动后到首帧到达有几十到几百毫秒，只看报文的话这段时间按钮还是「启动」，
+   * 手快就会再点一次 —— 同一 TRID 重复下发 S2F23 等于把采样重置一遍。
+   * 反过来，点「停止」之后如果还靠 60 秒窗口判断，按钮又会显示「停止」一分钟。
+   * 记下手点的意图，按钮立刻切成另一态：操作列永远只有"启动 ↔ 停止"两态。</p>
+   */
+  const [manual, setManual] = useState<ReadonlyMap<number, ManualSwitch>>(
+    () => new Map<number, ManualSwitch>(),
+  );
   /** 弹窗每次打开只读一次目录；关闭后旧请求的结果直接丢弃。 */
   const catalogSeq = useRef(0);
 
@@ -383,11 +396,20 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
     closeModal();
   };
 
-  const send = async (sml: string) => {
+  /**
+   * 发一条 SML；成功时顺带记下"这条 TRID 现在是启动还是停止"。
+   *
+   * <p>点击反馈必须立刻可见（按钮变「停止」），但只有真正发出去才记，
+   * 失败时保持原状——否则界面会说"已启动"而设备那边根本没收到 S2F23。</p>
+   */
+  const send = async (sml: string, trids: readonly number[] = [], started = false) => {
     setBusy(true);
     setError('');
     try {
       setResult(await requireClient(client).sendHostV2(hostId, sml));
+      if (trids.length > 0) {
+        markManual(trids, started);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -425,6 +447,48 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
     return running;
   }, [frames]);
 
+  /**
+   * 按钮用「是否已启动」：把用户亲手点过的启停和报文里看到的合起来算。
+   *
+   * <p>只认报文的话，点「启动」到首帧到达这几百毫秒里按钮还是「启动」（手快就会重复下发），
+   * 点「停止」之后又会被 60 秒窗口按着显示「停止」一分钟。手点过的意图优先，
+   * 报文只作为"没手点过时"的依据。</p>
+   */
+  const engagedTrids = useMemo(() => {
+    const engaged = new Set<number>();
+    const planOf = (trid: number): TracePlan | undefined =>
+      [...plans].reverse().find((item) => item.trid === trid);
+    const known = new Set<number>();
+    for (const plan of plans) {
+      known.add(plan.trid);
+      if (traceStarted(plan.trid, plan.totsmp, frames, manual.get(plan.trid))) {
+        engaged.add(plan.trid);
+      }
+    }
+    /* 报文里出现、但方案库里没有的 TRID：沿用窗口判断，别把它藏起来 */
+    for (const trid of runningTrids) {
+      if (!known.has(trid) && traceStarted(trid, planOf(trid)?.totsmp ?? 0, frames, manual.get(trid))) {
+        engaged.add(trid);
+      }
+    }
+    return engaged;
+  }, [plans, frames, manual, runningTrids]);
+
+  /** 记下"这一批 TRID 是用户点的启动/停止"；只有真正发出去成功才记。 */
+  const markManual = (trids: readonly number[], started: boolean) => {
+    setManual((previous) => {
+      const next = new Map(previous);
+      const at = Date.now();
+      for (const trid of trids) {
+        const current = next.get(trid) ?? { started: 0, stopped: 0 };
+        next.set(trid, started
+          ? { started: at, stopped: 0 }
+          : { ...current, stopped: at });
+      }
+      return next;
+    });
+  };
+
   const groups = useMemo(() => buildTraceGroups(frames, plans, DEFAULT_TRACE_DRAFT), [frames, plans]);
 
   const selectedPlans = plans.filter((plan) => selected.has(plan.id));
@@ -448,8 +512,8 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
   };
 
   const toggleRun = (plan: TracePlan) => {
-    const running = runningTrids.has(plan.trid);
-    void send(planSml(plan, running ? 0 : plan.totsmp));
+    const running = engagedTrids.has(plan.trid);
+    void send(planSml(plan, running ? 0 : plan.totsmp), [plan.trid], !running);
   };
 
   /** 批量启停：串行下发，已处于目标状态者跳过，单项失败只记录不中断。 */
@@ -470,12 +534,13 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
       for (let index = 0; index < targets.length; index += 1) {
         const plan = targets[index];
         setProgress(`${action} ${index + 1}/${targets.length}`);
-        if (runningTrids.has(plan.trid) === start) {
+        if (engagedTrids.has(plan.trid) === start) {
           skipped += 1;
           continue;
         }
         try {
           setResult(await activeClient.sendHostV2(hostId, planSml(plan, start ? plan.totsmp : 0)));
+          markManual([plan.trid], start);
           okCount += 1;
         } catch (e) {
           failures.push({ name: plan.name, message: (e as Error).message });
@@ -537,7 +602,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
         <TracePlanTable
           mode={readOnly ? 'config' : 'runtime'}
           plans={plans}
-          runningTrids={runningTrids}
+          engagedTrids={engagedTrids}
           selected={selected}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAll}

@@ -158,7 +158,16 @@ final class EventReporter {
                     : new EventPlan(planId == null ? "manual" : planId, ceid,
                             new com.shimizukenta.secssim.core.event.Trigger.Periodic(60_000L, 0L));
             long atMs = this.clock.getAsLong();
-            executor.execute(effective, planId, ceid, atMs, comm, this.onlineCheck.getAsBoolean(),
+            /*
+             * 台账/幂等键上的计划标识：手动触发（planId 为 null）必须落到"实际匹配到的那条计划"上。
+             * 否则两次手动触发（不同 CEID）在同一毫秒会撞上同一个幂等键 deviceId|manual|atMs，
+             * 后一条被静默丢弃 —— 现场就是"点了两个启动事件，只有第一个上报了"，
+             * 两份采集计划里第二份永远等不到它的启动 CEID。没有匹配计划时按 CEID 兜底区分。
+             */
+            String ledgerPlanId = planId != null
+                    ? planId
+                    : (firedPlan != null ? firedPlan.id() : "manual-" + ceid);
+            executor.execute(effective, ledgerPlanId, ceid, atMs, comm, this.onlineCheck.getAsBoolean(),
                     (ceidArg, atMsArg) -> this.assembler.get().build(ceidArg, atMsArg),
                     this.wbit.getAsBoolean());
             this.publishS6f11Notice(ceid, planId);

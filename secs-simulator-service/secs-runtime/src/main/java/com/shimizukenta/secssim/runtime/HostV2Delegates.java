@@ -140,9 +140,15 @@ final class HostV2Delegates {
             if (!this.hostRepository.hostExists(hostId)) {
                 return SessionOutcome.UNKNOWN_SESSION;
             }
-            return this.hostRepository.deletePlan(hostId, kind, planId)
-                    ? SessionOutcome.OK
-                    : SessionOutcome.UNKNOWN_SESSION;
+            if (!this.hostRepository.deletePlan(hostId, kind, planId)) {
+                return SessionOutcome.UNKNOWN_SESSION;
+            }
+            /* 采集方案删了，就把对应的那份采集器一起收掉：
+               不这么做，它还在后台采、还会随配置复活，界面上却已经没有那一行。 */
+            if ("collect".equals(kind)) {
+                this.hosts.removeCollectorPlan(hostId, planId);
+            }
+            return SessionOutcome.OK;
         } catch (com.shimizukenta.secssim.store.StoreException e) {
             com.shimizukenta.secssim.app.log.Log.error("删除主机方案失败: " + hostId + "/" + kind + "/" + planId, e);
             return SessionOutcome.FAILED;

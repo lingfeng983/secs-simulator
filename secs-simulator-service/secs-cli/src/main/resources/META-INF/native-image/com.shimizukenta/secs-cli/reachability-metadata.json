@@ -18,6 +18,7 @@
     { "type": "org.sqlite.core.NativeDB", "allDeclaredConstructors": true, "allDeclaredMethods": true, "allDeclaredFields": true }
   ],
   "resources": [
+    { "pattern": "seed/.*" },
     { "pattern": "org/sqlite/native/.*" },
     { "pattern": "sqlite.properties" }
   ]
