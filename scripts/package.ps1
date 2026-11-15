@@ -165,8 +165,18 @@ function Invoke-WindowsPackage {
         Write-Host '--- native image ---'
         Push-Location $service
         try {
-            & mvn.cmd -B -q -Pnative -pl secs-cli -am '-DskipTests' package
-            if ($LASTEXITCODE -ne 0) { throw 'native build failed' }
+            # ErrorActionPreference='Stop' 下，原生命令往 stderr 写一行（JDK 25 的
+            # restricted / terminally deprecated 警告、npm WARN 之类）都会被 PS 5.1
+            # 当成 NativeCommandError 直接抛，整套打包在第一步就断。临时放宽、按退出码判成败。
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & mvn.cmd -B -q -Pnative -pl secs-cli -am '-DskipTests' package 2>&1 |
+                    ForEach-Object { Write-Host $_ }
+                if ($LASTEXITCODE -ne 0) { throw 'native build failed' }
+            } finally {
+                $ErrorActionPreference = $prevPref
+            }
         } finally {
             Pop-Location
         }
@@ -209,10 +219,16 @@ function Invoke-WindowsPackage {
     Push-Location $gui
     try {
         # install 幂等：node_modules 已就位时秒回；npm.CMD 由 PATH 解析，退出码直传
-        & npm install --no-fund --no-audit
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE)" }
-        & npm run build
-        if ($LASTEXITCODE -ne 0) { throw "tauri build failed (exit $LASTEXITCODE)" }
+        $prevPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & npm install --no-fund --no-audit 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE)" }
+            & npm run build 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) { throw "tauri build failed (exit $LASTEXITCODE)" }
+        } finally {
+            $ErrorActionPreference = $prevPref
+        }
     } finally {
         Pop-Location
     }
@@ -248,8 +264,14 @@ function Invoke-LinuxPackage {
         Write-Host '--- maven jars ---'
         Push-Location $service
         try {
-            & mvn.cmd -B -q '-DskipTests' package
-            if ($LASTEXITCODE -ne 0) { throw 'maven package failed' }
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & mvn.cmd -B -q '-DskipTests' package 2>&1 | ForEach-Object { Write-Host $_ }
+                if ($LASTEXITCODE -ne 0) { throw 'maven package failed' }
+            } finally {
+                $ErrorActionPreference = $prevPref
+            }
         } finally {
             Pop-Location
         }
@@ -320,8 +342,14 @@ function Invoke-LinuxPackage {
     # 把整套打包打断，而这时包其实已经组装完了。
     $bash = Get-Command bash -ErrorAction SilentlyContinue
     if ($null -ne $bash) {
-        $shCheck = & $bash.Source -n (Join-Path $stage 'start-server.sh') 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
+        $prevPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $shCheck = & $bash.Source -n (Join-Path $stage 'start-server.sh') 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "start-server.sh 语法错误:`n$shCheck" }
+        } finally {
+            $ErrorActionPreference = $prevPref
+        }
         Write-Host 'start-server.sh syntax check OK'
     } else {
         Write-Warning 'PATH 里没有 bash，跳过 start-server.sh 语法自检（本次未改该脚本可忽略）'
