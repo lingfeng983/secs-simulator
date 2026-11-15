@@ -1,9 +1,9 @@
 /**
  * 参数模板库端点：/api/v2/param-templates（所有设备共享的「参数变化逻辑」）。
  *
- * <p>模板体是与 SVID 无关的变化逻辑（单曲线简形或 曲线+组合表达式+result）；
- * 设备配置时从库里选择，把模板体复制进自己的配置文档（复制快照语义），
- * 之后修改库不影响已配置设备。</p>
+ * <p>模板体就是一段值定义（schema v7）：{@code {"source": {mode:"curve"|"expr"|"const"|"cycle", …}}}，
+ * 与任何变量无关。设备配置时从库里选择，把这段 source 深拷贝进数据项，
+ * 之后修改库不影响已配置设备，设备里也不留引用。</p>
  */
 
 import { apiUrl, readJson, request } from './base';
@@ -15,7 +15,7 @@ export interface ParamTemplate {
   description: string;
   source: 'builtin' | 'custom';
   readonly: boolean;
-  /** 模板体（完整形：curves/composites/instances/result）。 */
+  /** 模板体：`{ source: {…} }`（一段值定义）。 */
   body: Record<string, unknown>;
   updatedAt: number;
 }

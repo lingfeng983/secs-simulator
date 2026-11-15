@@ -40,8 +40,7 @@ public final class ConfigRepository {
     private static final String[] PROJECTION_TABLES = {
         "connection_spec", "equipment_spec", "unit_def", "svid_def", "equipment_constant",
         "report_def", "report_svid", "ceid_def", "ceid_report",
-        "event_plan", "plan_action", "event_effect",
-        "template_curve", "template_composite", "template_instance",
+        "event_plan", "plan_action",
     };
 
     private final Db db;

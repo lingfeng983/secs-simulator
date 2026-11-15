@@ -29,9 +29,6 @@ final class HotReloader {
     /** 装载编排表并设限流。 */
     private final java.util.function.BiConsumer<EventSchedule, Integer> enableSchedule;
 
-    /** 效果记录：热重载时要清空（旧模型的效果不该残留）。 */
-    private final EventEffectStore effects;
-
     /** 当前值来源（可变句柄）。 */
     private final ValueSourceHandle values;
 
@@ -45,7 +42,6 @@ final class HotReloader {
                 java.util.function.Consumer<Boolean> collectionEventWbit,
                 java.util.function.Consumer<Boolean> traceWbit,
                 java.util.function.BiConsumer<EventSchedule, Integer> enableSchedule,
-                EventEffectStore effects,
                 ValueSourceHandle values,
                 ValueStore store,
                 java.util.function.Supplier<com.shimizukenta.secssim.core.domain.EquipmentSpec> equipment) {
@@ -53,7 +49,6 @@ final class HotReloader {
         this.collectionEventWbit = collectionEventWbit;
         this.traceWbit = traceWbit;
         this.enableSchedule = enableSchedule;
-        this.effects = effects;
         this.values = values;
         this.store = store;
         this.equipment = equipment;
@@ -73,23 +68,20 @@ final class HotReloader {
      * @param model           新设备模型（单元/变量/报告/事件定义）
      * @param values          新值来源；{@code null} 表示回落设备默认曲线
      */
-    EffectValueSource apply(EventSchedule schedule, int maxEventsPerSec,
-                             boolean s6f11Wbit, boolean s6f1Wbit,
-                             ResolvedEquipment model, ValueSource values) {
+    ValueSource apply(EventSchedule schedule, int maxEventsPerSec,
+                      boolean s6f11Wbit, boolean s6f1Wbit,
+                      ResolvedEquipment model, ValueSource values) {
         this.collectionEventWbit.accept(s6f11Wbit);
         this.traceWbit.accept(s6f1Wbit);
         this.refreshModelViews.accept(model);
         this.enableSchedule.accept(schedule, maxEventsPerSec);
-        /* 旧模型的效果随旧配置失效:效果记录不能跨热重载残留 */
-        this.effects.clear();
         if (values != null) {
-            final EffectValueSource source = new EffectValueSource(values, this.effects);
-            this.values.set(source);
-            return source;
+            this.values.set(values);
+            return values;
         }
-        /* 从模板图切回默认曲线：默认曲线要先重新绑进值存储 */
+        /* 没有自定义来源：默认曲线要先重新绑进值存储 */
         DefaultCurves.bind(this.store, this.equipment.get(), model);
-        final EffectValueSource source = new EffectValueSource(new CurveValueSource(this.store), this.effects);
+        final ValueSource source = new CurveValueSource(this.store);
         this.values.set(source);
         return source;
     }

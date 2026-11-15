@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
 import { DataTable, type Column } from '../../../shared/ui/DataTable';
 import { SmlResult } from '../../../shared/ui/SmlResult';
@@ -134,11 +134,8 @@ function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs): JSX.
 
   return (
     <div className="panel-stack">
-      <Panel
-        id="panel-host-overview"
-        title="主机概览"
-        description="实例的身份与目标;保存后设置版本 +1,需点「使设置生效」按最新设置重连。"
-      >
+      {/* 子页签已经说明"这是哪一页"：面板不再单独占一行标题，直接从表单开始 */}
+      <Panel id="panel-host-overview" title="主机概览" headless>
         {error !== '' && <p className="inline-note danger">{error}</p>}
         <div className="form-row">
           <label className="field">
@@ -191,11 +188,7 @@ function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs): JSX.
       </Panel>
 
       {/* 需求：概览页能一眼看到后面 Trace 采集 / S1F3 采集的配置与运行状态 */}
-      <Panel
-        id="panel-host-overview-collect"
-        title="采集概览"
-        description="配置区保存的 Trace / S1F3 采集方案，以及当前 S1F3 采集器的运行状态。运行区可直接点方案使用。"
-      >
+      <Panel id="panel-host-overview-collect" title="采集概览" headless>
         <div className="overview-grid">
           <div className="overview-card">
             <h3>Trace 采集方案（S2F23 → S6F1）</h3>
@@ -256,11 +249,7 @@ function HostPresetsPanel({ hostId }: PanelArgs): JSX.Element {
   const [copied, setCopied] = useState('');
 
   return (
-    <Panel
-      id="panel-host-presets"
-      title="报文模板 · SML 案例"
-      description={`${HOST_PRESETS.length} 条主机方向常用报文，按 ${PRESET_GROUPS.length} 组列出具体 SML 案例（可直接复制到运行区发送，或点「填入运行区发送」）。`}
-    >
+    <Panel id="panel-host-presets" title="报文模板 · SML 案例" headless>
       {copied !== '' && <p className="inline-note">{copied}</p>}
       {PRESET_GROUPS.map((group) => (
         <section key={group.label} style={{ marginBottom: 14 }}>
@@ -321,12 +310,9 @@ function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   };
 
   return (
-    <Panel
-      id="panel-host-send"
-      title="消息发送"
-      description="以本主机身份发一条 SML;收发明细在右侧「实时消息监控」。配置区·报文模板里有可直接填入的 SML 案例。"
-    >
+    <Panel id="panel-host-send" title="消息发送" headless>
       {error !== '' && <p className="inline-note danger">{error}</p>}
+      <p className="hint">以本主机身份发一条 SML；收发明细在右侧「实时消息监控」，配置区·报文模板里有可直接填入的 SML 案例。</p>
       <div className="preview-controls">
         {HOST_PRESETS.filter((preset) => preset.quick).map((preset) => (
           <button key={preset.label} type="button" title={preset.desc}
@@ -391,6 +377,7 @@ function TracePlanTable({
   onStart,
   onStop,
   busy,
+  toolbarEnd,
 }: {
   plans: readonly TracePlan[];
   mode: 'config' | 'runtime';
@@ -399,6 +386,8 @@ function TracePlanTable({
   onStart: (plan: TracePlan) => void;
   onStop: (plan: TracePlan) => void;
   busy: boolean;
+  /** 表格工具条右端的动作（新增方案这类页面级动作落在这里）。 */
+  toolbarEnd?: ReactNode;
 }): JSX.Element {
   const editing = mode === 'config';
   const columns: Column<TracePlan>[] = [
@@ -415,7 +404,7 @@ function TracePlanTable({
         <div className="row-actions">
           {editing ? (
             <>
-              <button type="button" onClick={() => onLoad(row)} title="载入到上方表单修改，再点「保存修改」写回">
+              <button type="button" onClick={() => onLoad(row)} title="打开编辑弹窗改参数，保存后写回方案库">
                 编辑
               </button>
               <button type="button" className="danger" onClick={() => onDelete(row.id)} title="删除方案（配置库同步删除）">
@@ -455,8 +444,9 @@ function TracePlanTable({
       rowKey={(row) => row.id}
       searchPlaceholder="搜索方案 / TRID / SVID"
       exportName={`trace-plans-${mode}`}
+      toolbarEnd={toolbarEnd}
       emptyText={editing
-        ? '还没有保存的 Trace 方案。填好上方参数与方案名称后点「保存为方案」。'
+        ? '还没有保存的 Trace 方案。点右上「新增方案」填好参数后保存。'
         : '还没有 Trace 方案；到配置区「Trace 设置」新增后这里即可启停。'}
       exportColumns={[
         { header: '方案', value: (row) => row.name },
@@ -614,12 +604,7 @@ function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: Pane
       <Panel
         id="panel-host-trace"
         title={readOnly ? 'Trace 设置（S2F23 方案库）' : 'Trace 采集（S2F23 → S6F1）'}
-        description={readOnly
-          ? 'S2F23 方案库：新增 / 编辑 / 删除方案（DSPER 是 hhmmss 六位数字、整秒）。\n下发与趋势曲线在运行区「Trace 采集」。'
-          : '设备按 DSPER 采样、REPGSZ 分条上报 S6F1。方案列表里启停；点「查看曲线」看对应 TRID 的趋势。'}
-        actions={readOnly
-          ? <button type="button" className="primary" onClick={openCreate}>新增方案</button>
-          : undefined}
+        headless
       >
         {error !== '' && <p className="inline-note danger">{error}</p>}
         {host.open && !readOnly && host.phase !== 'CONNECTED' && (
@@ -634,6 +619,10 @@ function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: Pane
           onStart={startPlan}
           onStop={stopPlan}
           busy={busy}
+          /* 页面级动作下移到表格工具条右侧：一页只剩"一行操作 + 一张表" */
+          toolbarEnd={readOnly
+            ? <button type="button" className="primary" onClick={openCreate}>新增方案</button>
+            : undefined}
         />
 
         {!readOnly && result !== null && (
@@ -647,11 +636,7 @@ function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: Pane
       </Panel>
 
       {!readOnly && (
-        <Panel
-          id="panel-host-trace-charts"
-          title="S6F1 参数趋势"
-          description="按方案折叠；点「查看曲线」才解析绘制该 TRID 的趋势，默认不展示。"
-        >
+        <Panel id="panel-host-trace-charts" title="S6F1 参数趋势" headless>
           {plans.length === 0 && <p className="hint">还没有 Trace 方案；到配置区新增后这里按方案看趋势。</p>}
           {plans.map((plan) => {
             const open = viewingTrid === plan.trid;
@@ -819,6 +804,7 @@ function CollectPlanTable({
   onStart,
   onStop,
   busy,
+  toolbarEnd,
 }: {
   plans: readonly CollectPlan[];
   mode: 'config' | 'runtime';
@@ -827,6 +813,8 @@ function CollectPlanTable({
   onStart: (plan: CollectPlan) => void;
   onStop: () => void;
   busy: boolean;
+  /** 表格工具条右端的动作（新增配置这类页面级动作落在这里）。 */
+  toolbarEnd?: ReactNode;
 }): JSX.Element {
   const editing = mode === 'config';
   const columns: Column<CollectPlan>[] = [
@@ -842,7 +830,7 @@ function CollectPlanTable({
         <div className="row-actions">
           {editing ? (
             <>
-              <button type="button" onClick={() => onLoad(row)} title="载入到上方表单修改，再点「保存修改」写回">
+              <button type="button" onClick={() => onLoad(row)} title="打开编辑弹窗改参数，保存后写回配置库">
                 编辑
               </button>
               <button type="button" className="danger" onClick={() => onDelete(row.id)} title="删除配置（配置库同步删除）">
@@ -877,8 +865,9 @@ function CollectPlanTable({
       rowKey={(row) => row.id}
       searchPlaceholder="搜索配置 / CEID / SVID"
       exportName={`collect-plans-${mode}`}
+      toolbarEnd={toolbarEnd}
       emptyText={editing
-        ? '还没有保存的采集配置。填好上方参数与配置名称后点「保存为配置」。'
+        ? '还没有保存的采集配置。点右上「新增配置」填好参数后保存。'
         : '还没有采集配置；到配置区「采集设置」新增后这里即可启停。'}
       exportColumns={[
         { header: '配置', value: (row) => row.name },
@@ -1113,12 +1102,7 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
     <Panel
       id="panel-host-collect"
       title={readOnly ? '采集设置（S1F3 配置库）' : '数据采集（S1F3 轮询）'}
-      description={readOnly
-        ? '采集配置库：新增 / 编辑 / 删除配置方案（启停 CEID / 周期 / SVID 清单）。\n下发、启停与数据曲线在运行区「数据采集」页。'
-        : '配置列表里启停（启动 = 下发该配置并开始采集）；点「查看曲线」看该配置的 SVID 曲线，默认不展示。'}
-      actions={readOnly
-        ? <button type="button" className="primary" onClick={openCreate}>新增配置</button>
-        : undefined}
+      headless
     >
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {notice !== '' && <p className="inline-note">{notice}</p>}
@@ -1131,6 +1115,10 @@ function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: Pa
         onStart={(plan) => void startPlan(plan)}
         onStop={() => void command(false)}
         busy={busy}
+        /* 页面级动作下移到表格工具条右侧 */
+        toolbarEnd={readOnly
+          ? <button type="button" className="primary" onClick={openCreate}>新增配置</button>
+          : undefined}
       />
 
       {!readOnly && (

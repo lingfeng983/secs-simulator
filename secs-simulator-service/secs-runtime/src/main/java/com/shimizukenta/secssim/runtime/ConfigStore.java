@@ -148,8 +148,8 @@ public final class ConfigStore {
     /**
      * 校验一段配置文本（不落盘）。
      *
-     * <p>判据与 {@code SessionLauncher.prepare} 一致：解析、编译设备模型、
-     * 模板图建一遍。静态方法保留：TemplateStore 与接口校验共用这一份。</p>
+     * <p>判据与 {@code SessionLauncher.prepare} 一致：解析 + 编译设备模型。
+     * 静态方法保留：TemplateStore 与接口校验共用这一份。</p>
      *
      * @param text JSON 文本
      * @return 问题列表；空表示合法
@@ -172,15 +172,6 @@ public final class ConfigStore {
         }
         if (!compiled.ok()) {
             return compiled.errors().stream().map(Object::toString).toList();
-        }
-
-        try {
-            if (config.hasCustomValues()) {
-                /* 模板 + SVID 直配(v6)统一在模板图里过单写者/环/未知引用 */
-                config.buildValues(compiled.equipment());
-            }
-        } catch (RuntimeException e) {
-            return List.of("值来源配置错误：" + e);
         }
 
         return List.of();

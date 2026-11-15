@@ -268,7 +268,7 @@ class SessionEquipmentConstantTest {
 
     private static final String CONFIG = """
             {
-              "schemaVersion": 5,
+              "schemaVersion": 7,
               "session": { "id": "ecv-1", "passive": true, "bindHost": "127.0.0.1",
                            "port": 5000, "deviceId": 10, "seed": 7 },
               "equipment": {

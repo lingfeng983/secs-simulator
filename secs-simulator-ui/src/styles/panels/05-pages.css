@@ -70,11 +70,7 @@
   white-space: pre-line;
 }
 
-/* ===== 结构页页签 + 模板说明 ===== */
-.structure-tabs {
-  margin: 0 0 0.85rem;
-}
-
+/* ===== 模板说明 ===== */
 .template-guide {
   margin-bottom: 1rem;
   padding: 0.7rem 0.9rem;
@@ -148,76 +144,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* ===== 设备子页：页签下方的一条命令栏 =====
-   页签已经说明"这是哪一页"，面板标题不再重复；左侧留一句说明，
-   右侧是统一的操作条。整体做成一条浅色命令栏，和内容区分开，
-   按钮不再"浮"在页面顶端。 */
-.tab-page .panel-title {
-  display: none;
-}
-
-.tab-page .panel-title-wrap {
-  display: block;
-  flex: 1 1 18rem;
-  min-width: 0;
-}
-
-.tab-page .panel-head {
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  min-height: 48px;
-  padding: 8px 14px;
-  background: var(--accent-wash);
-  border-bottom: 1px solid var(--line-soft);
-  /* 命令栏是面板的第一块：给上圆角，别把卡片圆角盖成直角 */
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-}
-
-.tab-page .panel-desc {
-  margin: 0;
-  max-width: 78ch;
-  color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
-  line-height: 1.5;
-}
-
-/* 标题已隐藏，气泡就没有锚点了：命令栏里的说明改成常驻文字。
-   其它页面的面板仍是「悬浮才出说明」，这里按子页形态单独放开。 */
-.tab-page .panel-tip {
-  position: static;
-  max-width: 78ch;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  opacity: 1;
-  visibility: visible;
-  transform: none;
-  color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
-  line-height: 1.5;
-  pointer-events: auto;
-}
-
-.tab-page .panel-actions {
-  margin-left: auto;
-}
-
-.tab-page .panel-body {
-  padding-top: 14px;
-}
-
-@media (max-width: 860px) {
-  .tab-page .panel-head {
-    align-items: flex-start;
-  }
-
-  .tab-page .panel-actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-}
 
 /* ===== 关联数据用点选清单 ===== */
 .check-grid {
@@ -230,6 +156,166 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-inset);
+}
+
+/* ===== 参数模板只读预览：模拟曲线 + 折叠的模板体 ===== */
+/* JSON 按原文缩进展示，长行横向滚动而不是被折断 */
+.param-template-preview-code {
+  max-height: 46vh;
+  white-space: pre;
+  word-break: normal;
+}
+
+.param-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.param-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+}
+
+.param-preview-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+  white-space: nowrap;
+}
+
+.param-preview-control select {
+  min-width: 130px;
+}
+
+/* 读数条：当前值用主色强调，其余是这轮试跑的统计 */
+.param-preview-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.param-preview-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.param-preview-stat > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-preview-stat > strong {
+  font: 600 calc(15px * var(--font-scale))/1.35 var(--font-mono);
+  color: var(--fg);
+}
+
+.param-preview-stat.is-current {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.param-preview-stat.is-current > strong {
+  color: var(--accent);
+}
+
+/* 图表用 CSS 变量取色，深浅主题/主色切换都自动跟随 */
+.param-curve-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  touch-action: none;
+}
+
+.param-curve-chart .param-curve-plot-bg { fill: var(--surface-2); }
+.param-curve-chart .param-curve-grid { stroke: var(--line); stroke-width: 1; }
+.param-curve-chart .param-curve-grid-v { stroke: var(--line-soft); }
+.param-curve-chart .param-curve-axis { stroke: var(--line-strong); stroke-width: 1; }
+.param-curve-chart .param-curve-tick,
+.param-curve-chart .param-curve-empty {
+  fill: var(--muted);
+  font: 400 calc(10.5px * var(--font-scale)) var(--font-mono);
+}
+.param-curve-chart .param-curve-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.param-curve-chart .param-curve-area { fill: url(#param-curve-fill); }
+.param-curve-chart .param-curve-cursor {
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.param-curve-chart .param-curve-cursor-dot {
+  fill: var(--warn);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.param-curve-chart .param-curve-hover-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.param-curve-chart .param-curve-hover-dot {
+  fill: var(--accent-bright);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.param-curve-chart .param-curve-tip-bg {
+  fill: var(--surface);
+  stroke: var(--line-strong);
+}
+.param-curve-chart .param-curve-tip-time {
+  fill: var(--muted);
+  font: 400 calc(10.5px * var(--font-scale)) var(--font-mono);
+}
+.param-curve-chart .param-curve-tip-value {
+  fill: var(--accent);
+  font: 600 calc(13px * var(--font-scale)) var(--font-mono);
+}
+
+.param-preview-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.param-preview-details > summary {
+  padding: 0.45rem 0.75rem;
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  cursor: pointer;
+}
+
+.param-preview-details[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.param-preview-details > :not(summary) {
+  margin: 0.7rem 0.75rem;
+}
+
+@media (max-width: 720px) {
+  .param-preview-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ===== 模板快速绑定 ===== */

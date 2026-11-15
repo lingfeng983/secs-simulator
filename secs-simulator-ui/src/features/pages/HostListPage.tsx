@@ -9,6 +9,8 @@ import type { HostV2 } from '../../api';
 import { HostTemplatePicker } from '../panels/hostsim/HostTemplatePicker';
 import type { HostTemplate } from '../../state/hostTemplates';
 import { DEFAULT_REGION } from '../../state/useRegions';
+import { deviceStatus } from '../../shared/lib/deviceStatus';
+import { readDeviceEndpoint } from '../../state/deviceEndpoint';
 
 /**
  * 主机清单页（设计 §3.4）：与设备清单同构——区域筛选 + 表格 + 新建。
@@ -17,6 +19,7 @@ import { DEFAULT_REGION } from '../../state/useRegions';
  * 可连续新建任意多台，多台可指向同一地址。
  */
 export function HostListPage({
+  backend,
   hosts,
   goTo,
   notifier,
@@ -30,6 +33,42 @@ export function HostListPage({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   /** 待确认的删除目标：删主机不可撤销，一律先问一次。 */
   const [deleteTarget, setDeleteTarget] = useState<{ ids: readonly string[]; label: string } | null>(null);
+
+  /* 「快速链接设备」的可选项：已经启动的设备（端口在监听）。
+     选一台就能把它的地址/端口/Device ID 一次填好，名称用 host-设备名。 */
+  const quickDevices = useMemo(
+    () => backend.sessions
+      .filter((session) => deviceStatus(session) !== 'stopped')
+      .map((session) => ({
+        id: session.id,
+        label: `${session.device === '' ? session.id : session.device}（${session.id}）`,
+      })),
+    [backend.sessions],
+  );
+
+  /** 读出一台已启动设备的端点：配置没读到就用总览里的端口兜底。 */
+  const pickQuickDevice = async (sessionId: string): Promise<{
+    name: string; host: string; port: number | null; deviceId: number;
+  } | null> => {
+    const session = backend.sessions.find((item) => item.id === sessionId);
+    if (session === undefined) {
+      return null;
+    }
+    const configName = session.config ?? '';
+    const modifiedMs = backend.configList.find((entry) => entry.name === configName)?.modifiedMs ?? 0;
+    const endpoint = configName === '' ? null : await readDeviceEndpoint(backend, configName, modifiedMs);
+    const port = endpoint?.port ?? backend.overview.find((row) => row.id === sessionId)?.port ?? null;
+    /* 绑定到 0.0.0.0 的设备，主机要从回环地址连：0.0.0.0 不是可连接的目标 */
+    const host = endpoint === null || endpoint.host === '' || endpoint.host === '0.0.0.0'
+      ? '127.0.0.1'
+      : endpoint.host;
+    return {
+      name: `host-${session.device === '' ? session.id : session.device}`,
+      host,
+      port,
+      deviceId: endpoint?.deviceId ?? 0,
+    };
+  };
 
   const visible = useMemo(
     () => hosts.hosts.filter((host) => (
@@ -320,6 +359,8 @@ export function HostListPage({
       <CreateHostModal
         open={createOpen}
         templates={hosts.templates}
+        quickDevices={quickDevices}
+        onPickDevice={pickQuickDevice}
         regionNames={regions?.names ?? [DEFAULT_REGION]}
         busy={busy}
         onClose={() => setCreateOpen(false)}
@@ -374,10 +415,12 @@ export function HostListPage({
   );
 }
 
-/** 新建主机弹窗：实例目标信息 + 可选的主机模板方案包。 */
+/** 新建主机弹窗：实例目标信息 + 快速链接设备 + 可选的主机模板方案包。 */
 function CreateHostModal({
   open,
   templates,
+  quickDevices,
+  onPickDevice,
   regionNames,
   busy,
   onClose,
@@ -385,6 +428,12 @@ function CreateHostModal({
 }: {
   open: boolean;
   templates: HostsV2State['templates'];
+  /** 可一键接管的设备：已经启动（端口在监听）的那些。 */
+  quickDevices: readonly { id: string; label: string }[];
+  /** 读出一台设备的地址/端口/Device ID；读不到返回 null。 */
+  onPickDevice: (sessionId: string) => Promise<{
+    name: string; host: string; port: number | null; deviceId: number;
+  } | null>;
   regionNames: readonly string[];
   busy: boolean;
   onClose: () => void;
@@ -400,7 +449,30 @@ function CreateHostModal({
   const [templateId, setTemplateId] = useState('');
   const [region, setRegion] = useState(DEFAULT_REGION);
   const [newRegion, setNewRegion] = useState('');
+  const [quickId, setQuickId] = useState('');
+  const [picking, setPicking] = useState(false);
   const selectedTemplate = templates.find((item) => item.id === templateId);
+
+  /** 选一台设备：把名称/目标/端口/Device ID 一次填好，之后仍可手改。 */
+  const applyQuickDevice = async (sessionId: string) => {
+    setQuickId(sessionId);
+    if (sessionId === '') {
+      return;
+    }
+    setPicking(true);
+    try {
+      const picked = await onPickDevice(sessionId);
+      if (picked === null) {
+        return;
+      }
+      setName(picked.name);
+      setHost(picked.host);
+      setPort(picked.port === null ? '' : String(picked.port));
+      setDeviceId(String(picked.deviceId));
+    } finally {
+      setPicking(false);
+    }
+  };
 
   const valid = host.trim() !== '' && Number(port) >= 1 && Number(port) <= 65535;
 
@@ -439,6 +511,29 @@ function CreateHostModal({
         />
       )}
       <div className="session-form">
+        {/* 一线操作：已经启动的设备直接拿来当目标，省掉抄地址/端口/Device ID */}
+        <div className="form-row">
+          <label className="field">
+            快速链接设备
+            <select
+              value={quickId}
+              disabled={picking}
+              aria-label="快速链接设备"
+              onChange={(event) => void applyQuickDevice(event.target.value)}
+            >
+              <option value="">
+                {quickDevices.length === 0 ? '— 没有已启动的设备 —' : '— 手动填写 —'}
+              </option>
+              {quickDevices.map((device) => (
+                <option key={device.id} value={device.id}>{device.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="hint">
+          选一台已经启动的设备：目标地址、端口、Device ID 按它的配置填好，名称用
+          <span className="mono"> host-设备名</span>；填完仍可手改。
+        </p>
         <div className="session-fields">
           <label className="session-field">
             <span className="session-field-text">

@@ -1,20 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { ParamTemplate } from '../../api/paramTemplates';
-import { SvidSourceEditor, EffectsEditor } from './SvidSourceEditors';
-import { RefMultiSelect, type RefChoice } from './RefMultiSelect';
+import { SourceEditor } from './SourceEditor';
+import { RefDropdownSelect, type RefChoice } from './RefDropdownSelect';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import { Collapsible } from '../../shared/ui/Collapsible';
 import {
   booleanField,
   collectCeids,
-  collectSvids,
-  CURVE_TYPES,
-  curveFieldSpecs,
-  defaultCurveFields,
-  defaultEffect,
-  effectFieldSpecs,
   editDocument,
-  isCurveType,
   isJsonObject,
   numberField,
   objectField,
@@ -22,11 +15,9 @@ import {
   readObjectArray,
   SECS_TYPES,
   stringField,
-  svidSourceKind,
   TRIGGER_TYPES,
   uniqueId,
   type JsonObject,
-  type SourceKind,
   type TriggerType,
 } from './templateConfig';
 
@@ -44,12 +35,9 @@ type Edit = (mutate: (root: JsonObject) => void) => void;
 /**
  * session / equipment / events 段的结构化编辑。
  *
- * <p>与 {@link import('./TemplateEditor').TemplateEditor} 同一套纪律：
- * 原文才是唯一事实来源，表单只是把解析后的结构投影出来，改完写回整份文档。
- * 未知键保留，缩进统一 2 空格；保存前仍要过「校验」（同一条启动路径）。</p>
- *
- * <p>templates 段的表单在 {@link import('./TemplateEditor').TemplateEditor} 里，
- * 本组件只负责其余三段。</p>
+ * <p>原文才是唯一事实来源，表单只是把解析后的结构投影出来，改完写回整份文档。
+ * 未知键保留，缩进统一 2 空格；保存前仍要过「校验」（同一条启动路径）。
+ * 值定义（source）按数据项挂在各自卡片上，没有独立的模板段。</p>
  */
 export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEditorProps): JSX.Element {
   const [error, setError] = useState('');
@@ -86,33 +74,15 @@ export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEd
       </div>
       <p className="hint">
         表单修改的是原文解析后的结构；保存前仍要「校验」。未知键会保留，
-        但整份文件的缩进会统一成 2 空格。模板 / 曲线的表单在下方「模板」区。
+        但整份文件的缩进会统一成 2 空格。每个变量的值定义就在它自己的卡片里。
       </p>
       {error !== '' && <p className="problems">{error}</p>}
 
       <SessionForm root={root} edit={edit} />
-      <EquipmentForm root={root} edit={edit} templateIds={templateIdsOf(root)} onPreviewSvid={onPreviewSvid} />
+      <EquipmentForm root={root} edit={edit} onPreviewSvid={onPreviewSvid} />
       <EventsForm root={root} edit={edit} />
     </div>
   );
-}
-
-/** 文档里全部模板 id(曲线 + 组合):SVID 直配引用的候选。 */
-export function templateIdsOf(root: JsonObject): string[] {
-  const templates = objectField(root, 'templates');
-  const ids: string[] = [];
-  const groups = [readObjectArray(templates, 'curves', 'templates'), readObjectArray(templates, 'composites', 'templates')];
-  for (const group of groups) {
-    if (typeof group === 'string') {
-      continue;
-    }
-    for (const item of group) {
-      if (typeof item.id === 'string') {
-        ids.push(item.id);
-      }
-    }
-  }
-  return ids;
 }
 
 /* ---------- 通用小件 ---------- */
@@ -165,22 +135,6 @@ export function FormGridHead({ columns }: { columns: string[] }): JSX.Element {
     </div>
   );
 }
-
-export function TypeSelect({ value, onCommit }: { value: string; onCommit: (next: string) => void }): JSX.Element {
-  return (
-    <label className="field field-cell">
-      <span className="field-cell-name">类型</span>
-      <select value={value} onChange={(event) => onCommit(event.target.value)}>
-        {SECS_TYPES.map((type) => (
-          <option key={type} value={type}>
-            {type}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 
 /** 数组里最大数值 id + 1；空数组用 fallback。 */
 export function nextId(items: readonly JsonObject[], key: string, fallback: number): number {
@@ -279,7 +233,7 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
 }
 
 /** 一行"属性 + 说明 + 控件"：说明保证在左侧，控件在右侧。 */
-function SessionField({ label, help, children }: { label: string; help: string; children: ReactNode }): JSX.Element {
+export function SessionField({ label, help, children }: { label: string; help: string; children: ReactNode }): JSX.Element {
   return (
     <label className="field session-field">
       <span className="session-field-text">
@@ -379,13 +333,10 @@ function editTraceLimit(
 
 /* ---------- 设备 ---------- */
 
-export function EquipmentForm({ root, edit, templateIds, onPreviewSvid, section = 'all' }: {
+export function EquipmentForm({ root, edit, onPreviewSvid }: {
   root: JsonObject;
   edit: Edit;
-  templateIds: string[];
   onPreviewSvid?: (svid: number) => void;
-  /** global = 设备名/号段/全局定义；units = 单元列表；all = 两者。 */
-  section?: 'all' | 'global' | 'units';
 }): JSX.Element {
   const equipment = isJsonObject(root.equipment) ? root.equipment : null;
 
@@ -419,71 +370,60 @@ export function EquipmentForm({ root, edit, templateIds, onPreviewSvid, section 
 
   return (
     <div className="cfg-section">
-      {section !== 'units' && (
-        <>
-          <div className="template-head">
-            <h3>设备全局</h3>
-          </div>
-          <p className="hint">
-            只放设备级内容：号段规则与设备常量（ECV）。SVID / CEID / 报告分别到
-            「状态变量」「事件」「报告」页维护，单元页只保留单元标识。
-          </p>
+      <div className="template-head">
+        <h3>设备全局</h3>
+      </div>
+      <p className="hint">
+        这里只管号段规划与单元标识。变量、设备常量、事件与报告分别到
+        「变量配置」「设备常量」「事件与报告」页维护。
+      </p>
 
-          <IdSpaceForm equipment={equipment} edit={edit} />
+      <IdSpaceForm equipment={equipment} edit={edit} />
 
-          <ConstantsForm equipment={equipment} edit={edit} />
-        </>
-      )}
-
-      {section !== 'global' && (
-        <>
-          <div className="template-head">
-            <h3>单元</h3>
-            {typeof units !== 'string' && (
-              <button
-                type="button"
-                onClick={() => edit((draft) => {
-                  const target = objectField(draft, 'equipment');
-                  const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
-                  const index = list.length + 1;
-                  list.push({
-                    unitId: nextId(list, 'unitId', 1),
-                    name: `CH${index}`,
-                    injectUnitId: index === 1,
-                    svids: [],
-                    reports: [],
-                    ceids: [],
-                  });
-                  target.units = list;
-                })}
-              >
-                + 单元
-              </button>
-            )}
-          </div>
-          <p className="hint">
-            单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）。
-            SVID、报告、事件分别到「状态变量」「报告」「事件」页维护，避免同一份数据在三个地方填。
-          </p>
-          {typeof units === 'string' ? (
-            <p className="problems">equipment.units {units}</p>
-          ) : units.length === 0 ? (
-            <p className="hint">还没有单元，点「+ 单元」添加第一台腔体/工位。</p>
-          ) : (
-            units.map((unit, index) => (
-              <UnitCard
-                key={index}
-                unit={unit}
-                index={index}
-                edit={edit}
-                templateIds={templateIds}
-                onPreviewSvid={onPreviewSvid}
-                unitSvidBase={unitSvidBase}
-                unitSvidStride={unitSvidStride}
-              />
-            ))
-          )}
-        </>
+      <div className="template-head" style={{ marginTop: '1.25rem' }}>
+        <h3>单元</h3>
+        {typeof units !== 'string' && (
+          <button
+            type="button"
+            onClick={() => edit((draft) => {
+              const target = objectField(draft, 'equipment');
+              const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
+              const index = list.length + 1;
+              list.push({
+                unitId: nextId(list, 'unitId', 1),
+                name: `CH${index}`,
+                injectUnitId: index === 1,
+                svids: [],
+                reports: [],
+                ceids: [],
+              });
+              target.units = list;
+            })}
+          >
+            + 单元
+          </button>
+        )}
+      </div>
+      <p className="hint">
+        单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）；单元里的变量、报告、事件
+        到「变量配置」「事件与报告」页维护，避免同一份数据在几个地方填。
+      </p>
+      {typeof units === 'string' ? (
+        <p className="problems">equipment.units {units}</p>
+      ) : units.length === 0 ? (
+        <p className="hint">还没有单元，点「+ 单元」添加第一台腔体/工位。</p>
+      ) : (
+        units.map((unit, index) => (
+          <UnitCard
+            key={index}
+            unit={unit}
+            index={index}
+            edit={edit}
+            onPreviewSvid={onPreviewSvid}
+            unitSvidBase={unitSvidBase}
+            unitSvidStride={unitSvidStride}
+          />
+        ))
       )}
     </div>
   );
@@ -603,138 +543,6 @@ function reserveOf(root: JsonObject): unknown[] {
   return idSpace.reserve as unknown[];
 }
 
-export function GlobalSvidsForm({ equipment, edit, templateIds, onPreviewSvid, library }: {
-  equipment: JsonObject;
-  edit: Edit;
-  templateIds: string[];
-  onPreviewSvid?: (svid: number) => void;
-  /** 参数模板库条目（所有设备共享）；给了才在值来源里显示「模板库」一组。 */
-  library?: ParamTemplate[];
-}): JSX.Element {
-  const list = readObjectArray(equipment, 'globalSvids', 'equipment');
-
-  return (
-    <div className="template-card">
-      <div className="template-card-head">
-        <span className="template-label">全局 SVID（不属于任何单元）</span>
-        {typeof list !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              const items = Array.isArray(target.globalSvids) ? (target.globalSvids as JsonObject[]) : [];
-              items.push({
-                id: nextId(items, 'id', 9001),
-                name: `GLOBAL_SVID_${items.length + 1}`,
-                type: 'F4',
-              });
-              target.globalSvids = items;
-            })}
-          >
-            + 全局 SVID
-          </button>
-        )}
-      </div>
-      {typeof list === 'string' ? (
-        <p className="problems">equipment.globalSvids {list}</p>
-      ) : list.length === 0 ? (
-        <p className="hint">没有全局 SVID。单元内 SVID 用各单元卡片编辑。</p>
-      ) : (
-        <>
-          <FormGridHead columns={['绝对 id', '名称', '类型', 'min', 'max']} />
-          {list.map((item, index) => (
-          <FormRow
-            key={index}
-            cols={5}
-            onRemove={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              if (Array.isArray(target.globalSvids)) {
-                (target.globalSvids as unknown[]).splice(index, 1);
-              }
-            })}
-          >
-            <label className="field field-cell">
-              <span className="field-cell-name">绝对 id</span>
-              <NumberField
-                value={numberField(item, 'id')}
-                integer
-                onCommit={(next) => edit((draft) => {
-                  globalSvidsOf(draft)[index].id = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">名称</span>
-              <TextField
-                value={stringField(item, 'name')}
-                onCommit={(next) => edit((draft) => {
-                  globalSvidsOf(draft)[index].name = next;
-                })}
-              />
-            </label>
-            <TypeSelect
-              value={stringField(item, 'type', 'F4')}
-              onCommit={(next) => edit((draft) => {
-                globalSvidsOf(draft)[index].type = next;
-              })}
-            />
-            <label className="field field-cell">
-              <span className="field-cell-name">min</span>
-              <NumberField
-                value={numberField(item, 'min')}
-                onCommit={(next) => edit((draft) => {
-                  globalSvidsOf(draft)[index].min = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">max</span>
-              <NumberField
-                value={numberField(item, 'max')}
-                onCommit={(next) => edit((draft) => {
-                  globalSvidsOf(draft)[index].max = next;
-                })}
-              />
-            </label>
-          </FormRow>
-        ))}
-        </>
-      )}
-      {typeof list !== 'string' && list.map((item, index) => (
-        <SvidSourceEditor
-          key={`gsrc-${index}`}
-          def={item}
-          mutate={(fn) => edit((draft) => {
-            const items = globalSvidsOf(draft);
-            if (isJsonObject(items[index])) {
-              fn(items[index]);
-            }
-          })}
-          templateIds={templateIds}
-          absoluteId={numberField(item, 'id') ?? 0}
-          onPreviewSvid={onPreviewSvid}
-          library={library}
-          editRootAndDef={library === undefined ? undefined : (fn) => edit((draft) => {
-            const def = globalSvidsOf(draft)[index];
-            if (isJsonObject(def)) {
-              fn(draft, def);
-            }
-          })}
-        />
-      ))}
-      {typeof list !== 'string' && list.length > 0 && (
-        <p className="hint">不配 min/max 时默认曲线退化为 0..100 有界随机游走;「值来源」可给这个 SVID 单独配曲线或模板。</p>
-      )}
-    </div>
-  );
-}
-
-function globalSvidsOf(root: JsonObject): JsonObject[] {
-  const target = objectField(root, 'equipment');
-  const items = target.globalSvids;
-  return Array.isArray(items) ? (items as JsonObject[]) : [];
-}
-
 export function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
   const list = readObjectArray(equipment, 'globalCeids', 'equipment');
 
@@ -797,7 +605,9 @@ export function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; ed
                 })}
               />
             </label>
-            <RefMultiSelect
+            <RefDropdownSelect
+              label="引用报告"
+              align="right"
               choices={globalReportChoices(equipment)}
               values={stringListOf(item, 'reports')}
               onChange={(next) => edit((draft) => {
@@ -842,108 +652,6 @@ function globalReportChoices(equipment: JsonObject): RefChoice[] {
   return out;
 }
 
-export function ConstantsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
-  const list = readObjectArray(equipment, 'constants', 'equipment');
-
-  return (
-    <div className="template-card">
-      <div className="template-card-head">
-        <span className="template-label">设备常量 ECV（S2F13 查询 / S2F15 写入）</span>
-        {typeof list !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              const items = Array.isArray(target.constants) ? (target.constants as JsonObject[]) : [];
-              items.push({
-                id: nextId(items, 'id', 501),
-                name: `ECV_${items.length + 1}`,
-                type: 'F4',
-                value: 0,
-              });
-              target.constants = items;
-            })}
-          >
-            + 常量
-          </button>
-        )}
-      </div>
-      {typeof list === 'string' ? (
-        <p className="problems">equipment.constants {list}</p>
-      ) : list.length === 0 ? (
-        <p className="hint">没有设备常量；没有这段时 S2F13 回空列表、S2F15 回 EAC=1。</p>
-      ) : (
-        <>
-          <FormGridHead columns={['ECID', '名称', '类型', '初始值', '单位']} />
-          {list.map((item, index) => (
-          <FormRow
-            key={index}
-            cols={5}
-            onRemove={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              if (Array.isArray(target.constants)) {
-                (target.constants as unknown[]).splice(index, 1);
-              }
-            })}
-          >
-            <label className="field field-cell">
-              <span className="field-cell-name">ECID</span>
-              <NumberField
-                value={numberField(item, 'id')}
-                integer
-                onCommit={(next) => edit((draft) => {
-                  constantsOf(draft)[index].id = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">名称</span>
-              <TextField
-                value={stringField(item, 'name')}
-                onCommit={(next) => edit((draft) => {
-                  constantsOf(draft)[index].name = next;
-                })}
-              />
-            </label>
-            <TypeSelect
-              value={stringField(item, 'type', 'F4')}
-              onCommit={(next) => edit((draft) => {
-                constantsOf(draft)[index].type = next;
-              })}
-            />
-            <label className="field field-cell">
-              <span className="field-cell-name">初始值</span>
-              <NumberField
-                value={numberField(item, 'value')}
-                onCommit={(next) => edit((draft) => {
-                  constantsOf(draft)[index].value = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">单位</span>
-              <TextField
-                allowBlank
-                value={stringField(item, 'unit')}
-                onCommit={(next) => edit((draft) => {
-                  constantsOf(draft)[index].unit = next === '' ? undefined : next;
-                })}
-              />
-            </label>
-          </FormRow>
-        ))}
-        </>
-      )}
-    </div>
-  );
-}
-
-function constantsOf(root: JsonObject): JsonObject[] {
-  const target = objectField(root, 'equipment');
-  const items = target.constants;
-  return Array.isArray(items) ? (items as JsonObject[]) : [];
-}
-
 export function stringListOf(item: JsonObject, key: string): string[] {
   const value = item[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -954,11 +662,10 @@ export function unitsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(units) ? (units as JsonObject[]) : [];
 }
 
-function UnitCard({ unit, index, edit, templateIds, onPreviewSvid, unitSvidBase, unitSvidStride }: {
+function UnitCard({ unit, index, edit, onPreviewSvid, unitSvidBase, unitSvidStride }: {
   unit: JsonObject;
   index: number;
   edit: Edit;
-  templateIds: string[];
   onPreviewSvid?: (svid: number) => void;
   unitSvidBase: number;
   unitSvidStride: number;
@@ -1065,7 +772,6 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
 export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const events = isJsonObject(root.events) ? root.events : null;
   const ceidChoices = useMemo(() => collectCeids(root), [root]);
-  const svidChoices = useMemo(() => collectSvids(root), [root]);
 
   if (events === null) {
     return (
@@ -1328,17 +1034,12 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                 </div>
               )}
 
-              <EffectsEditor
-                plan={plan}
-                mutatePlan={mutatePlan}
-                svidChoices={svidChoices}
-              />
             </div>
           );
         })
       )}
       <p className="hint">
-        切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。表达式规则见 docs/guides/schema-v4.md。
+        切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。事件只上报、不改任何值；按片重复的事件写在「工艺周期」里。
       </p>
       </Collapsible>
     </div>

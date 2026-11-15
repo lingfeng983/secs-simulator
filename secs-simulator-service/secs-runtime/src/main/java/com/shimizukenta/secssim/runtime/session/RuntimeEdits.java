@@ -12,7 +12,6 @@ import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.domain.ValueType;
-import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.PlanAction;
 import com.shimizukenta.secssim.core.event.Trigger;
@@ -31,7 +30,7 @@ public final class RuntimeEdits {
     }
 
     /**
-     * 解析编排计划:{"id","ceid","trigger":{"type",...},"effects":[...]}。
+     * 解析编排计划:{"id","ceid","trigger":{"type",...},"actions":[...]}。
      *
      * @param json JSON 文本
      * @return 计划
@@ -60,12 +59,6 @@ public final class RuntimeEdits {
                     + "（可选 at / periodic / onCondition / afterEvent）");
         };
 
-        List<EventEffect> effects = new ArrayList<>();
-        if (root.containsKey("effects") && root.get("effects").isArray()) {
-            for (JsonHub item : root.get("effects")) {
-                effects.add(parseEffect(item));
-            }
-        }
         List<PlanAction> actions = new ArrayList<>();
         if (root.containsKey("actions") && root.get("actions").isArray()) {
             for (JsonHub item : root.get("actions")) {
@@ -86,7 +79,7 @@ public final class RuntimeEdits {
                     + "（可选 keep / rollback）");
         }
         try {
-            return new EventPlan(id, ceid, t, effects, actions, offlinePolicy, onSendFailure);
+            return new EventPlan(id, ceid, t, actions, offlinePolicy, onSendFailure);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("计划不合法: " + e.getMessage());
         }
@@ -113,26 +106,6 @@ public final class RuntimeEdits {
             return new PlanAction(kind, stream, function, wbit, sml, params);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("动作不合法(kind=" + kind + "): " + e.getMessage());
-        }
-    }
-
-    private static EventEffect parseEffect(JsonHub item) {
-        int svid = (int) item.get("svid").longValue();
-        String opText = requireString(item, "op");
-        final EventEffect.Op op;
-        try {
-            op = EventEffect.Op.valueOf(opText.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("未知效果类型 op: " + opText);
-        }
-        Double value = item.containsKey("value") ? item.get("value").doubleValue() : null;
-        Double delta = item.containsKey("delta") ? item.get("delta").doubleValue() : null;
-        Long holdMs = item.containsKey("holdMs") ? item.get("holdMs").longValue() : null;
-        Long decayMs = item.containsKey("decayMs") ? item.get("decayMs").longValue() : null;
-        try {
-            return new EventEffect(svid, op, value, delta, holdMs, decayMs);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("效果不合法(op=" + opText + "): " + e.getMessage());
         }
     }
 

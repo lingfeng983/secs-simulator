@@ -185,11 +185,11 @@ class RuntimeEditsTest {
     void parsesPlanReportCeidSvidBodies() {
         EventPlan plan = RuntimeEdits.parseEventPlan(
                 "{\"id\":\"px\",\"ceid\":2001,\"trigger\":{\"type\":\"periodic\",\"periodMs\":250,\"jitterMs\":10},"
-                        + "\"effects\":[{\"svid\":1001,\"op\":\"set\",\"value\":80}]}");
+                        + "\"actions\":[{\"kind\":\"s6f11\"}]}");
         assertEquals("px", plan.id());
         assertEquals(2001, plan.ceid());
         assertTrue(plan.trigger() instanceof Trigger.Periodic);
-        assertEquals(1, plan.effects().size());
+        assertTrue(plan.hasCustomActions());
 
         ResolvedReport report = RuntimeEdits.parseReport(
                 "{\"id\":3001,\"slot\":\"R\",\"svids\":[1001,1002]}");

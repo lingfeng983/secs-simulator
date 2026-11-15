@@ -42,8 +42,6 @@ export interface SidebarDevice {
   template?: string;
   /** 配置文件，用于 tooltip。 */
   config?: string;
-  /** 数据库里还没启动的设备（无会话行）：默认落配置区，子页只列配置区。 */
-  notStarted?: boolean;
   /** 区域分组；不传按 Default 处理。 */
   region?: string;
 }
@@ -292,9 +290,11 @@ export function Sidebar({
     const tone = DEVICE_STATUS_TONE[status];
     const label = DEVICE_STATUS_LABEL[status];
     const expanded = expandedDevices.has(device.id);
-    /* 未启动的库内设备没有运行态可看：默认落配置区，子页只列配置区 */
-    const defaultZone = device.notStarted === true ? 'config' as const : 'runtime' as const;
-    const defaultPage = device.notStarted === true ? DEVICE_CONFIG_PAGES[0] : DEVICE_RUNTIME_PAGES[0];
+    /* 点设备只有一个落点：设备本身，默认进运行区。
+       库里还没启动的设备也一样——页面骨架不按状态分家，
+       运行区的数据等启动后才有。 */
+    const defaultZone = 'runtime' as const;
+    const defaultPage = DEVICE_RUNTIME_PAGES[0];
     return (
       <div className="nav-device" key={device.id}>
         <div className="nav-device-row">
@@ -333,7 +333,7 @@ export function Sidebar({
           <div className="nav-subpages">
             {[
               ...DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id], zone: 'config' as const })),
-              ...(device.notStarted === true ? [] : DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const }))),
+              ...DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const })),
             ].map((entry) => {
               const selected = active && route.name === 'device' && route.zone === entry.zone && route.page === entry.id;
               return (

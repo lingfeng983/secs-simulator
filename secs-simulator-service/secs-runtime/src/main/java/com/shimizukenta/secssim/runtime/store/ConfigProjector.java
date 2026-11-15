@@ -40,7 +40,6 @@ public final class ConfigProjector implements ConfigRepository.DocumentProjector
         JsonHub session = root.get("session");
         JsonHub equipment = root.get("equipment");
         JsonHub events = root.get("events");
-        JsonHub templates = root.get("templates");
 
         /* 最小正文（测试 / 迁移边界）可以缺段：缺哪段就不投影哪段 */
         if (session != null && session.isObject()) {
@@ -48,7 +47,6 @@ public final class ConfigProjector implements ConfigRepository.DocumentProjector
         }
         projectEquipment(connection, deviceId, equipment);
         projectEvents(connection, deviceId, events);
-        projectTemplates(connection, deviceId, templates);
     }
 
     /* ---------- connection_spec ---------- */
@@ -341,40 +339,10 @@ public final class ConfigProjector implements ConfigRepository.DocumentProjector
                     }
                 }
             }
-            JsonHub effects = plan.get("effects");
-            if (effects != null && effects.isArray()) {
-                int effectOrdinal = 0;
-                for (JsonHub effect : effects.values()) {
-                    try (PreparedStatement st = connection.prepareStatement(
-                            "INSERT INTO event_effect(device_id, plan_id, ordinal, svid, op, value, delta, hold_ms, decay_ms) "
-                                    + "VALUES(?,?,?,?,?,?,?,?,?)")) {
-                        st.setString(1, deviceId);
-                        st.setString(2, str(plan, "id"));
-                        st.setInt(3, effectOrdinal++);
-                        st.setLong(4, longOf(effect, "svid", 0L));
-                        st.setString(5, str(effect, "op"));
-                        setNullableDouble(st, 6, effect.get("value"));
-                        setNullableDouble(st, 7, effect.get("delta"));
-                        setNullableLong(st, 8, effect.get("holdMs"));
-                        setNullableLong(st, 9, effect.get("decayMs"));
-                        st.executeUpdate();
-                    }
-                }
-            }
         }
     }
 
     /* ---------- templates ---------- */
-
-    private static void projectTemplates(Connection connection, String deviceId, JsonHub templates)
-            throws SQLException {
-        if (templates == null || !templates.isObject()) {
-            return;
-        }
-        insertTemplateRows(connection, deviceId, templates.get("curves"), "template_curve", "curve_id");
-        insertTemplateRows(connection, deviceId, templates.get("composites"), "template_composite", "composite_id");
-        insertTemplateRows(connection, deviceId, templates.get("instances"), "template_instance", "instance_id");
-    }
 
     private static void insertTemplateRows(Connection connection, String deviceId, JsonHub rows,
                                            String table, String idColumn) throws SQLException {

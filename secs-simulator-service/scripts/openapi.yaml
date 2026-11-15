@@ -317,7 +317,7 @@ paths:
       tags: [control]
       summary: 新增编排计划（运行时,不写回配置）
       description: |
-        计划 JSON:{"id","ceid","trigger":{"type":"at|periodic|onCondition|afterEvent",...},"effects":[...]}。
+        计划 JSON:{"id","ceid","trigger":{"type":"at|periodic|onCondition|afterEvent",...},"actions":[...]}。事件只上报、不改值。
         trigger 字段随 type:at→atMs;periodic→periodMs/jitterMs;
         onCondition→expression/debounceMs;afterEvent→sourcePlan/delayMs。
         效果元素 {"svid","op":"set|add|pulse|shift|resume",...}。
@@ -1096,7 +1096,7 @@ paths:
         - { name: status, in: query, schema: { type: string, enum: [SENT, PARTIAL, FAILED, SKIPPED] } }
         - { name: dryRun, in: query, schema: { type: string, enum: ['0', '1', 'all'] } }
       responses:
-        '200': { description: 台账数组（items/count；含 messages 与 effects） }
+        '200': { description: 台账数组（items/count；含 messages；effects 恒为空数组，事件不改值） }
         '400': { description: limit 越界 }
     delete:
       tags: [devices]

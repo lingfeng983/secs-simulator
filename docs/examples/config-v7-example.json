@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 7,
+  "session": {
+    "id": "demo-01",
+    "passive": true,
+    "bindHost": "127.0.0.1",
+    "port": 5010,
+    "deviceId": 10,
+    "seed": 42
+  },
+  "context": [
+    { "id": "LOTID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "LOT{02}", "start": 1, "every": 25 } },
+    { "id": "WAFERID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "W{03}", "start": 1 } },
+    { "id": "RCPID", "type": "ASCII", "source": { "mode": "cycle", "list": ["ETCH-A1", "ETCH-B2"], "every": 25 } },
+    { "id": "PPID", "type": "ASCII", "source": { "mode": "const", "value": "PP-ETCH-01" } }
+  ],
+  "equipment": {
+    "name": "DEMO-ETCH",
+    "idSpace": {
+      "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000,
+      "svidStride": 100, "ceidStride": 100, "reportStride": 100,
+      "reserve": [[1, 999]]
+    },
+    "constants": [
+      { "id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 240, "unit": "C" }
+    ],
+    "globalSvids": [
+      {
+        "id": 9001, "name": "FACILITY_TEMP", "type": "F4", "min": 15, "max": 30,
+        "source": { "mode": "curve", "clock": "absolute",
+                    "curve": { "type": "sine", "min": 20, "max": 25, "periodMs": 600000 } }
+      }
+    ],
+    "units": [
+      {
+        "unitId": 1, "name": "CH1", "injectUnitId": true,
+        "svids": [
+          { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
+          {
+            "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400,
+            "source": { "mode": "curve", "clock": "phase",
+                        "curve": { "type": "randomWalk", "start": 180, "sigma": 2.5, "min": 0, "max": 400 } }
+          },
+          {
+            "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2,
+            "source": { "mode": "const", "value": 200 }
+          },
+          {
+            "offset": 3, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
+            "source": {
+              "mode": "expr", "clock": "phase",
+              "vars": {
+                "base": { "type": "constant", "value": 1.2 },
+                "amp": { "type": "constant", "value": 0.4 },
+                "periodSec": { "type": "constant", "value": 45 }
+              },
+              "expr": "clamp(base + amp * sin(6.283185307 * t / periodSec), 0, 10)"
+            }
+          },
+          {
+            "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1,
+            "source": { "mode": "curve",
+                        "curve": { "type": "step", "steps": [
+                          { "fromMs": 0, "value": 0 },
+                          { "fromMs": 5000, "value": 1 },
+                          { "fromMs": 55000, "value": 0 }
+                        ] } }
+          }
+        ],
+        "reports": [
+          {
+            "offset": 1, "slot": "STATUS",
+            "svids": ["UNIT_ID", "TEMP_PV", "PRESS", "ctx.LOTID", "ctx.WAFERID", "ecid.501"]
+          }
+        ],
+        "ceids": [
+          { "offset": 1, "slot": "PROCESS_START", "reports": ["STATUS"] },
+          { "offset": 2, "slot": "PROCESS_END", "reports": [] }
+        ]
+      }
+    ]
+  },
+  "cycle": {
+    "durationMs": 60000,
+    "jitterMs": 500,
+    "count": 25,
+    "noisePerWafer": false,
+    "events": [
+      { "atMs": 3000, "ceid": 2001 },
+      { "atMs": 55000, "ceid": 2002 }
+    ]
+  },
+  "events": {
+    "maxPerSec": 20,
+    "plans": []
+  }
+}

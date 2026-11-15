@@ -3,23 +3,28 @@ package com.shimizukenta.secssim.app.config;
 import com.shimizukenta.secssim.app.session.DefaultCurves;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
-import com.shimizukenta.secssim.core.curve.Rng;
-import com.shimizukenta.secssim.core.template.TemplateGraph;
+import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.value.BoundedValueSource;
 import com.shimizukenta.secssim.core.value.CurveValueSource;
-import com.shimizukenta.secssim.core.value.GraphValueSource;
-import com.shimizukenta.secssim.core.value.ValueSource;
+import com.shimizukenta.secssim.core.value.DataSourceValueSource;
 import com.shimizukenta.secssim.core.value.UnitIdValueSource;
+import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.core.value.ValueStore;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
- * 会话值来源的统一构建入口（schema v6）。
+ * 会话值来源的统一构建入口（schema v7）。
  *
- * <p>此前"有模板走模板图、没模板走默认曲线"的判断在
- * {@code SessionLauncher}、{@code Main}（草稿预览）里各写了一份，
- * v6 加入 SVID 直配后出现了第三种情况（只有直配、没有 templates 段）——
- * 再各写一份迟早出现"预览是一套语义、启动是另一套"的分叉。
- * 三处统一调这里。</p>
+ * <p>只有两条路，全部集中在这里，{@code SessionLauncher} 与草稿预览都调它：</p>
+ * <ol>
+ *   <li>配了任意值定义（{@code SVID → source}）→ {@link DataSourceValueSource}，
+ *       没配的项取 0；</li>
+ *   <li>一个都没配 → {@link DefaultCurves} 默认曲线（新建设备的“能跑起来”状态）。</li>
+ * </ol>
+ *
+ * <p>v7 之前还有第三条（模板图 / 实例绑定 / SVID 直配），已随值模型收窄删除。</p>
  */
 public final class ValueSources {
 
@@ -29,30 +34,30 @@ public final class ValueSources {
     /**
      * 按配置构建值来源。
      *
-     * <p>没有任何自定义值来源（templates 段为空且无 SVID 直配）时绑定
-     * {@code DefaultCurves} 默认曲线；否则构建模板图
-     * （用户实例 + 直配合成实例），未绑定到来源的 SVID 取 0。</p>
-     *
      * @param config    会话配置
      * @param equipment 已编译的设备模型
      * @return 值来源
-     * @throws ConfigException 模板图构建失败（未知引用/环/单写者冲突）
      */
     public static ValueSource of(SessionConfig config, ResolvedEquipment equipment) {
         final ValueSource values;
 
-        if (!config.hasCustomValues()) {
+        if (config.hasSources()) {
+            /* 一项一份 source：没有模板图、没有实例绑定、没有单写者冲突。
+               周期时钟决定曲线拿到的是片内相位还是绝对时刻。 */
+            values = new DataSourceValueSource(
+                    config.svidSources(),
+                    config.cycleClock(),
+                    config.spec().seed(),
+                    config.cycle() != null && config.cycle().noisePerWafer());
+        } else {
             ValueStore store = new ValueStore(config.spec().seed());
             DefaultCurves.bind(store, config.spec().equipment(), equipment);
             values = new CurveValueSource(store);
-        } else {
-            TemplateGraph graph = config.buildValues(equipment);
-            values = new GraphValueSource(graph, new Rng(config.spec().seed()).derive("graph"));
         }
 
-        /* UNIT_ID 是设备语义，不是用户曲线：模板图/直配路径也必须返回单元号，
+        /* UNIT_ID 是设备语义，不是用户曲线：任何路径都必须返回单元号，
            否则 S1F3 查到 0、S6F11 注入的却是真值。 */
-        final java.util.Map<Integer, Double> unitIds = unitIdValues(config, equipment);
+        Map<Integer, Double> unitIds = unitIdValues(config, equipment);
         final ValueSource withUnitIds = unitIds.isEmpty()
                 ? values : new UnitIdValueSource(values, unitIds);
 
@@ -62,15 +67,15 @@ public final class ValueSources {
     }
 
     /** 收集「UNIT_ID SVID → 单元编号」；没有这类 SVID 时返回空表。 */
-    private static java.util.Map<Integer, Double> unitIdValues(SessionConfig config, ResolvedEquipment equipment) {
-        java.util.Map<String, Integer> unitIdByName = new java.util.HashMap<>();
-        for (com.shimizukenta.secssim.core.domain.UnitSpec unit : config.spec().equipment().units()) {
+    private static Map<Integer, Double> unitIdValues(SessionConfig config, ResolvedEquipment equipment) {
+        Map<String, Integer> unitIdByName = new HashMap<>();
+        for (UnitSpec unit : config.spec().equipment().units()) {
             unitIdByName.put(unit.name(), unit.unitId().value());
         }
 
-        java.util.Map<Integer, Double> result = new java.util.HashMap<>();
+        Map<Integer, Double> result = new HashMap<>();
         for (ResolvedSvid svid : equipment.svids().values()) {
-            if (! com.shimizukenta.secssim.core.domain.UnitSpec.UNIT_ID_SLOT.equals(svid.slot())) {
+            if (!UnitSpec.UNIT_ID_SLOT.equals(svid.slot())) {
                 continue;
             }
             Integer unitId = unitIdByName.get(svid.owner());

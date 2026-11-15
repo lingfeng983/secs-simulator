@@ -60,21 +60,17 @@ final class PreviewBuilder {
     }
 
     /**
-     * 曲线预览，可只回放某一条计划。
+     * 曲线预览，可只看某一条计划的触发时刻。
      *
-     * <p>关键修正：事件效果要<b>从窗口之前就开始回放</b>。只在 {@code fromMs..toMs}
-     * 里模拟会漏掉更早施加、但窗口内仍在生效的效果（shift 未 resume、set 的衰减尾巴），
-     * 也会让周期 60s 的计划在短窗口里"一个都看不到"。</p>
+     * <p>事件只标时间点、不改值（schema v7）：曲线始终由数据项的 {@code source}
+     * 求值。窗口从 {@code fromMs} 之前一点开始回放，是为了让周期 60s 的计划在
+     * 短窗口里也能看到它在本窗口内的触发。</p>
      */
     String toJson(long fromMs, long toMs, int buckets, Set<Integer> svids,
                   boolean withEvents, String planId) {
         ValueSource source = this.values.get();
         List<PreviewSupport.PreviewEvent> events = List.of();
         if (withEvents) {
-            ValueSource base = source;
-            if (base instanceof EffectValueSource layered) {
-                base = layered.base();
-            }
             EventSchedule scheduleToRun = this.schedule.get();
             if (planId != null && !planId.isBlank()) {
                 List<com.shimizukenta.secssim.core.event.EventPlan> only = scheduleToRun.plans().stream()
@@ -83,14 +79,13 @@ final class PreviewBuilder {
                 scheduleToRun = new EventSchedule(only);
             }
             long simFrom = Math.max(0L, fromMs - MAX_HISTORY_MS);
-            EventSimulator.SimResult sim = EventSimulator.simulateWithEffects(
-                    scheduleToRun, base, this.seed,
+            EventSimulator.SimResult sim = EventSimulator.simulateWithValues(
+                    scheduleToRun, source, this.seed,
                     simFrom, toMs, EventSimulator.DEFAULT_MAX_EVENTS);
             events = sim.fires().stream()
                     .filter(fire -> fire.atMs() >= fromMs && fire.atMs() <= toMs)
                     .map(fire -> new PreviewSupport.PreviewEvent(fire.atMs(), fire.ceid(), fire.planId()))
                     .toList();
-            source = sim.values();
         }
         PreviewSupport.PreviewData data = PreviewSupport.compute(
                 source, this.model.get(), fromMs, toMs, buckets, svids, events);

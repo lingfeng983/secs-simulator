@@ -344,7 +344,7 @@ class SessionLauncherTest {
 
     private String configWithPort(String id, String marker, int port) {
         return """
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "%s", "passive": true, "bindHost": "127.0.0.1",
                              "port": %d, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "LINE-%s", "idSpace": {},

@@ -1,58 +1,14 @@
-import type { ReactNode } from 'react';
-
 /**
  * 设备/主机详情共用的「两段式」骨架（设计 §3.4.1 同构对照表）：
- * 实例头 + 配置区/运行区切换条 + 子页签。两个域共用版式与交互语言，
- * 数据与路由完全独立（同构但不相交）。
+ * 一条操作栏（配置/运行切换 + 动作）+ 子页签。
+ * 两个域共用版式与交互语言，数据与路由完全独立（同构但不相交）。
+ *
+ * <p>页面不再有"实例头"：设备名与主机名在页签、侧栏里已经写着，
+ * 状态在各自的清单页里看——详情页从操作栏直接开始。</p>
  */
 
-/** 实例头：徽标 + 关键指标 + 动作按钮。 */
-export interface InstanceHeadProps {
-  title: string;
-  /** 徽标（已连接/已断开/…）。 */
-  badge: ReactNode;
-  /** 徽标下的补充行（目标地址 / 配置版本等）。 */
-  subtitle?: ReactNode;
-  /** 四格指标。 */
-  metrics?: ReadonlyArray<{ label: string; value: ReactNode }>;
-  /** 右侧动作按钮组。 */
-  actions?: ReactNode;
-  /** 配置区 / 运行区切换：并入实例头这一行，不再单独占一行。 */
-  zoneSwitch?: ReactNode;
-}
-
-export function InstanceHead({ title, badge, subtitle, metrics, actions, zoneSwitch }: InstanceHeadProps): JSX.Element {
-  return (
-    <div className="instance-head">
-      <div className="instance-head-main">
-        <h1 className="instance-title">
-          {title}
-          {badge}
-        </h1>
-        {subtitle !== undefined && <div className="instance-subtitle">{subtitle}</div>}
-      </div>
-      {metrics !== undefined && metrics.length > 0 && (
-        <div className="instance-metrics">
-          {metrics.map((metric) => (
-            <div className="instance-metric" key={metric.label}>
-              <div className="instance-metric-label">{metric.label}</div>
-              <div className="instance-metric-value">{metric.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {(zoneSwitch !== undefined || actions !== undefined) && (
-        <div className="instance-actions">
-          {zoneSwitch}
-          {actions}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /**
- * 紧凑的配置区 / 运行区切换：放在实例头的状态/动作行里，一行排完。
+ * 紧凑的配置区 / 运行区切换：放在操作栏左侧，一行排完。
  */
 export function ZoneSwitch({
   zone,
@@ -88,6 +44,37 @@ export function ZoneSwitch({
         ◉ 运行区
       </button>
     </div>
+  );
+}
+
+/**
+ * 实例端点小标签：`地址:端口 | DeviceID`。
+ *
+ * <p>主机看「目标」（它连向哪里），设备看「监听」（它在哪里等）。
+ * 端口未知时只显示地址，别把 `:null` 摆在脸上。</p>
+ */
+export function EndpointTag({
+  label,
+  host,
+  port,
+  deviceId,
+  hint,
+}: {
+  label: string;
+  host: string;
+  port: number | null;
+  deviceId: number | null;
+  hint?: string;
+}): JSX.Element {
+  return (
+    <span className={`endpoint-tag${port === null ? ' pending' : ''}`} title={hint ?? `${label}地址：端口 | Device ID`}>
+      <span className="endpoint-tag-label">{label}</span>
+      <span className="mono">
+        {host}
+        {port === null ? '' : `:${port}`}
+        {deviceId === null ? '' : ` | ${deviceId}`}
+      </span>
+    </span>
   );
 }
 

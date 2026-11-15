@@ -55,7 +55,7 @@ class PlanExecutorTest {
      * pulse/decay 这类时间函数尤其明显。
      */
     @Test
-    void effectsAreAppliedBeforeBodyBuildAndSend() throws Exception {
+    void bodyIsBuiltBeforeSend() throws Exception {
         Recorder rec = new Recorder();
         List<String> order = new CopyOnWriteArrayList<>();
         AtomicInteger bodyCeid = new AtomicInteger();
@@ -70,10 +70,10 @@ class PlanExecutorTest {
             return null;
         };
         executor.execute(plain(), "p", 2001, AT, comm(sends, order), true,
-                () -> order.add("effects"), body, false);
+                body, false);
 
-        assertEquals(List.of("effects", "build", "send"), order,
-                "效果必须早于报文组装，组装必须早于发送");
+        assertEquals(List.of("build", "send"), order,
+                "组装必须早于发送");
         assertEquals(2001, bodyCeid.get(), "组装要拿到 CEID");
         assertEquals(List.of(AT), bodyAt, "组装要拿到调度锚点时刻");
         assertEquals(List.of("S6F11:w=false"), sends);
@@ -95,22 +95,20 @@ class PlanExecutorTest {
     void sameIdempotencyKeyIsExecutedOnce() throws Exception {
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
-        AtomicInteger effects = new AtomicInteger();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
 
         for (int i = 0; i < 3; i++) {
             executor.execute(plain(), "p", 2001, AT, comm(sends, null), true,
-                    effects::incrementAndGet, (ceid, at) -> null, false);
+                    (ceid, at) -> null, false);
         }
 
         assertEquals(1, sends.size(), "重复触发不得重复发送");
-        assertEquals(1, effects.get(), "重复触发不得重复施加效果");
         assertEquals(1, rec.ledger.size(), "重复触发不得重复记台账");
         assertTrue(executor.lastReserveAt("p", AT).isPresent(), "幂等窗口要留下预留痕迹");
 
         /* 换一个调度锚点 = 新的一次触发 */
         executor.execute(plain(), "p", 2001, AT + 1, comm(sends, null), true,
-                effects::incrementAndGet, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
         assertEquals(2, sends.size());
         assertEquals(2, rec.ledger.size());
     }
@@ -126,9 +124,9 @@ class PlanExecutorTest {
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
 
         executor.step(plain(), "p", 2001, AT, comm(sends, null), true,
-                () -> { }, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
         executor.step(plain(), "p", 2001, AT, comm(sends, null), true,
-                () -> { }, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
 
         assertEquals(2, sends.size(), "每次单步试跑都要真发");
         assertEquals(2, rec.ledger.size());
@@ -144,19 +142,17 @@ class PlanExecutorTest {
     /* 离线策略                                                            */
     /* ------------------------------------------------------------------ */
 
-    /** skip：不施加效果、不组装、不发送，只记一条 SKIPPED。 */
+    /** skip：不组装、不发送，只记一条 SKIPPED。 */
     @Test
-    void offlineSkipLeavesEffectsUntouched() throws Exception {
+    void offlineSkipRecordsOnly() throws Exception {
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
-        AtomicInteger effects = new AtomicInteger();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
 
         executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_KEEP),
-                "p", 2001, AT, null, false, effects::incrementAndGet,
+                "p", 2001, AT, null, false,
                 (ceid, at) -> { throw new AssertionError("离线不该组装报文"); }, false);
 
-        assertEquals(0, effects.get());
         assertEquals(0, sends.size());
         assertEquals(1, rec.ledger.size());
         assertEquals("SKIPPED", rec.ledger.get(0).status());
@@ -174,7 +170,7 @@ class PlanExecutorTest {
 
         executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_FAIL, EventPlan.FAILURE_KEEP),
                 "p", 2001, AT, comm(new CopyOnWriteArrayList<>(), null), false,
-                () -> { }, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
 
         assertEquals("FAILED", rec.ledger.get(0).status());
         assertTrue(rec.ledger.get(0).error().contains("offlinePolicy=fail"));
@@ -191,29 +187,26 @@ class PlanExecutorTest {
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
         List<Long> buildAt = new CopyOnWriteArrayList<>();
-        AtomicInteger effects = new AtomicInteger();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
         EventPlan queued = plan("p", 2001, List.of(), EventPlan.OFFLINE_QUEUE, EventPlan.FAILURE_KEEP);
 
         long[] anchors = {AT, AT + 10, AT + 20};
         for (long anchor : anchors) {
             executor.execute(queued, "p", 2001, anchor, null, false,
-                    effects::incrementAndGet, (ceid, at) -> null, false);
+                    (ceid, at) -> null, false);
         }
 
         assertEquals(3, executor.pendingCount());
         assertTrue(rec.ledger.isEmpty(), "排队期间不记执行台账（不是 Spooling）");
-        assertEquals(0, effects.get(), "离线不施加效果");
 
         long beforeReplay = System.currentTimeMillis();
         int replayed = executor.flushPending(new PlanExecutor.Dependencies(
-                comm(sends, null), true, effects::incrementAndGet,
+                comm(sends, null), true,
                 (ceid, atMs) -> { buildAt.add(atMs); return null; }, false));
 
         assertEquals(3, replayed);
         assertEquals(0, executor.pendingCount());
         assertEquals(3, sends.size());
-        assertEquals(3, effects.get(), "补跑时按 now 重新施加效果");
         assertEquals(3, buildAt.size());
         assertTrue(buildAt.stream().allMatch(t -> t >= beforeReplay),
                 "pulse/decay 必须用补跑时刻求值，不能回放旧时刻: " + buildAt);
@@ -222,7 +215,7 @@ class PlanExecutorTest {
         assertEquals(anchors[2], rec.ledger.get(2).scheduledAt());
         assertTrue(rec.ledger.stream().allMatch(e -> e.idempotencyKey().contains("|queued|")));
         assertEquals(0, executor.flushPending(new PlanExecutor.Dependencies(
-                comm(sends, null), true, () -> { }, (ceid, at) -> null, false)),
+                comm(sends, null), true, (ceid, at) -> null, false)),
                 "队列空后重复补跑不得再发");
     }
 
@@ -235,7 +228,7 @@ class PlanExecutorTest {
 
         for (int i = 0; i < PlanExecutor.QUEUE_CAPACITY + 1; i++) {
             executor.execute(queued, "p", 2001, AT + i, null, false,
-                    () -> { }, (ceid, at) -> null, false);
+                    (ceid, at) -> null, false);
         }
 
         assertEquals(PlanExecutor.QUEUE_CAPACITY, executor.pendingCount());
@@ -263,7 +256,7 @@ class PlanExecutorTest {
                 EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_KEEP);
 
         executor.execute(multi, "p", 2001, AT, comm(sends, null), true,
-                () -> { }, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
 
         assertEquals(3, sends.size(), "多 action = 多条报文");
         assertTrue(sends.get(0).startsWith("S6F11"));
@@ -275,95 +268,47 @@ class PlanExecutorTest {
         assertTrue(rec.ledger.get(0).error().isEmpty());
     }
 
-    /** SML 语法错误只让该动作失败：PARTIAL、错误逐条留痕，且绝不回滚。 */
+    /** SML 语法错误只让该动作失败：PARTIAL、错误逐条留痕。 */
     @Test
-    void brokenSmlYieldsPartialAndNeverRollsBack() throws Exception {
+    void brokenSmlYieldsPartial() throws Exception {
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
-        List<String> order = new CopyOnWriteArrayList<>();
-        AtomicInteger rolls = new AtomicInteger();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
-        executor.effectController(effects(order, true, rolls));
         EventPlan mixed = plan("p", 2001, List.of(
                 PlanAction.s6f11(),
                 PlanAction.sml("S1F2 W <U1 1>.")),  /* secondary 带 W：解析期必失败 */
                 EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_ROLLBACK);
 
         executor.execute(mixed, "p", 2001, AT, comm(sends, null), true,
-                () -> { }, (ceid, at) -> null, false);
+                (ceid, at) -> null, false);
 
         assertEquals(1, sends.size());
         assertEquals("PARTIAL", rec.ledger.get(0).status());
         assertTrue(rec.ledger.get(0).messageJson().contains("\"error\""));
-        assertFalse(rec.ledger.get(0).effectJson().contains("rollback"),
-                "PARTIAL 一律不回滚（设计 §2.7.2）");
-        assertEquals(0, rolls.get());
         assertEquals(1, rec.fires.size(), "PARTIAL 仍要计一次 fire（但不算成功）");
         assertTrue(rec.fires.get(0).startsWith("p|false|"), "PARTIAL 不算成功 fire");
         assertEquals(List.of(Boolean.FALSE), rec.immediate, "PARTIAL 不立即推");
     }
 
     /* ------------------------------------------------------------------ */
-    /* 回滚边界                                                            */
+    /* 发送失败                                                            */
     /* ------------------------------------------------------------------ */
 
-    /** 全失败 + 全 set/add 且未被触碰 → rolled_back。 */
+    /** 全失败：记 FAILED、立即推；效果层已取消，台账 effects 恒为空数组。 */
     @Test
-    void fullFailureOfRollbackableEffectsIsRolledBack() throws Exception {
+    void failedSendIsRecordedWithoutEffectLayer() throws Exception {
         Recorder rec = new Recorder();
-        List<String> order = new CopyOnWriteArrayList<>();
-        AtomicInteger rolls = new AtomicInteger();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
-        executor.effectController(effects(order, true, rolls));
-        SecsCommunicator broken = commThrows("链路断开");
-
-        executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
-                        EventPlan.FAILURE_ROLLBACK),
-                "p", 2001, AT, broken, true, () -> { }, (ceid, at) -> null, false);
-
-        assertEquals("FAILED", rec.ledger.get(0).status());
-        assertTrue(rec.ledger.get(0).effectJson().contains("\"rollback\":\"rolled_back\""));
-        assertEquals(1, rolls.get());
-        assertTrue(rec.ledger.get(0).error().contains("链路断开"));
-        assertTrue(rec.ledger.get(0).error().contains("rolled_back"));
-        assertEquals(List.of(Boolean.TRUE), rec.immediate);
-    }
-
-    /** 含 pulse/shift/resume 的效果不可回滚：即使全失败也标 rollback_skipped。 */
-    @Test
-    void nonRollbackableEffectsAreSkippedWithAnExplicitMark() throws Exception {
-        Recorder rec = new Recorder();
-        AtomicInteger rolls = new AtomicInteger();
-        PlanExecutor executor = new PlanExecutor(DEVICE, rec);
-        executor.effectController(effects(new CopyOnWriteArrayList<>(), false, rolls));
-
-        executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
-                        EventPlan.FAILURE_ROLLBACK),
-                "p", 2001, AT, commThrows("链路断开"), true, () -> { }, (ceid, at) -> null, false);
-
-        assertEquals("FAILED", rec.ledger.get(0).status());
-        assertTrue(rec.ledger.get(0).effectJson().contains("\"rollback\":\"rollback_skipped\""));
-        assertEquals(0, rolls.get(), "不可回滚的效果连撤销尝试都不该发生");
-    }
-
-    /** keep 是缺省策略；试跑即使失败也不动已施加的效果。 */
-    @Test
-    void keepPolicyAndDryRunNeverRollback() throws Exception {
-        Recorder rec = new Recorder();
-        AtomicInteger rolls = new AtomicInteger();
-        PlanExecutor executor = new PlanExecutor(DEVICE, rec);
-        executor.effectController(effects(new CopyOnWriteArrayList<>(), true, rolls));
 
         executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
                         EventPlan.FAILURE_KEEP),
-                "p", 2001, AT, commThrows("x"), true, () -> { }, (ceid, at) -> null, false);
-        executor.step(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
-                        EventPlan.FAILURE_ROLLBACK),
-                "p", 2001, AT + 1, commThrows("y"), true, () -> { }, (ceid, at) -> null, false);
+                "p", 2001, AT, commThrows("链路断开"), true,
+                (ceid, at) -> null, false);
 
-        assertEquals(0, rolls.get());
-        assertTrue(rec.ledger.stream().noneMatch(e -> e.effectJson().contains("rollback")));
-        assertEquals(1, rec.fires.size(), "试跑不计 fire；只有第一条正式 fire");
+        assertEquals("FAILED", rec.ledger.get(0).status());
+        assertEquals("[]", rec.ledger.get(0).effectJson(), "事件不改值，台账不带效果");
+        assertTrue(rec.ledger.get(0).error().contains("链路断开"));
+        assertEquals(List.of(Boolean.TRUE), rec.immediate, "FAILED 立即推");
     }
 
     /* ------------------------------------------------------------------ */
@@ -393,7 +338,7 @@ class PlanExecutorTest {
 
         try {
             executor.execute(overridden, "p", 2001, AT, comm, true,
-                    () -> { }, (ceid, at) -> null, false);
+                    (ceid, at) -> null, false);
 
             assertTrue(sent.await(2, TimeUnit.SECONDS), "ACK 队列必须真的执行发送");
             assertEquals(List.of("S6F11:w=true"), sends);
@@ -423,7 +368,7 @@ class PlanExecutorTest {
                         List.of(new PlanAction(PlanAction.KIND_S6F11, null, null, false, null, Map.of())),
                         EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_KEEP),
                 "p", 2001, AT, comm(sends, null, args -> threads.add(Thread.currentThread().getName())),
-                true, () -> { }, (ceid, at) -> null, false);
+                true, (ceid, at) -> null, false);
 
         assertEquals(List.of("S6F11:w=false"), sends);
         assertEquals(List.of(Thread.currentThread().getName()), threads);
@@ -443,7 +388,7 @@ class PlanExecutorTest {
         executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
                         EventPlan.FAILURE_KEEP),
                 "p", 2001, AT, comm(new CopyOnWriteArrayList<>(), null), true,
-                () -> { }, (ceid, at) -> null, true);
+                (ceid, at) -> null, true);
 
         assertEquals("FAILED", rec.ledger.get(0).status());
         assertTrue(rec.ledger.get(0).error().contains("ACK 队列已满"));
@@ -468,7 +413,7 @@ class PlanExecutorTest {
             executor.execute(plan("p", 2001, List.of(), EventPlan.OFFLINE_SKIP,
                             EventPlan.FAILURE_KEEP),
                     "p", 2001, AT, commThrows("对端拒收"), true,
-                    () -> { }, (ceid, at) -> null, true);
+                    (ceid, at) -> null, true);
 
             assertTrue(reported.await(2, TimeUnit.SECONDS));
             assertEquals(List.of("对端拒收"), errors);
@@ -522,7 +467,7 @@ class PlanExecutorTest {
             long start = System.nanoTime();
             executor.execute(plain(), "p", 2001, AT,
                     comm(new CopyOnWriteArrayList<>(), null), true,
-                    () -> { }, (ceid, at) -> null, false);
+                    (ceid, at) -> null, false);
             long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
 
             assertTrue(elapsedMs < 300,
@@ -578,29 +523,10 @@ class PlanExecutorTest {
 
     private static EventPlan plan(String id, int ceid, List<PlanAction> actions,
                                   String offlinePolicy, String onSendFailure) {
-        return new EventPlan(id, ceid, new Trigger.At(0L), List.of(), actions,
+        return new EventPlan(id, ceid, new Trigger.At(0L), actions,
                 offlinePolicy, onSendFailure);
     }
 
-    private static PlanExecutor.EffectController effects(List<String> order,
-                                                         boolean rollbackable,
-                                                         AtomicInteger rolls) {
-        return new PlanExecutor.EffectController() {
-            @Override
-            public PlanExecutor.EffectResult apply(int ceid, String planId) {
-                order.add("effects");
-                return new PlanExecutor.EffectResult(
-                        "[{\"svid\":1001,\"before\":1.0,\"after\":2.0}]",
-                        "token-" + ceid, rollbackable);
-            }
-
-            @Override
-            public String rollback(Object token) {
-                rolls.incrementAndGet();
-                return "rolled_back";
-            }
-        };
-    }
 
     private static SecsCommunicator comm(List<String> sends, List<String> order) {
         return comm(sends, order, args -> { });

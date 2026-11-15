@@ -116,7 +116,7 @@ class ConfigStoreTest {
      */
     @Test
     void readReturnsTheFileByteForByte() throws Exception {
-        String original = "{\n  \"schemaVersion\": 5,\n  \"我自己加的键\": {\"保留我\": true},\n"
+        String original = "{\n  \"schemaVersion\": 7,\n  \"我自己加的键\": {\"保留我\": true},\n"
                 + "  \"session\": {\"id\": \"line1\", \"passive\": true, \"bindHost\": \"127.0.0.1\","
                 + " \"port\": 0, \"deviceId\": 61, \"seed\": 3},\n"
                 + "  \"equipment\": {\"name\": \"L1\", \"idSpace\": {}, \"units\": ["
@@ -153,7 +153,7 @@ class ConfigStoreTest {
 
         /* 设备模型编译不过：两个单元抢同一个 unitId */
         List<String> duplicateUnit = ConfigStore.validate("""
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "line1", "passive": true, "bindHost": "127.0.0.1",
                              "port": 5010, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "L1", "idSpace": {},
@@ -300,7 +300,7 @@ class ConfigStoreTest {
     @Test
     void writeConstantsPreservesEverythingElse() throws Exception {
         String original = """
-                {"schemaVersion": 4,
+                {"schemaVersion": 7,
                  "我自己加的键": {"保留我": true},
                  "session": {"id": "line1", "passive": true, "bindHost": "127.0.0.1",
                              "port": 5010, "deviceId": 61, "seed": 3,
@@ -321,7 +321,7 @@ class ConfigStoreTest {
         String saved = read("line1.json");
 
         assertTrue(saved.contains("\"我自己加的键\""), "未知键必须保留: " + saved);
-        assertTrue(saved.contains("\"schemaVersion\": 4"), "不应被悄悄升级版本: " + saved);
+        assertTrue(saved.contains("\"schemaVersion\": 7"), "不应被悄悄升级版本: " + saved);
         assertTrue(saved.contains("\"timeouts\""), "session.timeouts 不能被丢掉: " + saved);
         assertTrue(saved.contains("\"t3\""), saved);
 
@@ -343,7 +343,7 @@ class ConfigStoreTest {
     /** 一份最小可编译配置。 */
     private static String config(String id) {
         return """
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "%s", "passive": true, "bindHost": "127.0.0.1",
                              "port": 5010, "deviceId": 61, "seed": 3},
                  "equipment": {"name": "L1", "idSpace": {},

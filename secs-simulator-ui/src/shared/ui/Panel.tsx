@@ -19,9 +19,9 @@ export interface PanelProps {
   /**
    * 不渲染标题行（标题只留在无障碍树里当 aria-label）。
    *
-   * <p>清单类页面把标题行删掉，操作按钮全部下移到表格工具条里，
-   * 一页只剩"一行操作 + 一张表"；此时 actions 不再有落点，
-   * 调用方应把按钮交给表格的 toolbar，而不是继续传 actions。</p>
+   * <p>详情页的子页用：页签已经说明"这是哪一页"，面板不再重复标题与说明，
+   * 内容直接开始。此时 status / actions 不会丢——它们落到内容下方的一条
+   * 操作行里，状态在左、按钮右对齐。</p>
    */
   headless?: boolean;
 }
@@ -43,8 +43,14 @@ export function Panel({
   status,
   headless = false,
 }: PanelProps): JSX.Element {
+  /* 无标题的面板把状态与动作放到内容下方：按钮下移、右对齐 */
+  const footed = headless && (status !== undefined || actions !== undefined);
   return (
-    <section className="panel" id={id} aria-label={headless ? title : undefined}>
+    <section
+      className={`panel${footed ? ' panel--footed' : ''}`}
+      id={id}
+      aria-label={headless ? title : undefined}
+    >
       {!headless && (
         <div className="panel-head">
           <div className="panel-title-wrap" tabIndex={description !== undefined ? 0 : undefined}>
@@ -68,6 +74,17 @@ export function Panel({
       )}
       {stats !== undefined && <div className="panel-stats">{stats}</div>}
       <div className="panel-body">{children}</div>
+      {footed && (
+        <div className="panel-foot">
+          {status !== undefined && <span className="panel-foot-status">{status}</span>}
+          <span className="spacer" aria-hidden="true" />
+          {actions !== undefined && (
+            <div className="panel-actions" role="toolbar" aria-label={`${title} 操作`}>
+              {actions}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

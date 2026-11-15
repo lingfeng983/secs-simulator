@@ -449,7 +449,7 @@ public final class SimHost {
                 "validate 通过", brief(valOk.body()));
         expect(200, "configs 新建 demo-copy", call("PUT", "/api/v1/configs/demo-copy.json", cfgText));
 
-        String badText = cfgText.replace("\"schemaVersion\": 6", "\"schemaVersion\": 99");
+        String badText = cfgText.replace("\"schemaVersion\": 7", "\"schemaVersion\": 99");
         HttpResponse<String> valBad = call("POST", "/api/v1/configs/demo-copy.json/validate", badText);
         check(valBad.statusCode() == 200 && valBad.body().contains("\"ok\":false")
                         && valBad.body().contains("schemaVersion"),
@@ -478,7 +478,7 @@ public final class SimHost {
 
         section("K. 运行时编辑");
         String plan = "{\"id\":\"pl-host\",\"ceid\":2003,"
-                + "\"trigger\":{\"type\":\"periodic\",\"periodMs\":600000},\"effects\":[]}";
+                + "\"trigger\":{\"type\":\"periodic\",\"periodMs\":600000}}";
         expect(201, "新增编排", call("POST", "/api/v1/sessions/etch-01/events", plan));
         expect(200, "禁用编排", call("POST", "/api/v1/sessions/etch-01/events/pl-host?enabled=false", null));
         expect(200, "删除编排", call("DELETE", "/api/v1/sessions/etch-01/events/pl-host", null));

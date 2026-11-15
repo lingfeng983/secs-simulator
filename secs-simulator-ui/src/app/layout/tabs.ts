@@ -8,6 +8,23 @@ export interface AppTab {
   hash: string;
 }
 
+/**
+ * 标签的类别：顶栏靠颜色一眼分开"设备 / 主机 / 其他"。
+ *
+ * <p>设备清单与设备详情算设备，主机清单与主机详情算主机，模板与审计算其他。</p>
+ */
+export type TabKind = 'device' | 'host' | 'other';
+
+export function tabKindOf(tabId: string): TabKind {
+  if (tabId === 'workbench' || tabId.startsWith('device:')) {
+    return 'device';
+  }
+  if (tabId === 'hosts' || tabId.startsWith('host:')) {
+    return 'host';
+  }
+  return 'other';
+}
+
 /** 最多同时保留多少个标签，避免长时间使用后顶栏挤成一条。 */
 export const MAX_TABS = 12;
 

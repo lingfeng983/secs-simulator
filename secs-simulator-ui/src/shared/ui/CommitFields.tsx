@@ -53,11 +53,13 @@ interface NumberFieldProps {
   list?: string;
   /** 悬停提示（透传给 input）。 */
   title?: string;
+  /** 给了就允许清空：清空后调用它（可选项删键），不给则清空恢复原值。 */
+  onClear?: () => void;
   onCommit: (next: number) => void;
 }
 
 /** 失焦/回车才提交的数字框；非法输入恢复原值，避免把 NaN 写进 JSON。 */
-export function NumberField({ value, integer = false, step, list, title, onCommit }: NumberFieldProps): JSX.Element {
+export function NumberField({ value, integer = false, step, list, title, onClear, onCommit }: NumberFieldProps): JSX.Element {
   const external = value === undefined ? '' : String(value);
   const [draft, setDraft] = useState(external);
 
@@ -66,6 +68,12 @@ export function NumberField({ value, integer = false, step, list, title, onCommi
   }, [external]);
 
   const commit = () => {
+    if (draft.trim() === '' && onClear !== undefined) {
+      if (value !== undefined) {
+        onClear();
+      }
+      return;
+    }
     const parsed = Number(draft);
     if (draft.trim() === '' || !Number.isFinite(parsed) || (integer && !Number.isInteger(parsed))) {
       setDraft(external);

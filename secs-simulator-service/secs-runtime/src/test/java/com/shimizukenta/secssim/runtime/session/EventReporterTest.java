@@ -14,27 +14,27 @@ import org.junit.jupiter.api.Test;
 import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.secs.SecsCommunicator;
 import com.shimizukenta.secssim.core.curve.Rng;
-import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
 
 /**
- * 事件上报的效果施加范围：同一 CEID 允许多条计划（周期 + 条件、多台单元）。
+ * 事件上报：通知里的计划身份、运行态三态、启停默认值。
  *
- * <p>过去 {@code applyPlanEffects} 只按 CEID 过滤，触发计划 a 时会把计划 b
- * 的效果一起施加——界面高亮 a，值却按 a∪b 跳变。计划身份已知时必须只施加
- * 触发它的那一条；手动触发（{@code planId == null}）没有计划上下文，保持并集。</p>
- *
- * <p>另一半是"效果源必须是实时编排表"：运行时增删改只改 {@link EventScheduler}，
- * 拿装载时的快照会出现"刚加的计划不生效、已删的计划还在改值"。</p>
+ * <p>schema v7 起事件只上报、不改值，所以这里不再断言"效果施加范围"——
+ * 值由数据项自己的 {@code source} 决定。仍然要守住的语义是：</p>
+ * <ul>
+ *   <li>通知必须携带<b>真正触发</b>的那条计划 id，而不是同 CEID 的第一条；</li>
+ *   <li>配置里的计划默认禁用，必须显式启动才参与调度；</li>
+ *   <li>"运行中"三态（stopped / waiting / running）与"消息真的在发"一致。</li>
+ * </ul>
  */
 class EventReporterTest {
 
-    /** 固定时钟：效果落点可断言。 */
+    /** 固定时钟。 */
     private static final long NOW = 5_000L;
 
-    /** 组装器返回 null：emit 在施加效果/发布通知之后才失败，用异常当"到此为止"的哨兵。 */
+    /** 组装器返回 null：emit 在发布通知之后才失败，用异常当"到此为止"的哨兵。 */
     private static final java.util.function.Supplier<S6F11Assembler> NO_ASSEMBLER = () -> null;
 
     /** 非空通信器；emit 用不到 send（组装先失败），只要求不为 null。 */
@@ -55,24 +55,16 @@ class EventReporterTest {
                 return null;
             });
 
-    /**
-     * 装载期编排表：a 是<b>首条</b>，触发 b。
-     *
-     * <p>特意让触发项不是首条：回退成 {@code findFirst()} 猜 planId 时，断言必须失败。</p>
-     */
+    /** 装载期编排表：a 是首条，b 与它同 CEID。 */
     private static EventSchedule schedule() {
         return new EventSchedule(List.of(
-                new EventPlan("a", 2001, new Trigger.At(0L),
-                        List.of(new EventEffect(1, EventEffect.Op.SHIFT, null, 10.0, null, null))),
-                new EventPlan("b", 2001, new Trigger.At(0L),
-                        List.of(new EventEffect(2, EventEffect.Op.SHIFT, null, 100.0, null, null))),
-                new EventPlan("other-ceid", 2002, new Trigger.At(0L),
-                        List.of(new EventEffect(3, EventEffect.Op.SHIFT, null, 1_000.0, null, null)))));
+                new EventPlan("a", 2001, new Trigger.At(0L)),
+                new EventPlan("b", 2001, new Trigger.At(0L)),
+                new EventPlan("other-ceid", 2002, new Trigger.At(0L))));
     }
 
-    private static EventPlan plan(String id, int ceid, int svid, double delta) {
-        return new EventPlan(id, ceid, new Trigger.At(0L),
-                List.of(new EventEffect(svid, EventEffect.Op.SHIFT, null, delta, null, null)));
+    private static EventPlan plan(String id, int ceid) {
+        return new EventPlan(id, ceid, new Trigger.At(0L));
     }
 
     /** 真实调度器；值来源与发送口都不参与（测试只走 add/update/remove 与预览表）。 */
@@ -81,119 +73,37 @@ class EventReporterTest {
                 () -> NOW, () -> null, () -> true, (ceid, planId) -> { });
     }
 
-    private static EventReporter reporter(EventEffectStore store, List<String> notices) {
-        return reporter(store, notices, EventReporterTest::schedule);
+    private static EventReporter reporter(List<String> notices) {
+        return reporter(notices, EventReporterTest::schedule);
     }
 
-    private static EventReporter reporter(EventEffectStore store, List<String> notices,
+    private static EventReporter reporter(List<String> notices,
                                           java.util.function.Supplier<EventSchedule> schedule) {
-        return new EventReporter(NO_ASSEMBLER, () -> STUB_COMMUNICATOR, () -> null, store,
+        return new EventReporter(NO_ASSEMBLER, () -> STUB_COMMUNICATOR, () -> null,
                 schedule,
                 ceid -> true, () -> { }, () -> { }, (type, payload) -> notices.add(payload),
                 () -> NOW, () -> false, "s1", e -> { });
     }
 
     @Test
-    void appliesOnlyEffectsOfTheFiringPlan() {
-        EventEffectStore store = new EventEffectStore();
+    void noticeCarriesTheFiringPlanId() {
         List<String> notices = new CopyOnWriteArrayList<>();
-        EventReporter reporter = reporter(store, notices);
+        EventReporter reporter = reporter(notices);
 
         assertThrows(IOException.class, () -> reporter.emit(2001, "b"));
 
-        assertEquals(1, store.activeAt(2, NOW).size(), "触发计划 b 的效果必须生效");
-        assertTrue(store.activeAt(1, NOW).isEmpty(), "同一 CEID 的其他计划不能被连带施加");
-        assertTrue(store.activeAt(3, NOW).isEmpty(), "其他 CEID 的计划不能被施加");
         assertEquals(List.of("{\"ceid\":2001,\"planId\":\"b\"}"), notices,
                 "通知必须携带真正触发的那条计划 id，而不是同 CEID 的第一条");
     }
 
     @Test
-    void appliesUnionOfCeidPlansForManualTrigger() {
-        EventEffectStore store = new EventEffectStore();
-        EventReporter reporter = reporter(store, new CopyOnWriteArrayList<>());
-
-        assertThrows(IOException.class, () -> reporter.emit(2001, null));
-
-        assertEquals(1, store.activeAt(1, NOW).size(), "手动触发施加该 CEID 全部计划");
-        assertEquals(1, store.activeAt(2, NOW).size());
-        assertTrue(store.activeAt(3, NOW).isEmpty(), "手动触发不跨 CEID");
-    }
-
-    /**
-     * 运行时新增的计划必须立刻参与效果施加。
-     *
-     * <p>回归点：效果源若是 {@code enableSchedule} 时的快照，新计划的 planId 在表里
-     * 找不到，效果被静默丢弃——S6F11 与通知照发，界面上的值却完全不动。</p>
-     */
-    @Test
-    void runtimeAddedPlanTakesEffect() {
-        EventEffectStore store = new EventEffectStore();
+    void manualTriggerHasNoPlanId() {
         List<String> notices = new CopyOnWriteArrayList<>();
-        EventScheduler scheduler = scheduler();
-        scheduler.enableSchedule(EventSchedule.empty(), 10);
-        EventReporter reporter = reporter(store, notices, scheduler::previewSchedule);
-
-        assertTrue(scheduler.addEventPlan(plan("c", 2001, 4, 5.0)));
-        /* 计划默认禁用：新增后要显式启动才参与调度/效果施加 */
-        assertTrue(scheduler.setEventEnabled("c", true));
-
-        assertThrows(IOException.class, () -> reporter.emit(2001, "c"));
-
-        assertEquals(1, store.activeAt(4, NOW).size(), "运行时新增的计划必须能施加效果");
-        assertEquals(List.of("{\"ceid\":2001,\"planId\":\"c\"}"), notices);
-    }
-
-    /** 运行时更新：施加新版本，旧版本的效果不得再出现。 */
-    @Test
-    void runtimeUpdatedPlanAppliesNewEffectsOnly() {
-        EventEffectStore store = new EventEffectStore();
-        EventScheduler scheduler = scheduler();
-        scheduler.enableSchedule(new EventSchedule(List.of(plan("u", 2001, 5, 1.0))), 10);
-        EventReporter reporter = reporter(store, new CopyOnWriteArrayList<>(), scheduler::previewSchedule);
-
-        assertTrue(scheduler.updateEventPlan("u", plan("u", 2001, 6, 1.0)));
-        /* 更新不改变启用态；计划默认禁用，这里显式启动后再验证效果 */
-        assertTrue(scheduler.setEventEnabled("u", true));
-
-        assertThrows(IOException.class, () -> reporter.emit(2001, "u"));
-
-        assertEquals(1, store.activeAt(6, NOW).size(), "更新后的效果必须生效");
-        assertTrue(store.activeAt(5, NOW).isEmpty(), "旧版本的效果不得再施加");
-    }
-
-    /** 运行时删除：已删计划不得继续改值。 */
-    @Test
-    void runtimeRemovedPlanStopsApplyingEffects() {
-        EventEffectStore store = new EventEffectStore();
-        EventScheduler scheduler = scheduler();
-        scheduler.enableSchedule(new EventSchedule(List.of(plan("r", 2001, 7, 1.0))), 10);
-        EventReporter reporter = reporter(store, new CopyOnWriteArrayList<>(), scheduler::previewSchedule);
-
-        assertTrue(scheduler.removeEventPlan("r"));
-
-        assertThrows(IOException.class, () -> reporter.emit(2001, "r"));
-
-        assertTrue(store.activeAt(7, NOW).isEmpty(), "已删除的计划不得继续施加效果");
-    }
-
-    /**
-     * 被禁用的计划不施加效果——包括手动触发的并集路径。
-     *
-     * <p>回归点：效果源若只排除 CEID、不排除禁用项，界面显示"已禁用"但值照样跳。</p>
-     */
-    @Test
-    void disabledPlanDoesNotApplyEffects() {
-        EventEffectStore store = new EventEffectStore();
-        EventScheduler scheduler = scheduler();
-        scheduler.enableSchedule(new EventSchedule(List.of(plan("off", 2001, 8, 1.0))), 10);
-        EventReporter reporter = reporter(store, new CopyOnWriteArrayList<>(), scheduler::previewSchedule);
-
-        assertTrue(scheduler.setEventEnabled("off", false));
+        EventReporter reporter = reporter(notices);
 
         assertThrows(IOException.class, () -> reporter.emit(2001, null));
 
-        assertTrue(store.activeAt(8, NOW).isEmpty(), "被禁用的计划不得施加效果");
+        assertEquals(List.of("{\"ceid\":2001}"), notices, "手动触发没有计划上下文");
     }
 
     /**
@@ -204,11 +114,28 @@ class EventReporterTest {
     @Test
     void plansAreDisabledByDefault() {
         EventScheduler scheduler = scheduler();
-        scheduler.enableSchedule(new EventSchedule(List.of(plan("d", 2001, 9, 1.0))), 10);
+        scheduler.enableSchedule(new EventSchedule(List.of(plan("d", 2001))), 10);
 
         assertTrue(scheduler.previewSchedule().plans().isEmpty(), "加载后默认不参与调度");
         assertTrue(scheduler.setEventEnabled("d", true));
         assertEquals(1, scheduler.previewSchedule().plans().size(), "显式启动后才参与调度");
+    }
+
+    /** 运行时新增/修改/删除都立刻反映到"实时表"（调度器预览表）。 */
+    @Test
+    void runtimeEditsShowUpInLiveSchedule() {
+        EventScheduler scheduler = scheduler();
+        scheduler.enableSchedule(EventSchedule.empty(), 10);
+
+        assertTrue(scheduler.addEventPlan(plan("c", 2001)));
+        assertTrue(scheduler.setEventEnabled("c", true));
+        assertEquals(1, scheduler.previewSchedule().plans().size());
+
+        assertTrue(scheduler.updateEventPlan("c", plan("c", 2002)));
+        assertEquals(2002, scheduler.previewSchedule().plans().get(0).ceid());
+
+        assertTrue(scheduler.removeEventPlan("c"));
+        assertTrue(scheduler.previewSchedule().plans().isEmpty());
     }
 
     /**
@@ -216,8 +143,7 @@ class EventReporterTest {
      * 在线且 CEID 可用 {@code running}。
      *
      * <p>界面上"运行中"必须等于"消息真的在发"。只按 {@code enabled} 判断会把
-     * "启动了但设备离线"也显示成运行中——操作员盯着一个一条报文都不发的"运行中"，
-     * 这是最容易误判的一类问题。</p>
+     * "启动了但设备离线"也显示成运行中。</p>
      */
     @Test
     void planStatusReflectsEnabledOnlineAndCeidGate() {
@@ -227,7 +153,7 @@ class EventReporterTest {
                 () -> NOW, () -> null, online::get, (ceid, planId) -> { });
         scheduler.ceidEnabled(ceid -> ceidAllowed.get());
 
-        EventPlan plan = plan("s", 2001, 3, 1.0);
+        EventPlan plan = plan("s", 2001);
         scheduler.enableSchedule(new EventSchedule(List.of(plan)), 10);
 
         assertEquals("stopped", scheduler.planStatus(plan).status(), "默认禁用");
@@ -248,7 +174,7 @@ class EventReporterTest {
     @Test
     void planIdWithSpecialCharactersStaysValidJson() {
         List<String> notices = new CopyOnWriteArrayList<>();
-        EventReporter reporter = reporter(new EventEffectStore(), notices);
+        EventReporter reporter = reporter(notices);
 
         String planId = "a\"b\\c\nd";
         assertThrows(IOException.class, () -> reporter.emit(2001, planId));

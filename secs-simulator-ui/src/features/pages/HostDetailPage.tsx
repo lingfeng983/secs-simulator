@@ -10,12 +10,14 @@ import {
   type HostPage,
   type HostZone,
 } from '../../app/router';
-import { hostPhaseLabel, hostPhaseTone, type HostsV2State } from '../../state/useHostsV2';
-import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
+import { type HostsV2State } from '../../state/useHostsV2';
+import { EndpointTag, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
+import { hostOfTarget } from '../../shared/lib/format';
 import { HostDetailPanels } from '../panels/hostsim/HostDetailPanels';
 /**
- * 主机详情页（设计 §3.4）：实例头 + 配置区(4 页) / 运行区(3 页)。
+ * 主机详情页（设计 §3.4）：一条操作栏 + 配置区(4 页) / 运行区(3 页)。
+ * 头部与设备页同构：不摆标题、状态徽标与指标，只留"切区"和"对这台主机动手"。
  * 运行区所有操作只作用于本主机（第三轮修订 13）；收发记录只看本主机。
  */
 export function HostDetailPage({
@@ -75,54 +77,42 @@ export function HostDetailPage({
       .finally(() => setBusy(false));
   };
 
-  const badge = (
-    <span className={`badge tone-${hostPhaseTone(host.phase)}`}>{hostPhaseLabel(host.phase)}</span>
-  );
-
   const pages = zone === 'config'
     ? HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id], note: HOST_CONFIG_PAGE_NOTES[id] }))
     : HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id], note: HOST_RUNTIME_PAGE_NOTES[id] }));
 
   return (
-    <div className="panel-stack">
-      <InstanceHead
-        title={`${host.id} · ${host.name}`}
-        badge={badge}
-        subtitle={
-          <>
-            目标 <span className="mono">{host.target}</span> · Device ID {host.deviceId}
-            {host.autoReconnect ? ' · 自动重连开' : ''}
-            {host.lastError ? <span className="danger"> · {host.lastError}</span> : ''}
-          </>
-        }
-        metrics={[
-          { label: '设置版本', value: `v${host.settingRevision}` },
-          { label: '当前生效', value: host.open ? `v${host.appliedRevision}` : '— 离线' },
-          { label: '重试次数', value: host.autoReconnect ? host.retryCount : '—' },
-        ]}
-        actions={
-          <>
-            {host.open ? (
-              <button type="button" disabled={busy} onClick={disconnectHost}>断开连接</button>
-            ) : (
-              <button type="button" className="primary" disabled={busy} onClick={openHost}>
-                {host.phase === 'FAILED' ? '重新连接' : '连接'}
-              </button>
-            )}
-            <button type="button" disabled={busy} onClick={applySettings} title="按最新设置重连并恢复采集">
-              使设置生效
+    <div className="panel-stack host-page" role="region" aria-label={`主机 ${host.name}`} data-host={host.id}>
+      {/* 与设备页同一条操作栏：切配置区/运行区 + 对这台主机动手。
+          标题、相位徽标与指标都不再占行——名字在页签与侧栏里。 */}
+      <div className="detail-bar">
+        <ZoneSwitch
+          zone={zone}
+          onChange={(next) => goTo?.(`host-zone:${hostId}:${next}`)}
+          configNote="▣ 修改后点「使设置生效」，按最新设置重连。"
+          runtimeNote="◉ 这里的操作只对本次连接有效；收发只作用于本主机。"
+        />
+        <EndpointTag
+          label="目标"
+          host={hostOfTarget(host.target)}
+          port={host.port}
+          deviceId={host.deviceId}
+          hint="目标地址：这台主机连向哪个设备的哪个端口，以及目标 Device ID"
+        />
+        <span className="spacer" aria-hidden="true" />
+        <div className="detail-actions">
+          {host.open ? (
+            <button type="button" disabled={busy} onClick={disconnectHost}>断开连接</button>
+          ) : (
+            <button type="button" className="primary" disabled={busy} onClick={openHost}>
+              {host.phase === 'FAILED' ? '重新连接' : '连接'}
             </button>
-          </>
-        }
-        zoneSwitch={
-          <ZoneSwitch
-            zone={zone}
-            onChange={(next) => goTo?.(`host-zone:${hostId}:${next}`)}
-            configNote="▣ 修改后点「使设置生效」，按最新设置重连。"
-            runtimeNote="◉ 这里的操作只对本次连接有效；收发只作用于本主机。"
-          />
-        }
-      />
+          )}
+          <button type="button" disabled={busy} onClick={applySettings} title="按最新设置重连并恢复采集">
+            使设置生效
+          </button>
+        </div>
+      </div>
 
       {error !== '' && <p className="inline-note danger">{error}</p>}
 

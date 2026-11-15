@@ -1,60 +1,48 @@
 /* ============================================================
-   3.0 两段式骨架:实例头 / 配置区·运行区切换 / 子页签 / 待生效横幅
+   3.0 两段式骨架:操作栏 / 配置区·运行区切换 / 子页签 / 待生效横幅
    配色遵循设计 §3.3:配置区靛蓝、运行区青绿。
    ============================================================ */
 
-/* ---------- 实例头 ---------- */
-.instance-head {
+/* ---------- 详情页操作栏（设备与主机同构；标题行已删） ---------- */
+.detail-bar {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
-.instance-head-main {
-  min-width: 220px;
-  flex: 1 1 260px;
-}
-
-.instance-title {
-  margin: 0 0 4px;
-  font-size: calc(17px * var(--font-scale));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.instance-subtitle {
-  color: var(--text-muted);
-  font-size: calc(12.5px * var(--font-scale));
-}
-
-.instance-metrics {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-}
-
-.instance-metric-label {
-  font-size: calc(11px * var(--font-scale));
-  color: var(--text-muted);
-}
-
-.instance-metric-value {
-  font-size: calc(15px * var(--font-scale));
-  font-weight: 600;
-}
-
-.instance-actions {
+.detail-actions {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
 
-/* ---------- 实例头里的紧凑区域切换（不再单独占一行） ---------- */
+/* 端点小标签：地址:端口 | DeviceID，跟在区域切换后面 */
+.endpoint-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2, var(--fg));
+  font-size: calc(11.5px * var(--font-scale));
+  white-space: nowrap;
+}
+
+.endpoint-tag-label {
+  color: var(--muted);
+}
+
+.endpoint-tag.pending {
+  opacity: 0.65;
+}
+
+/* ---------- 操作栏里的紧凑区域切换（不再单独占一行） ---------- */
 .zone-switch {
   display: inline-flex;
   align-items: center;

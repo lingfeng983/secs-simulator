@@ -28,7 +28,6 @@ export function ConfigEditShell({
   configName,
   panelId,
   title,
-  description,
   children,
 }: {
   backend: BackendController;
@@ -38,7 +37,6 @@ export function ConfigEditShell({
   configName?: string;
   panelId: string;
   title: string;
-  description: string;
   /** 拿到解析后的根对象与编辑函数；非法 JSON 时不会调用。 */
   children: (context: ConfigEditContext) => ReactNode;
 }): JSX.Element {
@@ -57,7 +55,7 @@ export function ConfigEditShell({
     <Panel
       id={panelId}
       title={title}
-      description={description}
+      headless
       status={
         draft.configName === ''
           ? <span className="state-pill" data-tone="muted">无配置来源</span>

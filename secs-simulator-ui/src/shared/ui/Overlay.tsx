@@ -1,5 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
+/** 打开中的浮层（先开在前）；Esc/Tab 只由最上层处理，嵌套弹窗按 Esc 不会把外层一起关掉。 */
+const openOverlays: object[] = [];
+
 /**
  * 浮层底座：遮罩 + 焦点圈定。
  *
@@ -36,7 +39,13 @@ export function Overlay({
       panel?.focus();
     }
 
+    const token = {};
+    openOverlays.push(token);
+
     const onKeyDown = (event: KeyboardEvent) => {
+      if (openOverlays[openOverlays.length - 1] !== token) {
+        return;
+      }
       if (event.key === 'Escape') {
         /* 浮层统一在这里响应 Esc：快捷键表、命令面板之外的浮层以前都没接 */
         event.stopPropagation();
@@ -60,6 +69,7 @@ export function Overlay({
 
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      openOverlays.splice(openOverlays.indexOf(token), 1);
       document.removeEventListener('keydown', onKeyDown);
       previous?.focus();
     };

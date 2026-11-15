@@ -4,19 +4,18 @@
 
 | 分区 | 内容 | 维护状态 |
 |---|---|---|
-| [`guides/`](guides/) | 使用手册、配置 Schema、值引擎规则、二进制预览格式、工作台重设计方案 | **活文档**，随代码同步更新 |
-| [`adr/`](adr/) | 0001–0018：分层、ID 空间、纯函数曲线、模板 DAG、事件编排、API 角色、配置编辑器、报文日志、虚拟线程、CI、目录与分层收敛等决策 | 决策记录，已接受的不再修改 |
+| [`guides/`](guides/) | 使用手册、配置 Schema、值引擎规则、二进制预览格式 | **活文档**，随代码同步更新 |
+| [`adr/`](adr/) | 0001–0020：分层、ID 空间、纯函数曲线、模板 DAG（已被 0020 取代）、事件编排、API 角色、配置编辑器、报文日志、虚拟线程、CI、目录与分层收敛、单一值定义与 wafer 周期等决策 | 决策记录，已接受的不再修改 |
 | [`reports/`](reports/) | 里程碑验收（M0–M9）、全量审计 / 代码评审、实机测试、未完成清单 | **归档**，只追加不修改 |
-| [`examples/`](examples/) | `sml/`（39 个主机/设备侧 SML 报文样例）、`config-v5-example.json` | 示例素材，供手动发送与配置编写参考 |
+| [`examples/`](examples/) | `sml/`（39 个主机/设备侧 SML 报文样例）、`config-v7-example.json` | 示例素材，供手动发送与配置编写参考 |
 | [`reference/`](reference/) | SEMI E4/E5/E30/E37 中文整理、项目对照表；`pdf/` 为付费标准原文（不入库） | 参考资料 |
 | [`../secs-simulator-service/scripts/openapi.yaml`](../secs-simulator-service/scripts/openapi.yaml) | HTTP API 机器可读契约（OpenAPI 3.0.3），由 `secs-simulator-service/scripts/check-openapi.py` 校验重复键 | 契约，改接口必须同步 |
 
 ## guides
 
 - [使用手册](guides/user-guide.md) — 界面操作、会话管理、报文、曲线、报告
-- [配置格式 Schema v5](guides/schema-v5.md) — 当前配置格式（设备 / 会话 / 模板 / 事件计划）
-- [配置格式 Schema v4](guides/schema-v4.md) — 旧格式，仍兼容读取
-- [SVID 值变化机制与规则](guides/svid-value-model.md) — 默认曲线 / 模板图 / 事件效果 / 钉值的优先级与边界
+- [配置格式 Schema v7](guides/schema-v7.md) — 当前配置格式（三类数据 / 值定义 / wafer 周期 / 事件与报告）；不兼容 v6 及更早
+- [数据值变化机制与规则](guides/svid-value-model.md) — 值定义 / 周期时钟 / 出口一致性与「设定」层
 - [二进制曲线预览格式（SCSP v1）](guides/preview-binary.md) — `GET /api/v1/preview.bin` 的字节布局
 
 ## adr
@@ -57,7 +56,7 @@
 
 - `examples/sml/equip/` — 设备侧报文样例（S1F1、S1F13、S5F1、S6F11、S10F1 等）
 - `examples/sml/host/` — 主机侧报文样例（S1F3、S2F33、S2F35、S10F2 等）
-- `examples/config-v5-example.json` — 一份可直接编译的完整配置示例
+- `examples/config-v7-example.json` — 一份可直接编译的完整配置示例
 
 用于「手动发送 SML」或编写新设备配置时参考；运行时**不会**读取这些文件。
 

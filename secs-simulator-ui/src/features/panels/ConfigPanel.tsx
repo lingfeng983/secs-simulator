@@ -206,7 +206,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
         if (fresh !== null) {
           setLoadedMs(fresh.modifiedMs);
         }
-        setNotice(`已保存 ${configName}，相关会话已按新配置重载`);
+        setNotice(`已保存 ${configName}，相关会话已按新配置重启`);
         void refreshConfigs();
       } else {
         setProblems(result.problems);
@@ -263,11 +263,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
     <Panel
       id="panel-config"
       title={configName === '' ? '配置编辑器' : configName}
-      description={
-        configName === ''
-          ? '进入设备页·配置就会自动打开这台设备的配置文件，不用自己挑。'
-          : `${configName} · 只编辑 JSON 原文：改完先「校验」，过了再「保存」。连接/结构/模板请用左侧对应子页。`
-      }
+      headless
       status={
         configName === ''
           ? <span className="state-pill" data-tone="muted">未打开</span>

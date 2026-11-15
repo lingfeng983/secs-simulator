@@ -29,7 +29,7 @@ public final class ConfigTemplate {
 
         return """
                 {
-                  "schemaVersion": 5,
+                  "schemaVersion": 7,
                   "session": {
                     "id": "%s",
                     "passive": true,
@@ -37,6 +37,21 @@ public final class ConfigTemplate {
                     "port": 5010,
                     "deviceId": 0,
                     "seed": 3
+                  },
+                  "context": [
+                    { "id": "LOTID",   "type": "ASCII", "source": { "mode": "cycle", "pattern": "LOT{02}", "start": 1, "every": 25 } },
+                    { "id": "RCPID",   "type": "ASCII", "source": { "mode": "const", "value": "RCP-A1" } },
+                    { "id": "PPID",    "type": "ASCII", "source": { "mode": "const", "value": "PP-01" } },
+                    { "id": "WAFERID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "W{03}", "start": 1 } }
+                  ],
+                  "cycle": {
+                    "durationMs": 180000,
+                    "jitterMs": 3000,
+                    "count": 25,
+                    "events": [
+                      { "atMs": 3000,   "ceid": 2001 },
+                      { "atMs": 177000, "ceid": 2001 }
+                    ]
                   },
                   "equipment": {
                     "name": "%s",
@@ -47,10 +62,20 @@ public final class ConfigTemplate {
                         "name": "CH1",
                         "injectUnitId": false,
                         "svids": [
-                          { "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C" }
+                          {
+                            "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C",
+                            "source": {
+                              "mode": "curve", "clock": "phase",
+                              "curve": { "type": "sine", "min": 150, "max": 350, "periodMs": 60000 }
+                            }
+                          }
                         ],
-                        "reports": [],
-                        "ceids": []
+                        "reports": [
+                          { "offset": 1, "slot": "STATUS", "svids": ["TEMP"] }
+                        ],
+                        "ceids": [
+                          { "offset": 1, "slot": "STATUS_REPORT", "reports": ["STATUS"] }
+                        ]
                       }
                     ]
                   },

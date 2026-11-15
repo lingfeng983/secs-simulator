@@ -153,7 +153,7 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
 
   const batchReload = useCallback(
     (ids: ReadonlySet<string>, onProgress?: (done: number, total: number) => void) =>
-      batchRun(ids, '重载', (id) => client === null ? Promise.resolve(0) : client.reloadSession(id), 'info', onProgress),
+      batchRun(ids, '重启', (id) => client === null ? Promise.resolve(0) : client.reloadSession(id), 'info', onProgress),
     [batchRun, client],
   );
 
@@ -242,7 +242,7 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
       }
       try {
         const status = await client.reloadSession(sessionId);
-        const text = lifecycleMessage(status, `重载会话 ${sessionId}`);
+        const text = lifecycleMessage(status, `重启设备 ${sessionId}`);
         if (status === 200) {
           notifierRef.current.success(text);
         } else {
@@ -251,7 +251,7 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
         await refreshSessions();
         await refreshSessionDetail(sessionId);
       } catch (error) {
-        notifierRef.current.error('重载会话失败', (error as Error).message);
+        notifierRef.current.error('重启设备失败', (error as Error).message);
       }
     },
     [client, refreshSessions, refreshSessionDetail],

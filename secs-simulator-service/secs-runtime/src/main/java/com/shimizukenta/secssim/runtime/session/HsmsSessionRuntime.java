@@ -75,10 +75,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final ValueStore store;
     /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
     private final ValueSourceHandle values;
-    /** values 委托里的效果层（「设定」钉值要落在它身上）。 */
-    private volatile EffectValueSource effectValues;
-    /** 事件效果的运行时记录(v6):手动触发的效果无法重放,只能记录。 */
-    private final EventEffectStore effects = new EventEffectStore();
+    /** values 委托里的「设定」层（钉值落在它身上）。 */
+    private volatile PinnedValueSource pinnedValues;
     /** overview 速率统计(60 秒滑动窗口)。 */
     private final RateTracker msgRate = new RateTracker();
     private final RateTracker eventRate = new RateTracker();
@@ -91,6 +89,13 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final TraceLimits traceLimits;
     /** S6F11 组装器：随设备模型热替换。 */
     private volatile S6F11Assembler assembler;
+
+    /** 晶圆属性（v7）：报告里的 ctx.<名> 从这里取。 */
+    private volatile com.shimizukenta.secssim.core.context.ContextTable contextTable =
+            com.shimizukenta.secssim.core.context.ContextTable.empty();
+
+    /** 设备常量取值（v7）：常量也可以是时间函数。 */
+    private volatile EcidValues ecidValues;
 
     /** 保护一次 pump 的完整状态推进，见 {@link #pumpNow()}。 */
     private final Object pumpLock = new Object();
@@ -249,7 +254,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.control = new ControlStateHolder(next -> this.publishNotice(
                 com.shimizukenta.secssim.app.event.NoticeEvent.SESSION,
                 "{\"controlState\":\"" + next.name() + "\"}"));
-        this.hostSide = new HostCommandHandler(this.constants, this.hostReports);
+        this.hostSide = new HostCommandHandler(this.constants, this.hostReports,
+                this.clock, this.ecidValues);
         this.hostSide.errorSink(this::recordError);
         this.hostSide.sessionId(spec.id());
         this.hostSide.modelSupplier(() -> this.model);
@@ -274,11 +280,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         } else {
             initial = values;
         }
-        final EffectValueSource initialSource = new EffectValueSource(initial, this.effects);
-        this.effectValues = initialSource;
+        final PinnedValueSource initialSource = new PinnedValueSource(initial);
+        this.pinnedValues = initialSource;
         this.values = new ValueSourceHandle(initialSource);
 
-        this.assembler = new S6F11Assembler(model, this.values, this.hostReports);
+        this.assembler = new S6F11Assembler(model, this.values, this.hostReports,
+                this.contextTable, this.ecidValues);
         this.ackSender = newAckSender("s6f11-ack-" + spec.id());
         this.traceAckSender = newAckSender("s6f1-ack-" + spec.id());
         this.alarmAckSender = newAckSender("s5f1-ack-" + spec.id());
@@ -340,7 +347,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.notifier = new SessionNotifier(spec.id(), this.msgRate);
         this.connector = new HsmsConnector(spec);
         this.ticker = new EventTicker("events-" + spec.id());
-        this.edits = new RuntimeEditsFacade(this.catalog, () -> this.model, () -> this.effectValues);
+        this.edits = new RuntimeEditsFacade(this.catalog, () -> this.model, () -> this.pinnedValues);
         this.constantStore = new ConstantStore(this.constants);
         this.metrics = new SessionMetrics(
                 () -> this.eventReporter.emitted(),
@@ -380,14 +387,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this::collectionEventWbit,
                 this::traceWbit,
                 this::enableSchedule,
-                this.effects,
                 this.values,
                 this.store,
                 () -> this.spec.equipment());
         this.eventReporter = new EventReporter(() -> this.assembler,
                 () -> this.communicator,
                 () -> this.ackSender,
-                this.effects,
                 /* 实时表：含运行时增删改，且已排除禁用计划 */
                 this.scheduler::previewSchedule,
                 ceid -> this.hostReports.isEnabled(ceid),
@@ -398,8 +403,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 () -> this.s6f11Wbit,
                 spec.id(),
                 this::recordError);
-        this.eventReporter.valueReader(
-                svid -> this.values.valueAt(svid, this.clock.nowMs()).orElse(Double.NaN));
     }
 
     private static ExecutorService newAckSender(String threadName) {
@@ -539,6 +542,29 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.notifier.notice(type, payloadJson);
     }
 
+    /**
+     * 接入 v7 数据模型：晶圆属性表 + 设备常量取值器。
+     *
+     * <p>装配器持有的是引用而不是快照：热生效时整体替换这两份，
+     * S6F11 下一次组装立刻用新的属性/常量，不必重建会话。</p>
+     *
+     * @param context 晶圆属性表
+     * @param ecids   设备常量取值器
+     * @return this
+     */
+    public HsmsSessionRuntime dataModel(com.shimizukenta.secssim.core.context.ContextTable context,
+                                        EcidValues ecids) {
+        this.contextTable = context == null
+                ? com.shimizukenta.secssim.core.context.ContextTable.empty() : context;
+        this.ecidValues = ecids;
+        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports,
+                this.contextTable, this.ecidValues);
+        if (this.hostSide != null) {
+            this.hostSide.ecidValues(ecids);
+        }
+        return this;
+    }
+
     /** 事件编排：装载编排表并设限流；具体触发规则见 {@link EventScheduler}。 */
     public void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
         this.scheduler.enableSchedule(schedule, maxEventsPerSec);
@@ -597,8 +623,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     public void applyHot(EventSchedule schedule, int maxEventsPerSec,
                          boolean s6f11Wbit, boolean s6f1Wbit,
                          ResolvedEquipment model, ValueSource values) {
-        this.effectValues = this.hotReloader.apply(schedule, maxEventsPerSec,
+        ValueSource next = this.hotReloader.apply(schedule, maxEventsPerSec,
                 s6f11Wbit, s6f1Wbit, model, values);
+        /* 热重载换掉值来源时，「设定」随旧配置一起失效：新来源没有设定层 */
+        this.pinnedValues = next instanceof PinnedValueSource pinned
+                ? pinned : new PinnedValueSource(next);
     }
 
     /** 「设定」一个状态变量的值：钉住,覆盖曲线与事件效果,直到取消设定或热重载。 */
@@ -661,7 +690,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /** 换设备模型后重建引用它的视图（S6F11 组装器与 Trace）。 */
     private void refreshModelViews(ResolvedEquipment next) {
         this.model = next;
-        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports);
+        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports,
+                this.contextTable, this.ecidValues);
         /* 容量限制跟随会话配置，热重载时不变 */
         this.tracePump.traceLimits(this.traceLimits.maxTracesOrDefault(),
                 this.traceLimits.maxSvidCountOrDefault());
@@ -811,20 +841,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.eventReporter.planExecutor(executor);
         this.eventReporter.onlineCheck(() ->
                 this.control.state() == EquipmentControlState.ONLINE);
-        /* 执行器本身不碰会话内部：效果证据、动作组装、W 位 ACK 队列都在这里接线 */
+        /* 执行器本身不碰会话内部：动作组装、W 位 ACK 队列都在这里接线 */
         executor.errorSink(this::recordError);
         executor.ackSender(() -> this.ackSender);
-        executor.effectController(new PlanExecutor.EffectController() {
-            @Override
-            public PlanExecutor.EffectResult apply(int ceid, String planId) {
-                return HsmsSessionRuntime.this.eventReporter.applyTracked(ceid, planId);
-            }
-
-            @Override
-            public String rollback(Object token) {
-                return HsmsSessionRuntime.this.eventReporter.rollback(token);
-            }
-        });
         executor.actionResolver(this::resolvePlanAction);
     }
 
@@ -1359,7 +1378,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     @Override
     public String catalogJson() {
-        return SessionJsonViews.catalogJson(this.model, this.hostReports, this.effectValues::isPinned);
+        return SessionJsonViews.catalogJson(this.model, this.hostReports, this.pinnedValues::isPinned);
     }
 
     /** 一条终端消息。 */

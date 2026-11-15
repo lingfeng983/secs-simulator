@@ -22,13 +22,21 @@ async function gotoDevice(page: import('@playwright/test').Page): Promise<void> 
 
 test('配置区·概览：设备定义摘要一眼读完', async ({ page }) => {
   await page.goto('/#/device/line1/config/overview');
-  /* 与其它配置子页同一套面板外壳：子页签已说明是哪一页，面板头只留说明与操作条 */
+  /* 子页签已说明是哪一页：面板不再有标题行，内容直接开始 */
   await expect(page.locator('#panel-overview')).toBeVisible();
-  await expect(page.locator('#panel-overview .panel-tip')).toContainText('保存后需重载生效');
+  await expect(page.locator('#panel-overview .panel-head')).toHaveCount(0);
   const table = page.locator('#panel-overview table').first();
   await expect(table).toContainText('line1');
   await expect(table).toContainText('LINE1');
   await expect(table).toContainText('line1.json');
+});
+
+test('操作栏带监听端点：地址:端口 | DeviceID', async ({ page }) => {
+  await page.goto('/#/device/line1/runtime/plans');
+  const tag = page.locator('.detail-bar .endpoint-tag');
+  /* 监听地址取配置 session 段；没写 bindHost 时按后端默认的 0.0.0.0 */
+  await expect(tag).toContainText('0.0.0.0:5000');
+  await expect(tag).toContainText('| 10');
 });
 
 test('配置区·连接：13 个字段 + 校验 / 保存 / 重新载入', async ({ page }) => {

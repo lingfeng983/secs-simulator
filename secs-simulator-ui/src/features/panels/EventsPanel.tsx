@@ -61,7 +61,7 @@ function planStatusHint(plan: EventPlanView): string {
  * 事件执行面板（运行区）。
  *
  * <p>只做运行态操作：逐条/全部启停、手动触发、单步试跑、确定性预览。
- * 计划的定义（触发规则 / effects）在配置区「事件计划」页维护；
+ * 计划的定义（周期与触发规则）在配置区「事件计划」页维护；
  * 这里启停改的是运行时状态，不写回配置，重载后按配置恢复。
  * 累计次数 / 下次触发 / 最后状态来自执行台账，原来在执行时间轴的计划卡上，
  * 现在并入列表列。</p>
@@ -212,7 +212,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         : <span className="badge tone-muted">{row.owner}</span>),
     },
     { key: 'trigger', header: '触发规则', sortValue: (row) => triggerLabel(row), render: (row) => triggerLabel(row) },
-    { key: 'effects', header: '效果', sortValue: (row) => row.effects?.length ?? 0, render: (row) => (row.effects?.length ?? 0) > 0 ? `${row.effects!.length} 项` : '—' },
     {
       key: 'count',
       header: '累计次数',
@@ -326,7 +325,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     <Panel
       id="panel-events"
       title="事件执行"
-      description="计划定义在配置区「事件计划」页；这里只做运行态启停与手动触发。默认禁用，设备在线后点「启动」才开始发事件。"
+      headless
       actions={
         <>
           <button
@@ -480,7 +479,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
       )}
 
       <p className="hint">
-        这里改的是<b>运行时状态</b>，不写回配置；重载会话会恢复配置里的编排。
+        这里改的是<b>运行时状态</b>，不写回配置；重启设备会恢复配置里的编排。
       </p>
 
       <PanelFootnote

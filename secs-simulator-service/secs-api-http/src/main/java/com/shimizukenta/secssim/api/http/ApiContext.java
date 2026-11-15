@@ -307,7 +307,7 @@ public interface ApiContext {
      * 200/201 成功、400 请求不合法(解析失败)、404 会话或目标不存在、409 冲突。
      * ================================================================== */
 
-    /** 新增编排计划;planJson 形如 {"id","ceid","trigger":{...},"effects":[...]}。 */
+    /** 新增编排计划;planJson 形如 {"id","ceid","trigger":{...},"actions":[...]}。 */
     default int addEventPlan(String sessionId, String planJson) {
         return 404;
     }

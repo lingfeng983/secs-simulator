@@ -47,7 +47,7 @@ class DeviceTemplatesTest {
     void testerTemplateSpreadsUnitsAcrossIdSegments() {
         String text = DeviceTemplates.json("tester", "t.json").orElseThrow();
         /* SITE2 事件表达式引用 1100 段的 SVID，说明号段真的错开了 */
-        assertTrue(text.contains("svid.1103"), text);
+        assertTrue(text.contains("\"svidStride\": 100"), text);
         assertTrue(text.contains("\"ceid\": 2101"), text);
     }
 

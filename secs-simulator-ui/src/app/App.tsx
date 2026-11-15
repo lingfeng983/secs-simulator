@@ -50,6 +50,15 @@ const MAX_LIVE_EVENTS = 200;
 /** 界面保留的报文条数（消息监视面板用；与后端内存上限 5000 不同，界面只留最近的）。 */
 const MAX_LIVE_MESSAGES = 5_000;
 
+/**
+ * 「一页只有一张表」的主页面：设备清单 / 主机清单 / 主机模板 / 设备模板 /
+ * 参数模板 / 审计。这些页面的表格要吃满页面剩余高度，内容溢出后才滚动，
+ * 而不是刚过 62vh 就在页面中间开一条滚动条。
+ */
+const SINGLE_TABLE_PAGES: ReadonlySet<string> = new Set([
+  'workbench', 'hosts', 'host-templates', 'templates', 'svid-templates', 'system',
+]);
+
 /** 2.x/3.0 早期的消息子页 hash：页面已下线，命中时自动拉开右侧监控抽屉。 */
 const LEGACY_MONITOR_HASH = /^#\/(?:device\/[^/]+\/(?:runtime\/)?messages|hosts\/[^/]+\/runtime\/monitor)(?:[?#]|$)/;
 
@@ -251,7 +260,9 @@ export function App(): JSX.Element {
         return;
       }
       if (id.startsWith('device-open:')) {
-        navigate({ name: 'device', sessionId: id.slice('device-open:'.length), zone: 'config', page: 'overview' });
+        /* 「打开设备」只有一个落点：设备本身，默认落在运行区（要动手的页在前面）。
+           设备启没启动不影响打开哪一页——运行数据要等启动后才有，但页面骨架不分家。 */
+        navigate({ name: 'device', sessionId: id.slice('device-open:'.length), zone: 'runtime', page: 'plans' });
         return;
       }
       switch (id) {
@@ -360,7 +371,7 @@ export function App(): JSX.Element {
         group: '设备',
         hint: session.controlState ?? session.state,
         keywords: ['device', session.id, session.device],
-        run: () => goTo(`device:${session.id}`),
+        run: () => goTo(`device-open:${session.id}`),
       });
       items.push({
         id: `device-page:${session.id}:config`,
@@ -374,7 +385,7 @@ export function App(): JSX.Element {
         label: `${session.id} · 运行区`,
         group: '设备',
         keywords: [session.id, 'runtime'],
-        run: () => goTo(`device-tab:${session.id}:svids`),
+        run: () => goTo(`device-zone:${session.id}:runtime`),
       });
     }
 
@@ -493,8 +504,10 @@ export function App(): JSX.Element {
 
   /* ---------- 布局 ---------- */
 
+  /* 页签标题用设备名；没启动的设备路由 key 是配置文件名，去掉 .json 再显示 */
   const deviceName = route.name === 'device'
-    ? backend.sessions.find((session) => session.id === route.sessionId)?.device ?? route.sessionId
+    ? (backend.sessions.find((session) => session.id === route.sessionId)?.device
+      ?? route.sessionId.replace(/\.json$/i, ''))
     : '';
   const devicePageDescription = route.name === 'device'
     ? (route.zone === 'config' ? DEVICE_CONFIG_PAGE_LABELS : DEVICE_RUNTIME_PAGE_LABELS)[route.page as never]
@@ -596,7 +609,7 @@ export function App(): JSX.Element {
       config: session.config,
       region: regions.deviceRegion(session.config ?? session.id),
     })),
-    /* 数据库里还没启动的设备也进树：配置区照常可看可改，点「启动」才创建会话 */
+    /* 数据库里还没启动的设备也进树：和已启动的设备长得一样，点「启动」才创建会话 */
     ...backend.configList
       .filter((entry) => !backend.sessions.some((session) => session.config === entry.name))
       .map((entry) => ({
@@ -605,7 +618,6 @@ export function App(): JSX.Element {
         state: 'CLOSED',
         template: entry.template ?? '',
         config: entry.name,
-        notStarted: true,
         region: regions.deviceRegion(entry.name),
       })),
   ];
@@ -685,7 +697,7 @@ export function App(): JSX.Element {
             </div>
           )}
 
-          <main className="content">
+          <main className={`content${SINGLE_TABLE_PAGES.has(route.name) ? ' content--table-page' : ''}`}>
             {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
             {route.name === 'device' && (
               <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />

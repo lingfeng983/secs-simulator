@@ -33,6 +33,17 @@ interface DeviceRow extends SessionSummary {
 /** 状态筛选下拉的选项顺序：按操作员关心的顺序排（先"能不能用"，再"在不在线"）。 */
 const STATE_FILTER_ORDER: readonly DeviceStatus[] = ['started', 'stopped', 'offline', 'online'];
 
+/**
+ * 行 → 「打开设备」的导航目标。
+ *
+ * <p>库里还没启动的设备没有会话 id，路由 key 用配置文件名；已启动的用会话 id。
+ * 两者是同一台设备的两种存在方式，落到同一个设备页——不要因为状态不同
+ * 就打开不同的东西。</p>
+ */
+function openTargetOf(row: DeviceRow): string {
+  return `device-open:${row.configOnly ?? row.id}`;
+}
+
 /** 新增设备弹框的输入：链接信息、设备模板与区域一次填完。 */
 interface CreateDeviceDraft {
   name: string;
@@ -294,31 +305,17 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       header: '设备',
       sortValue: (row) => row.device,
       render: (row) => (
-        row.configOnly === undefined ? (
-          <button
-            type="button"
-            className="link"
-            onClick={(event) => {
-              event.stopPropagation();
-              goTo?.(`device:${row.id}`);
-            }}
-            title="进入设备页"
-          >
-            {row.device}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="link"
-            onClick={(event) => {
-              event.stopPropagation();
-              goTo?.(`device-open:${row.configOnly}`);
-            }}
-            title="查看设备页（未启动）：配置区的定义照常可编辑，运行区等启动后再看"
-          >
-            {row.device}
-          </button>
-        )
+        <button
+          type="button"
+          className="link"
+          onClick={(event) => {
+            event.stopPropagation();
+            goTo?.(openTargetOf(row));
+          }}
+          title={row.configOnly === undefined ? '进入设备页' : '打开这台设备（还没启动，运行数据等启动后才有）'}
+        >
+          {row.device}
+        </button>
       ),
     },
     {
@@ -405,71 +402,68 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       header: '操作',
       render: (row) => {
         /* 三个动作对应三件事，互不替代：
-           「重载」= 重启（按配置文件重新装载）；
+           「重启」= 按配置文件重新装载（等价于"重载"）；
            「启动/停止」= 端口监听开关（启动后主机才连得上，停止后端口释放）；
            「上线/下线」= GEM 控制状态（等价主机发 S1F17 / S1F15）——只有链路
-           建起来（离线/在线）才出现：没连上主机时没有"上线"可言。 */
+           建起来（离线/在线）才出现：没连上主机时没有"上线"可言。
+           「重启」常驻第一格：没启动的设备留一个灰掉的按钮，
+           位置不变，操作员不用去找"这台怎么没有重启"。 */
         const status = deviceStatus(row);
+        const started = row.configOnly === undefined && status !== 'stopped';
         return (
           <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-            {row.configOnly !== undefined ? (
-              /* 数据库里还没启动的设备：只有「启动」一个动作 = 按配置创建会话 */
+            <button
+              type="button"
+              disabled={!started}
+              onClick={() => void backend.reloadSession(row.id)}
+              title={started
+                ? '重启：按配置文件重新装载，配置有问题时旧会话不受影响'
+                : '设备没启动，先点「启动」；启动后这里就能重启'}
+            >
+              重启
+            </button>
+            {row.configOnly !== undefined || status === 'stopped' ? (
+              /* 库里还没启动的设备 / 已停止的会话：一个「启动」= 建链并开始监听 */
               <button
                 type="button"
                 className="primary"
-                onClick={() => void backend.createSession(row.configOnly as string)}
-                title="按已保存的设备配置创建会话并启动端口监听"
+                onClick={() => void (row.configOnly !== undefined
+                  ? backend.createSession(row.configOnly)
+                  : backend.connectSession(row.id))}
+                title={row.configOnly !== undefined
+                  ? '按已保存的设备配置创建会话并启动端口监听'
+                  : '启动端口监听（设备开始等主机连接）'}
               >
                 启动
               </button>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void backend.reloadSession(row.id)}
-                  title="重载（重启）：按配置文件重新装载，配置有问题时旧会话不受影响"
-                >
-                  重载
-                </button>
-                {status === 'stopped' ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => void backend.connectSession(row.id)}
-                    title="启动端口监听（设备开始等主机连接）"
-                  >
-                    启动
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="danger"
-                    onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
-                    title="停止端口监听：链路断开、端口立即释放，设备保留在清单里"
-                  >
-                    停止
-                  </button>
-                )}
-                {status === 'offline' && (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => void backend.setDeviceOnline(row.id, true)}
-                    title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
-                  >
-                    上线
-                  </button>
-                )}
-                {status === 'online' && (
-                  <button
-                    type="button"
-                    onClick={() => void backend.setDeviceOnline(row.id, false)}
-                    title="设备下线（等价主机发 S1F15）：主动上报立即停止"
-                  >
-                    下线
-                  </button>
-                )}
-              </>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => setCloseTarget({ ids: [row.id], label: row.id })}
+                title="停止端口监听：链路断开、端口立即释放，设备保留在清单里"
+              >
+                停止
+              </button>
+            )}
+            {status === 'offline' && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void backend.setDeviceOnline(row.id, true)}
+                title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
+              >
+                上线
+              </button>
+            )}
+            {status === 'online' && (
+              <button
+                type="button"
+                onClick={() => void backend.setDeviceOnline(row.id, false)}
+                title="设备下线（等价主机发 S1F15）：主动上报立即停止"
+              >
+                下线
+              </button>
             )}
             {/* 删除这台设备：先停会话再软删配置（历史留着）。没有配置文件的外部会话删不了 */}
             <button
@@ -846,14 +840,14 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
             <button
               type="button"
               disabled={selectedSessionIds.length === 0 || batchBusy}
-              title="对选中的设备逐台重载（配置有问题时旧会话不受影响；主机会断连）"
+              title="对选中的设备逐台重启（按各自配置重新装载；配置有问题时旧会话不受影响，主机会断连）"
               onClick={() => {
                 setBatchBusy(true);
-                void batchReload(new Set(selectedSessionIds), (done, total) => setBatchProgress(`重载 ${done}/${total}`))
+                void batchReload(new Set(selectedSessionIds), (done, total) => setBatchProgress(`重启 ${done}/${total}`))
                   .finally(() => { setBatchBusy(false); setBatchProgress(''); });
               }}
             >
-              批量重载
+              批量重启
             </button>
             <button
               type="button"
@@ -907,7 +901,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
           { header: 'S9Fx', value: (row) => row.counters.s9Replies ?? 0 },
           { header: '活动报警', value: (row) => row.activeAlarms },
         ]}
-        onRowClick={(row) => goTo?.(`device:${row.id}`)}
+        onRowClick={(row) => goTo?.(openTargetOf(row))}
       />
 
       <Modal

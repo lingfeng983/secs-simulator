@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "session": {
     "id": "etch-01",
     "passive": true,
@@ -8,6 +8,13 @@
     "deviceId": 10,
     "seed": 20260225
   },
+  "context": [
+    { "id": "LOTID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "LOT{02}", "start": 1, "every": 25 } },
+    { "id": "WAFERID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "W{03}", "start": 1 } },
+    { "id": "RCPID", "type": "ASCII", "source": { "mode": "cycle", "list": ["ETCH-A1", "ETCH-B2"], "every": 25 } },
+    { "id": "PPID", "type": "ASCII", "source": { "mode": "const", "value": "PP-ETCH-01" } },
+    { "id": "BATCHID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "B{03}", "start": 1, "every": 25 } }
+  ],
   "equipment": {
     "name": "ETCH-DEMO",
     "idSpace": {
@@ -19,6 +26,14 @@
       "reportStride": 100,
       "reserve": [[1, 999]]
     },
+    "constants": [
+      { "id": 501, "name": "TEMP_LIMIT", "type": "F4", "value": 240, "unit": "C" },
+      {
+        "id": 502, "name": "PUMP_RPM", "type": "U4", "value": 1800, "unit": "rpm",
+        "source": { "mode": "curve", "clock": "phase",
+                    "curve": { "type": "ramp", "from": 0, "to": 3000, "durationMs": 30000 } }
+      }
+    ],
     "globalSvids": [
       {
         "id": 9001,
@@ -26,7 +41,7 @@
         "type": "F4",
         "min": 15,
         "max": 30,
-        "curve": { "type": "sine", "min": 20, "max": 25, "periodMs": 600000 }
+        "source": { "mode": "curve", "curve": { "type": "sine", "min": 20, "max": 25, "periodMs": 600000 } }
       }
     ],
     "units": [
@@ -38,24 +53,41 @@
           { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
           {
             "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400,
-            "curve": { "type": "randomWalk", "start": 180, "sigma": 2.5, "min": 0, "max": 400 }
+            "source": { "mode": "curve",
+                        "curve": { "type": "randomWalk", "start": 180, "sigma": 2.5, "min": 0, "max": 400 } }
           },
           {
             "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2,
-            "curve": { "type": "constant", "value": 200 }
+            "source": { "mode": "const", "value": 200 }
           },
           {
             "offset": 3, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
-            "template": "chamber-press"
+            "source": { "mode": "curve",
+                        "curve": { "type": "sine", "min": 0.2, "max": 2.0, "periodMs": 30000 } }
           },
-          { "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1 },
+          {
+            "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1,
+            "source": {
+              "mode": "curve",
+              "curve": { "type": "step", "steps": [
+                { "fromMs": 0, "value": 0 },
+                { "fromMs": 5000, "value": 1 },
+                { "fromMs": 55000, "value": 0 }
+              ] }
+            }
+          },
           {
             "offset": 5, "slot": "GAS_FLOW", "type": "F4", "unit": "sccm", "decimals": 1, "min": 0, "max": 500,
-            "curve": { "type": "sine", "min": 180, "max": 220, "periodMs": 45000 }
+            "source": { "mode": "curve",
+                        "curve": { "type": "sine", "min": 180, "max": 220, "periodMs": 45000 } }
           }
         ],
         "reports": [
-          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] },
+          {
+            "offset": 1,
+            "slot": "STATUS",
+            "svids": ["UNIT_ID", "TEMP_PV", "PRESS", "ctx.LOTID", "ctx.WAFERID", "ctx.RCPID", "ecid.501"]
+          },
           { "offset": 2, "slot": "MEASURE", "svids": ["TEMP_PV", "GAS_FLOW"] }
         ],
         "ceids": [
@@ -73,20 +105,34 @@
           { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
           {
             "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 400,
-            "curve": { "type": "randomWalk", "start": 150, "sigma": 2.0, "min": 0, "max": 400 }
+            "source": { "mode": "curve",
+                        "curve": { "type": "randomWalk", "start": 150, "sigma": 2.0, "min": 0, "max": 400 } }
           },
           {
             "offset": 2, "slot": "TEMP_SV", "type": "F4", "unit": "C", "decimals": 2,
-            "curve": { "type": "constant", "value": 170 }
+            "source": { "mode": "const", "value": 170 }
           },
           {
             "offset": 3, "slot": "PRESS", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
-            "template": "chamber-press"
+            "source": { "mode": "curve",
+                        "curve": { "type": "sine", "min": 0.2, "max": 2.0, "periodMs": 30000 } }
           },
-          { "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1 }
+          {
+            "offset": 4, "slot": "HEATER", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1,
+            "source": { "mode": "curve",
+                        "curve": { "type": "step", "steps": [
+                          { "fromMs": 0, "value": 0 },
+                          { "fromMs": 5000, "value": 1 },
+                          { "fromMs": 55000, "value": 0 }
+                        ] } }
+          }
         ],
         "reports": [
-          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRESS"] },
+          {
+            "offset": 1,
+            "slot": "STATUS",
+            "svids": ["UNIT_ID", "TEMP_PV", "PRESS", "ctx.LOTID", "ctx.WAFERID"]
+          },
           { "offset": 2, "slot": "MEASURE", "svids": ["TEMP_PV"] }
         ],
         "ceids": [
@@ -97,47 +143,25 @@
       }
     ]
   },
+  "cycle": {
+    "durationMs": 60000,
+    "jitterMs": 500,
+    "count": 25,
+    "noisePerWafer": false,
+    "events": [
+      { "atMs": 3000, "ceid": 2001 },
+      { "atMs": 30000, "ceid": 2003 },
+      { "atMs": 55000, "ceid": 2002 }
+    ]
+  },
   "events": {
     "maxPerSec": 50,
     "plans": [
       {
-        "id": "pl-process-start",
-        "ceid": 2001,
-        "trigger": { "type": "periodic", "periodMs": 60000, "jitterMs": 500 },
-        "effects": [
-          { "svid": 1001, "op": "pulse", "value": 250, "holdMs": 8000 },
-          { "svid": 1003, "op": "set", "value": 6.5, "decayMs": 20000 },
-          { "svid": 1101, "op": "shift", "delta": 20 }
-        ]
-      },
-      {
-        "id": "pl-process-end",
-        "ceid": 2002,
-        "trigger": { "type": "afterEvent", "sourcePlan": "pl-process-start", "delayMs": 30000 },
-        "effects": [
-          { "svid": 1101, "op": "resume" },
-          { "svid": 1004, "op": "set", "value": 0 }
-        ]
-      },
-      {
-        "id": "pl-measure",
-        "ceid": 2003,
-        "trigger": { "type": "periodic", "periodMs": 10000 }
-      },
-      {
         "id": "pl-overheat",
         "ceid": 2004,
-        "trigger": { "type": "onCondition", "expression": "svid.1001 > 240", "debounceMs": 5000 },
-        "effects": [
-          { "svid": 1001, "op": "resume" },
-          { "svid": 1004, "op": "set", "value": 0 }
-        ]
+        "trigger": { "type": "onCondition", "expression": "svid.1001 > 240", "debounceMs": 5000 }
       }
-    ]
-  },
-  "templates": {
-    "curves": [
-      { "id": "chamber-press", "type": "sine", "min": 0.2, "max": 2.0, "periodMs": 30000 }
     ]
   }
 }

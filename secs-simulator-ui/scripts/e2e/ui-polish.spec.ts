@@ -91,12 +91,12 @@ test('不支持保存对话框时退回下载，并提示下载目录', async ({
 test.describe('窄屏（390px）', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('设备命令栏换行，页面不横向溢出', async ({ page }) => {
+  test('设备子页在窄屏下换行，页面不横向溢出', async ({ page }) => {
     for (const hash of ['#/device/line1/config/document', '#/device/line1/runtime/manual', '#/device/line1/config/connection']) {
       await page.goto(`/${hash}`);
       /* hash 导航是同文档切换：刷新一次，确保量到的是这一页自己的布局 */
       await page.reload();
-      await expect(page.locator('.tab-page .panel-head').first()).toBeVisible();
+      await expect(page.locator('.tab-page .panel').first()).toBeVisible();
 
       await expect.poll(
         () => page.evaluate(

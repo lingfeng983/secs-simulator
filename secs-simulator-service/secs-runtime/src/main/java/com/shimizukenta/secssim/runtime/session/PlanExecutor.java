@@ -25,15 +25,17 @@ import com.shimizukenta.secssim.store.PlanExecutionRepository;
 /**
  * 编排执行器（3.0 需求 5，设计 §2.7.2）。
  *
- * <p>一次触发 = 一条台账：幂等预留 → 可发判定（离线策略）→ 施加效果 →
- * 逐条动作发送 → 台账提交。台账经 {@link PlanExecutionRepository} 异步批量
- * 落库（发送线程零同步 DB 写）。顺序契约：效果一定在组装之前，
- * 组装一定在发送之前——S6F11 报文体读到的是变化后的值。</p>
+ * <p>一次触发 = 一条台账：幂等预留 → 可发判定（离线策略）→ 逐条动作发送
+ * → 台账提交。台账经 {@link PlanExecutionRepository} 异步批量落库
+ * （发送线程零同步 DB 写）。</p>
  *
- * <p>可选装配（由 {@code HsmsSessionRuntime} 注入）：{@link EffectController}
- * 负责效果施加/回滚与 before→after 证据，{@link ActionResolver} 负责把五种动作
- * 解析成可发送的报文，{@code ackSender} 让 W 位发送走会话的单线程 ACK 队列。
- * 三者缺省时执行器仍可独立工作（供单测与 2.x 语义使用）。</p>
+ * <p><b>事件不改值</b>（schema v7）：触发只上报，报文体里的值由数据项自己的
+ * {@code source} 决定。台账的 effects 字段保留为空数组——DB 列不动，
+ * 界面也不再展示这一列。</p>
+ *
+ * <p>可选装配（由 {@code HsmsSessionRuntime} 注入）：{@link ActionResolver}
+ * 负责把动作解析成可发送的报文，{@code ackSender} 让 W 位发送走会话的
+ * 单线程 ACK 队列。缺省时执行器仍可独立工作（供单测使用）。</p>
  */
 public final class PlanExecutor {
 
@@ -56,24 +58,6 @@ public final class PlanExecutor {
         }
     }
 
-    /** 一次效果施加的证据（台账 effects 字段 + 回滚句柄）。 */
-    public record EffectResult(String json, Object token, boolean rollbackable) {
-    }
-
-    /**
-     * 效果控制：施加值效果，并在发送全部失败时按边界撤销。
-     *
-     * <p>{@code rollbackable} 只由「本次效果全是 set/add」决定；是否真的能撤，
-     * 由 {@link #rollback} 再检查「此后没有其它 fire 触碰过这些 SVID」。</p>
-     */
-    public interface EffectController {
-        /** @param ceid 采集事件号  @param planId 计划 id（手动触发为 null） @return 效果证据 */
-        EffectResult apply(int ceid, String planId);
-
-        /** @param token {@link EffectResult#token()} @return rolled_back / rollback_skipped */
-        String rollback(Object token);
-    }
-
     /** 动作解析器：把一条动作变成待发送报文（含 SML 占位符求值）。 */
     public interface ActionResolver {
         /**
@@ -87,7 +71,7 @@ public final class PlanExecutor {
     }
 
     /** 一次触发可用的会话依赖（重连补跑时整体换成当前连接）。 */
-    public record Dependencies(SecsCommunicator comm, boolean online, Runnable applyEffects,
+    public record Dependencies(SecsCommunicator comm, boolean online,
                                Secs2BodySupplier s6f11Body, boolean s6f11Wbit) {
     }
 
@@ -110,7 +94,6 @@ public final class PlanExecutor {
     private final AtomicLong replaySequence = new AtomicLong();
     private final Deque<Pending> pending = new ArrayDeque<>();
 
-    private volatile EffectController effectController;
     private volatile ActionResolver actionResolver;
     private volatile Supplier<ExecutorService> ackSender;
     private volatile Consumer<Exception> errorSink = ignored -> { };
@@ -119,11 +102,6 @@ public final class PlanExecutor {
     public PlanExecutor(String deviceId, Sink sink) {
         this.deviceId = deviceId;
         this.sink = sink;
-    }
-
-    /** @param controller 效果控制（before→after / 回滚） */
-    public void effectController(EffectController controller) {
-        this.effectController = controller;
     }
 
     /** @param resolver 动作解析器 */
@@ -154,18 +132,16 @@ public final class PlanExecutor {
      * @param atMs          触发时刻（调度锚点）
      * @param comm          连接；null = 离线
      * @param online        是否在线（控制状态 ONLINE 才算可发）
-     * @param applyEffects  效果施加回调（先于组装）
      * @param s6f11Body     默认 S6F11 报文体组装
      * @param s6f11Wbit     默认 S6F11 是否带 W
      * @throws IOException 同步路径上的发送异常（W 位队列满等；台账已记）
      */
     public void execute(EventPlan plan, String planId, int ceid, long atMs,
                         SecsCommunicator comm, boolean online,
-                        Runnable applyEffects,
                         Secs2BodySupplier s6f11Body,
                         boolean s6f11Wbit) throws IOException {
         executeInternal(plan, planId, ceid, atMs,
-                new Dependencies(comm, online, applyEffects, s6f11Body, s6f11Wbit),
+                new Dependencies(comm, online, s6f11Body, s6f11Wbit),
                 false, null, atMs);
     }
 
@@ -175,11 +151,10 @@ public final class PlanExecutor {
      */
     public void step(EventPlan plan, String planId, int ceid, long atMs,
                      SecsCommunicator comm, boolean online,
-                     Runnable applyEffects,
                      Secs2BodySupplier s6f11Body,
                      boolean s6f11Wbit) throws IOException {
         executeInternal(plan, planId, ceid, atMs,
-                new Dependencies(comm, online, applyEffects, s6f11Body, s6f11Wbit),
+                new Dependencies(comm, online, s6f11Body, s6f11Wbit),
                 true, "step|" + this.stepSequence.incrementAndGet(), atMs);
     }
 
@@ -239,21 +214,11 @@ public final class PlanExecutor {
         runOnline(plan, planId, ceid, atMs, key, ledgerPlanId, deps, dryRun, buildAtMs);
     }
 
-    /** 在线执行：效果 → 逐条组装/发送 → 结果判定 → （可选）回滚 → 台账。 */
+    /** 在线执行：逐条组装/发送 → 结果判定 → 台账。 */
     private void runOnline(EventPlan plan, String planId, int ceid, long scheduledAt,
                            String key, String ledgerPlanId, Dependencies deps,
                            boolean dryRun, long buildAtMs) {
-        /* 2. 施加效果（先于组装：报文体读到变化后的值） */
-        EffectController controller = this.effectController;
-        EffectResult effects;
-        if (controller != null) {
-            effects = controller.apply(ceid, planId);
-        } else {
-            deps.applyEffects().run();
-            effects = new EffectResult("[]", null, false);
-        }
-
-        /* 3. 逐条动作发送 */
+        /* 2. 逐条动作发送（事件不改值：报文体直接按触发时刻求值） */
         List<PlanAction> actions = plan.hasCustomActions() ? plan.actions() : List.of(PlanAction.s6f11());
         List<String> messages = new ArrayList<>();
         int sent = 0;
@@ -280,20 +245,11 @@ public final class PlanExecutor {
             }
         }
 
-        /* 4. 结果：全部成功 SENT / 部分 PARTIAL / 全失败 FAILED */
+        /* 3. 结果：全部成功 SENT / 部分 PARTIAL / 全失败 FAILED */
         Status status = failed == 0 ? Status.SENT
                 : sent > 0 ? Status.PARTIAL : Status.FAILED;
-        String effectsJson = effects.json() == null ? "[]" : effects.json();
-        if (status == Status.FAILED && !dryRun
-                && EventPlan.FAILURE_ROLLBACK.equals(plan.onSendFailure().toLowerCase(Locale.ROOT))) {
-            /* PARTIAL 一律不回滚；含 pulse/shift/resume 的计划在解析期就不可回滚 */
-            String mark = effects.rollbackable() && controller != null
-                    ? controller.rollback(effects.token()) : "rollback_skipped";
-            effectsJson = appendRollbackMark(effectsJson, mark);
-            lastError = appendError(lastError, mark);
-        }
         commit(key, ledgerPlanId, ceid, scheduledAt, dryRun, status,
-                messages.toString(), effectsJson, lastError, lastError);
+                messages.toString(), "[]", lastError, lastError);
     }
 
     /** 动作 → 报文：注入解析器优先；动作级 wbit 覆盖解析结果与会话默认值。 */
@@ -440,14 +396,6 @@ public final class PlanExecutor {
 
     private static String failedEntry(String kind, String error) {
         return "{\"kind\":\"" + escape(kind) + "\",\"error\":\"" + escape(error) + "\"}";
-    }
-
-    private static String appendRollbackMark(String effectsJson, String mark) {
-        String text = effectsJson == null || effectsJson.isBlank() ? "[]" : effectsJson.trim();
-        if (text.startsWith("[") && text.endsWith("]")) {
-            return "{\"items\":" + text + ",\"rollback\":\"" + escape(mark) + "\"}";
-        }
-        return text;
     }
 
     private static String appendError(String previous, String extra) {

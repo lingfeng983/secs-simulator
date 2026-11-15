@@ -179,6 +179,28 @@
   margin-right: 2px;
 }
 
+/* ===== 面板底部操作行 =====
+ * 详情页子页不再有标题行，页面级动作落到内容下方：状态在左、按钮右对齐。
+ * 内容区底边距交给这条操作行，避免"内容 → 一大段空白 → 细线 → 按钮"。 */
+.panel-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 14px;
+  padding: 12px var(--panel-pad) 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.panel--footed > .panel-body {
+  padding-bottom: 0;
+}
+
+.panel-foot-status {
+  color: var(--muted);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
 /* 工具条里的下拉/输入与按钮同高，避免一行里三种高度 */
 .panel-actions select,
 .panel-actions input:not([type='checkbox']):not([type='radio']) {
@@ -481,11 +503,174 @@
   font-size: calc(11.5px * var(--font-scale));
 }
 
-/* 引用多选框：报告引用 SVID、事件引用报告的勾选区 */
-.ref-multiselect {
+/* 引用下拉多选：报告字段 / 事件引用报告的勾选区。
+   触发器与 select 同一套外观（caret 用同样的渐变画法），
+   面板绝对定位浮在行上方，随内容一起滚动，不裁切。 */
+.ref-dropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.ref-dropdown-trigger {
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0.34rem 1.65rem 0.34rem 0.55rem;
+  font-weight: 400;
+  text-align: left;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 52%, calc(100% - 7.5px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.ref-dropdown-trigger:focus-visible,
+.ref-dropdown-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+.ref-dropdown-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-dropdown-summary.is-empty {
+  color: var(--faint);
+}
+
+.ref-dropdown-count {
+  flex: 0 0 auto;
+  min-width: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 600 calc(10.5px * var(--font-scale))/1.6 var(--font-mono);
+  text-align: center;
+}
+
+.ref-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  padding: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+/* 靠右的列（晶圆属性 / 引用报告）右对齐，面板不会伸出页面右缘 */
+.ref-dropdown--right .ref-dropdown-panel {
+  left: auto;
+  right: 0;
+}
+
+.ref-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.ref-dropdown-item {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 2px 10px;
+  gap: 0.45rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ref-dropdown-item:hover {
+  background: var(--surface-2);
+}
+
+.ref-dropdown-item .mono {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ref-dropdown-all {
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ref-dropdown-item-count {
+  margin-left: auto;
+  padding-left: 0.8rem;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--font-scale));
+}
+
+.ref-dropdown-item.is-missing .mono {
+  color: var(--warn);
+}
+
+.ref-dropdown-empty {
+  display: block;
+  padding: 0.35rem 0.4rem;
+  white-space: normal;
+}
+
+/* ===== 主页面单表格：吃满页面剩余高度，内容溢出后才出现滚动条 =====
+   设备清单 / 主机清单 / 主机模板 / 设备模板 / 参数模板 / 审计都是
+   「一行工具条 + 一张表」。原来 .table-scroll 固定 62vh，页面下面还空着
+   一大截，表格中间就先开了一条滚动条；scrollbar-gutter: stable 又让数据
+   很少时也常驻一条空槽。这里把 .content 的高度沿
+   panel → panel-body → table-wrap → table-scroll 一路传下去：
+   滚动区正好等于页面剩下的高度，只有行多到装不下才滚动，表头 sticky 照旧。
+   用子选择器链收窄作用域，设备/主机详情页里的小表格不受影响。 */
+.content--table-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.content--table-page > .panel-stack,
+.content--table-page > .panel,
+.content--table-page > .panel-stack > .panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.content--table-page > .panel-stack > .panel > .panel-body,
+.content--table-page > .panel > .panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 工具条、筛选、分页、脚注按内容占高，剩下的全给表格滚动区 */
+.content--table-page > .panel-stack > .panel > .panel-body > .table-wrap,
+.content--table-page > .panel > .panel-body > .table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.content--table-page > .panel-stack > .panel > .panel-body > .table-wrap > .table-scroll,
+.content--table-page > .panel > .panel-body > .table-wrap > .table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  /* 不预留滚动条槽：没溢出时看起来就是完全没有滚动条 */
+  scrollbar-gutter: auto;
 }

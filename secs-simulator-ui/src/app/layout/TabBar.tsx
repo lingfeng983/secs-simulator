@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { AppTab } from './tabs';
+import { tabKindOf, type AppTab } from './tabs';
 
-/** 页签右键菜单的动作。 */
+/** 标签页右键菜单的动作。 */
 export type TabCloseMode = 'self' | 'others' | 'left' | 'right' | 'all';
 
 export interface TabBarProps {
@@ -22,6 +22,10 @@ interface MenuState {
 /**
  * 顶栏下方的页面标签条：打开过的页面留一个标签，点标签直接切回去。
  * 每个标签可单独关闭；工作台标签常驻，保证任何时候都有落脚点。
+ *
+ * <p>标签按三类上色（见 {@link tabKindOf}）：设备一色、主机一色、其余一色。
+ * 左边一道域色竖条 + 极淡底色，选中时加重——一长排标签里也能看清
+ * "这一条是设备、那一条是主机"。</p>
  *
  * <p>右键标签弹出批量关闭菜单：当前 / 其他 / 左侧 / 右侧 / 全部。
  * 菜单挂在 fixed 层上——标签条本身是横向滚动容器，菜单放里面会被裁掉。</p>
@@ -69,8 +73,10 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onCloseMany }: TabBa
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            className={`app-tab${tab.id === activeId ? ' active' : ''}`}
+            /* 三类页签用三种颜色：设备 / 主机 / 其他，扫一眼就知道切到哪个域 */
+            className={`app-tab kind-${tabKindOf(tab.id)}${tab.id === activeId ? ' active' : ''}`}
             data-tab-id={tab.id}
+            data-tab-kind={tabKindOf(tab.id)}
             onContextMenu={(event) => {
               event.preventDefault();
               setMenu({ tab, x: event.clientX, y: event.clientY });

@@ -206,19 +206,52 @@ public final class EquipmentCompiler {
             }
 
             List<Integer> svidIds = new ArrayList<>();
+            List<FieldRef> fields = new ArrayList<>();
             for (String name : def.svidNames()) {
+                if (name.startsWith("ctx.")) {
+                    String contextName = name.substring("ctx.".length()).trim();
+                    if (contextName.isEmpty()) {
+                        this.issues.add(Issue.error("UNKNOWN_CONTEXT_REF",
+                                "单元 " + unit.name() + " 的报告 " + def.slot() + " 的 ctx. 引用缺少属性名"));
+                    } else {
+                        fields.add(new FieldRef.Context(contextName));
+                    }
+                    continue;
+                }
+                if (name.startsWith("ecid.")) {
+                    String text = name.substring("ecid.".length()).trim();
+                    try {
+                        int ecid = Integer.parseInt(text);
+                        if (this.spec.constants().stream().noneMatch(c -> c.id() == ecid)) {
+                            this.issues.add(Issue.error("UNKNOWN_ECID_REF",
+                                    "单元 " + unit.name() + " 的报告 " + def.slot()
+                                            + " 引用了不存在的设备常量 " + ecid));
+                        } else {
+                            fields.add(new FieldRef.Ecid(ecid));
+                        }
+                    } catch (NumberFormatException e) {
+                        this.issues.add(Issue.error("UNKNOWN_ECID_REF",
+                                "单元 " + unit.name() + " 的报告 " + def.slot()
+                                        + " 的 ecid. 引用应为编号: " + text));
+                    }
+                    continue;
+                }
                 Optional<SvidDef> local = unit.findSvid(name);
                 if (local.isPresent()) {
-                    svidIds.add(local.get().resolve(svidBase));
+                    int svid = local.get().resolve(svidBase);
+                    svidIds.add(svid);
+                    fields.add(new FieldRef.Svid(svid));
                 } else if (this.globalSvidByName.containsKey(name)) {
-                    svidIds.add(this.globalSvidByName.get(name).id());
+                    int svid = this.globalSvidByName.get(name).id();
+                    svidIds.add(svid);
+                    fields.add(new FieldRef.Svid(svid));
                 } else {
                     this.issues.add(Issue.error("UNKNOWN_SVID_REF",
                             "单元 " + unit.name() + " 的报告 " + def.slot() + " 引用了不存在的 SVID: " + name));
                 }
             }
 
-            ResolvedReport resolved = new ResolvedReport(id, unit.name(), def.slot(), svidIds);
+            ResolvedReport resolved = new ResolvedReport(id, unit.name(), def.slot(), svidIds, fields);
             ResolvedReport previous = this.reports.putIfAbsent(id, resolved);
 
             if (previous != null) {

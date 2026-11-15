@@ -43,6 +43,27 @@ public final class Secs2Mapper {
         };
     }
 
+    /**
+     * 映射一个文本值（晶圆属性走这条）。
+     *
+     * <p>声明成 ASCII 就原样写字符串；声明成数值型则先把文本解析成数字，
+     * 解析不了就退回 ASCII —— 报文格式错位比类型降级更难查。</p>
+     *
+     * @param type  声明类型
+     * @param text  文本
+     * @return SECS-II 数据项
+     */
+    public static Secs2 of(ValueType type, String text) {
+        if (type == ValueType.ASCII) {
+            return Secs2.getBuilder().ascii(text == null ? "" : text);
+        }
+        try {
+            return of(type, Double.parseDouble(text.trim()));
+        } catch (RuntimeException e) {
+            return Secs2.getBuilder().ascii(text == null ? "" : text);
+        }
+    }
+
     private static String format(double value) {
         return value == Math.rint(value) ? Long.toString((long) value) : Double.toString(value);
     }

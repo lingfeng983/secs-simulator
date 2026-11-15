@@ -382,8 +382,20 @@ public final class SessionLauncher {
         /* 值来源统一从这里出：默认曲线 / 模板图 / SVID 直配（v6）的分支只在 ValueSources 里有一份 */
         ValueSource values = ValueSources.of(config, compiled.equipment());
 
-        return new Prepared(spec, compiled.equipment(), values, config.schedule(),
-                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), constantWriter());
+        java.util.Map<Integer, com.shimizukenta.secssim.core.domain.EquipmentConstantDef> constants =
+                new java.util.LinkedHashMap<>();
+        for (com.shimizukenta.secssim.core.domain.EquipmentConstantDef def
+                : config.spec().equipment().constants()) {
+            constants.put(def.id(), def);
+        }
+        com.shimizukenta.secssim.core.context.ContextTable contextTable = config.contextTable();
+        com.shimizukenta.secssim.runtime.session.EcidValues ecidValues =
+                new com.shimizukenta.secssim.runtime.session.EcidValues(
+                        constants, config.ecidSources(), config.cycleClock(), config.spec().seed());
+
+        return new Prepared(spec, compiled.equipment(), values, config.effectiveSchedule(),
+                config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), constantWriter(),
+                contextTable, ecidValues);
     }
 
     /** S2F15 的常量回写目标：接到配置门面（正文在 config.db）。 */
@@ -460,6 +472,12 @@ public final class SessionLauncher {
     /** 已组装好、只差 open 的会话。 */
     private static final class Prepared {
 
+        /** v7：晶圆属性表（报告里的 ctx.<名>）。 */
+        private final com.shimizukenta.secssim.core.context.ContextTable contextTable;
+
+        /** v7：设备常量取值器（常量可以是时间函数）。 */
+        private final com.shimizukenta.secssim.runtime.session.EcidValues ecidValues;
+
         /** 常量回写目标：配置名 → 门面（S2F15 用）。 */
         interface ConstantWriter {
             void save(String configName, java.util.Map<Integer, com.shimizukenta.secssim.core.domain.EquipmentConstantDef> constants)
@@ -478,6 +496,17 @@ public final class SessionLauncher {
         Prepared(SessionSpec spec, ResolvedEquipment model,
                  ValueSource values, EventSchedule schedule, int maxPerSec,
                  boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter) {
+            this(spec, model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, constantWriter,
+                    com.shimizukenta.secssim.core.context.ContextTable.empty(), null);
+        }
+
+        Prepared(SessionSpec spec, ResolvedEquipment model,
+                 ValueSource values, EventSchedule schedule, int maxPerSec,
+                 boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter,
+                 com.shimizukenta.secssim.core.context.ContextTable contextTable,
+                 com.shimizukenta.secssim.runtime.session.EcidValues ecidValues) {
+            this.contextTable = contextTable;
+            this.ecidValues = ecidValues;
             this.spec = spec;
             this.model = model;
             this.values = values;
@@ -509,6 +538,7 @@ public final class SessionLauncher {
         HsmsSessionRuntime open(EventBus bus, NoticeBus notices, String configName) throws IOException {
             HsmsSessionRuntime runtime = new HsmsSessionRuntime(this.spec, this.model,
                     EngineClock.system(), this.values);
+            runtime.dataModel(this.contextTable, this.ecidValues);
             if (bus != null) {
                 runtime.eventBus(bus);
             }

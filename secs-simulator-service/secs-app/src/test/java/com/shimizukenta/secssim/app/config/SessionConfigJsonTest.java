@@ -21,8 +21,6 @@ import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
-import com.shimizukenta.secssim.core.curve.Rng;
-import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
@@ -32,7 +30,6 @@ import com.shimizukenta.secssim.core.domain.SvidDef;
 import com.shimizukenta.secssim.core.domain.UnitId;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.domain.ValueType;
-import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
@@ -113,7 +110,7 @@ class SessionConfigJsonTest {
     @Test
     void missingSessionIdReportsPath() {
         String json = """
-                {"schemaVersion":4,"session":{"port":5000},"equipment":{"name":"E","idSpace":{},"units":[]}}
+                {"schemaVersion": 7,"session":{"port":5000},"equipment":{"name":"E","idSpace":{},"units":[]}}
                 """;
 
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
@@ -123,7 +120,7 @@ class SessionConfigJsonTest {
     @Test
     void badSvidTypeReportsFieldPath() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -138,7 +135,7 @@ class SessionConfigJsonTest {
     @Test
     void missingUnitArrayIsRejected() {
         String json = """
-                {"schemaVersion":4,"session":{"id":"s1","port":5010},"equipment":{"name":"E","idSpace":{}}}
+                {"schemaVersion": 7,"session":{"id":"s1","port":5010},"equipment":{"name":"E","idSpace":{}}}
                 """;
 
         ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(json));
@@ -148,7 +145,7 @@ class SessionConfigJsonTest {
     @Test
     void semanticErrorsAreLeftToTheCompiler() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -171,71 +168,11 @@ class SessionConfigJsonTest {
         assertEquals("pri-01", parsed.spec().id());
     }
 
-    @Test
-    void templateConfigBuildsGraph() {
-        String json = """
-                {"schemaVersion":5,
-                 "session":{"id":"s1","port":5010},
-                 "equipment":{"name":"E","idSpace":{},
-                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
-                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"},
-                               {"offset":2,"slot":"DERIVED","type":"F4"}],
-                     "reports":[],"ceids":[]}]},
-                 "templates":{
-                   "curves":[{"id":"temp","type":"sine","min":100.0,"max":200.0,"periodMs":1000}],
-                   "composites":[{"id":"derived","outputs":{"V":"in.temp.V * 0.5"}}],
-                   "instances":[
-                     {"id":"temp","template":"temp","svids":{"V":1001}},
-                     {"id":"derived","template":"derived","svids":{"V":1002}}
-                   ]
-                 }}
-                """;
-
-        SessionConfig config = SessionConfigJson.parse(json);
-        CompilationResult compiled = config.compile();
-        assertTrue(compiled.ok(), () -> "配置不合法: " + compiled.issues());
-
-        GraphValueSource source = new GraphValueSource(
-                config.templates().build(compiled.equipment()), new Rng(1L).derive("graph"));
-        assertEquals(150.0, source.valueAt(1001, 0L).orElseThrow(), 1e-9, "sine t=0 应为中点");
-        assertEquals(75.0, source.valueAt(1002, 0L).orElseThrow(), 1e-9, "组合模板应派生");
-    }
-
     /** 空绑定实例是合法的纯中间节点：输出只喂组合，组合经直配糖落到 SVID。 */
-    @Test
-    void intermediateInstanceMayStayUnboundForComposites() {
-        String json = """
-                {"schemaVersion":6,
-                 "session":{"id":"s1","port":5010},
-                 "equipment":{"name":"E","idSpace":{},
-                   "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
-                     "svids":[{"offset":1,"slot":"TEMP","type":"F4"},
-                              {"offset":2,"slot":"DERIVED","type":"F4","template":"derived"}],
-                     "reports":[],"ceids":[]}]},
-                 "templates":{
-                   "curves":[{"id":"temp","type":"sine","min":100.0,"max":200.0,"periodMs":1000}],
-                   "composites":[{"id":"derived","outputs":{"V":"in.tempi.V * 0.5"}}],
-                   "instances":[
-                     {"id":"tempi","template":"temp","svids":{}}
-                   ]
-                 }}
-                """;
-
-        SessionConfig config = SessionConfigJson.parse(json);
-        CompilationResult compiled = config.compile();
-        assertTrue(compiled.ok(), () -> "配置不合法: " + compiled.issues());
-
-        GraphValueSource source = new GraphValueSource(
-                config.buildValues(compiled.equipment()), new Rng(1L).derive("graph"));
-        assertTrue(source.valueAt(1001, 0L).isEmpty(), "没有直配来源的 SVID 不该有图值");
-        assertEquals(75.0, source.valueAt(1002, 0L).orElseThrow(), 1e-9,
-                "空绑定中间实例应喂进组合并落到直配 SVID");
-    }
-
     @Test
     void afterEventTriggerRoundTrips() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -259,7 +196,7 @@ class SessionConfigJsonTest {
     @Test
     void afterEventUnknownSourceIsRejected() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -275,7 +212,7 @@ class SessionConfigJsonTest {
     @Test
     void onConditionTriggerRoundTrips() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -321,7 +258,7 @@ class SessionConfigJsonTest {
     @Test
     void globalSvidRangeRoundTrips() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "globalSvids":[{"id":9001,"name":"FACILITY_TEMP","type":"F4","min":18.0,"max":26.0}],
@@ -343,7 +280,7 @@ class SessionConfigJsonTest {
     @Test
     void unknownTriggerTypeReportsPath() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1",
@@ -358,7 +295,7 @@ class SessionConfigJsonTest {
     void portIsRequiredAndCannotBeZero() {
         /* 端口必填（1..65535）：没有兜底，设备的 SECS 口以配置（数据库）为准 */
         String missing = """
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "t", "passive": true, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": []},
                  "events": {"plans": []}}
@@ -367,7 +304,7 @@ class SessionConfigJsonTest {
         assertTrue(missingError.getMessage().contains("port"), missingError.getMessage());
 
         String zero = """
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "t", "passive": true, "port": 0, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": []},
                  "events": {"plans": []}}
@@ -379,7 +316,7 @@ class SessionConfigJsonTest {
     @Test
     void parsesOptionalHsmsTimeouts() {
         SessionConfig parsed = SessionConfigJson.parse("""
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                              "timeouts": {"t3": 60, "t7": 15}},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
@@ -396,7 +333,7 @@ class SessionConfigJsonTest {
     @Test
     void timeoutsSectionIsOptional() {
         SessionConfig parsed = SessionConfigJson.parse("""
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                  "events": {"plans": []}}
@@ -410,7 +347,7 @@ class SessionConfigJsonTest {
         com.shimizukenta.secssim.app.config.ConfigException error =
                 assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
                         () -> SessionConfigJson.parse("""
-                                {"schemaVersion": 5,
+                                {"schemaVersion": 7,
                                  "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                                              "timeouts": {"t3": 0}},
                                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
@@ -443,7 +380,7 @@ class SessionConfigJsonTest {
     @Test
     void traceSectionIsOptional() {
         SessionConfig parsed = SessionConfigJson.parse("""
-                {"schemaVersion": 5,
+                {"schemaVersion": 7,
                  "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1},
                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
                  "events": {"plans": []}}
@@ -457,7 +394,7 @@ class SessionConfigJsonTest {
         com.shimizukenta.secssim.app.config.ConfigException error =
                 assertThrows(com.shimizukenta.secssim.app.config.ConfigException.class,
                         () -> SessionConfigJson.parse("""
-                                {"schemaVersion": 5,
+                                {"schemaVersion": 7,
                                  "session": {"id": "t", "passive": true, "port": 5010, "deviceId": 1,
                                              "trace": {"maxTraces": 0}},
                                  "equipment": {"name": "T", "idSpace": {}, "units": [{ "unitId": 1, "name": "CH1", "svids": [], "reports": [], "ceids": [] }]},
@@ -489,7 +426,7 @@ class SessionConfigJsonTest {
     @Test
     void unknownPlanCeidIsACompileError() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
@@ -509,7 +446,7 @@ class SessionConfigJsonTest {
     @Test
     void duplicateGlobalSvidNameIsAWarning() {
         String json = """
-                {"schemaVersion":4,
+                {"schemaVersion": 7,
                  "session":{"id":"s1","port":5010},
                  "equipment":{"name":"E","idSpace":{},
                    "globalSvids":[
@@ -529,166 +466,106 @@ class SessionConfigJsonTest {
 
     /* ===== schema v6:事件效果 + SVID 直配值来源 ===== */
 
-    private static final String V6_SAMPLE = """
-            {
-              "schemaVersion": 6,
-              "session": { "id": "v6-01", "passive": true, "port": 5000, "deviceId": 7, "seed": 42 },
-              "equipment": {
-                "name": "V6",
-                "idSpace": { "svidBase": 1000, "ceidBase": 2000, "reportBase": 3000 },
-                "globalSvids": [
-                  { "id": 9001, "name": "FAC", "type": "F4", "curve": { "type": "sine", "min": 1, "max": 2, "periodMs": 1000 } }
-                ],
-                "units": [
-                  {
-                    "unitId": 1, "name": "CH1", "injectUnitId": true,
-                    "svids": [
-                      { "offset": 90, "slot": "UNIT_ID", "type": "U4" },
-                      { "offset": 1, "slot": "TEMP_PV", "type": "F4", "min": 0, "max": 400,
-                        "curve": { "type": "constant", "value": 180 } },
-                      { "offset": 2, "slot": "PRESS", "type": "F4", "template": "press", "params": { "base": 1.0 } },
-                      { "offset": 3, "slot": "HEATER", "type": "BOOLEAN", "min": 0, "max": 1 }
-                    ],
-                    "reports": [ { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV"] } ],
-                    "ceids": [ { "offset": 1, "slot": "E1", "reports": ["STATUS"] } ]
-                  }
-                ]
-              },
-              "events": {
-                "maxPerSec": 50,
-                "plans": [
-                  { "id": "p1", "ceid": 2001,
-                    "trigger": { "type": "periodic", "periodMs": 1000 },
-                    "effects": [
-                      { "svid": 1001, "op": "pulse", "value": 250, "holdMs": 5000 },
-                      { "svid": 1001, "op": "set", "value": 300, "decayMs": 10000 },
-                      { "svid": 1001, "op": "shift", "delta": 10 },
-                      { "svid": 1003, "op": "set", "value": 1 }
-                    ] }
-                ]
-              },
-              "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ] }
-            }
+    private static final String V7_SAMPLE = """
+            {"schemaVersion":7,
+             "session":{"id":"s1","port":5010},
+             "context":[
+               {"id":"LOTID","type":"ASCII","source":{"mode":"cycle","pattern":"LOT{02}","start":1}},
+               {"id":"WAFERID","type":"ASCII","source":{"mode":"cycle","pattern":"W{03}","start":1}}
+             ],
+             "cycle":{"durationMs":60000,"jitterMs":0,"count":3,"noisePerWafer":false,
+                      "events":[{"atMs":3000,"ceid":2001}]},
+             "equipment":{"name":"E","idSpace":{},
+               "constants":[{"id":501,"name":"TEMP_LIMIT","type":"F4","value":5,
+                               "source":{"mode":"const","value":5}}],
+               "units":[{"unitId":1,"name":"CH1","injectUnitId":false,
+                 "svids":[
+                   {"offset":1,"slot":"TEMP","type":"F4",
+                    "source":{"mode":"curve","clock":"phase","curve":{"type":"constant","value":180}}},
+                   {"offset":2,"slot":"PRESS","type":"F4",
+                    "source":{"mode":"expr","clock":"phase","vars":{"a":{"type":"constant","value":2}},"expr":"a*2"}}
+                 ],
+                 "reports":[{"offset":1,"slot":"STATUS",
+                             "svids":["TEMP","ctx.LOTID","ctx.WAFERID","ecid.501"]}],
+                 "ceids":[{"offset":1,"slot":"E1","reports":["STATUS"]}]}]},
+             "events":{"maxPerSec":50,"plans":[]}}
             """;
 
     @Test
-    void parsesV6DirectSourcesAndEffects() {
-        SessionConfig config = SessionConfigJson.parse(V6_SAMPLE);
+    void parsesV7SourcesAndContext() {
+        SessionConfig config = SessionConfigJson.parse(V7_SAMPLE);
         CompilationResult result = config.compile();
-        assertTrue(result.ok(), "v6 样例应能编译: " + result.errors());
+        assertTrue(result.ok(), () -> "v7 样例应能编译: " + result.issues());
 
-        SvidDef temp = config.spec().equipment().units().get(0).svids().get(1);
-        assertNotNull(temp.source(), "TEMP_PV 应带直配曲线");
-        assertNull(temp.source().template());
-
-        SvidDef press = config.spec().equipment().units().get(0).svids().get(2);
-        assertEquals("press", press.source().template());
-        assertEquals(Map.of("base", 1.0), press.source().params());
-
-        assertTrue(config.hasCustomValues());
-        EventPlan plan = config.schedule().plans().get(0);
-        assertEquals(4, plan.effects().size());
-        assertEquals(EventEffect.Op.PULSE, plan.effects().get(0).op());
+        assertEquals(2, config.context().size());
+        assertEquals("LOTID", config.context().get(0).id());
+        assertEquals(2, config.svidSources().size(), "两个 SVID 都配了 source");
+        assertTrue(config.svidSources().containsKey(1001));
+        assertEquals(1, config.ecidSources().size(), "只有配了 source 的 ECID 进映射");
     }
 
     @Test
-    void v6SampleBuildsValueSource() {
-        SessionConfig config = SessionConfigJson.parse(V6_SAMPLE);
+    void v7ReportCarriesContextAndEcid() {
+        SessionConfig config = SessionConfigJson.parse(V7_SAMPLE);
         CompilationResult result = config.compile();
-        assertTrue(result.ok());
+        assertTrue(result.ok(), () -> "编译应通过: " + result.issues());
 
-        var values = ValueSources.of(config, result.equipment());
-        /* 值来源自外向内：值域钳制 → UNIT_ID 覆盖（样例含 UNIT_ID 时）→ 模板图 */
-        assertTrue(values instanceof com.shimizukenta.secssim.core.value.BoundedValueSource);
-        var inner = ((com.shimizukenta.secssim.core.value.BoundedValueSource) values).inner();
-        if (inner instanceof com.shimizukenta.secssim.core.value.UnitIdValueSource withUnitIds) {
-            inner = withUnitIds.inner();
-        }
-        assertTrue(inner instanceof GraphValueSource);
-        /* 直配 constant 曲线:任意时刻都是 180 */
-        assertEquals(180.0, values.valueAt(1001, 12345L).orElse(-1), 1e-9);
-        /* 模板图里未绑定值来源的 SVID 取不到(上层按 0 处理) */
-        assertTrue(values.valueAt(1003, 12345L).isEmpty());
-        /* 全局 SVID 走内联 sine */
-        assertTrue(values.valueAt(9001, 0L).isPresent());
+        var report = result.equipment().reports().get(3001);
+        assertNotNull(report, "STATUS 报告应解析成 3001");
+        assertEquals(4, report.fields().size(), "TEMP + 两个属性 + 一个常量");
+        assertTrue(report.fields().stream().anyMatch(f -> f instanceof com.shimizukenta.secssim.core.compile.FieldRef.Context));
+        assertTrue(report.fields().stream().anyMatch(f -> f instanceof com.shimizukenta.secssim.core.compile.FieldRef.Ecid));
     }
 
     @Test
-    void v6ConfigRoundTrips() {
-        SessionConfig parsed = SessionConfigJson.parse(V6_SAMPLE);
+    void unknownContextReferenceIsCompileError() {
+        String bad = V7_SAMPLE.replace("\"ctx.WAFERID\"", "\"ctx.NOPE\"");
+        CompilationResult result = SessionConfigJson.parse(bad).compile();
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("UNKNOWN_CONTEXT_REF")),
+                () -> "应报 UNKNOWN_CONTEXT_REF: " + result.errors());
+    }
+
+    @Test
+    void unknownEcidReferenceIsCompileError() {
+        String bad = V7_SAMPLE.replace("\"ecid.501\"", "\"ecid.999\"");
+        CompilationResult result = SessionConfigJson.parse(bad).compile();
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("UNKNOWN_ECID_REF")),
+                () -> "应报 UNKNOWN_ECID_REF: " + result.errors());
+    }
+
+    @Test
+    void cycleEventsExpandPerWafer() {
+        SessionConfig config = SessionConfigJson.parse(V7_SAMPLE);
+        var plans = config.effectiveSchedule().plans();
+        assertEquals(3, plans.size(), "3 片 × 1 条周期事件");
+        assertEquals("cyc0-0", plans.get(0).id());
+        assertEquals(3_000L, ((Trigger.At) plans.get(0).trigger()).atMs(), "第一片事件在片内 3s");
+        assertTrue(((Trigger.At) plans.get(2).trigger()).atMs() > 60_000L, "第三片要等前两片跑完");
+    }
+
+    @Test
+    void v7ConfigRoundTrips() {
+        SessionConfig parsed = SessionConfigJson.parse(V7_SAMPLE);
         String first = SessionConfigJson.toJson(parsed);
         SessionConfig reparsed = SessionConfigJson.parse(first);
-        assertEquals(first, SessionConfigJson.toJson(reparsed), "v6 字段必须往返稳定");
-        assertTrue(first.contains("\"curve\""));
-        assertTrue(first.contains("\"effects\""));
+        assertEquals(first, SessionConfigJson.toJson(reparsed), "v7 字段必须往返稳定");
+        assertTrue(first.contains("\"source\""));
+        assertTrue(first.contains("\"context\""));
+        assertTrue(first.contains("\"cycle\""));
+        assertFalse(first.contains("\"effects\""), "v7 不再有事件效果");
     }
 
     @Test
-    void rejectsCurveAndTemplateTogether() {
-        String bad = V6_SAMPLE.replace(
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }, \"template\": \"press\"");
-        ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(bad));
-        assertTrue(e.getMessage().contains("二选一"));
-    }
-
-    @Test
-    void rejectsParamsWithoutTemplate() {
-        String bad = V6_SAMPLE.replace(
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }, \"params\": { \"a\": 1 }");
-        ConfigException e = assertThrows(ConfigException.class, () -> SessionConfigJson.parse(bad));
-        assertTrue(e.getMessage().contains("template"));
-    }
-
-    @Test
-    void rejectsUnknownEffectSvid() {
-        String bad = V6_SAMPLE.replace("{ \"svid\": 1003, \"op\": \"set\", \"value\": 1 }",
-                "{ \"svid\": 4242, \"op\": \"set\", \"value\": 1 }");
+    void rejectsSourceOnNonNumericSvid() {
+        String bad = V7_SAMPLE.replace(
+                "{\"offset\":2,\"slot\":\"PRESS\",\"type\":\"F4\"",
+                "{\"offset\":2,\"slot\":\"PRESS\",\"type\":\"ASCII\"");
         CompilationResult result = SessionConfigJson.parse(bad).compile();
-        assertFalse(result.ok());
-        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("UNKNOWN_EFFECT_SVID")));
+        assertFalse(result.ok(), "非数值 SVID 配值定义应报错");
+        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("SOURCE_TYPE_MISMATCH")),
+                () -> "应报 SOURCE_TYPE_MISMATCH: " + result.errors());
     }
 
-    @Test
-    void rejectsEffectOnNonNumericSvid() {
-        String bad = V6_SAMPLE.replace("{ \"svid\": 1003, \"op\": \"set\", \"value\": 1 }",
-                "{ \"svid\": 1003, \"op\": \"pulse\", \"value\": 1, \"holdMs\": 100 }");
-        CompilationResult result = SessionConfigJson.parse(bad).compile();
-        assertFalse(result.ok());
-        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("EFFECT_TYPE_MISMATCH")));
-    }
-
-    @Test
-    void allowsBooleanSetForEffects() {
-        CompilationResult result = SessionConfigJson.parse(V6_SAMPLE).compile();
-        assertTrue(result.ok(), "BOOLEAN set 0/1 应放行: " + result.errors());
-    }
-
-    @Test
-    void rejectsDirectSourceOnStringSvid() {
-        String bad = V6_SAMPLE.replace(
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }",
-                "\"curve\": { \"type\": \"constant\", \"value\": 180 }")
-                .replace("{ \"offset\": 2, \"slot\": \"PRESS\", \"type\": \"F4\", \"template\": \"press\", \"params\": { \"base\": 1.0 } }",
-                        "{ \"offset\": 2, \"slot\": \"NAME\", \"type\": \"ASCII\", \"curve\": { \"type\": \"constant\", \"value\": 1 } }");
-        CompilationResult result = SessionConfigJson.parse(bad).compile();
-        assertFalse(result.ok());
-        assertTrue(result.errors().stream().anyMatch(i -> i.toString().contains("SOURCE_TYPE_MISMATCH")));
-    }
-
-    @Test
-    void rejectsSingleWriterBetweenDirectAndInstance() {
-        String bad = V6_SAMPLE.replace(
-                """
-                      "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ] }""",
-                """
-                      "templates": { "curves": [ { "id": "press", "type": "sine", "min": 0.1, "max": 2, "periodMs": 5000 } ],
-                                     "instances": [ { "id": "dup", "template": "press", "svids": { "V": 1001 } } ] }""");
-        SessionConfig config = SessionConfigJson.parse(bad);
-        CompilationResult result = config.compile();
-        assertTrue(result.ok());
-        ConfigException e = assertThrows(ConfigException.class, () -> config.buildValues(result.equipment()));
-        assertTrue(e.getMessage().contains("1001"), "单写者冲突应指向重复的 SVID: " + e.getMessage());
-    }
 }

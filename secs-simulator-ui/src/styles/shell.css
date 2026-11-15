@@ -27,6 +27,8 @@
 }
 
 .app-tab {
+  /* 域色：下面的 kind-* 覆盖；没标记的按"其他"处理 */
+  --tab-tone: var(--tab-other);
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
@@ -35,26 +37,42 @@
   margin: 4px 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  transition: background var(--fast), color var(--fast), border-color var(--fast);
+  /* 左侧一道域色竖条：未选中时也能一眼分开"设备页 / 主机页 / 其他页" */
+  background-color: color-mix(in srgb, var(--tab-tone) 5%, transparent);
+  background-image: linear-gradient(to right, var(--tab-tone) 0 3px, transparent 3px);
+  /* 未选中也带一点域色：三类标签一眼分得开，但不至于抢过正文 */
+  color: color-mix(in srgb, var(--tab-tone) 38%, var(--muted));
+  transition: background-color var(--fast), color var(--fast), border-color var(--fast);
+}
+
+.app-tab.kind-device {
+  --tab-tone: var(--tab-device);
+}
+
+.app-tab.kind-host {
+  --tab-tone: var(--tab-host);
+}
+
+.app-tab.kind-other {
+  --tab-tone: var(--tab-other);
 }
 
 .app-tab:hover {
-  background: var(--surface-3);
+  background-color: color-mix(in srgb, var(--tab-tone) 12%, transparent);
   color: var(--fg);
 }
 
 .app-tab.active {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--tab-tone) 38%, transparent);
+  background-color: color-mix(in srgb, var(--tab-tone) 15%, transparent);
+  color: var(--tab-tone);
 }
 
 .app-tab-label {
   min-width: 0;
   max-width: 160px;
-  padding: 0.2rem 0.35rem 0.2rem 0.6rem;
+  /* 左边留一点：标签最前面是域色竖条 */
+  padding: 0.2rem 0.35rem 0.2rem 0.7rem;
   overflow: hidden;
   border: 0;
   background: transparent;

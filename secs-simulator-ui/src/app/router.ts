@@ -24,6 +24,7 @@ export type DeviceConfigPage =
   | 'connection'  // 连接：session 段
   | 'structure'   // 结构：单元/模板/组合 整体模型
   | 'svids'       // 变量配置：SVID 定义（写入配置草稿）
+  | 'context'     // 晶圆属性：LOTID/RCPID/PPID/WAFERID（写入配置草稿）
   | 'events'      // 事件与报告：CEID/RPT 定义（写入配置草稿）
   | 'plans'       // 事件计划：events.plans 定义（写入配置草稿）
   | 'document'    // 配置原文
@@ -40,7 +41,7 @@ export type DeviceZone = 'config' | 'runtime';
 export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
 
 export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
-  'overview', 'connection', 'structure', 'svids', 'events', 'plans', 'document', 'constants', 'revisions',
+  'overview', 'connection', 'structure', 'svids', 'context', 'events', 'plans', 'document', 'constants', 'revisions',
 ];
 /* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
    报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */
@@ -78,6 +79,7 @@ export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
   connection: '连接',
   structure: '结构',
   svids: '变量配置',
+  context: '晶圆属性',
   events: '事件与报告',
   plans: '事件计划',
   document: '配置原文',
@@ -102,12 +104,13 @@ export const HOST_RUNTIME_PAGE_LABELS: Record<HostRuntimePage, string> = {
 
 /** 子页签悬浮说明（SubTabs note）：一句话说清这页管什么。 */
 export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
-  overview: '设备身份与模板选择；保存后需重载生效。',
+  overview: '设备身份与模板选择；保存后需重启生效。',
   connection: 'HSMS 连接参数（session 段）：地址、端口、模式。',
-  structure: '单元/模板/组合的整体模型编辑；保存后需重载生效。',
-  svids: '状态变量（SVID）定义：写入配置草稿，校验后保存。',
-  events: '事件（CEID）与报告（RPT）定义：写入配置草稿，校验后保存。',
-  plans: '事件计划（触发规则/effects/actions）定义：写入配置草稿，校验后保存。',
+  structure: '设备名/号段/单元的整体模型编辑；保存后需重启生效。',
+  svids: '状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。',
+  context: '晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。',
+  events: '事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。',
+  plans: '工艺周期与事件计划：片内重复写在 cycle，周期外的异常路径写 plans。',
   document: '配置原文 JSON 与版本 diff。',
   constants: '设备常量（ECV）定义：写入配置草稿，校验后保存。',
   revisions: '配置版本历史与回看。',

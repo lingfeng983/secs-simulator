@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_TABS, nextTabAfterClose, tabIdForRoute, upsertTab, type AppTab } from './tabs';
+import { MAX_TABS, nextTabAfterClose, tabIdForRoute, tabKindOf, upsertTab, type AppTab } from './tabs';
 
 const workbench: AppTab = { id: 'workbench', label: '设备清单', hash: '#/workbench' };
 
@@ -12,6 +12,17 @@ describe('顶部页面标签', () => {
     expect(tabIdForRoute({ name: 'host', hostId: 'host-1', zone: 'runtime', page: 'trace' }))
       .toBe('host:host-1');
     expect(tabIdForRoute({ name: 'workbench' })).toBe('workbench');
+  });
+
+  it('标签按设备 / 主机 / 其他三类上色', () => {
+    expect(tabKindOf('workbench')).toBe('device');
+    expect(tabKindOf('device:line1')).toBe('device');
+    expect(tabKindOf('hosts')).toBe('host');
+    expect(tabKindOf('host:host-1')).toBe('host');
+    expect(tabKindOf('templates')).toBe('other');
+    expect(tabKindOf('svid-templates')).toBe('other');
+    expect(tabKindOf('host-templates')).toBe('other');
+    expect(tabKindOf('system:audit')).toBe('other');
   });
 
   it('同一对象只更新停留位置，不重复追加', () => {

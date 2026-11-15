@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "session": {
     "id": "cvd-01",
     "passive": true,
@@ -8,6 +8,13 @@
     "deviceId": 11,
     "seed": 20260226
   },
+  "context": [
+    { "id": "LOTID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "LOT{02}", "start": 7, "every": 25 } },
+    { "id": "WAFERID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "W{03}", "start": 1 } },
+    { "id": "RCPID", "type": "ASCII", "source": { "mode": "cycle", "list": ["CVD-STD", "CVD-THIN", "CVD-THICK"], "every": 10 } },
+    { "id": "PPID", "type": "ASCII", "source": { "mode": "const", "value": "PP-CVD-02" } },
+    { "id": "BATCHID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "B{03}", "start": 1, "every": 25 } }
+  ],
   "equipment": {
     "name": "CVD-DEMO",
     "idSpace": {
@@ -19,6 +26,14 @@
       "reportStride": 100,
       "reserve": [[1, 999]]
     },
+    "constants": [
+      { "id": 601, "name": "PRESSURE_SP", "type": "F4", "value": 1.2, "unit": "Torr" },
+      {
+        "id": 602, "name": "RF_POWER", "type": "F4", "value": 800, "unit": "W",
+        "source": { "mode": "curve", "clock": "phase",
+                    "curve": { "type": "sine", "min": 780, "max": 820, "periodMs": 20000 } }
+      }
+    ],
     "globalSvids": [
       {
         "id": 9002,
@@ -26,7 +41,8 @@
         "type": "F4",
         "min": 0,
         "max": 500,
-        "curve": { "type": "uniform", "min": 380, "max": 420, "resampleMs": 2000 }
+        "source": { "mode": "curve",
+                    "curve": { "type": "uniform", "min": 380, "max": 420, "resampleMs": 2000 } }
       }
     ],
     "units": [
@@ -38,22 +54,54 @@
           { "offset": 90, "slot": "UNIT_ID", "type": "U4", "unit": "", "decimals": 0 },
           {
             "offset": 1, "slot": "TEMP_PV", "type": "F4", "unit": "C", "decimals": 2, "min": 0, "max": 600,
-            "curve": { "type": "randomWalk", "start": 320, "driftPerSec": 0.02, "sigma": 1.5, "min": 0, "max": 600 }
+            "source": { "mode": "curve",
+                        "curve": { "type": "randomWalk", "start": 320, "driftPerSec": 0.02,
+                                   "sigma": 1.5, "min": 0, "max": 600 } }
           },
-          { "offset": 2, "slot": "PRES", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10 },
+          {
+            "offset": 2, "slot": "PRES", "type": "F4", "unit": "Torr", "decimals": 3, "min": 0, "max": 10,
+            "source": {
+              "mode": "expr",
+              "clock": "phase",
+              "vars": {
+                "base": { "type": "constant", "value": 1.2 },
+                "amp": { "type": "constant", "value": 0.4 },
+                "periodSec": { "type": "constant", "value": 45 }
+              },
+              "expr": "clamp(base + amp * sin(6.283185307 * t / periodSec), 0, 10)"
+            }
+          },
           {
             "offset": 3, "slot": "MFC_FLOW", "type": "F4", "unit": "sccm", "decimals": 1, "min": 0, "max": 300,
-            "curve": { "type": "sine", "min": 140, "max": 160, "periodMs": 20000 }
+            "source": { "mode": "curve",
+                        "curve": { "type": "sine", "min": 140, "max": 160, "periodMs": 20000 } }
           },
           {
             "offset": 4, "slot": "FILM_THICK", "type": "F4", "unit": "A", "decimals": 1, "min": 0, "max": 20000,
-            "curve": { "type": "ramp", "from": 0, "to": 5000, "durationMs": 600000, "cyclic": true }
+            "source": { "mode": "curve",
+                        "curve": { "type": "ramp", "from": 0, "to": 5000,
+                                   "durationMs": 120000, "cyclic": true } }
           },
-          { "offset": 5, "slot": "VALVE", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1 }
+          {
+            "offset": 5, "slot": "VALVE", "type": "BOOLEAN", "unit": "", "decimals": 0, "min": 0, "max": 1,
+            "source": { "mode": "curve",
+                        "curve": { "type": "step", "steps": [
+                          { "fromMs": 0, "value": 1 },
+                          { "fromMs": 90000, "value": 0 }
+                        ] } }
+          }
         ],
         "reports": [
-          { "offset": 1, "slot": "STATUS", "svids": ["UNIT_ID", "TEMP_PV", "PRES"] },
-          { "offset": 2, "slot": "PROCESS", "svids": ["MFC_FLOW", "FILM_THICK", "PLATE_VOLTAGE"] }
+          {
+            "offset": 1,
+            "slot": "STATUS",
+            "svids": ["UNIT_ID", "TEMP_PV", "PRES", "ctx.LOTID", "ctx.WAFERID", "ctx.RCPID"]
+          },
+          {
+            "offset": 2,
+            "slot": "PROCESS",
+            "svids": ["MFC_FLOW", "FILM_THICK", "PLATE_VOLTAGE", "ecid.601", "ecid.602"]
+          }
         ],
         "ceids": [
           { "offset": 1, "slot": "LOT_START", "reports": ["STATUS"] },
@@ -63,53 +111,19 @@
       }
     ]
   },
-  "events": {
-    "maxPerSec": 50,
-    "plans": [
-      {
-        "id": "pl-lot-start",
-        "ceid": 2001,
-        "trigger": { "type": "periodic", "periodMs": 120000, "jitterMs": 1000 },
-        "effects": [
-          { "svid": 1002, "op": "set", "value": 0.05, "decayMs": 15000 },
-          { "svid": 1005, "op": "set", "value": 1 }
-        ]
-      },
-      {
-        "id": "pl-lot-end",
-        "ceid": 2002,
-        "trigger": { "type": "afterEvent", "sourcePlan": "pl-lot-start", "delayMs": 90000 },
-        "effects": [
-          { "svid": 1002, "op": "resume" },
-          { "svid": 1005, "op": "set", "value": 0 }
-        ]
-      },
-      {
-        "id": "pl-sample",
-        "ceid": 2003,
-        "trigger": { "type": "periodic", "periodMs": 5000 }
-      }
+  "cycle": {
+    "durationMs": 120000,
+    "jitterMs": 1000,
+    "count": 25,
+    "noisePerWafer": false,
+    "events": [
+      { "atMs": 4000, "ceid": 2001 },
+      { "atMs": 60000, "ceid": 2003 },
+      { "atMs": 116000, "ceid": 2002 }
     ]
   },
-  "templates": {
-    "curves": [
-      { "id": "slow-temp", "type": "sine", "min": 315, "max": 330, "periodMs": 120000 }
-    ],
-    "composites": [
-      {
-        "id": "chamber-pressure",
-        "outputs": {
-          "V": "clamp(p.base + p.amp * sin(t * 6.283185307 / p.periodMs), 0, 10)"
-        }
-      }
-    ],
-    "instances": [
-      {
-        "id": "dep-pressure",
-        "template": "chamber-pressure",
-        "svids": { "V": 1002 },
-        "params": { "base": 1.2, "amp": 0.4, "periodMs": 45000 }
-      }
-    ]
+  "events": {
+    "maxPerSec": 50,
+    "plans": []
   }
 }

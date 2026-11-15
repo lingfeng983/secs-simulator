@@ -1,29 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { PanelBaseProps } from './types';
 import { Panel } from '../../shared/ui/Panel';
-import { EquipmentForm, templateIdsOf } from '../editors/ConfigFormEditor';
-import { editDocument, isJsonObject, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
+import { EquipmentForm } from '../editors/ConfigFormEditor';
+import { editDocument, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
 import { useConfigDraft } from '../../state/useConfigDraft';
-
-type StructureTab = 'global' | 'units';
 
 /**
  * 设备 · 结构：配置里的 equipment 段。
  *
- * <p>按"全局 / 单元"两个页签拆开：改设备名和号段时不用翻过一长串
- * 单元卡片。SVID 的曲线/组合模板管理已上收独立工具「模板管理」——
- * 这里只改设备本体，值来源引用模板在「变量配置」页绑定。</p>
+ * <p>号段规划与单元标识放在同一页。变量、设备常量、事件与报告
+ * 各有自己的页签，这里只改设备本体。</p>
  */
-export function StructurePanel({ backend, notifier, sessionId, configName }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
+export function StructurePanel({ backend, sessionId, configName }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const deviceId = sessionId ?? backend.activeSession;
   const draft = useConfigDraft(backend, deviceId, configName);
   const parsed = useMemo(() => parseConfigDocument(draft.text), [draft.text]);
-  const [tab, setTab] = useState<StructureTab>('global');
-
-  const templateIds = useMemo(
-    () => (parsed.ok ? templateIdsOf(parsed.config.root) : []),
-    [parsed],
-  );
 
   const edit = (mutate: (root: JsonObject) => void) => {
     const result = editDocument(draft.text, mutate);
@@ -36,11 +27,7 @@ export function StructurePanel({ backend, notifier, sessionId, configName }: Pan
     <Panel
       id="panel-structure"
       title="结构"
-      description={
-        '设备全局：名称 / 号段 / 全局 SVID / CEID / 常量\n'
-        + '单元：每个腔体或工位的标识信息\n'
-        + 'SVID 的曲线/组合模板在独立工具「模板管理」维护，变量配置里直接绑定'
-      }
+      headless
       status={
         draft.configName === ''
           ? <span className="state-pill" data-tone="muted">无配置来源</span>
@@ -75,24 +62,6 @@ export function StructurePanel({ backend, notifier, sessionId, configName }: Pan
         </p>
       ) : (
         <>
-          <div className="segmented structure-tabs" role="tablist" aria-label="结构分区">
-            {([
-              ['global', '设备全局'],
-              ['units', '单元'],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={tab === key}
-                className={`segment${tab === key ? ' active' : ''}`}
-                onClick={() => setTab(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
           {draft.notice !== '' && <p className="inline-note">{draft.notice}</p>}
           {draft.problems.length > 0 && (
             <ul className="problems">
@@ -100,22 +69,7 @@ export function StructurePanel({ backend, notifier, sessionId, configName }: Pan
             </ul>
           )}
 
-          {tab === 'global' && (
-            <EquipmentForm
-              root={parsed.config.root}
-              edit={edit}
-              templateIds={templateIds}
-              section="global"
-            />
-          )}
-          {tab === 'units' && (
-            <EquipmentForm
-              root={parsed.config.root}
-              edit={edit}
-              templateIds={templateIds}
-              section="units"
-            />
-          )}
+          <EquipmentForm root={parsed.config.root} edit={edit} />
         </>
       )}
     </Panel>

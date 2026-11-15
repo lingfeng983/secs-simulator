@@ -8,10 +8,11 @@ import java.util.Set;
 /**
  * 让 {@code UNIT_ID} 这个 SVID 永远等于所属单元的编号。
  *
- * <p>为什么需要单独一层：默认曲线路径会为 {@code UNIT_ID} 绑定常量曲线，但一旦配置里
- * 有模板图或 SVID 直配（schema v6 之后很常见），走的是 {@link GraphValueSource}，
- * 那里不认识 {@code UNIT_ID}——主机 S1F3 查 1090 会拿到 0，而 S6F11 里注入的
- * UNIT_ID 却是正确值，同一台设备两个来源给出不同答案。</p>
+ * <p>为什么需要单独一层：{@code UNIT_ID} 是设备语义，不是用户配的曲线。
+ * 一旦某个变量配了值定义，值引擎改走 {@link DataSourceValueSource}，
+ * 那里只认识显式配置的编号——主机 S1F3 查 1090 会拿到 0，而 S6F11 里注入的
+ * UNIT_ID 却是正确值，同一台设备两个来源给出不同答案。这一层把两类值来源
+ * 统一钉在真实单元号上。</p>
  */
 public final class UnitIdValueSource implements ValueSource {
 

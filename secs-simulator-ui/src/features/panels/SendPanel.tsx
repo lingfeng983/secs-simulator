@@ -142,7 +142,7 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     <Panel
       id="panel-send"
       title="手动发送"
-      description="直接往选中的会话发一条 SML。primary 不写 W 也默认要求回复；secondary（偶数 function）不能带 W。"
+      headless
       actions={
         <button
           type="button"

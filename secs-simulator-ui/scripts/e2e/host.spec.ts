@@ -19,7 +19,7 @@ async function openHosts(page: Page): Promise<void> {
 
 async function openHost(page: Page, hostId = 'host-1'): Promise<void> {
   await page.goto(`/#/hosts/${hostId}/config/overview`);
-  await expect(page.locator('.instance-head')).toContainText(hostId);
+  await expect(page.locator('.host-page')).toHaveAttribute('data-host', hostId);
 }
 
 /* ==================== 列表页 ==================== */
@@ -66,7 +66,7 @@ test('主机列表：连接 / 断开 / 详情 / 删除', async ({ page }) => {
   await expect.poll(() => state.hosts.some((host) => host.id === 'host-1')).toBe(false);
 
   await panel.locator('tbody tr', { hasText: 'host-2' }).first().getByRole('button', { name: '详情' }).click();
-  await expect(page.locator('.instance-head')).toContainText('host-2');
+  await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-2');
 });
 
 test('主机清单：表头全选 + 批量链接 / 断开 / 删除', async ({ page }) => {
@@ -125,7 +125,30 @@ test('新建主机：模板套用方案，实例目标信息仍由自己填', as
   await expect.poll(() => state.hosts.length).toBe(3);
   /* 模板里 1 份 Trace + 1 份采集方案被复制进新主机的方案库 */
   await expect.poll(() => state.hostPlans.length).toBe(2);
-  await expect(page.locator('.instance-head')).toContainText('host');
+  await expect(page.locator('.host-page')).toBeVisible();
+});
+
+test('操作栏带目标端点；新建主机可从已启动设备快速填入', async ({ page }) => {
+  await openHost(page);
+  const tag = page.locator('.detail-bar .endpoint-tag');
+  /* target 后端已经拼成 host:port，这里只补 Device ID，不重复端口 */
+  await expect(tag).toContainText('127.0.0.1:5000');
+  await expect(tag).toContainText('| 10');
+
+  await openHosts(page);
+  await page.locator('#panel-hosts-v2').getByRole('button', { name: '＋ 新建主机' }).click();
+  const dialog = page.getByRole('dialog');
+  const form = dialog.locator('.session-form');
+  const picker = dialog.getByLabel('快速链接设备');
+  /* 只列已启动的设备（line1 在线、line2 端口在监听），加上一条"手动填写" */
+  await expect(picker.locator('option')).toHaveCount(3);
+
+  await picker.selectOption('line1');
+  await expect(form.locator('input').nth(0)).toHaveValue('host-LINE1');
+  /* 绑定在 0.0.0.0 的设备，主机要从回环地址连 */
+  await expect(form.locator('input').nth(1)).toHaveValue('127.0.0.1');
+  await expect(form.locator('input').nth(2)).toHaveValue('5000');
+  await expect(form.locator('input').nth(3)).toHaveValue('10');
 });
 
 test('新建主机：默认值即可创建，清空目标地址才禁用', async ({ page }) => {
@@ -154,7 +177,7 @@ test('主机配置区不再有连接页签，连接动作在实例头', async ({
   await page.goto('/#/hosts/host-1/config/connection');
   await expect(page.locator('#panel-host-overview')).toBeVisible();
 
-  const head = page.locator('.instance-head');
+  const head = page.locator('.detail-bar');
   await head.getByRole('button', { name: '断开连接' }).click();
   await expect.poll(() => state.hosts.find((host) => host.id === 'host-1')?.open).toBe(false);
 

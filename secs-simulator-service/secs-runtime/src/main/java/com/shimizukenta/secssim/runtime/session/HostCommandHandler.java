@@ -65,10 +65,29 @@ final class HostCommandHandler {
     /** 会话 id（错误日志用）。 */
     private String sessionId = "";
 
+    /** v7：常量取值器（常量可以是时间函数）；{@code null} 表示只有静态值。 */
+    private volatile EcidValues ecidValues;
+
+    /** 仿真时钟：时间变化型常量要按"现在"求值。 */
+    private final com.shimizukenta.secssim.core.EngineClock clock;
+
     HostCommandHandler(Map<Integer, EquipmentConstantDef> constants,
-                     com.shimizukenta.secssim.app.session.HostReportTable hostReports) {
+                     com.shimizukenta.secssim.app.session.HostReportTable hostReports,
+                     com.shimizukenta.secssim.core.EngineClock clock,
+                     EcidValues ecidValues) {
         this.constants = constants;
         this.hostReports = hostReports;
+        this.clock = clock;
+        this.ecidValues = ecidValues;
+    }
+
+    /**
+     * 换一份常量取值器（热生效时整体替换）。
+     *
+     * @param values 取值器
+     */
+    void ecidValues(EcidValues values) {
+        this.ecidValues = values;
     }
 
     /**
@@ -243,9 +262,11 @@ final class HostCommandHandler {
 
         Secs2Builder b = Secs2.getBuilder();
 
+        long nowMs = this.clock == null ? 0L : this.clock.nowMs();
+
         if (requested.isEmpty()) {
             for (EquipmentConstantDef def : known) {
-                values.add(this.constantItem(def));
+                values.add(this.constantItem(def, nowMs));
             }
         } else {
             Map<Integer, EquipmentConstantDef> byId = new HashMap<>();
@@ -256,7 +277,7 @@ final class HostCommandHandler {
             for (int ecid : requested) {
                 EquipmentConstantDef def = byId.get(ecid);
                 /* 未知 ECID 回 0：不回会让主机等 T3，而设备其实"听到了但没这个常量" */
-                values.add(def == null ? b.uint4(0) : this.constantItem(def));
+                values.add(def == null ? b.uint4(0) : this.constantItem(def, nowMs));
             }
         }
 
@@ -271,7 +292,12 @@ final class HostCommandHandler {
      * @return 数据项
      * @throws Secs2Exception 构造失败
      */
-    private Secs2 constantItem(EquipmentConstantDef def) throws Secs2Exception {
+    private Secs2 constantItem(EquipmentConstantDef def, long nowMs) throws Secs2Exception {
+        EcidValues resolved = this.ecidValues;
+        if (resolved != null) {
+            /* 时间变化型在这里分流：S2F13 查到的必须是"此刻"的值 */
+            return resolved.encode(def.id(), nowMs);
+        }
         return switch (def.type()) {
             case U1 -> Secs2.getBuilder().uint1((long) def.value());
             case U2 -> Secs2.getBuilder().uint2((long) def.value());
@@ -377,6 +403,10 @@ final class HostCommandHandler {
             try {
                 ecid = Secs2Read.asInt(pair.get(0));
                 value = pair.get(1).getDouble(0);
+                if (this.ecidValues != null && this.ecidValues.isTimeVarying(ecid)) {
+                    /* 时间变化型常量写不了：写死一个新值下一秒又变了，语义自相矛盾 */
+                    return 1;
+                }
             } catch (Exception e) {
                 recordError(e);
                 return 2;

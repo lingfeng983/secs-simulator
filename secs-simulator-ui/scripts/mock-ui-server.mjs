@@ -47,8 +47,35 @@ http.createServer(async (req, res) => {
     if (path === '/api/v1/configs/line2.json') return json(res, { name: 'line2.json', modifiedMs: 2, text: JSON.stringify({
       schemaVersion: 5,
       session: { id: 'line2', passive: true, port: 5010, bindHost: '127.0.0.1', deviceId: 1 },
+      context: [
+        { id: 'LOTID', type: 'ASCII', source: { mode: 'cycle', pattern: 'LOT{03}', start: 1, every: 25 } },
+        { id: 'WAFERID', type: 'ASCII', source: { mode: 'cycle', pattern: 'W{03}', start: 1, every: 1 } },
+      ],
       equipment: { name: 'LINE2', idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 },
-        units: [{ unitId: 1, name: 'CH1', injectUnitId: false, svids: [{ offset: 1, slot: 'TEMP', type: 'F4', unit: 'C' }], reports: [], ceids: [] }] },
+        constants: [
+          { id: 501, name: 'TEMP_SP', type: 'F4', value: 180, unit: 'C' },
+          { id: 502, name: 'RAMP_RATE', type: 'F4', value: 8, unit: 'C/s' },
+        ],
+        globalCeids: [{ id: 1001, name: 'GLOBAL_READY', reports: ['CH1.RPT_TEMP'] }],
+        units: [{ unitId: 1, name: 'CH1', injectUnitId: false,
+          svids: [
+            { offset: 1, slot: 'TEMP', type: 'F4', unit: 'C', source: { mode: 'curve', clock: 'phase', curve: {
+              type: 'sequence', cyclic: false, segments: [
+                { durationMs: 20000, curve: { type: 'ramp', from: 20, to: 180, durationMs: 20000 } },
+                { durationMs: 10000, curve: { type: 'constant', value: 180 } },
+                { durationMs: 20000, curve: { type: 'sine', min: 175, max: 185, periodMs: 5000, phaseMs: 0 } },
+              ] } } },
+            { offset: 2, slot: 'PRESS', type: 'F4', unit: 'Pa' },
+            { offset: 3, slot: 'FLOW', type: 'F4', unit: 'sccm' },
+          ],
+          reports: [
+            { offset: 1, slot: 'RPT_TEMP', svids: ['TEMP', 'ecid.501', 'ctx.LOTID'] },
+            { offset: 2, slot: 'RPT_ALL', svids: ['TEMP', 'PRESS', 'FLOW'] },
+          ],
+          ceids: [
+            { offset: 1, slot: 'EVENT_TEMP', reports: ['RPT_TEMP'] },
+            { offset: 2, slot: 'EVENT_DONE', reports: [] },
+          ] }] },
     }) });
     if (path === '/api/v1/audit') return json(res, { audit: [{ at: 1700000000000, actor: 'dev', role: 'admin', action: 'trigger-ceid', target: 'line1', detail: 'ceid=2001 outcome=OK' }], limit: 200 });
     return json(res, {});

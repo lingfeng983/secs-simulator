@@ -25,14 +25,6 @@ export interface ExecutionMessage {
   elapsedMs?: number;
 }
 
-/** 台账里的一条 SVID 变化证据。 */
-export interface ExecutionEffect {
-  svid: number;
-  op: string;
-  before: number | null;
-  after: number | null;
-}
-
 /** 一条执行台账。 */
 export interface ExecutionRow {
   id: number;
@@ -44,9 +36,6 @@ export interface ExecutionRow {
   firedAt: number;
   status: ExecutionStatus;
   messages: ExecutionMessage[];
-  effects: ExecutionEffect[];
-  /** 发送全失败时的回滚标记：rolled_back / rollback_skipped。 */
-  rollback?: string;
   error: string;
 }
 
@@ -60,7 +49,6 @@ interface WireRow {
   firedAt: number;
   status: string;
   messages: unknown;
-  effects: unknown;
   error: string;
 }
 
@@ -72,18 +60,7 @@ function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** 后端 effects 可能是数组，也可能是带 rollback 标记的对象（发送失败回滚时）。 */
 function normalize(row: WireRow): ExecutionRow {
-  const effectsRaw = row.effects;
-  const wrapped = typeof effectsRaw === 'object' && effectsRaw !== null && !Array.isArray(effectsRaw)
-    ? effectsRaw as Record<string, unknown> : null;
-  const source = wrapped === null ? effectsRaw : wrapped.items;
-  const effects: ExecutionEffect[] = asArray(source).map((item) => ({
-    svid: asNumber(item.svid) ?? 0,
-    op: typeof item.op === 'string' ? item.op : '',
-    before: asNumber(item.before),
-    after: asNumber(item.after),
-  }));
   const messages: ExecutionMessage[] = asArray(row.messages).map((item) => ({
     kind: typeof item.kind === 'string' ? item.kind : '',
     stream: asNumber(item.stream) ?? undefined,
@@ -104,8 +81,6 @@ function normalize(row: WireRow): ExecutionRow {
     firedAt: row.firedAt,
     status,
     messages,
-    effects,
-    rollback: typeof wrapped?.rollback === 'string' ? wrapped.rollback : undefined,
     error: typeof row.error === 'string' ? row.error : '',
   };
 }
@@ -214,9 +189,6 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
       { header: '状态', value: (row) => row.status },
       { header: '试跑', value: (row) => (row.dryRun ? '是' : '否') },
       { header: '报文数', value: (row) => row.messages.length },
-      { header: 'SVID变化', value: (row) => row.effects.map((effect) =>
-        `${effect.svid} ${effect.before ?? '-'}→${effect.after ?? '-'}`).join(' | ') },
-      { header: '回滚', value: (row) => row.rollback ?? '' },
       { header: '错误', value: (row) => row.error },
     ]);
     const result = await saveTextFile('plan-executions.csv', csv, 'text/csv;charset=utf-8');

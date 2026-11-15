@@ -7,7 +7,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.app.log.Log;
@@ -20,9 +19,9 @@ import com.shimizukenta.secs.secs2.Secs2;
 /**
  * 采集事件上报（S6F11）。
  *
- * <p>所有触发路径（定时、条件、链式、手动）都从这里走一遍：施加计划效果、
- * 组装 S6F11、发出去。三件事放在一处，是为了让"效果只施加一次"这条语义
- * 不被各条路径搞乱。</p>
+ * <p>所有触发路径（定时、条件、链式、手动）都从这里走一遍：组装 S6F11、
+ * 发出去。<b>事件不改任何值</b>（schema v7）——报文体里的数值来自各个数据项
+ * 自己的 {@code source}，在组装那一刻求值。</p>
  */
 final class EventReporter {
 
@@ -44,9 +43,6 @@ final class EventReporter {
 
     /** S6F11 的 ACK 队列：W 位发送会阻塞到 S6F12 或 T3。 */
     private final java.util.function.Supplier<ExecutorService> ackSender;
-
-    /** 效果记录：计划里的值变化在这里落地。 */
-    private final com.shimizukenta.secssim.runtime.session.EventEffectStore effects;
 
     /**
      * 编排表。
@@ -87,13 +83,9 @@ final class EventReporter {
     /** 出错回调。 */
     private final java.util.function.Consumer<Exception> errorSink;
 
-    /** 读 SVID 当前值（台账的 before→after 证据；NaN = 取不到值）。 */
-    private volatile java.util.function.IntToDoubleFunction valueReader = svid -> Double.NaN;
-
     EventReporter(java.util.function.Supplier<S6F11Assembler> assembler,
                   java.util.function.Supplier<SecsCommunicator> communicator,
                   java.util.function.Supplier<ExecutorService> ackSender,
-                  com.shimizukenta.secssim.runtime.session.EventEffectStore effects,
                   java.util.function.Supplier<EventSchedule> schedule,
                   java.util.function.IntPredicate ceidEnabled,
                   Runnable recordSkipped,
@@ -106,7 +98,6 @@ final class EventReporter {
         this.assembler = assembler;
         this.communicator = communicator;
         this.ackSender = ackSender;
-        this.effects = effects;
         this.schedule = schedule;
         this.ceidEnabled = ceidEnabled;
         this.recordSkipped = recordSkipped;
@@ -116,19 +107,6 @@ final class EventReporter {
         this.wbit = wbit;
         this.sessionId = sessionId;
         this.errorSink = errorSink;
-    }
-
-    /**
-     * 挂 SVID 实时读值（台账的 before→after 证据）。
-     *
-     * <p>用 setter 而不是构造参数：构造签名是 2.x 起就被同包测试与其它
-     * 装配点引用的契约，扩参数会让只改了调用方的增量编译现场炸成
-     * {@code NoSuchMethodError}。</p>
-     *
-     * @param reader 读值回调；NaN 表示该 SVID 取不到值
-     */
-    void valueReader(java.util.function.IntToDoubleFunction reader) {
-        this.valueReader = reader == null ? svid -> Double.NaN : reader;
     }
 
     /** 已发条数。 */
@@ -181,14 +159,12 @@ final class EventReporter {
                             new com.shimizukenta.secssim.core.event.Trigger.Periodic(60_000L, 0L));
             long atMs = this.clock.getAsLong();
             executor.execute(effective, planId, ceid, atMs, comm, this.onlineCheck.getAsBoolean(),
-                    () -> this.applyPlanEffects(ceid, planId),
                     (ceidArg, atMsArg) -> this.assembler.get().build(ceidArg, atMsArg),
                     this.wbit.getAsBoolean());
             this.publishS6f11Notice(ceid, planId);
             return;
         }
 
-        this.applyPlanEffects(ceid, planId);
         this.publishS6f11Notice(ceid, planId);
 
         Secs2 body;
@@ -265,7 +241,6 @@ final class EventReporter {
         long atMs = this.clock.getAsLong();
         executor.step(target, planId, target.ceid(), atMs, this.communicator.get(),
                 this.onlineCheck.getAsBoolean(),
-                () -> this.applyPlanEffects(target.ceid(), planId),
                 (ceidArg, atMsArg) -> this.assembler.get().build(ceidArg, atMsArg),
                 this.wbit.getAsBoolean());
         this.publishS6f11Notice(target.ceid(), planId);
@@ -274,8 +249,8 @@ final class EventReporter {
     /**
      * 重连后按 FIFO 补跑离线队列（{@code offlinePolicy=queue}）。
      *
-     * <p>效果与报文体都按补跑时刻求值：这里给执行器的组装回调直接用
-     * {@code clock.nowMs()}，而不是排队时的 {@code atMs}。</p>
+     * <p>报文体按补跑时刻求值：这里给执行器的组装回调直接用当前时刻，
+     * 而不是排队时的 {@code atMs}。</p>
      */
     void replayPending() {
         PlanExecutor executor = this.planExecutor;
@@ -289,7 +264,6 @@ final class EventReporter {
         long now = this.clock.getAsLong();
         executor.flushPending(new PlanExecutor.Dependencies(
                 comm, true,
-                () -> { /* 效果由 EffectController 按实时计划施加 */ },
                 (ceidArg, atMsArg) -> this.assembler.get().build(ceidArg, now),
                 this.wbit.getAsBoolean()));
     }
@@ -326,103 +300,4 @@ final class EventReporter {
         this.notice.accept(com.shimizukenta.secssim.app.event.NoticeEvent.S6F11, b.object(pairs).toJson());
     }
 
-    /**
-     * 施加计划的值效果（schema v6）。
-     *
-     * <p>emit 是全部触发路径（定时/条件/链式/手动）的公共入口，
-     * 效果也只在这里施加一次:手动触发同样生效。计划被禁用时效果不施加
-     * （编排表来自 {@code previewSchedule}，已排除禁用项）。</p>
-     *
-     * <p>计划身份已知时只施加该计划的效果——同一 CEID 下允许多条计划
-     * （周期 + 条件、多台单元），按 CEID 取并集会把另一条计划的效果也带进来。
-     * 手动触发（{@code planId == null}）没有计划上下文，保持该 CEID 全部
-     * 启用计划取并集。</p>
-     */
-    private EffectBatch applyPlanEffects(int ceid, String planId) {
-        long now = this.clock.getAsLong();
-        boolean matched = false;
-        List<String> evidence = new ArrayList<>();
-        List<EffectBatch.Touch> touches = new ArrayList<>();
-        java.util.Set<Integer> seenSvids = new java.util.HashSet<>();
-        boolean rollbackable = true;
-        for (EventPlan plan : this.schedule.get().plans()) {
-            if (plan.ceid() != ceid) {
-                continue;
-            }
-            if (planId != null && !plan.id().equals(planId)) {
-                continue;
-            }
-            matched = true;
-            for (EventEffect effect : plan.effects()) {
-                int svid = effect.svid();
-                double before = this.valueReader.applyAsDouble(svid);
-                EventEffectStore.Applied handle = this.effects.applyTracked(svid, effect, now);
-                double after = this.valueReader.applyAsDouble(svid);
-                long versionAfter = this.effects.version(svid);
-                /* 只有 set/add 可逆；同一 SVID 被本次多条效果触碰也无法精确摘除 */
-                if ((effect.op() != EventEffect.Op.SET && effect.op() != EventEffect.Op.ADD)
-                        || !seenSvids.add(svid)) {
-                    rollbackable = false;
-                }
-                touches.add(new EffectBatch.Touch(svid, handle, versionAfter));
-                evidence.add("{\"svid\":" + svid
-                        + ",\"op\":\"" + effect.op().name().toLowerCase(java.util.Locale.ROOT) + '"'
-                        + ",\"before\":" + number(before)
-                        + ",\"after\":" + number(after)
-                        + ",\"value\":" + number(effect.value()) + "}");
-            }
-        }
-        if (planId != null && !matched) {
-            /* 触发方与效果源看到的不是同一张编排表：不报出来就是“事件发了、值不动” */
-            Log.warn("会话 " + this.sessionId + " 触发计划 " + planId
-                    + "（CEID " + ceid + "）时编排表中没有它，效果未施加");
-        }
-        return new EffectBatch("[" + String.join(",", evidence) + "]",
-                touches, rollbackable && !touches.isEmpty());
-    }
-
-    /** 供执行器的 EffectController 调用：施加并返回台账证据。 */
-    PlanExecutor.EffectResult applyTracked(int ceid, String planId) {
-        EffectBatch batch = this.applyPlanEffects(ceid, planId);
-        return new PlanExecutor.EffectResult(batch.json, batch, batch.rollbackable);
-    }
-
-    /** 仅当此后没有别的 fire 触碰过这些 SVID 才撤销本次 set/add 效果。 */
-    String rollback(Object token) {
-        if (!(token instanceof EffectBatch batch) || !batch.rollbackable) {
-            return "rollback_skipped";
-        }
-        for (EffectBatch.Touch touch : batch.touches) {
-            if (this.effects.version(touch.svid) != touch.versionAfter) {
-                return "rollback_skipped";
-            }
-        }
-        for (EffectBatch.Touch touch : batch.touches) {
-            if (!this.effects.removeIfUntouched(touch.svid, touch.handle, touch.versionAfter)) {
-                return "rollback_skipped";
-            }
-        }
-        return "rolled_back";
-    }
-
-    private static String number(Double value) {
-        return value == null || !Double.isFinite(value) ? "null" : value.toString();
-    }
-
-    /** 一次效果施加的回滚凭据（同包可见，供执行器 token 使用）。 */
-    static final class EffectBatch {
-        /** 单个 SVID 的施加句柄与代际快照。 */
-        record Touch(int svid, EventEffectStore.Applied handle, long versionAfter) {
-        }
-
-        private final String json;
-        private final List<Touch> touches;
-        private final boolean rollbackable;
-
-        private EffectBatch(String json, List<Touch> touches, boolean rollbackable) {
-            this.json = json;
-            this.touches = List.copyOf(touches);
-            this.rollbackable = rollbackable;
-        }
-    }
 }

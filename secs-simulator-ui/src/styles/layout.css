@@ -543,12 +543,17 @@ body.sidenav-resizing .app-body {
 .nav-subpages {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   margin: 0 0 0.25rem 1.5rem;
   padding-left: 0.4rem;
   border-left: 1px solid var(--line);
 }
 
 .nav-subpage {
+  /* 全局 button 是 inline-flex + justify-content:center，只写 text-align:left
+     管不住 flex 子项：文字仍会居中。展开的子菜单必须贴着左侧竖线左对齐。 */
+  justify-content: flex-start;
+  width: 100%;
   padding: 0.18rem 0.45rem;
   border: 0;
   border-radius: var(--radius-sm);

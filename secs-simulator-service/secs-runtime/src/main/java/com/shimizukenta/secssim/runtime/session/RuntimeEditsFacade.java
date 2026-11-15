@@ -18,19 +18,19 @@ final class RuntimeEditsFacade {
     /** 设备模型（判断 SVID 是否存在）。 */
     private final java.util.function.Supplier<com.shimizukenta.secssim.core.compile.ResolvedEquipment> model;
 
-    /** 效果叠加层（钉值落在这一层）。 */
-    private final java.util.function.Supplier<EffectValueSource> effectValues;
+    /** 「设定」覆盖层（钉值落在这一层）。 */
+    private final java.util.function.Supplier<PinnedValueSource> pinnedValues;
 
     RuntimeEditsFacade(RuntimeCatalog catalog,
                         java.util.function.Supplier<com.shimizukenta.secssim.core.compile.ResolvedEquipment> model,
-                        java.util.function.Supplier<EffectValueSource> effectValues) {
+                        java.util.function.Supplier<PinnedValueSource> pinnedValues) {
         this.catalog = catalog;
         this.model = model;
-        this.effectValues = effectValues;
+        this.pinnedValues = pinnedValues;
     }
 
     /**
-     * 「设定」一个状态变量的值：钉住,覆盖曲线与事件效果,直到取消设定或热重载。
+     * 「设定」一个状态变量的值：钉住，覆盖该变量的值定义，直到取消设定或热重载。
      *
      * @param svid  绝对 SVID
      * @param value 设定值
@@ -40,7 +40,7 @@ final class RuntimeEditsFacade {
         if (!this.model.get().svids().containsKey(svid)) {
             return false;
         }
-        this.effectValues.get().pin(svid, value);
+        this.pinnedValues.get().pin(svid, value);
         return true;
     }
 
@@ -51,7 +51,7 @@ final class RuntimeEditsFacade {
      * @return 原来是否有设定
      */
     boolean unpinSvidValue(int svid) {
-        return this.effectValues.get().unpin(svid);
+        return this.pinnedValues.get().unpin(svid);
     }
 
     /**
@@ -61,7 +61,7 @@ final class RuntimeEditsFacade {
      * @return 已设定返回 {@code true}
      */
     boolean isSvidPinned(int svid) {
-        return this.effectValues.get().isPinned(svid);
+        return this.pinnedValues.get().isPinned(svid);
     }
 
     /** 新增一个 RPTID 定义。 */

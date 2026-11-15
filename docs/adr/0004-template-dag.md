@@ -1,6 +1,7 @@
 # ADR 0004 · 模板 DAG 与受限表达式
 
-- 状态：已接受
+- 状态：**已被 [ADR 0020](0020-single-source-value-model.md) 取代**（模板图、实例绑定、直配已随 schema v7 删除；受限表达式保留，现服务于值定义 `mode:"expr"` 与 `transform`）
+- 状态（原）：已接受
 - 日期：M3
 - 影响范围：`secs-core` 的 `template`
 

@@ -92,7 +92,7 @@ function renderPanel(backend: BackendController): string {
 describe('DeviceOpsPanel 渲染契约', () => {
   it('merges overview and session data into one table', () => {
     const html = renderPanel(makeBackend());
-    /* 一张表:读数(端口/速率)与操作(重载/启动·停止)同处一行 */
+    /* 一张表:读数(端口/速率)与操作(重启/启动·停止)同处一行 */
     /* 标题行已删：名字只留在无障碍树上，页面上不再占一行 */
     expect(html).toContain('aria-label="设备与会话"');
     expect(html).not.toContain('panel-head');
@@ -119,7 +119,7 @@ describe('DeviceOpsPanel 渲染契约', () => {
     expect(html).not.toContain('>单元</th>');
     /* 但信息没丢:四态徽标的 title 里带着会话/控制状态 */
     expect(html).toContain('（OPEN · 在线）');
-    expect(html).toContain('重载');
+    expect(html).toContain('重启');
     expect(html).toContain('停止');
     /* 上线/下线只在链路建起来之后才出现：离线那行给「上线」，在线那行给「下线」 */
     expect(html).toContain('>上线</button>');
@@ -145,7 +145,7 @@ describe('DeviceOpsPanel 渲染契约', () => {
     /* 没勾选时不显示"已选 N 台"，只留按钮本身 */
     expect(html).not.toContain('已选 0 台');
     expect(html).toContain('批量同步配置');
-    expect(html).toContain('批量重载');
+    expect(html).toContain('批量重启');
     expect(html).toContain('批量停止');
     expect(html).toContain('批量删除');
     expect(html).not.toContain('批量上报');
@@ -178,6 +178,9 @@ describe('DeviceOpsPanel 渲染契约', () => {
     const html = renderPanel(backend);
     expect(html).toContain('>启动</button>');
     expect(html).not.toContain('>停止</button>');
+    /* 「重启」位置常在，但停止的设备上是灰的：不能点，也不消失 */
+    expect(html).toContain('>重启</button>');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>重启<\/button>/);
   });
 
   it('renders idle database devices as stopped rows without session actions', () => {
@@ -190,6 +193,8 @@ describe('DeviceOpsPanel 渲染契约', () => {
     const html = renderPanel(backend);
     expect(html).toContain('demo-etch');
     expect(html).toContain('按已保存的设备配置创建会话');
+    /* 未启动的库内设备也有「重启」一格（灰的），位置与会话行一致 */
+    expect((html.match(/>重启<\/button>/g) ?? []).length).toBe(3);
     /* 两个会话行 + 一台库内设备，都有勾选框 */
     expect((html.match(/aria-label="选择 /g) ?? []).length).toBe(3);
   });

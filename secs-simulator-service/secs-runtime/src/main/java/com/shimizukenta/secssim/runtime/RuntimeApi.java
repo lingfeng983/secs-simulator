@@ -545,9 +545,11 @@ final class RuntimeApi {
                         com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
                 java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> events =
                         java.util.List.of();
-                if (withEvents && !config.schedule().plans().isEmpty()) {
+                /* 周期事件在构建期按片展开：预览与启动必须看同一张表 */
+                com.shimizukenta.secssim.core.event.EventSchedule schedule = config.effectiveSchedule();
+                if (withEvents && !schedule.plans().isEmpty()) {
                     events = com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
-                                    config.schedule(), values, config.spec().seed(), fromMs, toMs,
+                                    schedule, values, config.spec().seed(), fromMs, toMs,
                                     com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS)
                             .stream()
                             .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
@@ -566,10 +568,9 @@ final class RuntimeApi {
             Log.error("配置草稿预览参数无效: " + e.getMessage(), e);
             return null;
         } catch (com.shimizukenta.secssim.app.config.ConfigException
-                | com.shimizukenta.secssim.core.template.GraphException
                 | com.shimizukenta.secssim.core.template.ExpressionException e) {
-            /* 草稿的语法/字段/模板表达式错误都属于用户输入，继续映射为 null（422）。
-               模板参数引用只在求值期才暴露（图构建期不校验 p.*），必须一起接住，
+            /* 草稿的语法/字段/表达式错误都属于用户输入，继续映射为 null（422）。
+               表达式里的 p.* 引用只在求值期才暴露（解析期不校验），必须一起接住，
                否则用户写错一个参数会看到 500 而不是"配置非法" */
             Log.error("配置草稿预览失败: " + e.getMessage(), e);
             return null;

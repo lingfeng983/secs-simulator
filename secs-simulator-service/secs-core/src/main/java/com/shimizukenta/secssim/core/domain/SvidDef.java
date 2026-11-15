@@ -7,6 +7,10 @@ package com.shimizukenta.secssim.core.domain;
  * 这样同一份单元模板可以被多个单元复用，各自解析到不同号段。
  * </p>
  *
+ * <p>这个记录<b>只描述变量本身</b>（编号、名字、类型、单位、值域）。
+ * 它怎么随时间变化，是配置层的事：一份 {@code source} 挂在变量绝对 ID 上，
+ * 与定义分开存，所以定义可以被多个单元复用而各自有各自的值。</p>
+ *
  * @param offset     段内偏移，≥ 1
  * @param slot       符号名（如 {@code TEMP_PV}），在单元内唯一
  * @param type       数据类型
@@ -14,25 +18,9 @@ package com.shimizukenta.secssim.core.domain;
  * @param decimals   显示小数位，≥ 0
  * @param min        值域下界
  * @param max        值域上界
- * @param source     直配值来源（schema v6，可选；{@code null} 用默认曲线）
  */
-public record SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min, double max,
-                      DirectSource source) {
-
-    /**
-     * 兼容旧调用的构造：不配值来源。
-     *
-     * @param offset     段内偏移
-     * @param slot       符号名
-     * @param type       类型
-     * @param unitSymbol 单位
-     * @param decimals   小数位
-     * @param min        下界
-     * @param max        上界
-     */
-    public SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min, double max) {
-        this(offset, slot, type, unitSymbol, decimals, min, max, null);
-    }
+public record SvidDef(int offset, String slot, ValueType type, String unitSymbol, int decimals, double min,
+                      double max) {
 
     /**
      * 校验并创建。

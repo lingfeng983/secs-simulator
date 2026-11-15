@@ -1,11 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
-import {
-  DEVICE_STATUS_LABEL,
-  DEVICE_STATUS_TONE,
-  deviceStatus,
-  deviceStatusHint,
-} from '../../shared/lib/deviceStatus';
+import { deviceStatus } from '../../shared/lib/deviceStatus';
 import { EventsPanel } from '../panels/EventsPanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
 import { ConfigPanel } from '../panels/ConfigPanel';
@@ -14,10 +9,12 @@ import { StructurePanel } from '../panels/StructurePanel';
 import { SendPanel } from '../panels/SendPanel';
 import { ConstantsConfigPanel } from '../panels/ConstantsConfigPanel';
 import { SvidConfigPanel } from '../panels/SvidConfigPanel';
+import { ContextConfigPanel } from '../panels/ContextConfigPanel';
 import { CeidReportConfigPanel } from '../panels/CeidReportConfigPanel';
 import { PlanConfigPanel } from '../panels/PlanConfigPanel';
-import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
+import { EndpointTag, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
+import { useDeviceEndpoint } from '../../state/deviceEndpoint';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -30,8 +27,10 @@ import {
 } from '../../app/router';
 
 /**
- * 单设备详情页——两段式（设计 §3.2）：实例头 + 配置区 / 运行区。
+ * 单设备详情页——两段式（设计 §3.2）：一条操作栏 + 配置区 / 运行区。
  * 配置区改「这台设备是什么」（保存后需重载），运行区操作当前运行。
+ * 页面不按设备状态分家：没启动的设备同样有配置区与运行区两套页，
+ * 只是运行区的数据要等启动之后才有。
  * 进入设备页就把该会话钉为全局 activeSession——现有面板全部按
  * "当前会话"取数，钉住之后零改动复用。
  */
@@ -57,6 +56,13 @@ export function DevicePage({
   const configOnlyName = configOnly?.name ?? '';
   const configName = summary?.config ?? configOnlyName;
   const [busy, setBusy] = useState(false);
+  /* 监听端点：配置 session 段的 绑定地址 / 端口 / Device ID。
+     端口先用总览里的数兜底，配置读回来后再补上地址与 Device ID。 */
+  const endpoint = useDeviceEndpoint(
+    backend,
+    configName,
+    backend.overview.find((row) => row.id === sessionId)?.port,
+  );
 
   /* 四态判据统一走 deviceStatus：设备页头、侧栏、设备清单必须说同一句话 */
   const status = isConfigOnly ? deviceStatus({ state: 'CLOSED' }) : deviceStatus(summary ?? {});
@@ -123,86 +129,78 @@ export function DevicePage({
   const pages = zone === 'config'
     ? DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id], note: DEVICE_CONFIG_PAGE_NOTES[id] }))
     : DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], note: DEVICE_RUNTIME_PAGE_NOTES[id] }));
+  /* 标题行不展示了，设备名仍要能被读屏与自动化认出来：挂在页面根节点的 aria-label 上 */
+  const deviceLabel = summary?.device
+    ?? (isConfigOnly ? configOnlyName : sessionId).replace(/\.json$/i, '');
 
   return (
-    <div className="panel-stack">
-      <InstanceHead
-        title={summary?.device ?? (isConfigOnly ? configOnlyName.replace(/\.json$/i, '') : sessionId)}
-        badge={
-          <span className={`badge tone-${DEVICE_STATUS_TONE[status]}`} title={deviceStatusHint(status)}>
-            {DEVICE_STATUS_LABEL[status]}
-          </span>
-        }
-        subtitle={
-          <>
-            <span className="mono">{summary?.id ?? (isConfigOnly ? configOnlyName : sessionId)}</span> · {DEVICE_STATUS_LABEL[status]}
-            {isConfigOnly ? ` · 配置 ${configOnlyName}` : ''}
-            {summary?.units !== undefined ? ` · ${summary.units} 个单元` : ''}
-            {summary?.lastError ? <span className="danger"> · {summary.lastError}</span> : ''}
-          </>
-        }
-        metrics={[
-          { label: '设备状态', value: DEVICE_STATUS_LABEL[status] },
-          { label: '单元数', value: summary?.units ?? '—' },
-          { label: '累计上报', value: summary?.counters.emitted ?? '—' },
-        ]}
-        actions={
-          <>
-            {status === 'stopped' ? (
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={startDevice}
-                title={isConfigOnly
-                  ? '按已保存的设备配置创建会话并启动端口监听'
-                  : '启动端口监听：主机随后可以连上来'}
-              >
-                启动设备
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="danger"
-                disabled={busy}
-                onClick={stopDevice}
-                title="停止端口监听：链路断开、端口释放，设备仍保留在设备清单里"
-              >
-                停止设备
-              </button>
-            )}
-            {status === 'offline' && (
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => setOnline(true)}
-                title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
-              >
-                上线
-              </button>
-            )}
-            {status === 'online' && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setOnline(false)}
-                title="设备下线（等价主机发 S1F15）：主动上报立即停止"
-              >
-                下线
-              </button>
-            )}
-          </>
-        }
-        zoneSwitch={
-          <ZoneSwitch
-            zone={zone}
-            onChange={(next) => goTo?.(`device-zone:${sessionId}:${next}`)}
-            configNote="▣ 修改的是设备定义;保存后需重载才会进入运行。"
-            runtimeNote="◉ 这里的操作只对本次运行有效;重载后按配置恢复。"
+    <div className="panel-stack device-page" role="region" aria-label={`设备 ${deviceLabel}`} data-device={deviceLabel}>
+      {/* 标题行已删：设备名在页签与侧栏里都有，状态在设备清单里看。
+          这一行只留两件事——切配置区/运行区、对这台设备动手。 */}
+      <div className="detail-bar">
+        <ZoneSwitch
+          zone={zone}
+          onChange={(next) => goTo?.(`device-zone:${sessionId}:${next}`)}
+          configNote="▣ 修改的是设备定义;保存后需重启设备才会进入运行。"
+          runtimeNote="◉ 这里的操作只对本次运行有效;重启后按配置恢复。"
+        />
+        {endpoint !== null && (
+          <EndpointTag
+            label="监听"
+            host={endpoint.host}
+            port={endpoint.port}
+            deviceId={endpoint.deviceId}
+            hint="监听地址：本机在哪个地址/端口等主机连进来，以及本设备的 Device ID（改配置后需重启设备生效）"
           />
-        }
-      />
+        )}
+        <span className="spacer" aria-hidden="true" />
+        <div className="detail-actions">
+          {status === 'stopped' ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={startDevice}
+              title={isConfigOnly
+                ? '按已保存的设备配置创建会话并启动端口监听'
+                : '启动端口监听：主机随后可以连上来'}
+            >
+              启动设备
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={stopDevice}
+              title="停止端口监听：链路断开、端口释放，设备仍保留在设备清单里"
+            >
+              停止设备
+            </button>
+          )}
+          {status === 'offline' && (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => setOnline(true)}
+              title="设备上线（等价主机发 S1F17）：上线后事件才按规则上报"
+            >
+              上线
+            </button>
+          )}
+          {status === 'online' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setOnline(false)}
+              title="设备下线（等价主机发 S1F15）：主动上报立即停止"
+            >
+              下线
+            </button>
+          )}
+        </div>
+      </div>
 
       <SubTabs
         pages={pages}
@@ -224,6 +222,9 @@ export function DevicePage({
         {zone === 'config' && page === 'svids' && (
           <SvidConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
+        {zone === 'config' && page === 'context' && (
+          <ContextConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+        )}
         {zone === 'config' && page === 'events' && (
           <CeidReportConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
@@ -240,10 +241,13 @@ export function DevicePage({
           <DeviceRevisionsPanel {...baseProps} sessionId={sessionId} configName={configName} />
         )}
 
+        {/* 未启动的设备照样有运行区这几页：页面骨架不随状态变，
+            只是运行数据要等设备启动后才有——所以放在页面内容区里说清楚，
+            而不是把整个运行区换成一个"设备未启动"的独立页面。 */}
         {zone === 'runtime' && isConfigOnly && (
           <div className="empty-zone" role="status">
-            <strong>设备未启动</strong>
-            <div>运行态页面要等设备启动后才有数据；先到配置区检查定义，或点「启动设备」。</div>
+            <strong>运行区 · {pages.find((item) => item.id === page)?.label ?? '运行'}</strong>
+            <div>这台设备还没有启动，运行数据要等它启动后才产生；配置区的定义随时可改。</div>
             <div style={{ marginTop: 10 }}>
               <button type="button" className="primary" disabled={busy} onClick={startDevice}>
                 启动设备
@@ -276,11 +280,7 @@ function DeviceOverviewPanel({
   /* 未启动的库内设备没有会话行：设备名退回配置文件名（去 .json） */
   const deviceLabel = summary?.device ?? configName.replace(/\.json$/i, '');
   return (
-    <Panel
-      id="panel-overview"
-      title="概览"
-      description="这台设备的身份与配置来源；改名、连接、变量、事件等编辑在配置区其它子页，保存后需重载生效。"
-    >
+    <Panel id="panel-overview" title="概览" headless>
       <table className="effects-table">
         <tbody>
           <tr><th>会话 id</th><td className="mono">{summary?.id ?? '—（未启动）'}</td></tr>

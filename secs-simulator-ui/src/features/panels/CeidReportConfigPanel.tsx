@@ -6,15 +6,25 @@ import {
   GlobalCeidsForm,
   nextId,
 } from '../editors/ConfigFormEditor';
-import { RefMultiSelect, type RefChoice } from '../editors/RefMultiSelect';
+import { RefDropdownSelect, type RefChoice } from '../editors/RefDropdownSelect';
+import { mergeReportFields, splitReportFields, type ReportFieldGroup } from '../editors/reportFields';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
-import { isJsonObject, numberField, readObjectArray, stringField, type JsonObject } from '../editors/templateConfig';
+import {
+  collectContexts,
+  collectEcids,
+  isJsonObject,
+  numberField,
+  readObjectArray,
+  stringField,
+  type JsonObject,
+} from '../editors/templateConfig';
 
 /**
  * 设备 · 配置区 · 事件与报告（CEID / RPT 定义）。
  *
- * <p>报告（RPT）引用本单元 SVID 的槽位名，事件（CEID）引用报告名
- * （全局 CEID 引用「单元名.报告名」）。三类定义都在这一页改，
+ * <p>报告（RPT）的字段可以引用三类数据：本单元 SVID 的槽位名、
+ * 设备常量 {@code ecid.<编号>}、晶圆属性 {@code ctx.<名>}；事件（CEID）
+ * 引用报告名（全局 CEID 引用「单元名.报告名」）。三类定义都在这一页改，
  * 写入配置草稿，「校验」→「保存」后相关会话自动重载。</p>
  */
 export function CeidReportConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
@@ -26,11 +36,6 @@ export function CeidReportConfigPanel(props: PanelBaseProps & { sessionId?: stri
       configName={configName}
       panelId="panel-ceid-report-config"
       title="事件与报告（CEID / RPT 定义）"
-      description={
-        '报告（RPT）= 一组 SVID 槽位名；事件（CEID）= 一组报告名。\n'
-        + '单元报告 / 单元事件用 offset 换算绝对 id；全局事件跨单元引用要写「单元名.报告名」。\n'
-        + '改动写入配置草稿，「校验」→「保存」后相关会话自动重载。'
-      }
     >
       {({ root, edit }) => (
         isJsonObject(root.equipment)
@@ -66,7 +71,7 @@ function UnitForms({ root, edit }: {
     <>
       {units.map((unit, index) => (
         <div key={index} className="cfg-section">
-          <UnitReportsForm unit={unit} unitIndex={index} edit={edit} />
+          <UnitReportsForm unit={unit} unitIndex={index} root={root} edit={edit} />
           <UnitCeidsForm unit={unit} unitIndex={index} edit={edit} />
         </div>
       ))}
@@ -90,14 +95,18 @@ function unitMutator(edit: (mutate: (root: JsonObject) => void) => void, unitInd
   };
 }
 
-function UnitReportsForm({ unit, unitIndex, edit }: {
+function UnitReportsForm({ unit, unitIndex, root, edit }: {
   unit: JsonObject;
   unitIndex: number;
+  root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
 }): JSX.Element {
   const list = readObjectArray(unit, 'reports', 'unit');
   const unitName = stringField(unit, 'name', `unit${unitIndex + 1}`);
   const mutateUnit = unitMutator(edit, unitIndex);
+  const svidChoices = unitSvidChoices(unit);
+  const ecidChoices = unitEcidChoices(root);
+  const ctxChoices = unitCtxChoices(root);
 
   return (
     <div className="template-card">
@@ -123,58 +132,79 @@ function UnitReportsForm({ unit, unitIndex, edit }: {
       {typeof list === 'string' ? (
         <p className="problems">{unitName}.reports {list}</p>
       ) : list.length === 0 ? (
-        <p className="hint">这个单元还没有报告。报告引用同单元 SVID 的槽位名。</p>
+        <p className="hint">这个单元还没有报告。报告可以引用 SVID、设备常量与晶圆属性。</p>
       ) : (
         <>
-          <FormGridHead columns={['offset', '报告名', 'SVID 槽位（勾选引用）']} />
-          {list.map((item, index) => (
-            <FormRow
-              key={index}
-              cols={3}
-              onRemove={() => mutateUnit((target) => {
-                if (Array.isArray(target.reports)) {
-                  (target.reports as unknown[]).splice(index, 1);
-                }
-              })}
-            >
-              <label className="field field-cell">
-                <span className="field-cell-name">offset</span>
-                <NumberField
-                  value={numberField(item, 'offset')}
-                  integer
-                  onCommit={(next) => mutateUnit((target) => {
-                    const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
-                    if (isJsonObject(items[index])) {
-                      items[index].offset = next;
-                    }
-                  })}
-                />
-              </label>
-              <label className="field field-cell">
-                <span className="field-cell-name">报告名</span>
-                <TextField
-                  value={stringField(item, 'slot')}
-                  onCommit={(next) => mutateUnit((target) => {
-                    const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
-                    if (isJsonObject(items[index])) {
-                      items[index].slot = next;
-                    }
-                  })}
-                />
-              </label>
-              <RefMultiSelect
-                choices={unitSvidChoices(unit)}
-                values={stringListOf(item, 'svids')}
-                onChange={(next) => mutateUnit((target) => {
-                  const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
-                  if (isJsonObject(items[index])) {
-                    items[index].svids = next;
+          <FormGridHead columns={['offset', '报告名', 'SVID', '设备常量', '晶圆属性']} />
+          {list.map((item, index) => {
+            const fields = splitReportFields(stringListOf(item, 'svids'));
+            const writeFields = (group: ReportFieldGroup, next: string[]) => mutateUnit((target) => {
+              const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
+              if (isJsonObject(items[index])) {
+                items[index].svids = mergeReportFields(stringListOf(items[index], 'svids'), group, next);
+              }
+            });
+            return (
+              <FormRow
+                key={index}
+                cols={5}
+                onRemove={() => mutateUnit((target) => {
+                  if (Array.isArray(target.reports)) {
+                    (target.reports as unknown[]).splice(index, 1);
                   }
                 })}
-                emptyHint="这个单元还没有 SVID，先到「变量配置」页添加"
-              />
-            </FormRow>
-          ))}
+              >
+                <label className="field field-cell">
+                  <span className="field-cell-name">offset</span>
+                  <NumberField
+                    value={numberField(item, 'offset')}
+                    integer
+                    onCommit={(next) => mutateUnit((target) => {
+                      const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
+                      if (isJsonObject(items[index])) {
+                        items[index].offset = next;
+                      }
+                    })}
+                  />
+                </label>
+                <label className="field field-cell">
+                  <span className="field-cell-name">报告名</span>
+                  <TextField
+                    value={stringField(item, 'slot')}
+                    onCommit={(next) => mutateUnit((target) => {
+                      const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
+                      if (isJsonObject(items[index])) {
+                        items[index].slot = next;
+                      }
+                    })}
+                  />
+                </label>
+                <RefDropdownSelect
+                  label="SVID"
+                  choices={svidChoices}
+                  values={fields.svid}
+                  onChange={(next) => writeFields('svid', next)}
+                  emptyHint="这个单元还没有 SVID，先到「变量配置」页添加"
+                />
+                <RefDropdownSelect
+                  label="设备常量"
+                  choices={ecidChoices}
+                  values={fields.ecid}
+                  onChange={(next) => writeFields('ecid', next)}
+                  emptyHint="还没有设备常量，先到「设备常量」页添加"
+                />
+                <RefDropdownSelect
+                  label="晶圆属性"
+                  align="right"
+                  choices={ctxChoices}
+                  values={fields.ctx}
+                  onChange={(next) => writeFields('ctx', next)}
+                  emptyHint="还没有晶圆属性，先到「晶圆属性」页添加"
+                />
+              </FormRow>
+            );
+          })}
+          <p className="hint">上报顺序：先 SVID，再设备常量，最后晶圆属性；列内按勾选先后，下拉里可全选。</p>
         </>
       )}
     </div>
@@ -253,7 +283,9 @@ function UnitCeidsForm({ unit, unitIndex, edit }: {
                   })}
                 />
               </label>
-              <RefMultiSelect
+              <RefDropdownSelect
+                label="引用报告"
+                align="right"
                 choices={unitReportChoices(unit)}
                 values={stringListOf(item, 'reports')}
                 onChange={(next) => mutateUnit((target) => {
@@ -277,18 +309,35 @@ function stringListOf(item: JsonObject, key: string): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
-/** 本单元的 SVID 槽位名清单（报告引用的候选）。 */
+/**
+ * 本单元报告的三类候选，各占一列：SVID 槽位名 / 设备常量 ecid.<编号> /
+ * 晶圆属性 ctx.<名>。报文里它们只是「字段」，顺序就是勾选顺序
+ * （跨列顺序由 mergeReportFields 归一：SVID → 设备常量 → 晶圆属性）。
+ */
 function unitSvidChoices(unit: JsonObject): RefChoice[] {
   const list = readObjectArray(unit, 'svids', 'unit');
   if (typeof list === 'string') {
     return [];
   }
-  return list
-    .map((item) => {
-      const slot = stringField(item, 'slot');
-      return { value: slot, label: slot === '' ? `offset ${numberField(item, 'offset') ?? '?'}` : slot };
-    })
-    .filter((choice) => choice.value !== '');
+  const out: RefChoice[] = [];
+  for (const item of list) {
+    const slot = stringField(item, 'slot');
+    if (slot !== '') {
+      out.push({ value: slot, label: slot });
+    }
+  }
+  return out;
+}
+
+function unitEcidChoices(root: JsonObject): RefChoice[] {
+  return collectEcids(root).map((ecid) => ({
+    value: `ecid.${ecid.id}`,
+    label: `ecid.${ecid.id}${ecid.name === '' ? '' : `（${ecid.name}）`}`,
+  }));
+}
+
+function unitCtxChoices(root: JsonObject): RefChoice[] {
+  return collectContexts(root).map((context) => ({ value: `ctx.${context.id}` }));
 }
 
 /** 本单元的报告名清单（事件引用的候选）。 */

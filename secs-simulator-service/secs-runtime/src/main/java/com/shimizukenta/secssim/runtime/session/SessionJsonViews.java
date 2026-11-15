@@ -29,31 +29,6 @@ final class SessionJsonViews {
     private SessionJsonViews() {
     }
 
-    /** 事件效果数组(v6):结构与配置文件一致,前端编辑器可直接回填。 */
-    private static JsonHub effectsJson(Iterable<com.shimizukenta.secssim.core.event.EventEffect> effects,
-                                       JsonHubBuilder b) {
-        List<JsonHub> items = new ArrayList<>();
-        for (com.shimizukenta.secssim.core.event.EventEffect effect : effects) {
-            List<JsonObjectPair> pairs = new ArrayList<>();
-            pairs.add(b.pair("svid", effect.svid()));
-            pairs.add(b.pair("op", effect.op().name().toLowerCase(java.util.Locale.ROOT)));
-            if (effect.value() != null) {
-                pairs.add(b.pair("value", effect.value()));
-            }
-            if (effect.delta() != null) {
-                pairs.add(b.pair("delta", effect.delta()));
-            }
-            if (effect.holdMs() != null) {
-                pairs.add(b.pair("holdMs", effect.holdMs()));
-            }
-            if (effect.decayMs() != null) {
-                pairs.add(b.pair("decayMs", effect.decayMs()));
-            }
-            items.add(b.object(pairs));
-        }
-        return b.array(items);
-    }
-
     /**
      * 一条计划的运行态。
      *
@@ -142,9 +117,6 @@ final class SessionJsonViews {
                 pairs.add(b.pair("lastError", stat.lastError() == null ? "" : stat.lastError()));
             }
             triggerJson(plan.trigger(), pairs, b);
-            if (!plan.effects().isEmpty()) {
-                pairs.add(b.pair("effects", effectsJson(plan.effects(), b)));
-            }
             events.add(b.object(pairs));
         }
 

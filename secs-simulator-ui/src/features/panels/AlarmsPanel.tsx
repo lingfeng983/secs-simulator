@@ -65,7 +65,7 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
     <Panel
       id="panel-alarms"
       title="报警"
-      description="向主机发送 S5F1（带 W 位，等待 S5F2），可对同一组参数做报警风暴。"
+      headless
       actions={
         <>
           <button

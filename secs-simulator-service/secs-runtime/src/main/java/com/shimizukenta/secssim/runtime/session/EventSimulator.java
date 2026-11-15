@@ -67,46 +67,44 @@ public final class EventSimulator {
     /**
      * 模拟区间内的全部触发，按时间升序。
      *
+     * <p>事件只上报、不改值（schema v7），所以预览只需回放「谁在什么时候触发」；
+     * 曲线一律由数据项自己的 {@code source} 求值，与运行时同一条路径。</p>
+     *
      * @param schedule  编排表
-     * @param base      基线值来源（不带效果层）
+     * @param values    值来源（条件表达式求值用）
      * @param seed      数据种子（抖动与运行时同源）
      * @param fromMs    起始（模拟时钟）
      * @param toMs      结束
      * @param maxEvents 事件上限
      * @return 触发列表
      */
-    public static List<SimFire> simulate(EventSchedule schedule, ValueSource base, long seed,
+    public static List<SimFire> simulate(EventSchedule schedule, ValueSource values, long seed,
                                          long fromMs, long toMs, int maxEvents) {
-        return simulateWithEffects(schedule, base, seed, fromMs, toMs, maxEvents).fires();
+        return simulateWithValues(schedule, values, seed, fromMs, toMs, maxEvents).fires();
     }
 
     /**
-     * 模拟区间内的全部触发，并返回叠加了效果层的值来源。
-     *
-     * <p>曲线要用 {@link SimResult#values()} 算：事件引起的值变化（set/pulse/shift）
-     * 才会体现在图上；用基线算出来的只是"没有事件"的曲线。</p>
+     * 模拟区间内的全部触发，并原样带回值来源。
      *
      * @param schedule  编排表
-     * @param base      基线值来源（不带效果层）
-     * @param seed      数据种子（抖动与运行时同源）
-     * @param fromMs    起始（模拟时钟）
+     * @param values    值来源
+     * @param seed      数据种子
+     * @param fromMs    起始
      * @param toMs      结束
      * @param maxEvents 事件上限
-     * @return 触发列表 + 叠加效果后的值来源
+     * @return 触发列表 + 值来源（与入参同一个实例）
      */
-    public static SimResult simulateWithEffects(EventSchedule schedule, ValueSource base, long seed,
-                                                 long fromMs, long toMs, int maxEvents) {
+    public static SimResult simulateWithValues(EventSchedule schedule, ValueSource values, long seed,
+                                               long fromMs, long toMs, int maxEvents) {
         List<SimFire> fires = new ArrayList<>();
         if (schedule.plans().isEmpty() || toMs <= fromMs) {
-            return new SimResult(fires, base);
+            return new SimResult(fires, values);
         }
         long ticks = (toMs - fromMs) / TICK_MS;
         if (ticks < 0 || ticks > MAX_TICKS) {
             throw new IllegalArgumentException("preview window too large: " + ticks + " ticks");
         }
 
-        EventEffectStore store = new EventEffectStore();
-        EffectValueSource values = new EffectValueSource(base, store);
         Rng rng = new Rng(seed).derive("events");
         Map<String, ConditionDebouncer> debouncers = new HashMap<>();
         List<PendingFire> pending = new ArrayList<>();
@@ -136,7 +134,6 @@ public final class EventSimulator {
                 }
                 if (debouncer.update(windowTo, active)) {
                     fires.add(new SimFire(windowTo, plan.id(), plan.ceid()));
-                    applyEffects(plan, store, windowTo);
                     enqueueAfter(schedule, plan.id(), windowTo, pending);
                 }
             }
@@ -150,10 +147,7 @@ public final class EventSimulator {
                 schedule.plans().stream()
                         .filter(plan -> plan.id().equals(fire.planId()))
                         .findFirst()
-                        .ifPresent(plan -> {
-                            applyEffects(plan, store, fire.atMs());
-                            enqueueAfter(schedule, plan.id(), fire.atMs(), pending);
-                        });
+                        .ifPresent(plan -> enqueueAfter(schedule, plan.id(), fire.atMs(), pending));
             }
 
             /* 3) AfterEvent 到期的(允许同 tick 级联,防环跳数与运行时一致) */
@@ -171,10 +165,7 @@ public final class EventSimulator {
                 schedule.plans().stream()
                         .filter(plan -> plan.id().equals(next.planId()))
                         .findFirst()
-                        .ifPresent(plan -> {
-                            applyEffects(plan, store, next.atMs());
-                            enqueueAfter(schedule, plan.id(), next.atMs(), pending);
-                        });
+                        .ifPresent(plan -> enqueueAfter(schedule, plan.id(), next.atMs(), pending));
             }
 
             windowFrom = windowTo;
@@ -182,12 +173,6 @@ public final class EventSimulator {
 
         fires.sort(Comparator.comparingLong(SimFire::atMs).thenComparing(SimFire::planId));
         return new SimResult(List.copyOf(fires), values);
-    }
-
-    private static void applyEffects(EventPlan plan, EventEffectStore store, long atMs) {
-        for (com.shimizukenta.secssim.core.event.EventEffect effect : plan.effects()) {
-            store.apply(effect.svid(), effect, atMs);
-        }
     }
 
     private static void enqueueAfter(EventSchedule schedule, String firedPlanId, long atMs,

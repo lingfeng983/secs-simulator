@@ -1,4 +1,8 @@
-/** Schema v5 模板段的前端结构化编辑模型。
+/** 配置文档（schema v7）的前端结构化编辑模型。
+ *
+ * <p>v7 只有一件事：<b>每个数据项自己带一份 {@code source}</b>。三类数据
+ * （晶圆属性 Context / 设备常量 ECID / 参数变量 SVID）共用同一种形状，
+ * 没有模板图、没有实例、没有绑定表，事件也不改值。</p>
  *
  * <p>这里刻意不 import 任何 React：解析、读取、写回都是纯函数，方便单测。
  * 原文始终是唯一事实来源——结构化编辑只改内存里的 JSON 对象，
@@ -15,6 +19,7 @@ export const CURVE_TYPES = [
   { type: 'pwl', label: '折线关键帧' },
   { type: 'uniform', label: '区间随机' },
   { type: 'randomWalk', label: '有界随机游走' },
+  { type: 'sequence', label: '分段序列' },
 ] as const;
 
 export type CurveType = (typeof CURVE_TYPES)[number]['type'];
@@ -52,6 +57,8 @@ export function curveFieldSpecs(type: CurveType): CurveField[] {
         NUMBER('max', '上界'),
         SELECT('policy', '越界策略', ['CLAMP', 'REFLECT', 'WRAP']),
       ];
+    case 'sequence':
+      return [BOOLEAN('cyclic', '走完末段后从头循环')];
     case 'step':
     case 'pwl':
       return [];
@@ -73,6 +80,16 @@ export function defaultCurveFields(type: CurveType): JsonObject {
       return { type, points: [{ tMs: 0, value: 0 }, { tMs: 30_000, value: 100 }, { tMs: 60_000, value: 0 }] };
     case 'uniform':
       return { type, min: 0, max: 100, resampleMs: 1_000 };
+    case 'sequence':
+      return {
+        type,
+        segments: [
+          { durationMs: 20_000, curve: { type: 'ramp', from: 0, to: 30, durationMs: 20_000 } },
+          { durationMs: 10_000, curve: { type: 'constant', value: 30 } },
+          { durationMs: 20_000, curve: { type: 'ramp', from: 30, to: 0, durationMs: 20_000 } },
+        ],
+        cyclic: false,
+      };
     case 'randomWalk':
       return {
         type,
@@ -92,96 +109,107 @@ export function isCurveType(value: unknown): value is CurveType {
   return typeof value === 'string' && CURVE_TYPES.some((item) => item.type === value);
 }
 
+export function curveTypeLabel(type: CurveType): string {
+  return CURVE_TYPES.find((item) => item.type === type)?.label ?? type;
+}
+
 /**
- * 这个名字能否安全地出现在表达式里（`in.<实例>.<输出>` / `p.<参数>`）。
+ * 这个名字能否安全地出现在表达式里。
  *
- * <p>后端表达式把标识符限制为字母 / 数字 / 下划线；连字符会被当成减法。
- * 模板 id 不进表达式，所以这里只用于实例 id、输出名和参数名。</p>
+ * <p>后端表达式把标识符限制为字母 / 数字 / 下划线 / 点（私有变量名只允许前者）。
+ * 表达式里的私有曲线名要用它校验，避免名字里的连字符被当成减法。</p>
  */
 export function isExpressionName(value: string): boolean {
   return /^[\p{L}_][\p{L}\p{N}_]*$/u.test(value);
 }
 
-export function curveTypeLabel(type: CurveType): string {
-  return CURVE_TYPES.find((item) => item.type === type)?.label ?? type;
+/* ---------- 值定义（source） ---------- */
+
+/** 一个数据项的值定义形态。 */
+export const SOURCE_MODES = [
+  { mode: 'const', label: '常量（不随时间变）' },
+  { mode: 'curve', label: '曲线（随时间变化）' },
+  { mode: 'expr', label: '表达式（私有曲线组合）' },
+  { mode: 'cycle', label: '按片变化（每片一档）' },
+] as const;
+
+export type SourceMode = (typeof SOURCE_MODES)[number]['mode'];
+
+/** 曲线 / 表达式的时间自变量。 */
+export const SOURCE_CLOCKS = [
+  { value: 'phase', label: '片内相位（每片重放）' },
+  { value: 'absolute', label: '绝对时间（只跑一次）' },
+] as const;
+
+export type SourceClock = (typeof SOURCE_CLOCKS)[number]['value'];
+
+export function isSourceMode(value: unknown): value is SourceMode {
+  return typeof value === 'string' && SOURCE_MODES.some((item) => item.mode === value);
 }
 
-export interface SvidChoice {
-  svid: number;
-  owner: string;
-  slot: string;
+/** 数据项的 source 对象（不存在时返回空对象，仅供渲染）。 */
+export function sourceOf(def: JsonObject): JsonObject {
+  return objectField(def, 'source');
 }
 
-export interface TemplateView {
-  present: boolean;
-  /** 这几个数组里的对象仍是文档树里的引用，只读渲染，改动必须经过 editTemplates。 */
-  curves: JsonObject[];
-  composites: JsonObject[];
-  instances: JsonObject[];
+/** 数据项的值定义形态；未配置返回空串。 */
+export function sourceModeOf(def: JsonObject): SourceMode | '' {
+  const mode = sourceOf(def).mode;
+  return isSourceMode(mode) ? mode : '';
 }
 
-export interface ParsedConfig {
-  root: JsonObject;
-  svids: SvidChoice[];
-}
-
-export type ParseConfigResult = { ok: true; config: ParsedConfig } | { ok: false; error: string };
-export type ReadTemplatesResult = { ok: true; templates: TemplateView } | { ok: false; error: string };
-export type EditTemplatesResult = { ok: true; text: string } | { ok: false; error: string };
-
-/** 后端 ValueType 枚举接受的全部类型（secs-core ValueType）。 */
-export const SECS_TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4', 'F8', 'ASCII', 'BOOLEAN'] as const;
-
-/** 事件计划的触发类型（docs/guides/schema-v4.md）。 */
-export const TRIGGER_TYPES = ['at', 'periodic', 'onCondition', 'afterEvent'] as const;
-export type TriggerType = (typeof TRIGGER_TYPES)[number];
-
-/** 事件效果的 op(schema v6,语义见 docs/guides/svid-value-model.md)。 */
-export const EFFECT_OPS = ['set', 'add', 'pulse', 'shift', 'resume'] as const;
-export type EffectOp = (typeof EFFECT_OPS)[number];
-
-/** 某个 op 的参数字段；set 的 decayMs 可省略。 */
-export function effectFieldSpecs(op: EffectOp): { key: string; label: string; optional?: boolean }[] {
-  switch (op) {
-    case 'set':
-      return [{ key: 'value', label: '值' }, { key: 'decayMs', label: '衰减 ms', optional: true }];
-    case 'add':
-    case 'shift':
-      return [{ key: 'delta', label: '增量' }];
-    case 'pulse':
-      return [{ key: 'value', label: '值' }, { key: 'holdMs', label: '保持 ms' }];
-    case 'resume':
-      return [];
+/** 一种值形态的默认对象；text 为真时按文本（晶圆属性）生成。 */
+export function defaultSource(mode: SourceMode, text = false): JsonObject {
+  switch (mode) {
+    case 'const':
+      return { mode, value: text ? 'VALUE' : 0 };
+    case 'curve':
+      return { mode, clock: 'phase', curve: defaultCurveFields('sine') };
+    case 'expr':
+      return { mode, clock: 'phase', vars: { a: defaultCurveFields('sine') }, expr: 'a' };
+    case 'cycle':
+      return text
+        ? { mode, pattern: 'W{03}', start: 1, every: 1 }
+        : { mode, start: 1, step: 1, every: 25 };
   }
 }
 
-/** 一种 op 的默认效果对象。 */
-export function defaultEffect(op: EffectOp, svid: number): JsonObject {
-  switch (op) {
-    case 'set':
-      return { svid, op, value: 0 };
-    case 'add':
-    case 'shift':
-      return { svid, op, delta: 0 };
-    case 'pulse':
-      return { svid, op, value: 0, holdMs: 5_000 };
-    case 'resume':
-      return { svid, op };
+/** 曲线的时钟（大小写不敏感，缺省 phase）。 */
+export function clockOf(source: JsonObject): SourceClock {
+  return stringField(source, 'clock', 'phase') === 'absolute' ? 'absolute' : 'phase';
+}
+
+/** 一句话描述一个 source 在做什么（列表与预览标题用）。 */
+export function describeSource(def: JsonObject): string {
+  const source = sourceOf(def);
+  const mode = sourceModeOf(def);
+  switch (mode) {
+    case '':
+      return '未配置（按默认值）';
+    case 'const': {
+      const value = source.value;
+      return `常量 ${typeof value === 'string' ? value : String(value ?? '')}`;
+    }
+    case 'curve': {
+      const type = stringField(objectField(source, 'curve'), 'type', '?');
+      const clock = clockOf(source) === 'absolute' ? '绝对时间' : '片内相位';
+      return `曲线 · ${type} · ${clock}`;
+    }
+    case 'expr':
+      return `表达式 · ${Object.keys(objectField(source, 'vars')).length} 条私有曲线`;
+    case 'cycle': {
+      if (source.pattern !== undefined) {
+        return `按片 · ${stringField(source, 'pattern')}`;
+      }
+      if (Array.isArray(source.list)) {
+        return `按片 · 轮换 ${(source.list as unknown[]).length} 条`;
+      }
+      return `按片 · ${String(source.value ?? '')} 起`;
+    }
   }
 }
 
-/** SVID 直配值来源形态（schema v6；default = 默认随机游走）。 */
-export type SourceKind = 'default' | 'curve' | 'template';
-
-export function svidSourceKind(def: JsonObject): SourceKind {
-  if (isJsonObject(def.curve)) {
-    return 'curve';
-  }
-  if (typeof def.template === 'string') {
-    return 'template';
-  }
-  return 'default';
-}
+/* ---------- 通用 JSON 读写 ---------- */
 
 export function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -224,7 +252,28 @@ export function booleanField(value: JsonObject, key: string, fallback = false): 
   return typeof child === 'boolean' ? child : fallback;
 }
 
-/** 解析配置原文；只校验 JSON 与根对象，templates 的形状由 readTemplates 校验。 */
+export interface SvidChoice {
+  svid: number;
+  owner: string;
+  slot: string;
+}
+
+export interface ParsedConfig {
+  root: JsonObject;
+  svids: SvidChoice[];
+}
+
+export type ParseConfigResult = { ok: true; config: ParsedConfig } | { ok: false; error: string };
+export type EditDocumentResult = { ok: true; text: string } | { ok: false; error: string };
+
+/** 后端 ValueType 枚举接受的全部类型（secs-core ValueType）。 */
+export const SECS_TYPES = ['U1', 'U2', 'U4', 'U8', 'I1', 'I2', 'I4', 'I8', 'F4', 'F8', 'ASCII', 'BOOLEAN'] as const;
+
+/** 事件计划的触发类型（docs/guides/schema-v4.md）；v7 周期事件走 cycle 段。 */
+export const TRIGGER_TYPES = ['at', 'periodic', 'onCondition', 'afterEvent'] as const;
+export type TriggerType = (typeof TRIGGER_TYPES)[number];
+
+/** 解析配置原文；只校验 JSON 与根对象。 */
 export function parseConfigDocument(text: string): ParseConfigResult {
   /* Windows 上保存的配置常带 BOM；JsonHub 接受它，JSON.parse 不接受。
      不剥掉的话，后端能读的文件在表单里会变成"非法 JSON"。 */
@@ -241,49 +290,47 @@ export function parseConfigDocument(text: string): ParseConfigResult {
   return { ok: true, config: { root: value, svids: collectSvids(value) } };
 }
 
+/** 把整份文档写回文本。结构化编辑会统一成 2 空格缩进。 */
+function stringifyConfig(root: JsonObject): string {
+  return `${JSON.stringify(root, null, 2)}
+`;
+}
+
 /**
- * 读取 templates 段。
+ * 在原文之上做一次<b>整文档</b>编辑（session / equipment / events 等任意段）。
  *
- * <p>形状不对时明确报字段路径，而不是让 React 在渲染中途抛 "map is not a function"。
- * </p>
+ * <p>编辑函数拿到克隆后的根对象，异常转成错误文案，未知键保留，
+ * 写回统一 2 空格缩进。</p>
  */
-export function readTemplates(root: JsonObject): ReadTemplatesResult {
-  const raw = root.templates;
-  if (raw === undefined) {
-    return { ok: true, templates: { present: false, curves: [], composites: [], instances: [] } };
+export function editDocument(text: string, mutate: (root: JsonObject) => void): EditDocumentResult {
+  const parsed = parseConfigDocument(text);
+  if (!parsed.ok) {
+    return parsed;
   }
-  if (!isJsonObject(raw)) {
-    return { ok: false, error: 'templates 必须是对象' };
+  const root = cloneJson(parsed.config.root);
+  try {
+    mutate(root);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
   }
+  return { ok: true, text: stringifyConfig(root) };
+}
 
-  const curves = readObjectArray(raw, 'curves', 'templates');
-  if (typeof curves === 'string') {
-    return { ok: false, error: curves };
-  }
-  const composites = readObjectArray(raw, 'composites', 'templates');
-  if (typeof composites === 'string') {
-    return { ok: false, error: composites };
-  }
-  const instances = readObjectArray(raw, 'instances', 'templates');
-  if (typeof instances === 'string') {
-    return { ok: false, error: instances };
-  }
+function cloneJson(root: JsonObject): JsonObject {
+  return JSON.parse(JSON.stringify(root)) as JsonObject;
+}
 
-  for (const [index, composite] of composites.entries()) {
-    if (composite.outputs !== undefined && !isJsonObject(composite.outputs)) {
-      return { ok: false, error: `templates.composites[${index}].outputs 必须是对象` };
-    }
+/** 生成不与 existing 冲突的 id。 */
+export function uniqueId(existing: ReadonlyArray<unknown>, base: string): string {
+  const used = new Set(existing.map((item) => String(item)));
+  if (!used.has(base)) {
+    return base;
   }
-  for (const [index, instance] of instances.entries()) {
-    if (instance.svids !== undefined && !isJsonObject(instance.svids)) {
-      return { ok: false, error: `templates.instances[${index}].svids 必须是对象` };
-    }
-    if (instance.params !== undefined && !isJsonObject(instance.params)) {
-      return { ok: false, error: `templates.instances[${index}].params 必须是对象` };
-    }
+  let index = 2;
+  while (used.has(`${base}${index}`)) {
+    index += 1;
   }
-
-  return { ok: true, templates: { present: true, curves, composites, instances } };
+  return `${base}${index}`;
 }
 
 function readObjectArray(parent: JsonObject, key: string, path: string): JsonObject[] | string {
@@ -304,107 +351,6 @@ function readObjectArray(parent: JsonObject, key: string, path: string): JsonObj
 }
 
 export { readObjectArray };
-
-/** 把整份文档写回文本。结构化编辑会统一成 2 空格缩进。 */
-function stringifyConfig(root: JsonObject): string {
-  return `${JSON.stringify(root, null, 2)}
-`;
-}
-
-/**
- * 在原文之上做一次模板编辑。
- *
- * <p>编辑函数拿到的是<b>克隆后</b>文档里的 templates 视图；原文本不变时不会写回。
- * 没有 templates 段时自动插入空的 curves/composites/instances。
- * </p>
- */
-export function editTemplates(
-  text: string,
-  mutate: (templates: TemplateView, root: JsonObject) => void,
-): EditTemplatesResult {
-  const parsed = parseConfigDocument(text);
-  if (!parsed.ok) {
-    return parsed;
-  }
-
-  const root = cloneJson(parsed.config.root);
-  const initial = readTemplates(root);
-  if (!initial.ok) {
-    return initial;
-  }
-
-  /* 缺省数组要先落到文档里：readTemplates 返回的空数组只是视图，
-     push 进去不会写回文档。缺失时补空数组，已有的数组保持原引用。 */
-  const section = ensureObjectField(root, 'templates');
-  for (const key of ['curves', 'composites', 'instances'] as const) {
-    if (section[key] === undefined) {
-      section[key] = [];
-    }
-  }
-  const read = readTemplates(root);
-  if (!read.ok) {
-    return read;
-  }
-  if (!read.templates.present) {
-    return { ok: false, error: 'templates 段插入失败' };
-  }
-
-  try {
-    mutate(read.templates, root);
-  } catch (error) {
-    return { ok: false, error: (error as Error).message };
-  }
-  return { ok: true, text: stringifyConfig(root) };
-}
-
-function cloneJson(root: JsonObject): JsonObject {
-  return JSON.parse(JSON.stringify(root)) as JsonObject;
-}
-
-/**
- * 在原文之上做一次<b>整文档</b>编辑（session / equipment / events 等任意段）。
- *
- * <p>与 {@link editTemplates} 同一套纪律：编辑函数拿到克隆后的根对象，
- * 异常转成错误文案，未知键保留，写回统一 2 空格缩进。</p>
- */
-export function editDocument(text: string, mutate: (root: JsonObject) => void): EditTemplatesResult {
-  const parsed = parseConfigDocument(text);
-  if (!parsed.ok) {
-    return parsed;
-  }
-  const root = cloneJson(parsed.config.root);
-  try {
-    mutate(root);
-  } catch (error) {
-    return { ok: false, error: (error as Error).message };
-  }
-  return { ok: true, text: stringifyConfig(root) };
-}
-
-/** 生成不与 existing 冲突的 id。 */
-export function uniqueId(existing: ReadonlyArray<unknown>, base: string): string {
-  const used = new Set(existing.map((item) => String(item)));
-  if (!used.has(base)) {
-    return base;
-  }
-  let index = 2;
-  while (used.has(`${base}${index}`)) {
-    index += 1;
-  }
-  return `${base}${index}`;
-}
-
-/** 一个模板的输出名；曲线固定只有 V。 */
-export function templateOutputs(view: TemplateView, templateId: string): string[] {
-  const composite = view.composites.find((item) => stringField(item, 'id') === templateId);
-  if (composite !== undefined) {
-    return Object.keys(objectField(composite, 'outputs'));
-  }
-  if (view.curves.some((item) => stringField(item, 'id') === templateId)) {
-    return ['V'];
-  }
-  return [];
-}
 
 /** 当前配置里的 SVID 候选（按单元号段 + offset 解析，含 globalSvids）。 */
 export function collectSvids(root: JsonObject): SvidChoice[] {
@@ -496,4 +442,46 @@ export function collectCeids(root: JsonObject): SvidChoice[] {
     }
   }
   return [...unique.values()].sort((left, right) => left.svid - right.svid);
+}
+
+/** 晶圆属性定义（顶层 context 段）。 */
+export interface ContextChoice {
+  id: string;
+  type: string;
+}
+
+export function collectContexts(root: JsonObject): ContextChoice[] {
+  const out: ContextChoice[] = [];
+  for (const item of arrayField(root, 'context')) {
+    if (!isJsonObject(item)) {
+      continue;
+    }
+    const id = stringField(item, 'id');
+    if (id !== '') {
+      out.push({ id, type: stringField(item, 'type', 'ASCII') });
+    }
+  }
+  return out;
+}
+
+/** 设备常量定义（equipment.constants）。 */
+export interface EcidChoice {
+  id: number;
+  name: string;
+  type: string;
+}
+
+export function collectEcids(root: JsonObject): EcidChoice[] {
+  const equipment = objectField(root, 'equipment');
+  const out: EcidChoice[] = [];
+  for (const item of arrayField(equipment, 'constants')) {
+    if (!isJsonObject(item)) {
+      continue;
+    }
+    const id = numberField(item, 'id');
+    if (id !== undefined) {
+      out.push({ id, name: stringField(item, 'name'), type: stringField(item, 'type', 'F4') });
+    }
+  }
+  return out;
 }

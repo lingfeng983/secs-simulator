@@ -28,11 +28,7 @@ export function ConnectionPanel({ backend, sessionId, configName }: PanelBasePro
     <Panel
       id="panel-connection"
       title="连接"
-      description={
-        '会话标识：会话 id / deviceId / 随机种子\n'
-        + '监听：HSMS 端口 / 绑定地址 / 被动模式\n'
-        + '超时：T3–T8（秒，留空用协议默认）'
-      }
+      headless
       status={
         draft.configName === ''
           ? <span className="state-pill" data-tone="muted">无配置来源</span>

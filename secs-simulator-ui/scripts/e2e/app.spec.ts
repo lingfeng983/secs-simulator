@@ -53,7 +53,7 @@ test('侧栏设备树已精简：筛选 / 模板分组 / 平铺切换全部下�
 test('顶部信息栏只有图标：不显示页面路径，也没有按钮文字', async ({ page }) => {
   await page.goto('/');
   await page.locator('#panel-sessions tbody tr', { hasText: 'LINE1' }).first().click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
 
   /* 最左是 GUI 图标区，且只有图标 */
   const bar = page.locator('.titlebar');
@@ -131,7 +131,7 @@ test('消息监控头部：先区域后对象，标题行已下线，关闭在�
 test('页签右键：关闭其他 / 关闭全部', async ({ page }) => {
   await page.goto('/');
   await page.locator('#panel-sessions tbody tr', { hasText: 'LINE1' }).first().click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
   await page.locator('.sidenav .nav-item', { hasText: '主机清单' }).first().click();
 
   const bar = page.locator('.tabbar');
@@ -223,14 +223,14 @@ test('工作台搜索与状态筛选', async ({ page }) => {
   await statusFilter.selectOption('');
 });
 
-test('批量工具条：表头全选 / 重载 / 停止确认', async ({ page }) => {
+test('批量工具条：表头全选 / 重启 / 停止确认', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
 
   /* 批量动作就在表格工具条这一行（标题行已删） */
   const batch = page.locator('#panel-sessions .table-toolbar');
   await expect(batch).not.toContainText('已选');
-  await expect(batch.getByRole('button', { name: '批量重载' })).toBeDisabled();
+  await expect(batch.getByRole('button', { name: '批量重启' })).toBeDisabled();
   /* 工具条上不再有「全选 / 清空选择」两个按钮：全选挪到表头复选框 */
   await expect(batch.getByRole('button', { name: '全选' })).toHaveCount(0);
   await expect(batch.getByRole('button', { name: '清空选择' })).toHaveCount(0);
@@ -241,7 +241,7 @@ test('批量工具条：表头全选 / 重载 / 停止确认', async ({ page }) 
   await expect(batch).toContainText('已选 2 台');
   await expect(batch.getByRole('button', { name: '批量同步配置' })).toBeEnabled();
 
-  await batch.getByRole('button', { name: '批量重载' }).click();
+  await batch.getByRole('button', { name: '批量重启' }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(2);
 
@@ -289,12 +289,12 @@ test('批量同步配置弹窗能打开并给出目标台数', async ({ page }) 
   await expect(dialog).toHaveCount(0);
 });
 
-test('单行「重载」直接打后端，「停止」先确认再改状态，「启动」能再开端口', async ({ page }) => {
+test('单行「重启」直接打后端，「停止」先确认再改状态，「启动」能再开端口', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
   const row = page.locator('#panel-sessions tbody tr', { hasText: 'line1' }).first();
 
-  await row.getByRole('button', { name: '重载' }).click();
+  await row.getByRole('button', { name: '重启' }).click();
   await expect.poll(() => state.calls.filter((call) => call.endsWith('/reload')).length).toBe(1);
 
   await row.getByRole('button', { name: '停止' }).click();
@@ -345,7 +345,7 @@ test('设备清单：批量动作与新建都在表格工具条这一行', async
   await expect(header).toBeVisible();
   await expect(header.getByRole('button', { name: '新建设备' })).toBeVisible();
   await expect(header.getByRole('button', { name: '批量同步配置' })).toBeVisible();
-  await expect(header.getByRole('button', { name: '批量重载' })).toBeVisible();
+  await expect(header.getByRole('button', { name: '批量重启' })).toBeVisible();
   await expect(header.getByRole('button', { name: '批量停止' })).toBeVisible();
   /* 没勾选时不显示"已选 N 台" */
   await expect(header).not.toContainText('已选 0 台');
@@ -382,7 +382,7 @@ test('命令面板：去主机清单 / 打开设备 / 执行操作', async ({ pa
   await page.keyboard.press('Control+k');
   await palette.locator('.palette-input').fill('LINE1');
   await palette.getByText(/打开设备 LINE1/).click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
 });
 
 test('命令面板里能切主题、切密度、开快捷键表', async ({ page }) => {
@@ -433,7 +433,7 @@ test('侧栏收起成图标栏，仍能点进设备', async ({ page }) => {
   await expect(side).toHaveClass(/collapsed/);
   await expect(side.locator('.nav-monogram').first()).toHaveText('LI');
   await side.locator('.nav-item[title^="LINE1"]').click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
   await page.getByRole('button', { name: '展开导航栏' }).click();
   await expect(side).not.toHaveClass(/collapsed/);
 });
@@ -593,14 +593,19 @@ test('顶部标签：打开过的页面留下标签，可切换也可关闭', as
   await openTool(page, '主机清单');
   await expect(bar.locator('.app-tab', { hasText: '主机清单' })).toBeVisible();
 
+  /* 标签按三类上色：设备 / 主机 / 其他，颜色由 data-tab-kind 决定 */
+  await expect(bar.locator('.app-tab', { hasText: '设备清单' })).toHaveAttribute('data-tab-kind', 'device');
+  await expect(bar.locator('.app-tab', { hasText: 'LINE1' })).toHaveAttribute('data-tab-kind', 'device');
+  await expect(bar.locator('.app-tab', { hasText: '主机清单' })).toHaveAttribute('data-tab-kind', 'host');
+
   /* 点回设备标签：回到这台设备最后停留的子页 */
   await bar.locator('.app-tab', { hasText: 'LINE1' }).locator('.app-tab-label').click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
 
   /* 关掉主机标签：当前不在该标签上，页面不跳；标签消失 */
   await bar.locator('.app-tab', { hasText: '主机清单' }).getByRole('button', { name: /关闭/ }).click();
   await expect(bar.locator('.app-tab', { hasText: '主机清单' })).toHaveCount(0);
-  await expect(page.locator('.instance-head .instance-title')).toContainText('LINE1');
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', 'LINE1');
 });
 
 test('通用设置：主题 / 主色 / 布局 / 密度落到根元素并跨刷新保留', async ({ page }) => {

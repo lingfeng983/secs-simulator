@@ -39,3 +39,15 @@ export function formatCount(value: number | undefined): string {
   }
   return value.toLocaleString();
 }
+
+/**
+ * 目标串里的主机部分："127.0.0.1:5000" → "127.0.0.1"。
+ *
+ * <p>主机实例的 target 是后端拼好的 host:port，端口另有独立字段；
+ * 两处都取会把端口显示两遍。</p>
+ */
+export function hostOfTarget(target: string): string {
+  const text = target.trim();
+  const match = /^(.*):(\d{1,5})$/.exec(text);
+  return match === null ? text : match[1];
+}

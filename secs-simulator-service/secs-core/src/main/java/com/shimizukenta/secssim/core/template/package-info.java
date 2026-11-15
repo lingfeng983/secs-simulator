@@ -1,17 +1,13 @@
 /**
- * 模板与 DAG：让"一组 SVID 由一个模板统一生产"成立。
+ * 受限的纯函数表达式：值定义里 {@code mode: "expr"} 的求值引擎。
  *
- * <p>现实中的变量从来不是各自独立的：温度上升会带来压力变化，
- * 总流量必须等于各支路之和，加热器的开关跟随温度偏差。
- * 一个 SVID 一条曲线的做法表达不了这种关系，只能靠人肉对齐，迟早漂移。
- * </p>
+ * <p>只保留 {@link com.shimizukenta.secssim.core.template.Expression} 与
+ * {@link com.shimizukenta.secssim.core.template.ExpressionException}：
+ * 表达式允许四则运算、少量纯函数与 {@code p.*} 私有变量，没有赋值、循环、
+ * 状态——同一个表达式在任意时刻都能重算，可以逐个时刻批量试算预览。</p>
  *
- * <p>本包提供三件东西：</p>
- * <ul>
- *   <li>{@link com.shimizukenta.secssim.core.template.Template} —— 多输出生产单元；</li>
- *   <li>{@link com.shimizukenta.secssim.core.template.Expression} —— 受限的纯函数表达式；</li>
- *   <li>{@link com.shimizukenta.secssim.core.template.TemplateGraph} —— 依赖拓扑求值，
- *       并强制"一个 SVID 只能有一个生产者"。</li>
- * </ul>
+ * <p>旧的「模板图 + 实例绑定」已随 schema v7 删除：一个数据项只有一份
+ * 值定义（{@code source}），不再有跨实例的 {@code in.<实例>.<输出>} 引用，
+ * 因此也不再需要拓扑排序与单写者检查。</p>
  */
 package com.shimizukenta.secssim.core.template;

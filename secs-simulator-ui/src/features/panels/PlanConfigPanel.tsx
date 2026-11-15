@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { ConfigEditShell } from './ConfigEditShell';
 import { EventsForm } from '../editors/ConfigFormEditor';
+import { CycleForm } from '../editors/CycleForm';
 import { collectSvids, type JsonObject } from '../editors/templateConfig';
 import { EventPreview } from '../charts/EventPreview';
 import type { PreviewData } from '../../api';
@@ -17,9 +18,8 @@ const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
 /**
  * 设备 · 配置区 · 事件计划（events.plans 定义）+ 草稿周期预览。
  *
- * <p>计划的触发规则、effects、actions 都在配置里定义：启动会话时播种进
- * 调度器。运行区的「事件执行」页只做启停，不做定义编辑（运行态改动不
- * 回写配置）。这里编辑顶层 events 段：maxPerSec / W 位 / 计划清单。</p>
+ * <p>三块都在这一页：<b>工艺周期</b>（cycle，按片重复）、<b>事件计划</b>
+ * （events.plans，周期外的异常路径）、<b>草稿预览</b>。事件只上报、不改值。</p>
  *
  * <p>下方「事件周期预览」按<b>草稿原文</b>（含未保存改动）做确定性重放，
  * 草稿一变（防抖 600ms）自动重算——边配置边看"这份编排会画出什么曲线"，
@@ -33,12 +33,7 @@ export function PlanConfigPanel(props: PanelBaseProps & { sessionId?: string; co
       sessionId={sessionId}
       configName={configName}
       panelId="panel-plan-config"
-      title="事件计划（events.plans 定义）"
-      description={
-        '事件计划的定义清单：触发规则（定时/周期/条件/事件后）、effects、actions。\n'
-        + '设备启动时按配置播种进调度器；运行区的「事件执行」页只做启停，不回写配置。\n'
-        + '改动写入配置草稿，下方预览随之刷新；「校验」→「保存」后相关会话自动重载。'
-      }
+      title="事件计划与工艺周期"
     >
       {({ root, edit, text }) => <PlanEditor root={root} edit={edit} text={text} backend={backend} />}
     </ConfigEditShell>
@@ -102,6 +97,7 @@ function PlanEditor({ root, edit, text, backend }: {
 
   return (
     <>
+      <CycleForm root={root} edit={edit} />
       <EventsForm root={root} edit={edit} />
 
       <section className="panel-section block" id="plan-draft-preview">
@@ -126,7 +122,7 @@ function PlanEditor({ root, edit, text, backend }: {
         <p className="hint">
           不需要保存或启动设备：直接按当前草稿（含未保存改动）做一次确定性重放。
           横轴是模拟时间，竖线是各计划按触发规则会发送事件的时刻——
-          边改触发规则 / effects 边看曲线变化。
+          边改周期与触发规则边看曲线变化。
         </p>
         {preview === null ? (
           <p className="hint">

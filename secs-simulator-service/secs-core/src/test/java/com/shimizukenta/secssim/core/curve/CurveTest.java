@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.core.curve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -109,6 +110,66 @@ class CurveTest {
         assertEquals(50.0, curve.at(5_000L, RNG), 1e-9);
         assertEquals(100.0, curve.at(15_000L, RNG), 1e-9);
         assertEquals(0.0, curve.at(99_999L, RNG), 1e-9, "序列末端外应保持末值");
+    }
+
+    @Test
+    void sequenceDelegatesWithLocalTime() {
+        Curve curve = new SequenceCurve(List.of(
+                new SequenceCurve.Segment(10_000L, RampCurve.of(0.0, 10.0, 10_000L)),
+                new SequenceCurve.Segment(5_000L, new ConstantCurve(7.0)),
+                new SequenceCurve.Segment(10_000L, RampCurve.of(10.0, 0.0, 10_000L))), false);
+
+        assertEquals(5.0, curve.at(5_000L, RNG), 1e-9, "第一段按局部时刻求值");
+        assertEquals(9.0, curve.at(9_000L, RNG), 1e-9);
+        assertEquals(7.0, curve.at(10_000L, RNG), 1e-9, "边界归后一段");
+        assertEquals(7.0, curve.at(14_999L, RNG), 1e-9);
+        assertEquals(10.0, curve.at(15_000L, RNG), 1e-9, "第三段从自己的 0 重新开始");
+        assertEquals(5.0, curve.at(20_000L, RNG), 1e-9);
+        assertEquals(0.0, curve.at(25_000L, RNG), 1e-9, "非循环时停在末段终点");
+        assertEquals(0.0, curve.at(99_999L, RNG), 1e-9);
+    }
+
+    @Test
+    void sequenceWrapsWhenCyclic() {
+        Curve curve = new SequenceCurve(List.of(
+                new SequenceCurve.Segment(10_000L, RampCurve.of(0.0, 10.0, 10_000L)),
+                new SequenceCurve.Segment(10_000L, RampCurve.of(10.0, 0.0, 10_000L))), true);
+
+        assertEquals(5.0, curve.at(5_000L, RNG), 1e-9);
+        assertEquals(0.0, curve.at(20_000L, RNG), 1e-9, "总时长处整条序列回到起点");
+        assertEquals(5.0, curve.at(25_000L, RNG), 1e-9);
+    }
+
+    @Test
+    void sequenceGivesEachSegmentItsOwnNoise() {
+        Curve curve = new SequenceCurve(List.of(
+                new SequenceCurve.Segment(60_000L, new UniformCurve(0.0, 1_000_000.0, 1_000L)),
+                new SequenceCurve.Segment(60_000L, new UniformCurve(0.0, 1_000_000.0, 1_000L))), false);
+
+        long identical = 0L;
+        for (long t = 0L; t < 60_000L; t += 1_000L) {
+            if (curve.at(t, RNG) == curve.at(60_000L + t, RNG)) {
+                identical++;
+            }
+        }
+        assertTrue(identical < 3L, "两段随机不能给出同一串值，命中 " + identical);
+    }
+
+    @Test
+    void sequenceBoundsSpanAllSegments() {
+        Curve curve = new SequenceCurve(List.of(
+                new SequenceCurve.Segment(1_000L, new ConstantCurve(3.0)),
+                new SequenceCurve.Segment(1_000L, new SequenceCurve(
+                        List.of(new SequenceCurve.Segment(1_000L, new ConstantCurve(-2.0))), false))), false);
+
+        assertEquals(-2.0, curve.lowerBound(), 1e-9, "嵌套序列的上下界也要包进外包络");
+        assertEquals(3.0, curve.upperBound(), 1e-9);
+    }
+
+    @Test
+    void sequenceRejectsEmptyOrZeroLength() {
+        assertThrows(IllegalArgumentException.class, () -> new SequenceCurve(List.of(), false));
+        assertThrows(IllegalArgumentException.class, () -> new SequenceCurve.Segment(0L, new ConstantCurve(0.0)));
     }
 
     @Test

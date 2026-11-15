@@ -22,13 +22,13 @@ import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Builder;
 import com.shimizukenta.secssim.app.config.SessionConfig;
 import com.shimizukenta.secssim.app.config.SessionConfigJson;
+import com.shimizukenta.secssim.app.config.ValueSources;
+import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
-import com.shimizukenta.secssim.core.curve.Rng;
-import com.shimizukenta.secssim.core.value.GraphValueSource;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.Secs2Read;
 
@@ -43,7 +43,7 @@ class ConfigDrivenSessionTest {
 
     private static final String CONFIG = """
             {
-              "schemaVersion": 4,
+              "schemaVersion": 7,
               "session": { "id": "cfg-1", "passive": true, "bindHost": "127.0.0.1",
                            "port": 5010, "deviceId": 33, "seed": 99 },
               "equipment": {
@@ -63,35 +63,32 @@ class ConfigDrivenSessionTest {
             }
             """;
 
-    private static final String TEMPLATE_CONFIG = """
+    /** v7：每个变量一份 source，没有 templates 段、没有实例绑定。 */
+    private static final String SOURCE_CONFIG = """
             {
-              "schemaVersion": 5,
-              "session": { "id": "tpl-1", "passive": true, "bindHost": "127.0.0.1",
+              "schemaVersion": 7,
+              "session": { "id": "src-1", "passive": true, "bindHost": "127.0.0.1",
                            "port": 5010, "deviceId": 44, "seed": 99 },
               "equipment": {
-                "name": "TPL-EQ", "idSpace": {},
+                "name": "SRC-EQ", "idSpace": {},
                 "units": [ { "unitId": 1, "name": "CH1", "injectUnitId": false,
                   "svids": [
-                    { "offset": 1, "slot": "TEMP", "type": "F4" },
-                    { "offset": 2, "slot": "DERIVED", "type": "F4" }
+                    { "offset": 1, "slot": "TEMP", "type": "F4",
+                      "source": { "mode": "curve",
+                                  "curve": { "type": "sine", "min": 100.0, "max": 200.0, "periodMs": 1000 } } },
+                    { "offset": 2, "slot": "DERIVED", "type": "F4",
+                      "source": { "mode": "expr", "expr": "base * 0.5",
+                                  "vars": { "base": { "type": "constant", "value": 150.0 } } } }
                   ],
                   "reports": [], "ceids": [] } ]
-              },
-              "templates": {
-                "curves": [ { "id": "temp", "type": "sine", "min": 100.0, "max": 200.0, "periodMs": 1000 } ],
-                "composites": [ { "id": "derived", "outputs": { "V": "in.temp.V * 0.5" } } ],
-                "instances": [
-                  { "id": "temp", "template": "temp", "svids": { "V": 1001 } },
-                  { "id": "derived", "template": "derived", "svids": { "V": 1002 } }
-                ]
               }
             }
             """;
 
     @Test
-    void schemaV5TemplatesDriveS1F3(@TempDir Path tempDir) throws Exception {
-        Path file = tempDir.resolve("模板-设备.json");
-        Files.writeString(file, TEMPLATE_CONFIG, StandardCharsets.UTF_8);
+    void v7SourcesDriveS1F3(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("值定义-设备.json");
+        Files.writeString(file, SOURCE_CONFIG, StandardCharsets.UTF_8);
 
         SessionConfig config = SessionConfigJson.read(file);
         CompilationResult compiled = config.compile();
@@ -102,9 +99,7 @@ class ConfigDrivenSessionTest {
         SessionSpec spec = new SessionSpec(configured.id(), configured.passive(), configured.bindHost(),
                 port, configured.deviceId(), configured.seed(), configured.equipment());
 
-        GraphValueSource values = new GraphValueSource(
-                config.templates().build(compiled.equipment()),
-                new Rng(config.spec().seed()).derive("graph"));
+        ValueSource values = ValueSources.of(config, compiled.equipment());
         HsmsSessionRuntime session = new HsmsSessionRuntime(
                 spec, compiled.equipment(), new ManualEngineClock(0L), values);
         session.open();
@@ -119,7 +114,7 @@ class ConfigDrivenSessionTest {
 
             Secs2 body = reply.get().secs2();
             assertEquals(150.0, Secs2Read.asDouble(body.get(0)), 1e-3, "sine t=0 应为中点");
-            assertEquals(75.0, Secs2Read.asDouble(body.get(1)), 1e-3, "组合模板应派生");
+            assertEquals(75.0, Secs2Read.asDouble(body.get(1)), 1e-3, "expr 值定义应派生出 75");
         } finally {
             session.close();
         }

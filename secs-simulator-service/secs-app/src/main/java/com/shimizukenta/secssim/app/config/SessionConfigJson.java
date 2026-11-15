@@ -20,8 +20,8 @@ import com.shimizukenta.jsonhub.JsonString;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.app.session.TraceLimits;
+import com.shimizukenta.secssim.core.context.ContextTable;
 import com.shimizukenta.secssim.core.domain.CeidDef;
-import com.shimizukenta.secssim.core.domain.DirectSource;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalCeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
@@ -33,13 +33,13 @@ import com.shimizukenta.secssim.core.domain.SvidDef;
 import com.shimizukenta.secssim.core.domain.UnitId;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
 import com.shimizukenta.secssim.core.domain.ValueType;
-import com.shimizukenta.secssim.core.event.EventEffect;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.PlanAction;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.template.Expression;
 import com.shimizukenta.secssim.core.template.ExpressionException;
+import com.shimizukenta.secssim.core.value.DataSource;
 
 /**
  * Schema v4 配置的读写。
@@ -103,13 +103,132 @@ public final class SessionConfigJson {
         int maxPerSec = parseMaxPerSec(root);
         boolean s6f11Wbit = parseS6f11Wbit(root);
         boolean s6f1Wbit = parseS6f1Wbit(root);
-        TemplateConfig templates = TemplateConfigJson.parse(root);
+        CycleConfig cycle = CycleConfig.parse(root, ROOT);
+        List<ContextTable.Def> context = parseContext(root);
+        Map<Integer, DataSource> svidSources = parseSvidSources(root, equipment);
+        Map<Integer, DataSource> ecidSources = parseEcidSources(root, equipment);
 
         HsmsTimeouts timeouts = parseTimeouts(session, sessionPath);
         TraceLimits traceLimits = parseTraceLimits(session, sessionPath);
         SessionSpec spec = new SessionSpec(id, passive, bindHost, port, deviceId, seed, equipment, timeouts,
                 traceLimits);
-        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, templates);
+        return new SessionConfig(spec, schedule, maxPerSec, s6f11Wbit, s6f1Wbit,
+                cycle, context, svidSources, ecidSources);
+    }
+
+    /**
+     * 解析 {@code context} 段（schema v7）：晶圆属性。
+     *
+     * @param root 配置根
+     * @return 属性定义（顺序即界面顺序）
+     */
+    private static List<ContextTable.Def> parseContext(JsonHub root) {
+        if (!root.containsKey("context")) {
+            return List.of();
+        }
+        String path = ROOT + ".context";
+        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(root, "context", ROOT), path);
+        List<ContextTable.Def> defs = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            String itemPath = path + "[" + i + "]";
+            JsonHub item = items.get(i);
+            String id = JsonAccess.string(item, "id", itemPath);
+            ValueType type = parseType(JsonAccess.optionalString(item, "type", itemPath).orElse("ASCII"),
+                    itemPath + ".type");
+            DataSource source = DataSourceJson.parse(JsonAccess.object(item, "source", itemPath),
+                    itemPath + ".source");
+            defs.add(new ContextTable.Def(id, type, source));
+        }
+        return defs;
+    }
+
+    /**
+     * 解析每个 SVID 上的 {@code source}（schema v7），解析成绝对 SVID。
+     *
+     * @param root      配置根
+     * @param equipment 设备定义（用于算绝对 ID）
+     * @return 绝对 SVID → 值定义
+     */
+    private static Map<Integer, DataSource> parseSvidSources(JsonHub root, EquipmentSpec equipment) {
+        Map<Integer, DataSource> sources = new LinkedHashMap<>();
+        List<UnitSpec> units = equipment.units();
+        for (int i = 0; i < units.size(); i++) {
+            int base = equipment.idSpace().svidBaseFor(i + 1);
+            List<JsonHub> svids = svidJsonList(root, i);
+            List<SvidDef> defs = units.get(i).svids();
+            for (int k = 0; k < svids.size() && k < defs.size(); k++) {
+                JsonHub item = svids.get(k);
+                if (!item.containsKey("source")) {
+                    continue;
+                }
+                String path = ROOT + ".equipment.units[" + i + "].svids[" + k + "].source";
+                sources.put(defs.get(k).resolve(base),
+                        DataSourceJson.parse(JsonAccess.object(item, "source", path), path));
+            }
+        }
+        if (root.containsKey("equipment")) {
+            JsonHub equipmentJh = JsonAccess.object(root, "equipment", ROOT);
+            if (equipmentJh.containsKey("globalSvids")) {
+                List<JsonHub> globals = JsonAccess.elements(
+                        JsonAccess.array(equipmentJh, "globalSvids", ROOT + ".equipment"),
+                        ROOT + ".equipment.globalSvids");
+                List<GlobalSvidDef> defs = equipment.globalSvids();
+                for (int k = 0; k < globals.size() && k < defs.size(); k++) {
+                    JsonHub item = globals.get(k);
+                    if (!item.containsKey("source")) {
+                        continue;
+                    }
+                    String path = ROOT + ".equipment.globalSvids[" + k + "].source";
+                    sources.put(defs.get(k).id(),
+                            DataSourceJson.parse(JsonAccess.object(item, "source", path), path));
+                }
+            }
+        }
+        return sources;
+    }
+
+    /** 取某个单元的 svids 原始 JSON 列表（与解析出的定义一一对应）。 */
+    private static List<JsonHub> svidJsonList(JsonHub root, int unitIndex) {
+        JsonHub equipment = JsonAccess.object(root, "equipment", ROOT);
+        List<JsonHub> units = JsonAccess.elements(
+                JsonAccess.array(equipment, "units", ROOT + ".equipment"), ROOT + ".equipment.units");
+        JsonHub unit = units.get(unitIndex);
+        if (!unit.containsKey("svids")) {
+            return List.of();
+        }
+        return JsonAccess.elements(JsonAccess.array(unit, "svids", ROOT + ".equipment.units"),
+                ROOT + ".equipment.units[" + unitIndex + "].svids");
+    }
+
+    /**
+     * 解析每个 ECID 上的 {@code source}（schema v7）：时间变化型设备常量。
+     *
+     * @param root      配置根
+     * @param equipment 设备定义
+     * @return ECID → 值定义
+     */
+    private static Map<Integer, DataSource> parseEcidSources(JsonHub root, EquipmentSpec equipment) {
+        if (!root.containsKey("equipment")) {
+            return Map.of();
+        }
+        JsonHub equipmentJh = JsonAccess.object(root, "equipment", ROOT);
+        if (!equipmentJh.containsKey("constants")) {
+            return Map.of();
+        }
+        List<JsonHub> items = JsonAccess.elements(
+                JsonAccess.array(equipmentJh, "constants", ROOT + ".equipment"),
+                ROOT + ".equipment.constants");
+        Map<Integer, DataSource> sources = new LinkedHashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            JsonHub item = items.get(i);
+            if (!item.containsKey("source")) {
+                continue;
+            }
+            String path = ROOT + ".equipment.constants[" + i + "].source";
+            int id = JsonAccess.integer(item, "id", path.substring(0, path.length() - ".source".length()));
+            sources.put(id, DataSourceJson.parse(JsonAccess.object(item, "source", path), path));
+        }
+        return sources;
     }
 
 
@@ -221,10 +340,14 @@ public final class SessionConfigJson {
         List<JsonObjectPair> pairs = new ArrayList<>();
         pairs.add(b.pair("schemaVersion", SessionConfig.SCHEMA_VERSION));
         pairs.add(b.pair("session", sessionJson(config.spec(), b)));
-        pairs.add(b.pair("equipment", equipmentJson(config.spec().equipment(), b)));
+        pairs.add(b.pair("equipment", equipmentJson(config.spec().equipment(),
+                config.svidSources(), config.ecidSources(), b)));
         pairs.add(b.pair("events", eventsJson(config, b)));
-        if (!config.templates().isEmpty()) {
-            pairs.add(b.pair("templates", TemplateConfigJson.toJson(config.templates(), b)));
+        if (config.cycle() != null) {
+            pairs.add(b.pair("cycle", cycleJson(config.cycle(), b)));
+        }
+        if (!config.context().isEmpty()) {
+            pairs.add(b.pair("context", contextJson(config.context(), b)));
         }
 
         JsonHub root = b.object(pairs);
@@ -312,9 +435,15 @@ public final class SessionConfigJson {
     }
 
     private static JsonHub equipmentJson(EquipmentSpec equipment, JsonHubBuilder b) {
+        return equipmentJson(equipment, Map.of(), Map.of(), b);
+    }
+
+    private static JsonHub equipmentJson(EquipmentSpec equipment, Map<Integer, DataSource> svidSources,
+                                         Map<Integer, DataSource> ecidSources, JsonHubBuilder b) {
         List<JsonHub> units = new ArrayList<>();
-        for (UnitSpec unit : equipment.units()) {
-            units.add(unitJson(unit, b));
+        for (int i = 0; i < equipment.units().size(); i++) {
+            units.add(unitJson(equipment.units().get(i),
+                    equipment.idSpace().svidBaseFor(i + 1), svidSources, b));
         }
 
         List<JsonHub> globals = new ArrayList<>();
@@ -329,7 +458,7 @@ public final class SessionConfigJson {
             if (Double.isFinite(def.max())) {
                 pairs.add(b.pair("max", def.max()));
             }
-            addDirectSource(pairs, def.source(), b);
+            addItemSource(pairs, svidSources.get(def.id()), b);
             globals.add(b.object(pairs));
         }
 
@@ -343,7 +472,7 @@ public final class SessionConfigJson {
 
         /* 设备常量要原样写回：S2F15 落盘后如果这段没保存，
            "重载后保留"就成了假的——文件里根本没有这些值。 */
-        JsonHub constants = constantsJson(equipment.constants(), b);
+        JsonHub constants = constantsJson(equipment.constants(), ecidSources, b);
 
         return b.object(
                 b.pair("name", equipment.name()),
@@ -365,6 +494,19 @@ public final class SessionConfigJson {
      * @return JSON 数组
      */
     public static JsonHub constantsJson(java.util.Collection<EquipmentConstantDef> constants, JsonHubBuilder b) {
+        return constantsJson(constants, Map.of(), b);
+    }
+
+    /**
+     * 设备常量数组（带值来源）。
+     *
+     * @param constants 常量
+     * @param sources   ECID → 值定义
+     * @param b         构造器
+     * @return JSON 数组
+     */
+    public static JsonHub constantsJson(java.util.Collection<EquipmentConstantDef> constants,
+                                        Map<Integer, DataSource> sources, JsonHubBuilder b) {
         List<JsonHub> items = new ArrayList<>();
         List<EquipmentConstantDef> ordered = new ArrayList<>(constants);
         ordered.sort(java.util.Comparator.comparingInt(EquipmentConstantDef::id));
@@ -378,6 +520,7 @@ public final class SessionConfigJson {
             if (!def.unit().isEmpty()) {
                 pairs.add(b.pair("unit", def.unit()));
             }
+            addItemSource(pairs, sources.get(def.id()), b);
             items.add(b.object(pairs));
         }
         return b.array(items);
@@ -406,10 +549,11 @@ public final class SessionConfigJson {
         return b.array(items);
     }
 
-    private static JsonHub unitJson(UnitSpec unit, JsonHubBuilder b) {
+    private static JsonHub unitJson(UnitSpec unit, int base, Map<Integer, DataSource> sources,
+                                    JsonHubBuilder b) {
         List<JsonHub> svids = new ArrayList<>();
         for (SvidDef def : unit.svids()) {
-            svids.add(svidJson(def, b));
+            svids.add(svidJson(def, base, sources, b));
         }
 
         List<JsonHub> reports = new ArrayList<>();
@@ -437,7 +581,8 @@ public final class SessionConfigJson {
                 b.pair("ceids", b.array(ceids)));
     }
 
-    private static JsonHub svidJson(SvidDef def, JsonHubBuilder b) {
+    private static JsonHub svidJson(SvidDef def, int base, Map<Integer, DataSource> sources,
+                                    JsonHubBuilder b) {
         List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
         pairs.add(b.pair("offset", def.offset()));
         pairs.add(b.pair("slot", def.slot()));
@@ -451,7 +596,7 @@ public final class SessionConfigJson {
         if (Double.isFinite(def.max())) {
             pairs.add(b.pair("max", def.max()));
         }
-        addDirectSource(pairs, def.source(), b);
+        addItemSource(pairs, sources.get(def.resolve(base)), b);
 
         return b.object(pairs);
     }
@@ -472,9 +617,6 @@ public final class SessionConfigJson {
             planPairs.add(b.pair("id", plan.id()));
             planPairs.add(b.pair("ceid", plan.ceid()));
             planPairs.add(b.pair("trigger", triggerJson(plan.trigger(), b)));
-            if (!plan.effects().isEmpty()) {
-                planPairs.add(b.pair("effects", effectsJson(plan.effects(), b)));
-            }
             /* 3.0 需求 5：动作与策略按原样回写，配置保存往返不丢字段。
                全缺省的计划不写这些键，保证 v4/v5/v6 旧配置零改动。 */
             if (plan.hasCustomActions()) {
@@ -498,6 +640,7 @@ public final class SessionConfigJson {
 
         return b.object(pairs);
     }
+
 
     /** 计划动作数组（kind/stream/function/wbit/sml/params，全可选的键不写）。 */
     private static JsonHub actionsJson(List<PlanAction> actions, JsonHubBuilder b) {
@@ -523,29 +666,6 @@ public final class SessionConfigJson {
                     params.add(b.pair(entry.getKey(), entry.getValue()));
                 }
                 pairs.add(b.pair("params", b.object(params)));
-            }
-            items.add(b.object(pairs));
-        }
-        return b.array(items);
-    }
-
-    private static JsonHub effectsJson(List<EventEffect> effects, JsonHubBuilder b) {
-        List<JsonHub> items = new ArrayList<>(effects.size());
-        for (EventEffect effect : effects) {
-            List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new ArrayList<>();
-            pairs.add(b.pair("svid", effect.svid()));
-            pairs.add(b.pair("op", effect.op().name().toLowerCase(java.util.Locale.ROOT)));
-            if (effect.value() != null) {
-                pairs.add(b.pair("value", effect.value()));
-            }
-            if (effect.delta() != null) {
-                pairs.add(b.pair("delta", effect.delta()));
-            }
-            if (effect.holdMs() != null) {
-                pairs.add(b.pair("holdMs", effect.holdMs()));
-            }
-            if (effect.decayMs() != null) {
-                pairs.add(b.pair("decayMs", effect.decayMs()));
             }
             items.add(b.object(pairs));
         }
@@ -602,8 +722,7 @@ public final class SessionConfigJson {
                         JsonAccess.string(item, "name", itemPath),
                         parseType(JsonAccess.string(item, "type", itemPath), itemPath + ".type"),
                         JsonAccess.optionalDouble(item, "min", itemPath).orElse(Double.NEGATIVE_INFINITY),
-                        JsonAccess.optionalDouble(item, "max", itemPath).orElse(Double.POSITIVE_INFINITY),
-                        parseDirectSource(item, itemPath)));
+                        JsonAccess.optionalDouble(item, "max", itemPath).orElse(Double.POSITIVE_INFINITY)));
             }
         }
 
@@ -770,69 +889,7 @@ public final class SessionConfigJson {
             throw new ConfigException(path + ".min", "min " + lower + " 大于 max " + upper);
         }
 
-        return new SvidDef(offset, slot, type, unitSymbol, decimals, lower, upper, parseDirectSource(jh, path));
-    }
-
-    /**
-     * 解析 SVID 上的直配值来源（schema v6，可选）。
-     *
-     * <p>{@code curve}（内联曲线）与 {@code template}（引用模板，可带
-     * {@code output} 与 {@code params}）二选一；都不写就是默认曲线。</p>
-     */
-    private static DirectSource parseDirectSource(JsonHub jh, String path) {
-        boolean hasCurve = jh.containsKey("curve");
-        boolean hasTemplate = jh.containsKey("template");
-
-        if (hasCurve && hasTemplate) {
-            throw new ConfigException(path, "curve 与 template 只能二选一");
-        }
-        if (hasTemplate) {
-            String template = JsonAccess.string(jh, "template", path);
-            String output = jh.containsKey("output")
-                    ? JsonAccess.string(jh, "output", path + ".output") : null;
-            Map<String, Double> params = new LinkedHashMap<>();
-            if (jh.containsKey("params")) {
-                JsonHub paramsJson = JsonAccess.object(jh, "params", path + ".params");
-                for (JsonString key : paramsJson.keySet()) {
-                    String name = key.unescaped();
-                    OptionalDouble value = paramsJson.get(name).optionalDouble();
-                    if (value.isEmpty()) {
-                        throw new ConfigException(path + ".params." + name, "应为数字");
-                    }
-                    params.put(name, value.getAsDouble());
-                }
-            }
-            return DirectSource.ofTemplate(template, output, params);
-        }
-        if (hasCurve) {
-            if (jh.containsKey("params") || jh.containsKey("output")) {
-                throw new ConfigException(path, "output/params 必须与 template 搭配使用");
-            }
-            return DirectSource.ofCurve(CurveJson.parse(JsonAccess.object(jh, "curve", path), path + ".curve"));
-        }
-        return null;
-    }
-
-    /** 把直配值来源写回 SVID 的 JSON（没配就不写，保持旧配置往返稳定）。 */
-    private static void addDirectSource(List<JsonObjectPair> pairs, DirectSource source, JsonHubBuilder b) {
-        if (source == null) {
-            return;
-        }
-        if (source.curve() != null) {
-            pairs.add(b.pair("curve", b.object(CurveJson.pairs(source.curve(), b))));
-            return;
-        }
-        pairs.add(b.pair("template", source.template()));
-        if (source.output() != null) {
-            pairs.add(b.pair("output", source.output()));
-        }
-        if (!source.params().isEmpty()) {
-            List<JsonObjectPair> params = new ArrayList<>();
-            for (Map.Entry<String, Double> entry : source.params().entrySet()) {
-                params.add(b.pair(entry.getKey(), entry.getValue()));
-            }
-            pairs.add(b.pair("params", b.object(params)));
-        }
+        return new SvidDef(offset, slot, type, unitSymbol, decimals, lower, upper);
     }
 
     private static ValueType parseType(String name, String path) {
@@ -897,7 +954,6 @@ public final class SessionConfigJson {
                         JsonAccess.string(item, "id", itemPath),
                         JsonAccess.integer(item, "ceid", itemPath),
                         parseTrigger(JsonAccess.object(item, "trigger", itemPath), itemPath + ".trigger"),
-                        parseEffects(item, itemPath),
                         parseActions(item, itemPath),
                         offlinePolicy, onSendFailure));
             } catch (IllegalArgumentException e) {
@@ -952,48 +1008,6 @@ public final class SessionConfigJson {
             }
         }
         return actions;
-    }
-
-    /**
-     * 解析计划的效果数组（schema v6，可选）。
-     *
-     * <p>字段完整性（哪个 op 要哪些字段）由 {@link EventEffect} 的构造器把关，
-     * 这里只做 JSON → 模型的映射与 op 名的容错。</p>
-     */
-    private static List<EventEffect> parseEffects(JsonHub item, String itemPath) {
-        if (!item.containsKey("effects")) {
-            return List.of();
-        }
-
-        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(item, "effects", itemPath), itemPath + ".effects");
-        List<EventEffect> effects = new ArrayList<>(items.size());
-
-        for (int i = 0; i < items.size(); i++) {
-            String path = itemPath + ".effects[" + i + "]";
-            JsonHub effect = items.get(i);
-            String opName = JsonAccess.string(effect, "op", path).trim().toUpperCase(java.util.Locale.ROOT);
-
-            EventEffect.Op op;
-            try {
-                op = EventEffect.Op.valueOf(opName);
-            } catch (IllegalArgumentException e) {
-                throw new ConfigException(path + ".op",
-                        "未知效果类型: " + opName + "（可选 set / add / pulse / shift / resume）");
-            }
-
-            try {
-                effects.add(new EventEffect(
-                        JsonAccess.integer(effect, "svid", path),
-                        op,
-                        boxedOptionalDouble(effect, "value"),
-                        boxedOptionalDouble(effect, "delta"),
-                        effect.containsKey("holdMs") ? JsonAccess.longValue(effect, "holdMs", path) : null,
-                        effect.containsKey("decayMs") ? JsonAccess.longValue(effect, "decayMs", path) : null));
-            } catch (IllegalArgumentException e) {
-                throw new ConfigException(path, e.getMessage());
-            }
-        }
-        return effects;
     }
 
     /** OptionalDouble → 装箱可空（JSON 字段缺失时为 {@code null}）。 */
@@ -1101,5 +1115,61 @@ public final class SessionConfigJson {
         JsonHub events = JsonAccess.object(root, "events", ROOT);
         OptionalInt value = JsonAccess.optionalInt(events, "maxPerSec", ROOT + ".events");
         return value.orElse(50);
+    }
+
+    /**
+     * 把一个数据项的值定义写回 JSON（v7）。
+     *
+     * <p>没有 source 的项不写这个键：旧配置因此保持原样，不会凭空多出字段。</p>
+     *
+     * @param pairs  该数据项的键值对
+     * @param source 值定义（可空）
+     * @param b      构造器
+     */
+    private static void addItemSource(List<JsonObjectPair> pairs, DataSource source, JsonHubBuilder b) {
+        if (source == null) {
+            return;
+        }
+        pairs.add(b.pair("source", DataSourceJson.toJson(source, b)));
+    }
+
+    /**
+     * 周期段。
+     *
+     * @param cycle 周期定义
+     * @param b     构造器
+     * @return JSON
+     */
+    private static JsonHub cycleJson(CycleConfig cycle, JsonHubBuilder b) {
+        List<JsonHub> events = new ArrayList<>();
+        for (CycleConfig.Event event : cycle.events()) {
+            events.add(b.object(
+                    b.pair("atMs", event.atMs()),
+                    b.pair("ceid", event.ceid())));
+        }
+        return b.object(
+                b.pair("durationMs", cycle.durationMs()),
+                b.pair("jitterMs", cycle.jitterMs()),
+                b.pair("count", cycle.count()),
+                b.pair("noisePerWafer", cycle.noisePerWafer()),
+                b.pair("events", b.array(events)));
+    }
+
+    /**
+     * 晶圆属性段。
+     *
+     * @param context 属性定义
+     * @param b       构造器
+     * @return JSON
+     */
+    private static JsonHub contextJson(List<ContextTable.Def> context, JsonHubBuilder b) {
+        List<JsonHub> items = new ArrayList<>();
+        for (ContextTable.Def def : context) {
+            items.add(b.object(
+                    b.pair("id", def.id()),
+                    b.pair("type", def.type().name()),
+                    b.pair("source", DataSourceJson.toJson(def.source(), b))));
+        }
+        return b.array(items);
     }
 }

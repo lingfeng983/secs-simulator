@@ -8,7 +8,8 @@ package com.shimizukenta.secssim.core.curve;
  * </p>
  */
 public sealed interface Curve
-        permits ConstantCurve, RampCurve, UniformCurve, RandomWalkCurve, SineCurve, StepCurve, PwlCurve {
+        permits ConstantCurve, RampCurve, UniformCurve, RandomWalkCurve, SineCurve, StepCurve, PwlCurve,
+                SequenceCurve {
 
     /**
      * 求值。

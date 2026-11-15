@@ -136,17 +136,7 @@ export function PlanExecutionTimeline({ deviceId, liveEvents, notifier }: Props)
               <span className="hint-inline">CEID {row.ceid}</span>
               <span className="hint-inline">报文 {row.messages.length} 条</span>
               {row.dryRun && <span className="badge tone-warn">试跑</span>}
-              {row.rollback && <span className="badge tone-warn">{row.rollback}</span>}
             </div>
-            {row.effects.length > 0 && (
-              <div className="hint" style={{ marginTop: 3 }}>
-                {row.effects.map((effect, index) => (
-                  <span key={index} className="mono" style={{ marginRight: 12 }}>
-                    SVID {effect.svid} {effect.op} {effect.before ?? '—'}→{effect.after ?? '—'}
-                  </span>
-                ))}
-              </div>
-            )}
             {row.error !== '' && <div className="hint" style={{ color: '#b42318' }}>{row.error}</div>}
           </div>
         ))}

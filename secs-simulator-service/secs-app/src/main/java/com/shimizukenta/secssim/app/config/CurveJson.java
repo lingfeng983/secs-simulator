@@ -13,17 +13,18 @@ import com.shimizukenta.secssim.core.curve.Curve;
 import com.shimizukenta.secssim.core.curve.PwlCurve;
 import com.shimizukenta.secssim.core.curve.RampCurve;
 import com.shimizukenta.secssim.core.curve.RandomWalkCurve;
+import com.shimizukenta.secssim.core.curve.SequenceCurve;
 import com.shimizukenta.secssim.core.curve.SineCurve;
 import com.shimizukenta.secssim.core.curve.StepCurve;
 import com.shimizukenta.secssim.core.curve.UniformCurve;
 
 /**
- * 曲线对象的 JSON 读写（schema v5 引入，v6 起同时用于 svid 直配）。
+ * 曲线对象的 JSON 读写（schema v7：值定义里 {@code mode:"curve"} 的 {@code curve} 段，
+ * 以及 {@code expr} 的私有 {@code vars}）。
  *
- * <p>从 {@code TemplateConfigJson} 抽出来：templates.curves 与
- * equipment 里的 svid.curve 必须是<b>同一种形状</b>，否则"模板里能写的、
- * 直配上写不了"会让用户把两套语法各学一遍。这里只管形状，
- * 语义校验（类型是否允许、SVID 是否存在）在编译层做。</p>
+ * <p>参数模板库、设备变量、设备常量用的是<b>同一种形状</b>，所以只有这一个解析器：
+ * 库里能写的曲线，粘到任何数据项上都一样能写。这里只管形状，
+ * 语义校验（类型是否允许、编号是否存在）在编译层做。</p>
  */
 final class CurveJson {
 
@@ -55,6 +56,9 @@ final class CurveJson {
                         optionalLong(jh, "phaseMs", 0L, path));
                 case "step" -> new StepCurve(parseSteps(jh, path));
                 case "pwl" -> new PwlCurve(parsePoints(jh, path));
+                case "sequence" -> new SequenceCurve(
+                        parseSegments(jh, path),
+                        JsonAccess.bool(jh, "cyclic", false, path));
                 case "uniform" -> new UniformCurve(
                         requiredDouble(jh, "min", path),
                         requiredDouble(jh, "max", path),
@@ -69,7 +73,8 @@ final class CurveJson {
                         requiredDouble(jh, "max", path),
                         parsePolicy(jh, path));
                 default -> throw new ConfigException(path + ".type",
-                        "未知曲线类型: " + type + "（可选 constant / ramp / sine / step / pwl / uniform / randomWalk）");
+                        "未知曲线类型: " + type
+                                + "（可选 constant / ramp / sine / step / pwl / uniform / randomWalk / sequence）");
             };
         } catch (IllegalArgumentException e) {
             throw new ConfigException(path, e.getMessage());
@@ -124,6 +129,15 @@ final class CurveJson {
             pairs.add(b.pair("min", c.min()));
             pairs.add(b.pair("max", c.max()));
             pairs.add(b.pair("policy", c.policy().name()));
+        } else if (curve instanceof SequenceCurve c) {
+            List<JsonHub> segments = new ArrayList<>();
+            for (SequenceCurve.Segment segment : c.segments()) {
+                segments.add(b.object(
+                        b.pair("durationMs", segment.durationMs()),
+                        b.pair("curve", b.object(pairs(segment.curve(), b)))));
+            }
+            pairs.add(b.pair("segments", b.array(segments)));
+            pairs.add(b.pair("cyclic", c.cyclic()));
         }
         return pairs;
     }
@@ -149,6 +163,9 @@ final class CurveJson {
         }
         if (curve instanceof RandomWalkCurve) {
             return "randomWalk";
+        }
+        if (curve instanceof SequenceCurve) {
+            return "sequence";
         }
         throw new IllegalStateException("unsupported curve type: " + curve.getClass());
     }
@@ -177,6 +194,26 @@ final class CurveJson {
                     requiredDouble(item, "value", itemPath)));
         }
         return points;
+    }
+
+    /**
+     * 分段序列的各段；每段的 {@code curve} 递归走同一个 {@link #parse}，
+     * 所以段里可以再放任何曲线类型（包括嵌套序列），校验规则只有一套。
+     */
+    private static List<SequenceCurve.Segment> parseSegments(JsonHub jh, String path) {
+        List<JsonHub> items = JsonAccess.elements(JsonAccess.array(jh, "segments", path), path + ".segments");
+        List<SequenceCurve.Segment> segments = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            String itemPath = path + ".segments[" + i + "]";
+            JsonHub item = items.get(i);
+            if (!item.isObject()) {
+                throw new ConfigException(itemPath, "应为对象（{ durationMs, curve }）");
+            }
+            segments.add(new SequenceCurve.Segment(
+                    requiredLong(item, "durationMs", itemPath),
+                    parse(JsonAccess.object(item, "curve", itemPath), itemPath + ".curve")));
+        }
+        return segments;
     }
 
     private static BoundPolicy parsePolicy(JsonHub jh, String path) {
@@ -213,5 +250,86 @@ final class CurveJson {
 
     private static int optionalInt(JsonHub jh, String key, int fallback, String path) {
         return JsonAccess.optionalInt(jh, key, path).orElse(fallback);
+    }
+
+    /**
+     * 序列化曲线对象（不含 id）。
+     *
+     * <p>v7 之后曲线直接挂在数据项的 {@code source} 上，配置回写与界面展示都要
+     * 能把它写回去——缺了这一半，"改一次常量就把曲线弄丢"是必然的。</p>
+     *
+     * @param curve 曲线
+     * @param b     构造器
+     * @return JSON
+     */
+    static JsonHub toJson(Curve curve, JsonHubBuilder b) {
+        List<JsonObjectPair> pairs = new ArrayList<>();
+
+        switch (curve) {
+            case ConstantCurve value -> {
+                pairs.add(b.pair("type", b.string("constant")));
+                pairs.add(b.pair("value", b.number(value.value())));
+            }
+            case RampCurve ramp -> {
+                pairs.add(b.pair("type", b.string("ramp")));
+                pairs.add(b.pair("from", b.number(ramp.from())));
+                pairs.add(b.pair("to", b.number(ramp.to())));
+                pairs.add(b.pair("durationMs", b.number(ramp.durationMs())));
+                pairs.add(b.pair("cyclic", ramp.cyclic()));
+            }
+            case SineCurve sine -> {
+                pairs.add(b.pair("type", b.string("sine")));
+                pairs.add(b.pair("min", b.number(sine.min())));
+                pairs.add(b.pair("max", b.number(sine.max())));
+                pairs.add(b.pair("periodMs", b.number(sine.periodMs())));
+                pairs.add(b.pair("phaseMs", b.number(sine.phaseMs())));
+            }
+            case StepCurve step -> {
+                pairs.add(b.pair("type", b.string("step")));
+                List<JsonHub> steps = new ArrayList<>();
+                for (StepCurve.Step item : step.steps()) {
+                    steps.add(b.object(b.pair("fromMs", b.number(item.fromMs())),
+                            b.pair("value", b.number(item.value()))));
+                }
+                pairs.add(b.pair("steps", b.array(steps)));
+            }
+            case PwlCurve pwl -> {
+                pairs.add(b.pair("type", b.string("pwl")));
+                List<JsonHub> points = new ArrayList<>();
+                for (PwlCurve.Point item : pwl.points()) {
+                    points.add(b.object(b.pair("tMs", b.number(item.tMs())),
+                            b.pair("value", b.number(item.value()))));
+                }
+                pairs.add(b.pair("points", b.array(points)));
+            }
+            case UniformCurve uniform -> {
+                pairs.add(b.pair("type", b.string("uniform")));
+                pairs.add(b.pair("min", b.number(uniform.min())));
+                pairs.add(b.pair("max", b.number(uniform.max())));
+                pairs.add(b.pair("resampleMs", b.number(uniform.resampleMs())));
+            }
+            case RandomWalkCurve walk -> {
+                pairs.add(b.pair("type", b.string("randomWalk")));
+                pairs.add(b.pair("start", b.number(walk.start())));
+                pairs.add(b.pair("driftPerSec", b.number(walk.driftPerSec())));
+                pairs.add(b.pair("sigma", b.number(walk.sigma())));
+                pairs.add(b.pair("gridMs", b.number(walk.gridMs())));
+                pairs.add(b.pair("octaves", b.number(walk.octaves())));
+                pairs.add(b.pair("min", b.number(walk.min())));
+                pairs.add(b.pair("max", b.number(walk.max())));
+                pairs.add(b.pair("policy", b.string(walk.policy().name())));
+            }
+            case SequenceCurve sequence -> {
+                pairs.add(b.pair("type", b.string("sequence")));
+                pairs.add(b.pair("cyclic", sequence.cyclic()));
+                List<JsonHub> segments = new ArrayList<>();
+                for (SequenceCurve.Segment segment : sequence.segments()) {
+                    segments.add(b.object(b.pair("durationMs", b.number(segment.durationMs())),
+                            b.pair("curve", toJson(segment.curve(), b))));
+                }
+                pairs.add(b.pair("segments", b.array(segments)));
+            }
+        }
+        return b.object(pairs);
     }
 }

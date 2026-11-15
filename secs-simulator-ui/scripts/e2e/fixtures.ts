@@ -620,13 +620,16 @@ export async function openWorkbench(page: Page): Promise<void> {
   await expect(page.locator('#panel-sessions')).toBeVisible();
 }
 
-/** 点侧栏里的设备（先展开所在模板分组/平铺项都可点）。 */
+/** 点侧栏里的设备（先展开所在模板分组/平铺项都可点），默认落在运行区。 */
 export async function openDeviceFromSidebar(page: Page, device: string): Promise<void> {
   await page.locator('.sidenav .nav-item', { hasText: device }).first().click();
-  await expect(page.locator('.instance-head .instance-title')).toContainText(device);
+  await expect(page.locator('.device-page')).toHaveAttribute('data-device', device);
+  /* 打开设备默认进运行区：要动手的页在前面 */
+  await expect(page.locator('.zone-switch').getByRole('tab', { name: /运行区/ }))
+    .toHaveAttribute('aria-selected', 'true');
 }
 
-/** 切配置区 / 运行区：切换按钮已并入实例头（.zone-switch），文案带 ▣ / ◉ 前缀。 */
+/** 切配置区 / 运行区：切换条在页面上方的操作栏里（.zone-switch），文案带 ▣ / ◉ 前缀。 */
 export async function switchZone(page: Page, zone: '配置区' | '运行区'): Promise<void> {
   const tab = page.locator('.zone-switch').getByRole('tab', { name: new RegExp(zone) });
   await tab.click();

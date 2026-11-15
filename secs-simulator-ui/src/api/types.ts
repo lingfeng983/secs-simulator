@@ -129,17 +129,6 @@ export interface EventPlanView {
   debounceMs?: number;
   sourcePlan?: string;
   delayMs?: number;
-  effects?: EventEffectView[];
-}
-
-/** 事件效果(schema v6;op 与字段的对应关系同后端 EventEffect)。 */
-export interface EventEffectView {
-  svid: number;
-  op: 'set' | 'add' | 'pulse' | 'shift' | 'resume';
-  value?: number;
-  delta?: number;
-  holdMs?: number;
-  decayMs?: number;
 }
 
 /** 手动发送 SML 的结果。 */

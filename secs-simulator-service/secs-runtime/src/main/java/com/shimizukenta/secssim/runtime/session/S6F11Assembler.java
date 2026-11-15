@@ -10,6 +10,7 @@ import java.util.OptionalDouble;
 import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Builder;
 import com.shimizukenta.secssim.app.session.HostReportTable;
+import com.shimizukenta.secssim.core.compile.FieldRef;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
@@ -52,6 +53,8 @@ public final class S6F11Assembler {
     private final ValueSource values;
     private final HostReportTable hostReports;
     private final Map<String, Integer> unitIdSvidByOwner;
+    private final com.shimizukenta.secssim.core.context.ContextTable context;
+    private final EcidValues ecidValues;
 
     /**
      * 创建组装器（不带主机动态定义）。
@@ -71,9 +74,17 @@ public final class S6F11Assembler {
      * @param hostReports 主机动态定义（覆盖层）
      */
     public S6F11Assembler(ResolvedEquipment model, ValueSource values, HostReportTable hostReports) {
+        this(model, values, hostReports,
+                com.shimizukenta.secssim.core.context.ContextTable.empty(), null);
+    }
+
+    public S6F11Assembler(ResolvedEquipment model, ValueSource values, HostReportTable hostReports,
+                          com.shimizukenta.secssim.core.context.ContextTable context, EcidValues ecidValues) {
         this.model = model;
         this.values = values;
         this.hostReports = hostReports;
+        this.context = context == null ? com.shimizukenta.secssim.core.context.ContextTable.empty() : context;
+        this.ecidValues = ecidValues;
         this.unitIdSvidByOwner = new HashMap<>();
 
         for (ResolvedSvid svid : model.svids().values()) {
@@ -124,48 +135,73 @@ public final class S6F11Assembler {
     private Asset assetFor(int reportId) {
         Optional<List<Integer>> hostDefined = this.hostReports.svidsOf(reportId);
         if (hostDefined.isPresent()) {
-            /* 主机自定义：原样使用，不注入 UNIT_ID */
-            return new Asset(hostDefined.get(), null);
+            /* 主机自定义的报告只有编号，没有属性/常量；原样使用，不注入 UNIT_ID */
+            List<FieldRef> refs = new ArrayList<>(hostDefined.get().size());
+            for (int svid : hostDefined.get()) {
+                refs.add(new FieldRef.Svid(svid));
+            }
+            return new Asset(refs, null);
         }
 
         ResolvedReport report = this.model.reports().get(reportId);
         if (report == null) {
             return new Asset(List.of(), null);
         }
-        return new Asset(report.svidIds(), report.owner());
+        return new Asset(report.fields(), report.owner());
     }
 
     private List<Secs2> valuesOf(Asset asset, long tMs) {
-        List<Integer> svidIds = new ArrayList<>(asset.svidIds());
+        List<FieldRef> fields = new ArrayList<>(asset.fields());
 
         if (asset.injectableOwner() != null) {
             Integer unitIdSvid = this.unitIdSvidByOwner.get(asset.injectableOwner());
-            if (unitIdSvid != null && !svidIds.contains(unitIdSvid)) {
-                /* 多单元设备：把单元号放到报告首位，主机侧才不用查表就能区分腔体 */
-                svidIds.addFirst(unitIdSvid);
+            if (unitIdSvid != null) {
+                boolean present = fields.stream().anyMatch(
+                        ref -> ref instanceof FieldRef.Svid svid && svid.id() == unitIdSvid);
+                if (!present) {
+                    /* 多单元设备：把单元号放到报告首位，主机侧才不用查表就能区分腔体 */
+                    fields.addFirst(new FieldRef.Svid(unitIdSvid));
+                }
             }
         }
 
-        List<Secs2> values = new ArrayList<>(svidIds.size());
-        for (int svidId : svidIds) {
-            ResolvedSvid svid = this.model.svids().get(svidId);
-            if (svid == null) {
-                values.add(Secs2.getBuilder().uint4(0L));
-                continue;
-            }
-
-            OptionalDouble value = this.values.valueAt(svidId, tMs);
-            values.add(Secs2Mapper.of(svid.type(), value.orElse(0.0)));
+        List<Secs2> values = new ArrayList<>(fields.size());
+        for (FieldRef field : fields) {
+            values.add(this.encode(field, tMs));
         }
         return values;
+    }
+
+    /** 按字段类型编码：SVID 走值来源，ECID 走常量取值，Context 直出文本。 */
+    private Secs2 encode(FieldRef field, long tMs) {
+        Secs2Builder builder = Secs2.getBuilder();
+        return switch (field) {
+            case FieldRef.Svid ref -> {
+                ResolvedSvid svid = this.model.svids().get(ref.id());
+                if (svid == null) {
+                    yield builder.uint4(0L);
+                }
+                OptionalDouble value = this.values.valueAt(ref.id(), tMs);
+                yield Secs2Mapper.of(svid.type(), value.orElse(0.0));
+            }
+            case FieldRef.Ecid ref -> this.ecidValues == null
+                    ? builder.uint4(0L)
+                    : this.ecidValues.encode(ref.id(), tMs);
+            case FieldRef.Context ref -> {
+                var type = this.context.typeOf(ref.name());
+                String text = this.context.textAt(ref.name(), tMs).orElse("");
+                yield type.map(valueType -> Secs2Mapper.of(valueType, text))
+                        .orElseGet(() -> builder.ascii(text));
+            }
+        };
     }
 
     /**
      * 一个报告的取值来源。
      *
-     * @param svidIds          VID 列表
-     * @param injectableOwner  可注入 UNIT_ID 的单元名；主机自定义时为 {@code null}
+     * @param fields          字段序列（SVID / ECID / Context）
+     * @param injectableOwner 可注入 UNIT_ID 的单元名；主机自定义时为 {@code null}
      */
-    private record Asset(List<Integer> svidIds, String injectableOwner) {
+    private record Asset(List<FieldRef> fields, String injectableOwner) {
     }
 }

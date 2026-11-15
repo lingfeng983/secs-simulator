@@ -413,10 +413,10 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       if (failed > 0) {
         notifierRef.current.warn(
           `配置已保存，但 ${failed} 个会话未能生效`,
-          `${hot} 个已重载（连接标识未变的走热生效）；没生效的仍在用旧配置，回工作台点「重载」重试`,
+          `${hot} 个已重启（连接标识未变的走热生效）；没生效的仍在用旧配置，回设备清单点「重启」重试`,
         );
       } else if (hot > 0) {
-        notifierRef.current.info(`配置已生效：${hot} 个会话已重载（连接标识未变的走热生效，主机不断连）`);
+        notifierRef.current.info(`配置已生效：${hot} 个会话已重启（连接标识未变的走热生效，主机不断连）`);
       }
       await refreshSessions();
     },

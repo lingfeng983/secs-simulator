@@ -147,32 +147,6 @@ public final class Schema {
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS event_effect (
-          device_id TEXT NOT NULL, plan_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
-          svid INTEGER NOT NULL, op TEXT NOT NULL,
-          value REAL, delta REAL, hold_ms INTEGER, decay_ms INTEGER,
-          PRIMARY KEY (device_id, plan_id, ordinal)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS template_curve (
-          device_id TEXT NOT NULL, curve_id TEXT NOT NULL, definition_json TEXT NOT NULL,
-          PRIMARY KEY (device_id, curve_id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS template_composite (
-          device_id TEXT NOT NULL, composite_id TEXT NOT NULL, definition_json TEXT NOT NULL,
-          PRIMARY KEY (device_id, composite_id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS template_instance (
-          device_id TEXT NOT NULL, instance_id TEXT NOT NULL, definition_json TEXT NOT NULL,
-          PRIMARY KEY (device_id, instance_id)
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS device_template (
           id TEXT PRIMARY KEY, label TEXT NOT NULL, description TEXT NOT NULL,
           source TEXT NOT NULL CHECK (source IN ('builtin','custom')),
@@ -230,7 +204,6 @@ public final class Schema {
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_plan_device ON event_plan(device_id, ordinal)",
-        "CREATE INDEX IF NOT EXISTS idx_effect_plan ON event_effect(device_id, plan_id)",
         "CREATE INDEX IF NOT EXISTS idx_svid_owner ON svid_def(device_id, owner)",
     };
 
