@@ -587,6 +587,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
 - [ADR 0018 · 内网工具全放行](docs/adr/0018-intranet-open-access.md) — 监听 0.0.0.0、移除 Host/Origin 防护（2026-11-14）
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
+- [3.1.0 发布说明](docs/reports/release-notes-3.1.0.md) — 功能版：一台主机并发多份 S1F3 采集计划、桌面版可用性修复与打包冒烟门禁
 - [3.0.1 发布说明](docs/reports/release-notes-3.0.1.md) — 缺陷修复版：Trace 重连停发、重载失败丢运行态编辑、界面轮询与导入假成功
 - [3.0.0 发布说明](docs/reports/release-notes-3.0.0.md)
 - [2.0.1 发布说明](docs/reports/release-notes-2.0.1.md)
