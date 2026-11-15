@@ -32,8 +32,12 @@ final class SessionHandler extends HttpSupport {
      */
     private static final String DEPRECATION_SUNSET = "Wed, 30 Jun 2027 00:00:00 GMT";
 
+    /** 主机模拟路由段。 */
+    private final SessionHostSimRoutes hostSimRoutes;
+
     SessionHandler(ApiContext context, AccessControl access, AuditSink audit) {
         super(context, access, audit);
+        this.hostSimRoutes = new SessionHostSimRoutes(context, access, audit);
     }
 
 
@@ -380,35 +384,7 @@ final class SessionHandler extends HttpSupport {
      * GET /api/v1/sessions/{id}/alarms、/terminal 或 /catalog。
      */
     void handleSessionQuery(HttpExchange ex) throws IOException {
-        String path = ex.getRequestURI().getPath();
-        if (path.endsWith("/host-sim/collector")) {
-            /* v6:采集器状态与数据 */
-            String id = path.substring(ApiPaths.SESSION_PREFIX.length(),
-                    path.length() - "/host-sim/collector".length());
-            if (id.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-session-id\"}");
-                return;
-            }
-            String json = this.context.hostSimCollectorJson(id);
-            if (json == null) {
-                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-                return;
-            }
-            respond(ex, 200, json);
-            return;
-        }
-        if (path.endsWith("/host-sim")) {
-            String id = path.substring(ApiPaths.SESSION_PREFIX.length(), path.length() - "/host-sim".length());
-            if (id.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-session-id\"}");
-                return;
-            }
-            String json = this.context.hostSimJson(id);
-            if (json == null) {
-                respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-                return;
-            }
-            respond(ex, 200, json);
+        if (this.hostSimRoutes.handleQuery(ex)) {
             return;
         }
 
@@ -490,91 +466,9 @@ final class SessionHandler extends HttpSupport {
         }
 
         /* 主机模拟器：打开连接 / 以主机角色发报文 / 采集器配置与启停 */
-        if (parts.length >= 2 && "host-sim".equals(parts[1])) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            if (parts.length == 2) {
-                /* v6:请求体可选携带远程目标 {"host":..,"port":..,"deviceId":..};空体连本机 */
-                String targetBody = readBody(ex, MAX_CONFIG_BYTES);
-                if (targetBody == null) {
-                    /* 超限被 readBody 吞成 null：以前这里落到"空体"，于是一个超大的
-                       远程目标请求被静默当成"连本机设备"，连到了完全不同的地方 */
-                    respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
-                    return;
-                }
-                if (targetBody.isBlank()) {
-                    targetBody = null;
-                }
-                /* 目标字段在入口校验：非法目标属于 400，不能和"连不上"共用 502 */
-                if (targetBody != null) {
-                    try {
-                        com.shimizukenta.jsonhub.JsonHub target =
-                                com.shimizukenta.jsonhub.JsonHub.fromJson(targetBody);
-                        if (!target.isObject()
-                                || str(target, "host").isBlank()
-                                || num(target, "port") < 1
-                                || num(target, "port") > 65535) {
-                            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
-                            return;
-                        }
-                    } catch (RuntimeException e) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
-                        return;
-                    }
-                }
-                SessionOutcome outcome = this.context.openHostSim(parts[0], targetBody);
-                audit(ex, "host-sim-open", parts[0], "outcome=" + outcome
-                        + (targetBody == null ? "" : " remote"));
-                switch (outcome) {
-                    case OK -> respond(ex, 201, "{\"ok\":true}");
-                    case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"host-busy-or-sim-open\"}");
-                    case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-                    default -> respond(ex, 502, "{\"ok\":false,\"error\":\"open-failed\"}");
-                }
-                return;
-            }
-            if (parts.length == 3 && "send".equals(parts[2])) {
-                /* 与 /host-sims/{id}/send 对齐：SML 上限 64 KiB，不是默认的 4 KiB。
-                   两条路径同义却给不同上限，短报文走哪条都行、长报文只有一条能发，
-                   排查起来毫无线索。 */
-                String body = readBody(ex, MAX_SML_BYTES);
-                if (body == null || body.trim().isEmpty()) {
-                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                    return;
-                }
-                try {
-                    String result = this.context.sendHostSml(parts[0], body);
-                    if (result == null) {
-                        respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-                        return;
-                    }
-                    respond(ex, 200, result);
-                } catch (IllegalArgumentException e) {
-                    respond(ex, 400, "{\"ok\":false,\"error\":\"SML 解析失败: " + json(e.getMessage()) + "\"}");
-                } catch (IllegalStateException e) {
-                    respond(ex, 409, "{\"ok\":false,\"error\":\"host-sim-not-open\"}");
-                } catch (IOException e) {
-                    respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed: " + json(e.getMessage()) + "\"}");
-                }
-                return;
-            }
-            if (parts.length == 3 && "collector".equals(parts[2])) {
-                String body = readBody(ex, MAX_CONFIG_BYTES);
-                if (body == null || body.isBlank()) {
-                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                    return;
-                }
-                CollectorResult result = this.context.setHostSimCollector(parts[0], body);
-                respondCollector(ex, result, "host-sim-collector-config", parts[0]);
-                return;
-            }
-            if (parts.length == 4 && "collector".equals(parts[2])
-                    && ("start".equals(parts[3]) || "stop".equals(parts[3]))) {
-                CollectorResult result = this.context.hostSimCollectorCommand(parts[0], "start".equals(parts[3]));
-                respondCollector(ex, result, "host-sim-collector-" + parts[3], parts[0]);
-                return;
-            }
+        if (parts.length >= 2 && "host-sim".equals(parts[1])
+                && this.hostSimRoutes.handleCommand(ex, parts)) {
+            return;
         }
 
         /* 运行时编辑:编排计划 / 报告 / 状态变量的增删改与值设定(设备页)。

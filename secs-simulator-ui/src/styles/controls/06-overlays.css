@@ -1,0 +1,122 @@
+/* ===== 浮层 ===== */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 7vh 16px 16px;
+  background: color-mix(in srgb, #05090f 52%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: overlay-in 140ms ease-out;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.overlay-panel {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-height: 100%;
+  outline: none;
+}
+
+.modal,
+.palette {
+  display: flex;
+  flex-direction: column;
+  max-height: 82vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  animation: pop-in 190ms var(--ease);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.modal {
+  width: min(36rem, 100%);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem 0.8rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.modal-head h2 {
+  font-size: 0.98rem;
+}
+
+.modal-close {
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: calc(18px * var(--font-scale));
+  line-height: 1;
+}
+
+.modal-close:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.modal-body {
+  padding: 1rem;
+  overflow: auto;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--line-soft);
+  background: var(--surface-2);
+}
+
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcut-table td {
+  padding: 0.4rem 0.3rem;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: calc(12.5px * var(--font-scale));
+}
+
+.shortcut-table tr:last-child td {
+  border-bottom: none;
+}
+
+.shortcut-keys {
+  width: 12rem;
+  white-space: nowrap;
+}
+
+.shortcut-keys kbd + kbd {
+  margin-left: 2px;
+}

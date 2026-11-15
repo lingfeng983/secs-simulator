@@ -1,12 +1,8 @@
 package com.shimizukenta.secssim.api.http;
 
 import java.io.IOException;
-import com.shimizukenta.secssim.app.log.Log;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 
-import com.shimizukenta.jsonhub.JsonHub;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
@@ -14,8 +10,16 @@ import com.sun.net.httpserver.HttpExchange;
  */
 final class ConfigHandler extends HttpSupport {
 
+    /** 模板域：内置设备模板目录、自定义模板与参数模板。 */
+    private final ConfigTemplateHandler templates;
+
+    /** v2 设备域：运行时动作、计划、目录编辑、执行台账与链路。 */
+    private final DeviceRuntimeHandler deviceRuntime;
+
     ConfigHandler(ApiContext context, AccessControl access, AuditSink audit) {
         super(context, access, audit);
+        this.templates = new ConfigTemplateHandler(context, access, audit);
+        this.deviceRuntime = new DeviceRuntimeHandler(context, access, audit);
     }
 
 
@@ -210,111 +214,17 @@ final class ConfigHandler extends HttpSupport {
      * 字段的取值，label/description 给界面显示。</p>
      */
     void handleConfigTemplates(HttpExchange ex) throws IOException {
-        if (!requireRole(ex, ApiRole.VIEWER)) {
-            return;
-        }
-        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 200, "{\"templates\":" + this.context.configTemplatesJson() + "}");
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+        this.templates.handleConfigTemplates(ex);
     }
 
     /** GET /api/v1/templates：内置 + 自定义模板；POST 新建自定义模板。 */
     void handleTemplates(HttpExchange ex) throws IOException {
-        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.VIEWER)) {
-                return;
-            }
-            respond(ex, 200, "{\"templates\":" + this.context.templatesJson() + "}");
-            return;
-        }
-        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            try {
-                com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
-                String id = root.get("id").optionalString().orElse("").trim();
-                String text = root.get("text").optionalString().orElse("");
-                ConfigResult result = this.context.saveTemplate(id, text);
-                this.templateResult(ex, id, result);
-            } catch (RuntimeException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
-            }
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+        this.templates.handleTemplates(ex);
     }
 
     /** GET/PUT/DELETE /api/v1/templates/{id}。 */
     void handleTemplatePath(HttpExchange ex) throws IOException {
-        String id = templateIdFromPath(ex);
-        if (id == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
-            return;
-        }
-        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.VIEWER)) {
-                return;
-            }
-            String text = this.context.templateText(id).orElse(null);
-            if (text == null) {
-                respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-                return;
-            }
-            respond(ex, 200, "{\"id\":\"" + json(id) + "\",\"text\":\"" + json(text) + "\"}");
-            return;
-        }
-        if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            String text = readBody(ex, MAX_CONFIG_BYTES);
-            if (text == null) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            this.templateResult(ex, id, this.context.saveTemplate(id, text));
-            return;
-        }
-        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            this.templateResult(ex, id, this.context.deleteTemplate(id));
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-    }
-
-    private void templateResult(HttpExchange ex, String id, ConfigResult result) throws IOException {
-        switch (result.outcome()) {
-            case OK -> respond(ex, 200, "{\"ok\":true,\"id\":\"" + json(id) + "\"}");
-            case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"template-conflict\"}");
-            case NOT_FOUND -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            case INVALID -> respond(ex, 400, problemsJson(false, result.problems()));
-            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"template-failed\"}");
-        }
-    }
-
-    private static String templateIdFromPath(HttpExchange ex) {
-        String path = ex.getRequestURI().getPath();
-        String prefix = ApiPaths.TEMPLATE_PREFIX;
-        if (!path.startsWith(prefix) || path.length() <= prefix.length()) {
-            return null;
-        }
-        String rest = path.substring(prefix.length());
-        if (rest.contains("/")) {
-            return null;
-        }
-        /* getPath() 已经解过一次码；再 decode 会把含 % 的 id 解坏并抛 IAE（500） */
-        return rest;
+        this.templates.handleTemplatePath(ex);
     }
 
     /**
@@ -322,98 +232,12 @@ final class ConfigHandler extends HttpSupport {
      * POST 新建/更新（体是 {@code {"id"?,"name","description","body"}}，id 空 = 新建）。
      */
     void handleParamTemplatesV2(HttpExchange ex) throws IOException {
-        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.VIEWER)) {
-                return;
-            }
-            respond(ex, 200, "{\"templates\":" + this.context.paramTemplatesJson() + "}");
-            return;
-        }
-        if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            try {
-                com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
-                String id = str(root, "id");
-                String name = str(root, "name");
-                String description = str(root, "description");
-                String templateBody = str(root, "body");
-                if (templateBody.isEmpty()) {
-                    respond(ex, 400, problemsJson(false, List.of("body 不能为空")));
-                    return;
-                }
-                ParamTemplateSaved saved =
-                        this.context.saveParamTemplate(id, name, description, templateBody);
-                audit(ex, "param-template-save", saved.id() == null ? name : saved.id(),
-                        "outcome=" + saved.result().outcome());
-                switch (saved.result().outcome()) {
-                    case OK -> respond(ex, saved.id().equals(id) ? 200 : 201,
-                            "{\"ok\":true,\"id\":\"" + json(saved.id()) + "\"}");
-                    case CONFLICT -> respond(ex, 409,
-                            "{\"ok\":false,\"error\":\"param-template-conflict\",\"problems\":[\""
-                                    + json(String.join("; ", saved.result().problems())) + "\"]}");
-                    case NOT_FOUND -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-                    case INVALID -> respond(ex, 400, problemsJson(false, saved.result().problems()));
-                    default -> respond(ex, 500, "{\"ok\":false,\"error\":\"param-template-failed\"}");
-                }
-            } catch (RuntimeException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
-            }
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+        this.templates.handleParamTemplatesV2(ex);
     }
 
     /** DELETE /api/v2/param-templates/{id}；内置模板拒绝（409）。 */
     void handleParamTemplateV2Path(HttpExchange ex) throws IOException {
-        String id = paramTemplateIdFromPath(ex);
-        if (id == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
-            return;
-        }
-        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            ConfigResult result = this.context.deleteParamTemplate(id);
-            audit(ex, "param-template-delete", id, "outcome=" + result.outcome());
-            switch (result.outcome()) {
-                case OK -> respond(ex, 200, "{\"ok\":true,\"id\":\"" + json(id) + "\"}");
-                case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"param-template-readonly\"}");
-                case NOT_FOUND -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-                default -> respond(ex, 500, "{\"ok\":false,\"error\":\"param-template-failed\"}");
-            }
-            return;
-        }
-        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.VIEWER)) {
-                return;
-            }
-            /* 单个条目暂无独立读端点：列表已带 body，前端不需要额外请求 */
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-    }
-
-    private static String paramTemplateIdFromPath(HttpExchange ex) {
-        String path = ex.getRequestURI().getPath();
-        String prefix = ApiPaths.PARAM_TEMPLATE_V2_PREFIX;
-        if (!path.startsWith(prefix) || path.length() <= prefix.length()) {
-            return null;
-        }
-        String rest = path.substring(prefix.length());
-        if (rest.contains("/")) {
-            return null;
-        }
-        /* getPath() 已经解过一次码；再 decode 会把含 % 的 id 解坏并抛 IAE（500） */
-        return rest;
+        this.templates.handleParamTemplateV2Path(ex);
     }
 
 
@@ -426,645 +250,16 @@ final class ConfigHandler extends HttpSupport {
      * 所以分发只能放在同一个 handler 里。</p>
      */
     void handleDeviceV2(HttpExchange ex) throws IOException {
-        String path = ex.getRequestURI().getPath();
-        if (!path.startsWith(ApiPaths.DEVICE_V2_PREFIX)) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        String rest = path.substring(ApiPaths.DEVICE_V2_PREFIX.length());
-        String[] parts = rest.split("/");
-        if (parts.length >= 2 && "link".equals(parts[1]) && !parts[0].isBlank()) {
-            if (parts.length == 2) {
-                this.handleDeviceLinkStateV2(ex, parts[0]);
-                return;
-            }
-            if (parts.length == 3) {
-                this.handleDeviceLinkV2(ex, parts[0], parts[2]);
-                return;
-            }
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (parts.length >= 3 && !parts[0].isBlank() && "runtime".equals(parts[1])) {
-            this.handleDeviceRuntimeV2(ex, parts);
-            return;
-        }
-        this.handleConfigRevisionsV2(ex);
-    }
-
-    /**
-     * v2 设备运行时：{@code /api/v2/devices/{id}/runtime/**}（设计 §2.5）。
-     *
-     * <p>读写分权：GET 只要求 VIEWER，任何改动都要 OPERATOR。这里的所有增删改都
-     * 只落运行态（{@code runtime_plan_override} / {@code runtime_catalog_edit} /
-     * {@code runtime_svid_pin}），不回写配置——配置仍是「设备真实长什么样」的唯一来源，
-     * 运行态覆盖只在重载/重启时按顺序重放。</p>
-     *
-     * @param ex    交换
-     * @param parts 路径段（已去掉前缀：{@code [deviceId, "runtime", 资源, ...]}）
-     * @throws IOException 写响应失败
-     */
-    private void handleDeviceRuntimeV2(HttpExchange ex, String[] parts) throws IOException {
-        try {
-            this.dispatchDeviceRuntimeV2(ex, parts);
-        } catch (com.shimizukenta.jsonhub.JsonHubParseException
-                | com.shimizukenta.jsonhub.JsonHubUnsupportedOperationException
-                | com.shimizukenta.jsonhub.JsonHubBuildException
-                | com.shimizukenta.jsonhub.JsonHubIndexOutOfBoundsException e) {
-            /* 请求体不是合法 JSON、或缺字段/类型不对（`root.get("ceid").longValue()`
-               在缺键时 NPE、在字符串值时抛 UnsupportedOperation）：这是调用方的错。
-               v1 的编辑路径早就这么兜了，v2 之前漏了——一个截断的 body 就能打出 500。 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\",\"message\":\""
-                    + json(e.getMessage()) + "\"}");
-        } catch (IllegalArgumentException e) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":\""
-                    + json(e.getMessage()) + "\"}");
-        }
-    }
-
-    /** 运行时资源的实际分派（异常由 {@link #handleDeviceRuntimeV2} 统一收敛成 4xx）。 */
-    private void dispatchDeviceRuntimeV2(HttpExchange ex, String[] parts) throws IOException {
-        String deviceId = parts[0];
-        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
-        String resource = parts.length > 2 ? parts[2] : "";
-
-        switch (resource) {
-            case "executions" -> {
-                if (parts.length != 3) {
-                    respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-                    return;
-                }
-                this.handleExecutionsV2(ex, deviceId);
-            }
-            case "plans" -> this.handlePlansV2(ex, deviceId, method, parts);
-            case "catalog" -> this.handleCatalogEditV2(ex, deviceId, method, parts);
-            case "svids" -> this.handleSvidPinV2(ex, deviceId, method, parts);
-            case "message" -> this.handleDeviceMessageV2(ex, deviceId, method);
-            case "alarm" -> this.handleDeviceAlarmV2(ex, deviceId, method, parts);
-            case "ceid" -> this.handleDeviceCeidV2(ex, deviceId, method, parts);
-            default -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-        }
-    }
-
-    /**
-     * {@code /runtime/plans[/{planId}]} 与 {@code .../{planId}/{step|enabled}}。
-     *
-     * <p>{@code step} 与 {@code enabled} 沿用已发布的处理器：它们的鉴权、
-     * 请求体解析与状态码已经和界面联调过，不在这里重写一遍。</p>
-     */
-    private void handlePlansV2(HttpExchange ex, String deviceId, String method,
-                               String[] parts) throws IOException {
-        if (parts.length == 5) {
-            String planId = parts[3];
-            if ("step".equals(parts[4])) {
-                this.handleStepV2(ex, deviceId, planId);
-                return;
-            }
-            if ("enabled".equals(parts[4])) {
-                this.handleEnabledV2(ex, deviceId, planId);
-                return;
-            }
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (parts.length < 3 || parts.length > 4) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        boolean read = "GET".equals(method);
-        if (!requireRole(ex, read ? ApiRole.VIEWER : ApiRole.OPERATOR)) {
-            return;
-        }
-
-        if (parts.length == 3) {
-            if (read) {
-                String body = this.context.plansV2Json(deviceId);
-                if (body == null) {
-                    respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-                    return;
-                }
-                audit(ex, "plan-list", deviceId, "");
-                respond(ex, 200, body);
-                return;
-            }
-            if ("POST".equals(method)) {
-                String body = readBody(ex, MAX_CONFIG_BYTES);
-                if (body == null || body.isBlank()) {
-                    respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                    return;
-                }
-                int status = this.context.addPlanV2(deviceId, body);
-                audit(ex, "plan-add", deviceId, "status=" + status);
-                respondEditStatus(ex, status);
-                return;
-            }
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-
-        String planId = parts[3];
-        if ("PUT".equals(method)) {
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null || body.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            int status = this.context.updatePlanV2(deviceId, planId, body);
-            audit(ex, "plan-update", deviceId, "plan=" + planId + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        if ("DELETE".equals(method)) {
-            int status = this.context.removePlanV2(deviceId, planId);
-            audit(ex, "plan-delete", deviceId, "plan=" + planId + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-    }
-
-    /** {@code /runtime/catalog/{kind}[/{key}]}，{@code kind = ceid | report | svid}。 */
-    private void handleCatalogEditV2(HttpExchange ex, String deviceId, String method,
-                                     String[] parts) throws IOException {
-        String kind = parts.length > 3 ? parts[3] : "";
-        if (!"ceid".equals(kind) && !"report".equals(kind) && !"svid".equals(kind)) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-kind\"}");
-            return;
-        }
-        if (parts.length < 4 || parts.length > 5) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-
-        if (parts.length == 4) {
-            if (!"POST".equals(method)) {
-                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-                return;
-            }
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null || body.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            int status = this.context.addCatalogV2(deviceId, kind, body);
-            audit(ex, kind + "-add", deviceId, "status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-
-        Integer key = intOrNull(parts[4]);
-        if (key == null || key < 1) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-key\"}");
-            return;
-        }
-        if ("PUT".equals(method)) {
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null || body.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            int status = this.context.updateCatalogV2(deviceId, kind, key, body);
-            audit(ex, kind + "-update", deviceId, "key=" + key + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        if ("DELETE".equals(method)) {
-            int status = this.context.removeCatalogV2(deviceId, kind, key);
-            audit(ex, kind + "-delete", deviceId, "key=" + key + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-    }
-
-    /** {@code PUT|DELETE /runtime/svids/{svid}/pin}：钉值 / 取消钉值。 */
-    private void handleSvidPinV2(HttpExchange ex, String deviceId, String method,
-                                 String[] parts) throws IOException {
-        if (parts.length != 5 || !"pin".equals(parts[4])) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        Integer svid = intOrNull(parts[3]);
-        if (svid == null || svid < 1) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-svid\"}");
-            return;
-        }
-        if ("PUT".equals(method)) {
-            String body = readBody(ex, MAX_CONFIG_BYTES);
-            if (body == null || body.isBlank()) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-            int status = this.context.pinSvidV2(deviceId, svid, body);
-            audit(ex, "svid-pin", deviceId, "svid=" + svid + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        if ("DELETE".equals(method)) {
-            int status = this.context.unpinSvidV2(deviceId, svid);
-            audit(ex, "svid-unpin", deviceId, "svid=" + svid + " status=" + status);
-            respondEditStatus(ex, status);
-            return;
-        }
-        respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-    }
-
-    /** {@code POST /runtime/message}：手动 SML 原文，不套 JSON 外壳。 */
-    private void handleDeviceMessageV2(HttpExchange ex, String deviceId, String method)
-            throws IOException {
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        if (!"POST".equals(method)) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        String sml = readBody(ex, MAX_SML_BYTES);
-        if (sml == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
-            return;
-        }
-        if (sml.isBlank()) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"empty-sml\"}");
-            return;
-        }
-        try {
-            String result = this.context.sendSmlV2(deviceId, sml);
-            if (result == null) {
-                audit(ex, "send-sml", deviceId, "outcome=unknown-device bytes=" + sml.length());
-                respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-                return;
-            }
-            audit(ex, "send-sml", deviceId, "outcome=ok bytes=" + sml.length());
-            respond(ex, 200, result);
-        } catch (IllegalArgumentException e) {
-            audit(ex, "send-sml", deviceId, "outcome=bad-sml bytes=" + sml.length());
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-sml\",\"message\":\""
-                    + json(e.getMessage()) + "\"}");
-        } catch (IllegalStateException e) {
-            audit(ex, "send-sml", deviceId, "outcome=not-open bytes=" + sml.length());
-            respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
-        } catch (IOException e) {
-            audit(ex, "send-sml", deviceId, "outcome=failed bytes=" + sml.length());
-            Log.error("手动发送 SML 失败（v2 设备 " + deviceId + "）", e);
-            respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
-        }
-    }
-
-    /** {@code POST|DELETE /runtime/alarm/{alid}}：置位 / 清除。 */
-    private void handleDeviceAlarmV2(HttpExchange ex, String deviceId, String method,
-                                     String[] parts) throws IOException {
-        if (parts.length != 4) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        boolean set;
-        if ("POST".equals(method)) {
-            set = true;
-        } else if ("DELETE".equals(method)) {
-            set = false;
-        } else {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        Integer alid = intOrNull(parts[3]);
-        if (alid == null || alid < 1) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
-            return;
-        }
-
-        /* 文本与类别既可以放 JSON body，也可以放 query：v1 用的是 query，
-           这里两种都认，免得调用方为一元值再包一层 JSON */
-        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-        String text = query.getOrDefault("text", "");
-        String categoryRaw = query.getOrDefault("category", "1");
-        String body = readBody(ex);
-        if (body == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
-            return;
-        }
-        if (!body.isBlank()) {
-            try {
-                JsonHub root = JsonHub.fromJson(body);
-                if (!root.isObject()) {
-                    throw new IllegalArgumentException("expected object");
-                }
-                if (root.containsKey("text")) {
-                    text = root.get("text").optionalString().orElse(text);
-                }
-                if (root.containsKey("category")) {
-                    /* 只认数字：字符串形式的类别交给 query 传，省掉一层隐式转换 */
-                    categoryRaw = String.valueOf(root.get("category").optionalInt()
-                            .orElseThrow(() -> new IllegalArgumentException("category")));
-                }
-            } catch (RuntimeException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-        }
-
-        Integer category = intOrNull(categoryRaw);
-        if (category == null || category < 1 || category > 7) {
-            /* ALCD 低 3 位是类别，0 无定义：入口就拒，别等 AlarmReporter 抛 IOException 变 500 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
-            return;
-        }
-        if (!isAscii(text)) {
-            /* SECS-II 的 A 是 US-ASCII（ALTX 含中文编码会失败） */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-text\"}");
-            return;
-        }
-
-        TriggerOutcome outcome = this.context.triggerAlarmV2(deviceId, alid, set, text, category);
-        audit(ex, "alarm", deviceId, "alid=" + alid + " set=" + set
-                + " category=" + category + " outcome=" + outcome);
-        respondTrigger(ex, outcome);
-    }
-
-    /** {@code POST /runtime/ceid/{ceid}}：手动触发一次采集事件上报。 */
-    private void handleDeviceCeidV2(HttpExchange ex, String deviceId, String method,
-                                    String[] parts) throws IOException {
-        if (parts.length != 4) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        if (!"POST".equals(method)) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        Integer ceid = intOrNull(parts[3]);
-        if (ceid == null || ceid < 1) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
-            return;
-        }
-        TriggerOutcome outcome = this.context.triggerCeidV2(deviceId, ceid);
-        audit(ex, "trigger-ceid", deviceId, "ceid=" + ceid + " outcome=" + outcome);
-        respondTrigger(ex, outcome);
-    }
-
-    /**
-     * 编辑类状态码的响应映射。
-     *
-     * <p>v2 把资源拆到了不同路径，但语义与 v1 编辑路径一致：
-     * 201 新建、200 改/删、404 设备或条目不存在、409 冲突、400 请求体不合法。</p>
-     */
-    private static void respondEditStatus(HttpExchange ex, int status) throws IOException {
-        switch (status) {
-            case 200, 201 -> respond(ex, status, "{\"ok\":true}");
-            case 400 -> respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\"}");
-            case 404 -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            case 409 -> respond(ex, 409, "{\"ok\":false,\"error\":\"conflict\"}");
-            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"edit-failed\"}");
-        }
-    }
-
-    /** 触发类结果的状态码映射（与 v1 手动触发保持一致：202 受理、409 未在线）。 */
-    private static void respondTrigger(HttpExchange ex, TriggerOutcome outcome) throws IOException {
-        switch (outcome) {
-            case OK -> respond(ex, 202, "{\"ok\":true}");
-            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
-            /* 发送失败是链路/对端的问题，不是本进程的 bug：与 v2 手动发送、
-               主机模拟发送统一用 502，客户端据此提示"重试/检查链路"而不是"报 bug" */
-            case FAILED -> respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
-        }
-    }
-
-    /** 路径段转整数；非数字返回 {@code null}（调用方按 400 处理）。 */
-    private static Integer intOrNull(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return Integer.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /** SECS-II 的 A 类型只允许 US-ASCII。 */
-    private static boolean isAscii(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) > 0x7F) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** GET /api/v2/devices/{id}/runtime/executions：执行台账（缺省不含试跑）。DELETE：清空台账。 */
-    private void handleExecutionsV2(HttpExchange ex, String deviceId) throws IOException {
-        if (!requireRole(ex, ApiRole.VIEWER)) {
-            return;
-        }
-        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            SessionOutcome outcome = this.context.clearExecutionsV2(deviceId);
-            audit(ex, "plan-executions-clear", deviceId, "outcome=" + outcome);
-            switch (outcome) {
-                case OK -> respond(ex, 200, "{\"ok\":true}");
-                case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-                default -> respond(ex, 502, "{\"ok\":false,\"error\":\"clear-failed\"}");
-            }
-            return;
-        }
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-        int limit = 50;
-        Integer requested = intParam(query, "limit");
-        /* 写了 limit 但不是整数也算 400：以前静默用默认值，调用方以为
-           "只取 10 条"，实际拿到 50 条，翻页错位还查不出原因 */
-        if (query.containsKey("limit") && requested == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
-            return;
-        }
-        if (requested != null) {
-            limit = requested;
-        }
-        if (limit < 1 || limit > 500) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
-            return;
-        }
-        String json = this.context.planExecutionsV2(deviceId, limit,
-                query.get("planId"), query.get("status"), query.get("dryRun"));
-        if (json == null) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            return;
-        }
-        audit(ex, "plan-executions", deviceId, "limit=" + limit);
-        respond(ex, 200, json);
-    }
-
-    /** POST /api/v2/devices/{id}/runtime/plans/{planId}/step：单步试跑。 */
-    private void handleStepV2(HttpExchange ex, String deviceId, String planId) throws IOException {
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        TriggerOutcome outcome = this.context.stepPlanV2(deviceId, planId);
-        audit(ex, "plan-step", deviceId, "plan=" + planId + " outcome=" + outcome);
-        switch (outcome) {
-            case OK -> respond(ex, 200, "{\"ok\":true,\"planId\":\"" + json(planId) + "\"}");
-            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
-            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"plan-step-failed\"}");
-        }
-    }
-
-    /** POST/PUT /api/v2/devices/{id}/runtime/plans/{planId}/enabled：持久化启停。 */
-    private void handleEnabledV2(HttpExchange ex, String deviceId, String planId) throws IOException {
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
-        if (!"POST".equals(method) && !"PUT".equals(method)) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-        boolean enabled = !"false".equalsIgnoreCase(query.get("enabled"));
-        String body = readBody(ex);
-        if (body == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-            return;
-        }
-        if (!body.isBlank()) {
-            try {
-                JsonHub root = JsonHub.fromJson(body);
-                if (root.isObject() && root.containsKey("enabled")) {
-                    enabled = root.get("enabled").optionalBoolean().orElse(enabled);
-                } else if (!root.isObject()) {
-                    throw new IllegalArgumentException("expected object");
-                }
-            } catch (RuntimeException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
-                return;
-            }
-        }
-        SessionOutcome outcome = this.context.setPlanEnabledV2(deviceId, planId, enabled);
-        audit(ex, "plan-enabled", deviceId, "plan=" + planId + " enabled=" + enabled
-                + " outcome=" + outcome);
-        switch (outcome) {
-            case OK -> respond(ex, 200, "{\"ok\":true,\"planId\":\"" + json(planId)
-                    + "\",\"enabled\":" + enabled + "}");
-            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            default -> respond(ex, 400, "{\"ok\":false,\"error\":\"plan-not-found\"}");
-        }
-    }
-
-    /** GET /api/v2/devices/{id}/link：链路相位（断开展示、重连按钮的状态来源）。 */
-    private void handleDeviceLinkStateV2(HttpExchange ex, String deviceId) throws IOException {
-        if (!requireRole(ex, ApiRole.VIEWER)) {
-            return;
-        }
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        String json = this.context.deviceLinkV2Json(deviceId);
-        if (json == null) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            return;
-        }
-        respond(ex, 200, json);
-    }
-
-    /** POST /api/v2/devices/{id}/link/{connect|disconnect|reload|online|offline}。 */
-    private void handleDeviceLinkV2(HttpExchange ex, String deviceId, String action) throws IOException {
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
-        if (!"POST".equals(method) && !"PUT".equals(method)) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        final SessionOutcome outcome;
-        switch (action) {
-            case "connect" -> outcome = this.context.deviceConnectV2(deviceId);
-            case "disconnect" -> outcome = this.context.deviceDisconnectV2(deviceId);
-            case "reload" -> outcome = this.context.deviceReloadV2(deviceId);
-            /* GEM 的上线/下线：等价于主机发 S1F17 / S1F15，只动控制状态不动链路 */
-            case "online" -> outcome = this.context.deviceOnlineV2(deviceId, true);
-            case "offline" -> outcome = this.context.deviceOnlineV2(deviceId, false);
-            default -> {
-                respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-                return;
-            }
-        }
-        audit(ex, "device-link", deviceId, "action=" + action + " outcome=" + outcome);
-        switch (outcome) {
-            case OK -> respond(ex, 200, "{\"ok\":true,\"action\":\"" + action + "\"}");
-            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
-            case NOT_RELOADABLE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-reloadable\"}");
-            case NOT_CONNECTED -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-connected\"}");
-            default -> respond(ex, 502, "{\"ok\":false,\"error\":\"link-" + action + "-failed\"}");
-        }
+        this.deviceRuntime.handleDeviceV2(ex);
     }
 
     /**
      * v2:设备配置版本历史(GET /api/v2/devices/{name}/config/revisions)。
      */
     void handleConfigRevisionsV2(HttpExchange ex) throws IOException {
-        if (!requireRole(ex, ApiRole.VIEWER)) {
-            return;
-        }
-        String rest = ex.getRequestURI().getPath()
-                .substring(ApiPaths.DEVICE_REVISIONS_V2.length());
-        String[] parts = rest.split("/");
-        /* 只认 {id}/config/revisions 这一种形状。以前这里是 handleDeviceV2 的兜底分支，
-           任何没认出来的路径（`/devices/{id}/runtime`、`/devices/{id}/config/xyz`）
-           都会静默返回该设备的版本历史——200 + 另一个资源，比 404 更难查。 */
-        if (parts.length != 3 || parts[0].isBlank()
-                || !"config".equals(parts[1]) || !"revisions".equals(parts[2])) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-        if (!"GET".equals(ex.getRequestMethod().toUpperCase(Locale.ROOT))) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-        String name = parts[0];
-        int limit = 50;
-        Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-        Integer requested = intParam(query, "limit");
-        /* 写了 limit 但不是整数 / 越界都算 400：以前 parse 直接抛 NumberFormatException
-           变成 500，负数则被下游 Math.max 静默改成 1 条 */
-        if (query.containsKey("limit")
-                && (requested == null || requested < 1 || requested > 500)) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-limit\"}");
-            return;
-        }
-        if (requested != null) {
-            limit = requested;
-        }
-        String body = this.context.configRevisionsV2(name, limit);
-        if (body == null) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"config-not-found\"}");
-            return;
-        }
-        respond(ex, 200, body);
+        this.deviceRuntime.handleConfigRevisionsV2(ex);
     }
+
 
     /**
      * 单份配置的读取、校验、保存与删除。
@@ -1277,6 +472,38 @@ final class ConfigHandler extends HttpSupport {
         String[] parts = path.substring(ApiPaths.CONFIG_PREFIX.length()).split("/");
         return parts.length == 2 && ApiPaths.VALIDATE_SUFFIX.equals(parts[1]);
     }
+
+
+    /** 路径段转整数；非数字返回 {@code null}（调用方按 400 处理）。 */
+    static Integer intOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+
+    /**
+     * 编辑类状态码的响应映射。
+     *
+     * <p>v2 把资源拆到了不同路径，但语义与 v1 编辑路径一致：
+     * 201 新建、200 改/删、404 设备或条目不存在、409 冲突、400 请求体不合法。</p>
+     */
+    static void respondEditStatus(HttpExchange ex, int status) throws IOException {
+        switch (status) {
+            case 200, 201 -> respond(ex, status, "{\"ok\":true}");
+            case 400 -> respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\"}");
+            case 404 -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            case 409 -> respond(ex, 409, "{\"ok\":false,\"error\":\"conflict\"}");
+            default -> respond(ex, 500, "{\"ok\":false,\"error\":\"edit-failed\"}");
+        }
+    }
+
+
     /**
      * 新建配置请求：文件名 + 设备模板 id。
      *

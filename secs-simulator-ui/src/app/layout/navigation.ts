@@ -75,14 +75,14 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
         id: 'templates',
         label: '设备模板',
         description: '设备模板增删改查（新建设备的整套配置）',
-        icon: 'config',
+        icon: 'template',
         route: { name: 'templates' },
       },
       {
         id: 'svid-templates',
         label: '参数模板',
         description: '参数变化逻辑库,所有设备共享;设备配置时从中选择复制',
-        icon: 'config',
+        icon: 'param',
         route: { name: 'svid-templates' },
       },
       {

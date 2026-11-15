@@ -1,9 +1,7 @@
 package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
@@ -16,11 +14,9 @@ import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.audit.AuditLog;
 import com.shimizukenta.secssim.app.event.MessageLog;
 import com.shimizukenta.secssim.app.session.SessionManager;
-import com.shimizukenta.secssim.app.session.SessionRuntime;
-import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
-import com.shimizukenta.secssim.runtime.session.PlanRuntimeStat;
+
 import com.shimizukenta.secssim.store.ConfigRepository;
-import com.shimizukenta.secssim.store.HostRepository;
+
 import com.shimizukenta.secssim.store.PlanExecutionRepository;
 import com.shimizukenta.secssim.store.RuntimeStateRepository;
 
@@ -34,6 +30,9 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  *   <li>{@link RuntimeApi}——会话/配置/报文/审计的接口落地（无状态，只查对象调方法）</li>
  *   <li>{@link HostSimRegistry}——主机模拟器的注册、查找、重连与关闭</li>
  *   <li>{@link BurstRunner}——压测线程池、预算与取消</li>
+ *   <li>{@link DeviceIdResolver}——设备 id 归一与「按设备找会话」</li>
+ *   <li>{@link DeviceV2Delegates}——设备运行时编辑、执行台账与链路相位</li>
+ *   <li>{@link HostV2Delegates}——主机命名空间、配置区方案库与主机报文</li>
  *   <li>本类——健康信息、停机编排与 {@code ApiContext} 委托</li>
  * </ul>
  *
@@ -47,21 +46,19 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final Runnable shutdown;
     private final RuntimeApi api;
     private final HostSimRegistry hosts;
-    private final com.shimizukenta.secssim.store.HostRepository hostRepository;
-    private final MessageLog messageLog;
     private final ConfigStore configs;
     private final SessionManager sessions;
-    private final ConfigRepository configRepository;
-    private final PlanExecutionRepository planExecutions;
-    private final RuntimeStateRepository linkState;
     private final BurstRunner bursts;
     /** 运行态改动写穿到 runtime.db（钉值、计划启用态、目录编辑、链路相位）。 */
     private final RuntimePersister persister;
     /** 状态通知（SSE 的第二条数据源：设备/主机链路相位、配置变更）。 */
     private final com.shimizukenta.secssim.app.event.NoticeBus notices;
-    /** 手工触发台账的序号：同一毫秒内连点两次也不能撞幂等键。 */
-    private static final java.util.concurrent.atomic.AtomicLong MANUAL_TRIGGER_SEQ =
-            new java.util.concurrent.atomic.AtomicLong();
+    /** 设备 id 归一与「按设备找会话」的查询。 */
+    private final DeviceIdResolver ids;
+    /** v2 设备域（运行时编辑/台账/链路）的委托。 */
+    private final DeviceV2Delegates deviceV2;
+    /** v2 主机命名空间的委托。 */
+    private final HostV2Delegates hostV2;
 
     RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
@@ -77,22 +74,23 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         this.extraHealthJson = extraHealthJson;
         this.shutdown = shutdown;
         this.sessions = sessions;
-        this.configRepository = configRepository;
-        this.planExecutions = planExecutions;
-        this.linkState = linkState;
+
         this.notices = notices;
         this.hosts = new HostSimRegistry(sessions, eventBus, hostRepository, linkState, notices);
         /* 主机实例从配置库装回内存。这一步以前写在 Bootstrap 里，装进了一个随后就被
            丢掉的注册表——真正对外提供服务的这个注册表是空的，重启后主机详情 404、
            连接/发送全都找不到实例。放在这里才算真的装上。 */
         this.hosts.loadPersisted();
-        this.hostRepository = hostRepository;
-        this.messageLog = messages;
+
         this.configs = configs;
         this.bursts = new BurstRunner(sessions, this.hosts);
-        this.persister = new RuntimePersister(linkState, this::canonicalDeviceId);
+        this.ids = new DeviceIdResolver(sessions, configRepository);
+        this.persister = new RuntimePersister(linkState, this.ids::canonical);
         this.api = new RuntimeApi(sessions, launcher, configs, templates, paramTemplates, messages, audit,
                 this.hosts, this.bursts, this.persister);
+        this.deviceV2 = new DeviceV2Delegates(this.api, this.ids, linkState, planExecutions,
+                this.persister, configRepository);
+        this.hostV2 = new HostV2Delegates(this.hosts, hostRepository, this.bursts, messages);
     }
 
     /**
@@ -430,560 +428,214 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public String planExecutionsV2(String deviceId, int limit, String planId,
                                    String status, String dryRun) {
-        String canonical = canonicalDeviceId(deviceId);
-        boolean includeDryRun = dryRun != null && ("all".equalsIgnoreCase(dryRun)
-                || "1".equals(dryRun) || "true".equalsIgnoreCase(dryRun));
-        int capped = Math.max(1, Math.min(500, limit));
-        String statusFilter = status == null || status.isBlank() ? null
-                : status.trim().toUpperCase(java.util.Locale.ROOT);
-        List<PlanExecutionRepository.ExecutionRow> rows = this.planExecutions.query(
-                canonical, blankToNull(planId), statusFilter, includeDryRun, capped);
-
-        StringBuilder sb = new StringBuilder(128 + rows.size() * 256);
-        sb.append("{\"items\":[");
-        for (int i = 0; i < rows.size(); i++) {
-            PlanExecutionRepository.ExecutionRow row = rows.get(i);
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append("{\"id\":").append(row.id())
-                    .append(",\"deviceId\":").append(quote(row.deviceId()))
-                    .append(",\"planId\":").append(quote(row.planId()))
-                    .append(",\"ceid\":").append(row.ceid())
-                    .append(",\"dryRun\":").append(row.dryRun())
-                    .append(",\"scheduledAt\":").append(row.scheduledAt())
-                    .append(",\"firedAt\":").append(row.firedAt())
-                    .append(",\"status\":").append(quote(row.status()))
-                    .append(",\"messages\":").append(safeArray(row.messageJson()))
-                    .append(",\"effects\":").append(safeArray(row.effectJson()))
-                    .append(",\"error\":").append(quote(row.error()))
-                    .append('}');
-        }
-        return sb.append("],\"count\":").append(rows.size()).append('}').toString();
+        return this.deviceV2.planExecutionsV2(deviceId, limit, planId, status, dryRun);
     }
 
     @Override
     public SessionOutcome clearExecutionsV2(String deviceId) {
-        String canonical = canonicalDeviceId(deviceId);
-        if (this.configRepository.findDevice(canonical).isEmpty()) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        try {
-            this.planExecutions.clearForDevice(canonical);
-            return SessionOutcome.OK;
-        } catch (com.shimizukenta.secssim.store.StoreException e) {
-            com.shimizukenta.secssim.app.log.Log.error("清理执行台账失败: " + canonical, e);
-            return SessionOutcome.FAILED;
-        }
+        return this.deviceV2.clearExecutionsV2(deviceId);
     }
 
     @Override
     public TriggerOutcome stepPlanV2(String deviceId, String planId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return TriggerOutcome.UNKNOWN_SESSION;
-        }
-        try {
-            session.stepPlan(planId);
-            return TriggerOutcome.OK;
-        } catch (java.io.IOException | RuntimeException e) {
-            com.shimizukenta.secssim.app.log.Log.error("单步试跑计划失败: " + planId, e);
-            return TriggerOutcome.FAILED;
-        }
+        return this.deviceV2.stepPlanV2(deviceId, planId);
     }
 
     @Override
     public SessionOutcome setPlanEnabledV2(String deviceId, String planId, boolean enabled) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        if (!session.setEventEnabled(planId, enabled)) {
-            return SessionOutcome.FAILED;
-        }
-        /* next_fire_at 由调度器在下一次扫描时推进；这里只持久化启停态，
-           不写死一个可能与 OnCondition / AfterEvent 冲突的时刻（设计 §2.7.3）。 */
-        this.linkState.savePlanState(canonicalDeviceId(deviceId), planId, enabled, null, "");
-        return SessionOutcome.OK;
+        return this.deviceV2.setPlanEnabledV2(deviceId, planId, enabled);
     }
 
     /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
 
     @Override
     public String plansV2Json(String deviceId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return null;
-        }
-        /* 统计缺失的计划按「没跑过」处理：配置里有、runtime_plan_state 里没有很正常 */
-        Map<String, PlanRuntimeStat> stats = new LinkedHashMap<>();
-        for (RuntimeStateRepository.PlanStateRow row : this.linkState.planStates(canonicalDeviceId(deviceId))) {
-            stats.put(row.planId(), new PlanRuntimeStat(row.fireCount(), row.skippedCount(),
-                    row.lastFireAt() == null ? 0L : row.lastFireAt(),
-                    row.nextFireAt() == null ? 0L : row.nextFireAt(),
-                    row.lastError() == null ? "" : row.lastError()));
-        }
-        return session.eventsJson(stats);
+        return this.deviceV2.plansV2Json(deviceId);
     }
 
     @Override
     public int addPlanV2(String deviceId, String planJson) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? 404 : this.api.addEventPlan(session.id(), planJson);
+        return this.deviceV2.addPlanV2(deviceId, planJson);
     }
 
     @Override
     public int updatePlanV2(String deviceId, String planId, String planJson) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? 404 : this.api.updateEventPlan(session.id(), planId, planJson);
+        return this.deviceV2.updatePlanV2(deviceId, planId, planJson);
     }
 
     @Override
     public int removePlanV2(String deviceId, String planId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? 404 : this.api.removeEventPlan(session.id(), planId);
+        return this.deviceV2.removePlanV2(deviceId, planId);
     }
 
     @Override
     public int addCatalogV2(String deviceId, String kind, String bodyJson) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return 404;
-        }
-        return switch (kind) {
-            case "ceid" -> this.api.addCeid(session.id(), bodyJson);
-            case "report" -> this.api.addReport(session.id(), bodyJson);
-            case "svid" -> this.api.addSvid(session.id(), bodyJson);
-            default -> 400;
-        };
+        return this.deviceV2.addCatalogV2(deviceId, kind, bodyJson);
     }
 
     @Override
     public int updateCatalogV2(String deviceId, String kind, int key, String bodyJson) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return 404;
-        }
-        return switch (kind) {
-            case "ceid" -> this.api.updateCeid(session.id(), key, bodyJson);
-            case "report" -> this.api.updateReport(session.id(), key, bodyJson);
-            case "svid" -> this.api.updateSvid(session.id(), key, bodyJson);
-            default -> 400;
-        };
+        return this.deviceV2.updateCatalogV2(deviceId, kind, key, bodyJson);
     }
 
     @Override
     public int removeCatalogV2(String deviceId, String kind, int key) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return 404;
-        }
-        return switch (kind) {
-            case "ceid" -> this.api.removeCeid(session.id(), key);
-            case "report" -> this.api.removeReport(session.id(), key);
-            case "svid" -> this.api.removeSvid(session.id(), key);
-            default -> 400;
-        };
+        return this.deviceV2.removeCatalogV2(deviceId, kind, key);
     }
 
     @Override
     public int pinSvidV2(String deviceId, int svid, String valueJson) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? 404 : this.api.pinSvidValue(session.id(), svid, valueJson);
+        return this.deviceV2.pinSvidV2(deviceId, svid, valueJson);
     }
 
     @Override
     public int unpinSvidV2(String deviceId, int svid) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? 404 : this.api.unpinSvidValue(session.id(), svid);
+        return this.deviceV2.unpinSvidV2(deviceId, svid);
     }
 
     @Override
     public String sendSmlV2(String deviceId, String sml) throws IOException {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? null : this.api.sendSml(session.id(), sml);
+        return this.deviceV2.sendSmlV2(deviceId, sml);
     }
 
     @Override
     public TriggerOutcome triggerCeidV2(String deviceId, int ceid) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return TriggerOutcome.UNKNOWN_SESSION;
-        }
-        TriggerOutcome outcome = this.api.triggerCeid(session.id(), ceid);
-        /* 台账要留证据（设计 §2.5）：手工触发也记一行，plan_id 固定 manual，
-           这样「谁在什么时候手动发过一次」能直接查出来，不用翻报文日志 */
-        long now = System.currentTimeMillis();
-        String key = canonicalDeviceId(deviceId) + "|manual|" + ceid + "|" + now
-                + "|" + MANUAL_TRIGGER_SEQ.incrementAndGet();
-        this.planExecutions.append(new PlanExecutionRepository.Execution(
-                canonicalDeviceId(deviceId), "manual", ceid, key, false, now, now,
-                outcome == TriggerOutcome.OK ? "SENT" : outcome.name(), "", "",
-                outcome == TriggerOutcome.OK ? "" : "手动触发未发出: " + outcome));
-        return outcome;
+        return this.deviceV2.triggerCeidV2(deviceId, ceid);
     }
 
     @Override
     public TriggerOutcome triggerAlarmV2(String deviceId, int alid, boolean set,
                                          String text, int category) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        return session == null ? TriggerOutcome.UNKNOWN_SESSION
-                : this.api.triggerAlarm(session.id(), alid, set, text, category);
+        return this.deviceV2.triggerAlarmV2(deviceId, alid, set, text, category);
     }
 
     /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
 
     @Override
     public String deviceLinkV2Json(String deviceId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        String canonical = canonicalDeviceId(deviceId);
-        /* 内存相位是权威：device_link 行可能落后一拍（相位回调是异步的） */
-        String phase = session == null ? null
-                : RuntimeApi.phaseName(session.linkPhase());
-        String lastError = session == null ? null : session.lastError();
-        java.util.Optional<RuntimeStateRepository.LinkRow> row = this.linkState.deviceLink(canonical);
-        if (session == null && row.isEmpty()) {
-            return null;
-        }
-        StringBuilder sb = new StringBuilder(160);
-        sb.append("{\"deviceId\":").append(quote(canonical))
-                .append(",\"phase\":").append(quote(phase != null ? phase
-                        : row.map(RuntimeStateRepository.LinkRow::phase).orElse("STOPPED")))
-                .append(",\"controlState\":")
-                .append(quote(session == null ? "OFFLINE" : session.controlState().name()))
-                .append(",\"lastError\":").append(quote(lastError == null ? "" : lastError))
-                .append(",\"configRevision\":").append(row.map(RuntimeStateRepository.LinkRow::configRevision).orElse(0L))
-                .append(",\"connectedAt\":").append(row.map(RuntimeStateRepository.LinkRow::connectedAt).orElse(null))
-                .append(",\"disconnectedAt\":").append(row.map(RuntimeStateRepository.LinkRow::disconnectedAt).orElse(null))
-                .append('}');
-        return sb.toString();
+        return this.deviceV2.deviceLinkV2Json(deviceId);
     }
 
     @Override
     public SessionOutcome deviceConnectV2(String deviceId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        if (session.linkPhase() != SessionRuntime.LinkPhase.STOPPED
-                && session.linkPhase() != SessionRuntime.LinkPhase.DISCONNECTED
-                && session.linkPhase() != SessionRuntime.LinkPhase.FAILED) {
-            /* 幂等：已经在监听/已连上，重复点「连接」不该报错 */
-            return SessionOutcome.OK;
-        }
-        try {
-            session.reconnect();
-            this.persister.devicePhase(deviceId, RuntimeApi.phaseName(session.linkPhase()),
-                    session.lastError());
-            return SessionOutcome.OK;
-        } catch (java.io.IOException | RuntimeException e) {
-            com.shimizukenta.secssim.app.log.Log.error("设备连接失败: " + deviceId + " " + e.getMessage(), e);
-            this.persister.devicePhase(deviceId, "FAILED", e.getMessage());
-            return SessionOutcome.FAILED;
-        }
+        return this.deviceV2.deviceConnectV2(deviceId);
     }
 
     @Override
     public SessionOutcome deviceDisconnectV2(String deviceId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        /* 只断链：配置、模型、钉值、计划启用态、运行时编辑都留着，再连原样恢复 */
-        session.disconnect();
-        this.persister.devicePhase(deviceId, "DISCONNECTED", session.lastError());
-        return SessionOutcome.OK;
+        return this.deviceV2.deviceDisconnectV2(deviceId);
     }
 
     @Override
     public SessionOutcome deviceOnlineV2(String deviceId, boolean online) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        if (!session.setOnline(online)) {
-            /* 没有主机时不允许上线：GEM 的 ONLINE 是"对某台主机"的状态 */
-            return SessionOutcome.NOT_CONNECTED;
-        }
-        com.shimizukenta.secssim.app.log.Log.info("设备 " + deviceId
-                + (online ? " 置为在线（等价 S1F17）" : " 置为离线（等价 S1F15）"));
-        return SessionOutcome.OK;
+        return this.deviceV2.deviceOnlineV2(deviceId, online);
     }
 
     @Override
     public SessionOutcome deviceReloadV2(String deviceId) {
-        HsmsSessionRuntime session = sessionFor(deviceId);
-        if (session == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        return this.api.reloadSession(session.id());
-    }
-
-    /** v2 设备 id 与 v1 legacy stem 都归一到 config.db 的 ULID（台账按它归属）。 */
-    private String canonicalDeviceId(String key) {
-        if (key == null || key.isBlank()) {
-            return key;
-        }
-        try {
-            return this.configRepository.findDevice(key)
-                    .map(ConfigRepository.DeviceView::id).orElse(key);
-        } catch (RuntimeException e) {
-            /* 配置库临时不可读时按原 key 查，不让台账查询整条挂掉 */
-            return key;
-        }
-    }
-
-    /** 按归一后的设备 id 找会话：v1 会话 id 是 legacy stem，v2 设备 id 是 ULID。 */
-    private HsmsSessionRuntime sessionFor(String deviceId) {
-        String canonical = canonicalDeviceId(deviceId);
-        for (SessionRuntime runtime : this.sessions.list()) {
-            if (runtime instanceof HsmsSessionRuntime hsms
-                    && canonical.equals(canonicalDeviceId(hsms.id()))) {
-                return hsms;
-            }
-        }
-        return null;
-    }
-
-    private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    private static String safeArray(String json) {
-        return json == null || json.isBlank() ? "[]" : json;
-    }
-
-    /** JSON 字符串转义（设备 id / 计划 id / 错误文本可能带引号或换行）。 */
-    private static String quote(String text) {
-        if (text == null) {
-            return "\"\"";
-        }
-        StringBuilder sb = new StringBuilder(text.length() + 2).append('"');
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-                }
-            }
-        }
-        return sb.append('"').toString();
+        return this.deviceV2.deviceReloadV2(deviceId);
     }
 
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */
 
     @Override
     public String hostsV2Json() {
-        return this.hosts.allJson();
+        return this.hostV2.hostsV2Json();
     }
 
     @Override
     public HostOpenResult openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
-        if (host == null || host.isBlank() || port < 1 || port > 65535) {
-            return HostOpenResult.failed(SessionOutcome.FAILED);
-        }
-        var result = this.hosts.open(name == null || name.isBlank() ? "host" : name,
-                new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId),
-                autoReconnect);
-        /* id 随结果返回，不再落到共享字段上（并发创建会串号） */
-        return new HostOpenResult(result.outcome(), result.hostId() == null ? "" : result.hostId());
+        return this.hostV2.openHostV2(name, host, port, deviceId, autoReconnect);
     }
 
     @Override
     public SessionOutcome saveHostV2(String hostId, String name, String host, int port, int deviceId) {
-        var sim = this.hosts.findSim(hostId);
-        if (sim == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
-        }
-        sim.saveSettings(name, new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId));
-        var view = this.hostRepository.find(hostId).orElse(null);
-        if (view != null) {
-            this.hostRepository.save(hostId, sim.name(), host, port, deviceId,
-                    view.collectorJson(), view.autoReconnect(), view.note());
-        }
-        return SessionOutcome.OK;
+        return this.hostV2.saveHostV2(hostId, name, host, port, deviceId);
     }
 
     @Override
     public String hostV2Json(String hostId) {
-        return this.hosts.jsonById(hostId);
+        return this.hostV2.hostV2Json(hostId);
     }
 
     @Override
     public SessionOutcome destroyHostV2(String hostId) {
-        SessionOutcome outcome = this.hosts.destroyById(hostId);
-        this.bursts.cancelHost(hostId);
-        return outcome;
+        return this.hostV2.destroyHostV2(hostId);
     }
 
     @Override
     public SessionOutcome hostConnectV2(String hostId) {
-        return this.hosts.connectById(hostId);
+        return this.hostV2.hostConnectV2(hostId);
     }
 
     @Override
     public SessionOutcome hostDisconnectV2(String hostId) {
-        SessionOutcome outcome = this.hosts.disconnectById(hostId);
-        this.bursts.cancelHost(hostId);
-        return outcome;
+        return this.hostV2.hostDisconnectV2(hostId);
     }
 
     @Override
     public SessionOutcome hostApplyV2(String hostId) {
-        return this.hosts.applyById(hostId);
+        return this.hostV2.hostApplyV2(hostId);
     }
 
     @Override
     public String hostSendV2(String hostId, String sml) {
-        try {
-            return this.hosts.sendById(hostId, sml);
-        } catch (java.io.IOException e) {
-            return "{\"ok\":false,\"error\":\"" + escape(e.getMessage() == null ? "send-failed" : e.getMessage()) + "\"}";
-        }
+        return this.hostV2.hostSendV2(hostId, sml);
     }
 
     @Override
     public String hostVariablesRefreshV2(String hostId) {
-        return this.hosts.refreshVariables(hostId);
+        return this.hostV2.hostVariablesRefreshV2(hostId);
     }
 
     @Override
     public boolean hostVariableDeclareV2(String hostId, int svid, String type) {
-        return this.hosts.declareVariableType(hostId, svid, type);
+        return this.hostV2.hostVariableDeclareV2(hostId, svid, type);
     }
 
     @Override
     public String hostVariablesV2(String hostId) {
-        return this.hosts.variablesJson(hostId);
+        return this.hostV2.hostVariablesV2(hostId);
     }
 
     @Override
     public String hostTemplatesJson() {
-        return this.hostRepository.listTemplatesJson();
+        return this.hostV2.hostTemplatesJson();
     }
 
     /* ---------- v2：主机配置区方案库（Trace / S1F3 采集，落 config.db） ---------- */
 
     @Override
     public String hostPlansV2Json(String hostId, String kind) {
-        if (!this.hostRepository.hostExists(hostId)) {
-            return null;
-        }
-        List<String> bodies = this.hostRepository.listPlans(hostId, kind);
-        StringBuilder out = new StringBuilder("[");
-        for (int i = 0; i < bodies.size(); i++) {
-            if (i > 0) {
-                out.append(',');
-            }
-            out.append(bodies.get(i));
-        }
-        return out.append(']').toString();
+        return this.hostV2.hostPlansV2Json(hostId, kind);
     }
 
     @Override
     public SessionOutcome saveHostPlanV2(String hostId, String kind, String planId, String body) {
-        try {
-            if (!this.hostRepository.hostExists(hostId)) {
-                return SessionOutcome.UNKNOWN_SESSION;
-            }
-            this.hostRepository.savePlan(hostId, kind, planId, body);
-            return SessionOutcome.OK;
-        } catch (com.shimizukenta.secssim.store.StoreException e) {
-            com.shimizukenta.secssim.app.log.Log.error("保存主机方案失败: " + hostId + "/" + kind + "/" + planId, e);
-            return SessionOutcome.FAILED;
-        }
+        return this.hostV2.saveHostPlanV2(hostId, kind, planId, body);
     }
 
     @Override
     public SessionOutcome deleteHostPlanV2(String hostId, String kind, String planId) {
-        try {
-            if (!this.hostRepository.hostExists(hostId)) {
-                return SessionOutcome.UNKNOWN_SESSION;
-            }
-            return this.hostRepository.deletePlan(hostId, kind, planId)
-                    ? SessionOutcome.OK
-                    : SessionOutcome.UNKNOWN_SESSION;
-        } catch (com.shimizukenta.secssim.store.StoreException e) {
-            com.shimizukenta.secssim.app.log.Log.error("删除主机方案失败: " + hostId + "/" + kind + "/" + planId, e);
-            return SessionOutcome.FAILED;
-        }
+        return this.hostV2.deleteHostPlanV2(hostId, kind, planId);
     }
 
     @Override
     public SessionOutcome createHostTemplateV2(String id, String name, String host, int port,
                                                int deviceId, String note) {
-        try {
-            if (id != null && !id.isBlank()) {
-                this.hostRepository.saveTemplate(id, name, host, port, deviceId, "{}", note);
-            } else {
-                this.hostRepository.createTemplate(name, host, port, deviceId, "{}", note);
-            }
-            return SessionOutcome.OK;
-        } catch (com.shimizukenta.secssim.store.StoreException e) {
-            return SessionOutcome.FAILED;
-        }
+        return this.hostV2.createHostTemplateV2(id, name, host, port, deviceId, note);
     }
 
     @Override
     public SessionOutcome deleteHostTemplateV2(String id) {
-        try {
-            this.hostRepository.deleteTemplate(id);
-            return SessionOutcome.OK;
-        } catch (com.shimizukenta.secssim.store.StoreException e) {
-            return SessionOutcome.FAILED;
-        }
+        return this.hostV2.deleteHostTemplateV2(id);
     }
 
     @Override
     public String hostMessagesV2(String hostId, int limit) {
-        var snapshot = this.messageLog.selectHostMessages(Math.max(1, limit), hostId, "host");
-        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
-        List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
-        for (var event : snapshot.messages()) {
-            items.add(com.shimizukenta.jsonhub.JsonHub.fromJson(toMessageJson(event)));
-        }
-        return b.object(
-                b.pair("ok", true),
-                b.pair("total", snapshot.total()),
-                b.pair("messages", b.array(items))).toJson();
+        return this.hostV2.hostMessagesV2(hostId, limit);
     }
 
-    private String toMessageJson(com.shimizukenta.secssim.app.event.MessageEvent event) {
-        return "{\"seq\":" + event.seq()
-                + ",\"hostId\":\"" + escape(event.hostId()) + "\""
-                + ",\"perspective\":\"" + event.perspective() + "\""
-                + ",\"direction\":\"" + event.direction() + "\""
-                + ",\"stream\":" + event.stream()
-                + ",\"function\":" + event.function()
-                + ",\"wbit\":" + event.wbit()
-                + ",\"body\":\"" + escape(event.body()) + "\""
-                + ",\"at\":" + event.atMillis() + "}";
-    }
-
-    private static String escape(String value) {
-        StringBuilder sb = new StringBuilder(value.length() + 8);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '\\' -> sb.append("\\\\");
-                case '"' -> sb.append("\\\"");
-                case '\n' -> sb.append('\\').append('n');
-                case '\r' -> sb.append('\\').append('r');
-                case '\t' -> sb.append('\\').append('t');
-                default -> sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
     /* ---------- 总览与压测 ---------- */
 
     @Override

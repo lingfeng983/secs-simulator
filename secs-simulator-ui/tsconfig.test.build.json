@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "noEmit": false,
+    "noEmitOnError": false,
+    "isolatedModules": false,
+    "declaration": false,
+    "sourceMap": false,
+    "outDir": "./.arts-tsout",
+    "rootDir": "./src"
+  },
+  "include": ["src"]
+}

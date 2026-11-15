@@ -1,0 +1,200 @@
+/* 状态灯:比按钮弱、比文字强,用来表达"当前这份东西是什么状态" */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.14rem 0.55rem 0.14rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: calc(11.5px * var(--font-scale));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.state-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state-pill[data-tone='ok'] {
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.state-pill[data-tone='warn'] {
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.state-pill[data-tone='danger'] {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 分段控件:一排互斥视图 */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+}
+
+.segment,
+.segmented > button {
+  min-height: 26px;
+  padding: 0 0.7rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.segment:hover:not(:disabled),
+.segmented > button:hover:not(:disabled) {
+  background: transparent;
+  border: none;
+  color: var(--ink);
+}
+
+.segment.active,
+.segmented > button.active {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+
+[data-theme='dark'] .segment.active,
+[data-theme='dark'] .segmented > button.active {
+  background: var(--surface-2);
+}
+
+/* ===== 徽标 / 胶囊 ===== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.46rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.badge:empty::before {
+  display: none;
+}
+
+.badge-ok,
+.badge.tone-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge-warn,
+.badge.tone-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge-danger,
+.badge.tone-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* info 单独用蓝：设备四态里"离线"必须和"在线（绿）"一眼分得开，
+   借用 accent（青绿）会跟 ok 混在一起 */
+.badge.tone-info {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.badge-muted,
+.badge.tone-muted {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+/* 状态点 */
+.conn-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: 0 0 auto;
+}
+
+.conn-dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.conn-dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+/* 离线：链路通了但设备没 ONLINE。蓝色与"启动（黄）"区分开，
+   否则操作员分不清"还没人连"和"连着但没上线" */
+.conn-dot.info {
+  background: var(--info);
+  box-shadow: 0 0 0 3px var(--info-soft);
+}
+
+.conn-dot.danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.conn-dot.muted {
+  background: var(--faint);
+}
+
+/* 快选 chip */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip {
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}

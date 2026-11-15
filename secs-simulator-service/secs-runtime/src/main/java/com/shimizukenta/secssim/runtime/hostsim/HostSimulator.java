@@ -18,18 +18,13 @@ import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
 import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secs.secs2.Secs2Item;
-import com.shimizukenta.secs.secs2.Secs2Exception;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.HashSet;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -120,17 +115,8 @@ public final class HostSimulator {
     /** 退避重试的创建/取消互斥：并发观察同一次断链会建出两个定时器，被覆盖的那个永不关闭。 */
     private final Object retryLock = new Object();
 
-    /* ===== S1F3 采集器状态 ===== */
-    private volatile CollectorConfig collectorConfig;
-    private volatile boolean collectorRunning;
-    private volatile long collectorStartedAt;
-    private volatile long collectorLastRttMs;
-    private volatile long collectorStoppedAt;
-    private final AtomicLong collectorSamples = new AtomicLong();
-    private final AtomicLong collectorDecodeErrors = new AtomicLong();
-    private final AtomicBoolean collectorInFlight = new AtomicBoolean(false);
-    private final Map<Integer, Deque<double[]>> collectorData = new ConcurrentHashMap<>();
-    private volatile ScheduledExecutorService collectorExecutor;
+    /** S1F3 采集器（状态机、轮询与 JSON 输出都在辅助类里）。 */
+    private final HostCollector collector;
 
     /** 主机链路相位(host_link.phase)。 */
     public enum HostLinkPhase {
@@ -147,6 +133,7 @@ public final class HostSimulator {
         this.name = name;
         this.target = target;
         this.autoReconnect = autoReconnect;
+        this.collector = new HostCollector(this, hostId);
         if (catalog != null) {
             this.variableCatalog.putAll(catalog);
         }
@@ -450,9 +437,7 @@ public final class HostSimulator {
         this.changePhase(HostLinkPhase.CONNECTED);
         Log.info("主机 " + this.hostId + " 已连接 " + current.bindHost() + ":" + current.port());
         /* 采集配置已在（重连恢复）：连接成功后自动恢复采集 */
-        if (this.collectorConfig != null && !this.collectorRunning) {
-            this.collectorStart("连接恢复");
-        }
+        this.collector.recoverAfterConnect();
     }
 
     /**
@@ -499,7 +484,7 @@ public final class HostSimulator {
     private void disconnectLocked() {
         this.manualDisconnect = true;
         this.cancelRetry();
-        this.collectorStop("手动断开");
+        this.collector.stop("手动断开");
         SecsCommunicator comm = this.communicator;
         this.communicator = null;
         this.open.set(false);
@@ -552,7 +537,7 @@ public final class HostSimulator {
     private void installPassThrough(SecsCommunicator comm) {
         comm.addReceiveMessagePassThroughListener(message -> {
             if (message.getStream() == 6 && message.getFunction() == 11) {
-                this.onS6f11(message);
+                this.collector.onS6f11(message);
             }
         });
         final com.shimizukenta.secssim.app.event.EventBus bus = this.eventBus;
@@ -619,61 +604,6 @@ public final class HostSimulator {
         }
     }
 
-    /**
-     * 从 S6F11 body 取 CEID 并比对采集器启停（与本地/远程无关）。
-     *
-     * <p>标准是 L[3]{DATAID, CEID, REPORTS}，第 2 项是 CEID；部分设备发
-     * L[2]{CEID, REPORTS}，这时第 2 项是列表、解析失败，退回第 1 项。
-     * 这里不再用 {@code open} 做前置门槛：真正的可启动检查在 collectorStart 里，
-     * 链路正在建立时 open 可能还没置位，但帧已经到了，早退会白白丢掉这次触发。</p>
-     */
-    private void onS6f11(SecsMessage message) {
-        CollectorConfig config = this.collectorConfig;
-        if (config == null) {
-            return;
-        }
-        int ceid;
-        try {
-            Secs2 body = message.secs2();
-            if (body.secs2Item() != Secs2Item.LIST || body.size() < 1) {
-                return;
-            }
-            ceid = readCeid(body);
-        } catch (Exception e) {
-            Log.warn("主机解析 S6F11 CEID 失败（" + this.hostId + "）: " + e);
-            return;
-        }
-        if (ceid < 0) {
-            return;
-        }
-
-        if (!this.collectorRunning && ceid == config.startCeid()) {
-            Log.info("主机收到启动 CEID " + ceid + "（" + this.hostId + "），触发 S1F3 采集");
-            this.collectorStart("CEID " + ceid);
-        } else if (this.collectorRunning && ceid == config.stopCeid()) {
-            Log.info("主机收到停止 CEID " + ceid + "（" + this.hostId + "），停止 S1F3 采集");
-            this.collectorStop("CEID " + ceid);
-        }
-    }
-
-    /** S6F11 body 的 CEID 位置：L[3] 取 index 1，L[2] 依次试 index 1 / 0。 */
-    private static int readCeid(Secs2 body) throws Secs2Exception {
-        if (body.size() >= 2) {
-            try {
-                return Secs2Read.asInt(body.get(1));
-            } catch (Secs2Exception | RuntimeException e) {
-                /* 第 2 项是报告列表：按 L[2]{CEID, REPORTS} 继续试 */
-            }
-        }
-        if (body.size() >= 1) {
-            try {
-                return Secs2Read.asInt(body.get(0));
-            } catch (Secs2Exception | RuntimeException e) {
-                return -1;
-            }
-        }
-        return -1;
-    }
 
     /* ===== S1F3 采集器 ===== */
 
@@ -716,7 +646,9 @@ public final class HostSimulator {
     }
 
     /**
-     * 下发采集配置（可在连接前后随时调用;会停止正在运行的采集）。
+     * 下发采集配置（可在连接前后随时调用；会停止正在运行的采集并回到待命）。
+     *
+     * <p>待命（armed）状态下不轮询，收到 {@code startCeid} 的 S6F11 才开始采集。</p>
      *
      * @param json {@code {"startCeid":101,"stopCeid":102,"intervalMs":1000,"svids":[{"id":401,"name":"T","unit":"C"}]}}
      * @throws IllegalArgumentException 形状或取值非法
@@ -729,18 +661,18 @@ public final class HostSimulator {
             throw new IllegalArgumentException("采集配置不是合法 JSON: " + e.getMessage(), e);
         }
 
-        int startCeid = JsonAccessHelper.intField(root, "startCeid");
-        int stopCeid = JsonAccessHelper.intField(root, "stopCeid");
-        long intervalMs = JsonAccessHelper.longField(root, "intervalMs", 1_000L);
-        JsonHub svidsJson = JsonAccessHelper.arrayField(root, "svids");
+        int startCeid = JsonFieldReader.intField(root, "startCeid");
+        int stopCeid = JsonFieldReader.intField(root, "stopCeid");
+        long intervalMs = JsonFieldReader.longField(root, "intervalMs", 1_000L);
+        JsonHub svidsJson = JsonFieldReader.arrayField(root, "svids");
 
         List<CollectorSvid> svids = new ArrayList<>();
         for (int i = 0; i < svidsJson.length(); i++) {
             JsonHub item = svidsJson.get(i);
-            int id = JsonAccessHelper.intField(item, "id");
+            int id = JsonFieldReader.intField(item, "id");
             svids.add(new CollectorSvid(id,
-                    JsonAccessHelper.stringField(item, "name"),
-                    JsonAccessHelper.stringField(item, "unit")));
+                    JsonFieldReader.stringField(item, "name"),
+                    JsonFieldReader.stringField(item, "unit")));
         }
 
         CollectorConfig config = new CollectorConfig(startCeid, stopCeid, intervalMs, svids);
@@ -754,186 +686,21 @@ public final class HostSimulator {
             }
         }
 
-        /* 「停旧采集 + 换配置」必须是一个整体：collectorStart 由链路线程在 S6F11
-           里触发，两步之间被唤醒会用<b>旧</b>参数启动，之后不再重读。 */
-        synchronized ( this ) {
-            this.collectorStop("配置更新");
-            this.collectorConfig = config;
-
-            /* 换配置后，不在新列表里的 SVID 队列没有消费者也没有出口：
-               反复改采集配置会让内存只增不减 */
-            Set<Integer> keep = new HashSet<>();
-            for (CollectorSvid svid : config.svids()) {
-                keep.add(svid.id());
-            }
-            this.collectorData.keySet().retainAll(keep);
-        }
+        /* 「停旧采集 + 换配置」在采集器内部整体完成：启动由链路线程在 S6F11
+           里触发，两步之间被唤醒会用旧参数启动，之后不再重读。 */
+        this.collector.applyConfig(config);
     }
 
-    /** 手动启动采集（正常流程由 startCeid 的 S6F11 触发）。 */
+    /** 手动启动采集：配置了启动 CEID 时只是武装待命（等 S6F11），否则直接开始轮询。 */
     public void collectorStartManual() {
-        if (this.collectorConfig == null) {
-            throw new IllegalStateException("采集器还没有配置");
-        }
-        this.collectorStart("手动");
+        this.collector.startManual();
     }
 
-    /** 手动停止采集。 */
+    /** 手动停止采集：退出待命（armed=false），之后的启动 CEID 也不再触发轮询。 */
     public void collectorStopManual() {
-        this.collectorStop("手动");
+        this.collector.stopManual();
     }
 
-    private synchronized void collectorStart(String cause) {
-        CollectorConfig config = this.collectorConfig;
-        if (config == null || this.collectorRunning || !this.open.get()) {
-            return;
-        }
-        this.collectorData.clear();
-        this.collectorSamples.set(0);
-        this.collectorDecodeErrors.set(0);
-        this.collectorRunning = true;
-        this.collectorStartedAt = System.currentTimeMillis();
-        this.collectorStoppedAt = 0;
-
-        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "hostsim-collector-" + this.hostId);
-            thread.setDaemon(true);
-            return thread;
-        });
-        this.collectorExecutor = executor;
-        executor.scheduleAtFixedRate(this::collectorTick,
-                0L, config.intervalMs(), TimeUnit.MILLISECONDS);
-        Log.info("主机采集器已启动（" + this.hostId + "，" + cause + "）");
-    }
-
-    private synchronized void collectorStop(String cause) {
-        if (!this.collectorRunning) {
-            return;
-        }
-        this.collectorRunning = false;
-        this.collectorStoppedAt = System.currentTimeMillis();
-        ScheduledExecutorService executor = this.collectorExecutor;
-        if (executor != null) {
-            executor.shutdownNow();
-            this.collectorExecutor = null;
-        }
-        Log.info("主机采集器已停止（" + this.hostId + "，" + cause + "）");
-    }
-
-    /** 一轮 S1F3 轮询:上一轮没回来就跳过本拍,避免在 T3 上叠队列。 */
-    private void collectorTick() {
-        if (!this.collectorRunning || !this.collectorInFlight.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            CollectorConfig config = this.collectorConfig;
-            SecsCommunicator comm = this.communicator;
-            if (config == null || comm == null) {
-                return;
-            }
-
-            List<Secs2> items = new ArrayList<>();
-            for (CollectorSvid svid : config.svids()) {
-                items.add(Secs2.getBuilder().uint4(svid.id()));
-            }
-            Secs2 body = Secs2.getBuilder().list(items);
-
-            long startedAt = System.currentTimeMillis();
-            Optional<SecsMessage> reply;
-            try {
-                reply = comm.send(1, 3, true, body);
-            } catch (Exception e) {
-                this.lastError = "采集 S1F3 发送失败: " + e.getMessage();
-                return;
-            }
-            this.collectorLastRttMs = System.currentTimeMillis() - startedAt;
-            if (reply.isEmpty()) {
-                return;
-            }
-
-            this.decodeS1f4(config, reply.get());
-        } finally {
-            this.collectorInFlight.set(false);
-        }
-    }
-
-    /** S1F4 应答按位置解码;目录里声明过的类型优先,未声明按应答项格式码探测。 */
-    private void decodeS1f4(CollectorConfig config, SecsMessage reply) {
-        Secs2 body = reply.secs2();
-        long now = System.currentTimeMillis();
-
-        if (body.secs2Item() != Secs2Item.LIST || body.size() != config.svids().size()) {
-            this.collectorDecodeErrors.incrementAndGet();
-            return;
-        }
-
-        for (int i = 0; i < config.svids().size(); i++) {
-            CollectorSvid svid = config.svids().get(i);
-            Double value;
-            try {
-                value = decodeScalar(body.get(i), svid.id());
-            } catch (Secs2Exception e) {
-                value = null;
-            }
-            if (value == null) {
-                this.collectorDecodeErrors.incrementAndGet();
-                continue;
-            }
-            Deque<double[]> queue =
-                    this.collectorData.computeIfAbsent(svid.id(), key -> new ArrayDeque<>());
-            synchronized (queue) {
-                queue.addLast(new double[] {now, value});
-                while (queue.size() > MAX_SAMPLES_PER_SVID) {
-                    queue.pollFirst();
-                }
-            }
-            this.collectorSamples.incrementAndGet();
-        }
-    }
-
-    /**
-     * 宽容解码：目录里声明过的类型优先，未声明按应答项格式码探测
-     * （双精度 → 整型 → 单字节 → 布尔；嵌套 L 返回 null 记解码错误）。
-     */
-    private Double decodeScalar(Secs2 item, int svid) throws Secs2Exception {
-        if (item.secs2Item() == Secs2Item.LIST || item.isEmpty()) {
-            return null;
-        }
-        CatalogEntry entry = this.variableCatalog.get(svid);
-        String declared = entry == null ? "" : entry.declaredType();
-        if (!declared.isEmpty()) {
-            return switch (declared.toUpperCase(java.util.Locale.ROOT)) {
-                case "U1", "U2", "U4", "U8", "I1", "I2", "I4", "I8" -> (double) item.getInt(0);
-                case "F4", "F8" -> item.getDouble(0);
-                case "BOOLEAN" -> item.getBoolean(0) ? 1.0 : 0.0;
-                default -> probeScalar(item);
-            };
-        }
-        return probeScalar(item);
-    }
-
-    private static Double probeScalar(Secs2 item) {
-        try {
-            return item.getDouble(0);
-        } catch (Secs2Exception ignored) {
-            /* 尝试下一种 */
-        }
-        try {
-            return (double) item.getInt(0);
-        } catch (Secs2Exception ignored) {
-            /* 尝试下一种 */
-        }
-        try {
-            return (double) (item.getByte(0) & 0xFF);
-        } catch (Secs2Exception ignored) {
-            /* 尝试下一种 */
-        }
-        try {
-            return item.getBoolean(0) ? 1.0 : 0.0;
-        } catch (Secs2Exception ignored) {
-            return null;
-        }
-    }
 
     /**
      * 从目标读取变量目录：发 S1F11 W + 空列表，解析 S1F12 的 SVID/名称/单位。
@@ -1017,83 +784,7 @@ public final class HostSimulator {
      * @return JSON（running/config/series...;未配置时 configured=false）
      */
     public String collectorJson() {
-        JsonHubBuilder b = JsonHub.getBuilder();
-        CollectorConfig config = this.collectorConfig;
-
-        if (config == null) {
-            return b.object(
-                    b.pair("configured", false),
-                    b.pair("running", false)).toJson();
-        }
-
-        List<JsonHub> svids = new ArrayList<>();
-        List<JsonHub> series = new ArrayList<>();
-        boolean truncated = false;
-        for (CollectorSvid svid : config.svids()) {
-            svids.add(b.object(
-                    b.pair("id", svid.id()),
-                    b.pair("name", svid.name()),
-                    b.pair("unit", svid.unit())));
-
-            Deque<double[]> queue = this.collectorData.get(svid.id());
-            List<JsonHub> ts = new ArrayList<>();
-            List<JsonHub> vs = new ArrayList<>();
-            if (queue != null) {
-                synchronized (queue) {
-                    int size = queue.size();
-                    /* 超过返回点数就等间隔抽稀：保留首尾附近的可读性，不把 3600 点全塞进 JSON */
-                    int stride = size <= MAX_JSON_POINTS_PER_SVID
-                            ? 1
-                            : (int) Math.ceil((double) size / MAX_JSON_POINTS_PER_SVID);
-                    if (stride > 1) {
-                        truncated = true;
-                    }
-                    int index = 0;
-                    for (double[] point : queue) {
-                        /* 末点尽量保留，但不能因此多出第 721 个点 */
-                        if (index % stride == 0
-                                || (index == size - 1 && ts.size() < MAX_JSON_POINTS_PER_SVID)) {
-                            ts.add(b.number((long) point[0]));
-                            vs.add(b.number(point[1]));
-                        }
-                        index++;
-                    }
-                }
-            }
-            series.add(b.object(
-                    b.pair("svid", svid.id()),
-                    b.pair("name", svid.name()),
-                    b.pair("unit", svid.unit()),
-                    b.pair("t", b.array(ts)),
-                    b.pair("v", b.array(vs))));
-        }
-
-        /* 变量目录里声明过但已移除的 SVID 标 stale(数据停止追加) */
-        List<JsonHub> stale = new ArrayList<>();
-        if (!this.variableCatalog.isEmpty()) {
-            for (CollectorSvid svid : config.svids()) {
-                if (!this.variableCatalog.containsKey(svid.id())) {
-                    stale.add(b.number(svid.id()));
-                }
-            }
-        }
-
-        return b.object(
-                b.pair("configured", true),
-                b.pair("running", this.collectorRunning),
-                b.pair("startCeid", config.startCeid()),
-                b.pair("stopCeid", config.stopCeid()),
-                b.pair("intervalMs", config.intervalMs()),
-                b.pair("svids", b.array(svids)),
-                b.pair("startedAt", this.collectorStartedAt),
-                b.pair("stoppedAt", this.collectorStoppedAt),
-                b.pair("samples", this.collectorSamples.get()),
-                b.pair("decodeErrors", this.collectorDecodeErrors.get()),
-                b.pair("lastRttMs", this.collectorLastRttMs),
-                b.pair("truncated", truncated),
-                b.pair("staleSvids", b.array(stale)),
-                b.pair("series", b.array(series)))
-                .toJson();
+        return this.collector.toJson();
     }
 
     /* ===== SML 发送(原有能力) ===== */
@@ -1163,10 +854,7 @@ public final class HostSimulator {
     public void destroy() {
         this.disconnect();
         this.cancelRetry();
-        ScheduledExecutorService collector = this.collectorExecutor;
-        if (collector != null) {
-            collector.shutdownNow();
-        }
+        this.collector.shutdown();
     }
 
     /** close() 保留为 destroy 的同义别名（旧调用方）。 */
@@ -1181,6 +869,32 @@ public final class HostSimulator {
      */
     public boolean isOpen() {
         return this.open.get() && this.communicator != null;
+    }
+
+    /* 采集器辅助类的包内状态入口：只收窄可见性，不扩大 public 面。 */
+    SecsCommunicator currentCommunicator() {
+        return this.communicator;
+    }
+
+    boolean linkOpen() {
+        return this.open.get();
+    }
+
+    void recordError(String message) {
+        this.lastError = message;
+    }
+
+    String declaredTypeOf(int svid) {
+        CatalogEntry entry = this.variableCatalog.get(svid);
+        return entry == null ? "" : entry.declaredType();
+    }
+
+    boolean catalogContainsSvid(int svid) {
+        return this.variableCatalog.containsKey(svid);
+    }
+
+    boolean catalogEmpty() {
+        return this.variableCatalog.isEmpty();
     }
 
     /**
@@ -1227,44 +941,4 @@ public final class HostSimulator {
                 .toJson();
     }
 
-    /** {@code setCollectorConfig} 里的轻量 JSON 读取（避免与 secs-app JsonAccess 依赖纠缠）。 */
-    private static final class JsonAccessHelper {
-
-        private JsonAccessHelper() {
-        }
-
-        static int intField(JsonHub obj, String key) {
-            if (!obj.containsKey(key)) {
-                throw new IllegalArgumentException("缺少必填字段: " + key);
-            }
-            return obj.get(key).optionalInt()
-                    .orElseThrow(() -> new IllegalArgumentException(key + " 应为整数"));
-        }
-
-        static long longField(JsonHub obj, String key, long fallback) {
-            if (!obj.containsKey(key)) {
-                return fallback;
-            }
-            return obj.get(key).optionalLong()
-                    .orElseThrow(() -> new IllegalArgumentException(key + " 应为整数"));
-        }
-
-        static String stringField(JsonHub obj, String key) {
-            if (!obj.containsKey(key)) {
-                return "";
-            }
-            return obj.get(key).optionalString().orElse("");
-        }
-
-        static JsonHub arrayField(JsonHub obj, String key) {
-            if (!obj.containsKey(key)) {
-                throw new IllegalArgumentException("缺少必填字段: " + key);
-            }
-            JsonHub value = obj.get(key);
-            if (value == null || !value.isArray()) {
-                throw new IllegalArgumentException(key + " 应为数组");
-            }
-            return value;
-        }
-    }
 }

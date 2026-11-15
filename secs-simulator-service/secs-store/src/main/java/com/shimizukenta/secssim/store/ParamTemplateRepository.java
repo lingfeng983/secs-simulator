@@ -93,7 +93,7 @@ public final class ParamTemplateRepository {
                 st.setLong(8, now);
                 st.executeUpdate();
             } catch (SQLException e) {
-                if (e.getMessage() != null && e.getMessage().contains("PRIMARY")) {
+                if (ConfigRepository.isUniqueViolation(e)) {
                     throw StoreException.conflict("已经有同 id 的参数模板: " + id);
                 }
                 throw new StoreException("新建参数模板失败: " + e.getMessage(), e);

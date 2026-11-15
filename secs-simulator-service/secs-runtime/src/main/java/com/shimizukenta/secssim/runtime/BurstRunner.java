@@ -411,6 +411,12 @@ final class BurstRunner {
         int failed;
         int skipped;
         boolean aborted;
+
+        /** 首条失败原因（{@code null} 表示没有失败）。 */
+        String firstError;
+
+        /** 首条失败的下标（0 起）；{@code -1} 表示没有失败。 */
+        int firstErrorIndex = -1;
     }
 
     /** 在后台线程里跑一条压测：总时长超预算就中止剩余条目。 */
@@ -437,8 +443,23 @@ final class BurstRunner {
                 try {
                     action.perform(i);
                     stats.latencies.add(System.currentTimeMillis() - t0);
+                } catch (InterruptedException e) {
+                    /* 中断不是"这一条失败"：恢复中断标志并中止整轮压测，
+                       否则清掉标志后循环会继续把剩余条目发完 */
+                    Thread.currentThread().interrupt();
+                    stats.skipped = count - i - 1;
+                    stats.aborted = true;
+                    Log.error("压测被中断（第 " + i + " 条）", e);
+                    break;
                 } catch (Exception e) {
                     stats.failed++;
+                    if (stats.firstError == null) {
+                        /* 首条失败带完整堆栈；后续失败只计数——服务端整体不可用时
+                           5000 条逐条打日志会把日志文件瞬间刷满 */
+                        stats.firstError = String.valueOf(e);
+                        stats.firstErrorIndex = i;
+                        Log.error("压测第 " + i + " 条发送失败（共 " + count + " 条）", e);
+                    }
                 }
             }
             if (!pace(intervalMs, startedAt, i, deadline)) {
@@ -466,6 +487,9 @@ final class BurstRunner {
                 + ",\"latencyP50\":" + pick.apply((int) (latencies.size() * 0.5))
                 + ",\"latencyP95\":" + pick.apply((int) (latencies.size() * 0.95))
                 + ",\"latencyMax\":" + pick.apply(latencies.size() - 1)
+                /* 只新增字段：既有字段的名字与语义不动，前端旧解析照常工作 */
+                + ",\"firstError\":\"" + jsonEscape(stats.firstError) + "\""
+                + ",\"firstErrorIndex\":" + stats.firstErrorIndex
                 + "}";
     }
 

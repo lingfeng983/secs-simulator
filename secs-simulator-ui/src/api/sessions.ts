@@ -70,7 +70,15 @@ export const sessionApi: SessionApi = {
     if (!response.ok && response.status !== 207) {
       throw new Error(`${response.status} ${text.slice(0, 200)}`);
     }
-    return JSON.parse(text) as SessionBulkResult;
+    try {
+      return JSON.parse(text) as SessionBulkResult;
+    } catch {
+      throw new ApiError(
+        response.status,
+        'bad-json',
+        `${response.status} 返回的不是 JSON：${text.slice(0, 120)}`,
+      );
+    }
   },
   async closeSession(sessionId) {
     /* 3.0 起这条 v1 端点的语义是「断开链路」：设备不消失，可再连。
@@ -215,7 +223,15 @@ export const sessionApi: SessionApi = {
     if (!response.ok) {
       throw new ApiError(response.status, '', `${response.status} ${text.slice(0, 200)}`);
     }
-    return JSON.parse(text) as BurstResult;
+    try {
+      return JSON.parse(text) as BurstResult;
+    } catch {
+      throw new ApiError(
+        response.status,
+        'bad-json',
+        `${response.status} 返回的不是 JSON：${text.slice(0, 120)}`,
+      );
+    }
   },
   async burstStatus(sessionId) {
     return readJson<BurstStatus>(

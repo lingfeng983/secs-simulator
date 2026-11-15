@@ -67,6 +67,12 @@ export interface DataTableProps<T> {
   tableKey?: string;
   /** 行点击(下钻);给了就整行可点、指针变手型。 */
   onRowClick?: (row: T) => void;
+  /**
+   * 行双击；与 onRowClick 互不取消——单击下钻、双击打开由调用方各自定义。
+   *
+   * <p>不给时行为与之前完全一致。</p>
+   */
+  onRowDoubleClick?: (row: T) => void;
 }
 
 /**
@@ -96,6 +102,7 @@ export function DataTable<T>({
   caption,
   tableKey,
   onRowClick,
+  onRowDoubleClick,
 }: DataTableProps<T>): JSX.Element {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
@@ -396,7 +403,14 @@ export function DataTable<T>({
                   key={rowKey(row)}
                   className={rowClassName?.(row)}
                   onClick={onRowClick === undefined ? undefined : () => onRowClick(row)}
-                  style={onRowClick === undefined ? undefined : { cursor: 'pointer' }}
+                  onDoubleClick={
+                    onRowDoubleClick === undefined ? undefined : () => onRowDoubleClick(row)
+                  }
+                  style={
+                    onRowClick === undefined && onRowDoubleClick === undefined
+                      ? undefined
+                      : { cursor: 'pointer' }
+                  }
                 >
                   {columns.map((column) => (
                     <td

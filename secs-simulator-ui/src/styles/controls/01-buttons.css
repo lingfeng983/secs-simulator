@@ -1,0 +1,139 @@
+/* ===== 按钮 ===== */
+button {
+  --btn-bg: var(--surface);
+  --btn-fg: var(--fg);
+  --btn-line: var(--line);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 30px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--btn-line);
+  border-radius: var(--radius-sm);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font: 500 calc(12.5px * var(--font-scale))/1.4 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--fast), border-color var(--fast), color var(--fast),
+    box-shadow var(--fast), transform var(--fast);
+}
+
+button:hover:not(:disabled) {
+  --btn-line: var(--line-strong);
+  --btn-bg: var(--surface-2);
+  --btn-fg: var(--ink);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+  --btn-bg: var(--surface-3);
+}
+
+button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+button.primary {
+  --btn-bg: var(--accent);
+  --btn-fg: var(--accent-ink);
+  --btn-line: transparent;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+[data-theme='dark'] button.primary {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 1px rgba(45, 212, 191, 0.2);
+}
+
+button.primary:hover:not(:disabled) {
+  --btn-bg: var(--accent-bright);
+  --btn-fg: var(--accent-ink);
+  --btn-line: transparent;
+}
+
+button.primary:active:not(:disabled) {
+  --btn-bg: var(--accent);
+}
+
+button.danger {
+  --btn-fg: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  --btn-line: color-mix(in srgb, var(--danger) 35%, transparent);
+  --btn-bg: var(--danger-soft);
+  --btn-fg: var(--danger);
+}
+
+button.icon-btn {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+button.icon-btn:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+button.icon-btn[data-active='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+button.link,
+button.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.link:hover:not(:disabled),
+button.link-button:hover:not(:disabled) {
+  background: none;
+  color: var(--accent-bright);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--font-scale));
+}
+
+/* 行内操作:紧凑、不抢行高 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.row-actions button,
+.table-pager button,
+.chip {
+  min-height: 26px;
+  padding: 0 0.55rem;
+  font-size: calc(12px * var(--font-scale));
+}

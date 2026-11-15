@@ -1,0 +1,132 @@
+/* ===== 空状态 / 折叠 / 提示块 ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 1.8rem 1rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty-text {
+  color: var(--fg);
+  font-size: calc(13px * var(--font-scale));
+}
+
+.empty-hint {
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+  max-width: 46rem;
+}
+
+.empty-action {
+  margin-top: 0.55rem;
+}
+
+.collapsible {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.collapsible + .collapsible {
+  margin-top: 0.5rem;
+}
+
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 38px;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: calc(13px * var(--font-scale));
+  text-align: left;
+}
+
+.collapsible-head:hover:not(:disabled) {
+  background: var(--surface-2);
+  border: none;
+  color: var(--ink);
+}
+
+.collapsible-mark {
+  width: 0.85rem;
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.collapsible-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.collapsible-badge {
+  color: var(--faint);
+  font: calc(11px * var(--font-scale))/1.4 var(--font-mono);
+  font-weight: 400;
+}
+
+.collapsible.open > .collapsible-head {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.collapsible-body {
+  padding: 0.7rem 0.8rem 0.8rem;
+  background: var(--surface-inset);
+}
+
+.problems {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.4rem 0 0;
+  padding: 0.45rem 0.7rem;
+  padding-left: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.6;
+}
+
+.alert-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: calc(12.5px * var(--font-scale));
+}
+
+.alert-bar > span {
+  flex: 1 1 auto;
+}
+
+.alert-bar button {
+  min-height: 26px;
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: transparent;
+  color: var(--danger);
+}
+
+/* 命令面板里的分组容器:只是语义分组,不需要额外样式 */
+.palette-group + .palette-group {
+  margin-top: 0.15rem;
+}
+
+/* 快捷键表的对话框比默认窄一点 */
+.modal.shortcut-help {
+  width: min(30rem, 100%);
+}

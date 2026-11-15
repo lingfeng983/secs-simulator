@@ -103,8 +103,7 @@ public final class ConfigRepository {
                 st.setLong(8, now);
                 st.executeUpdate();
             } catch (SQLException e) {
-                /* SQLite 的唯一冲突报文不带索引名：按列名判定 */
-                if (e.getMessage() != null && e.getMessage().contains("UNIQUE constraint failed")) {
+                if (isUniqueViolation(e)) {
                     throw StoreException.conflict("设备名或 legacy id 冲突: " + name + " / " + legacyId);
                 }
                 throw new StoreException("建设备失败: " + e.getMessage(), e);
@@ -403,6 +402,33 @@ public final class ConfigRepository {
     /** 允许抛 SQLException 的事务体。 */
     private interface SqlWork<T> {
         T apply(Connection connection) throws SQLException;
+    }
+
+    /** SQLITE_CONSTRAINT_UNIQUE（扩展码）。 */
+    private static final int SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+    /** SQLITE_CONSTRAINT_PRIMARYKEY（扩展码）。 */
+    private static final int SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
+
+    /**
+     * 唯一/主键约束冲突判定（{@link ParamTemplateRepository} 等共用）。
+     *
+     * <p>判据是 sqlite-jdbc 的扩展错误码而不是异常报文：
+     * {@code SQLException.getErrorCode()} 只给基础码 19（SQLITE_CONSTRAINT），
+     * 区分不了 UNIQUE 与 NOT NULL/CHECK，扩展码从
+     * {@code SQLiteException.getResultCode()} 取。报文匹配只在拿不到扩展码时兜底
+     * （驱动被包装、升级换了文案都会让文本判据失效）。</p>
+     */
+    static boolean isUniqueViolation(SQLException e) {
+        if (e instanceof org.sqlite.SQLiteException sqlite) {
+            int extended = sqlite.getResultCode().code;
+            if (extended == SQLITE_CONSTRAINT_UNIQUE || extended == SQLITE_CONSTRAINT_PRIMARYKEY) {
+                return true;
+            }
+        }
+        String message = e.getMessage();
+        return message != null
+                && (message.contains("UNIQUE constraint failed") || message.contains("PRIMARY"));
     }
 
     /** 把带 SQLException 的写事务体包成 unchecked：SQL 失败统一变 StoreException。 */

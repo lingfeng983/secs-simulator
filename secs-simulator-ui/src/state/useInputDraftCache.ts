@@ -84,10 +84,17 @@ function allDraftElements(root: HTMLElement): DraftElement[] {
     .filter(isDraftable);
 }
 
-function elementKey(root: HTMLElement, element: DraftElement): string {
-  const base = baseKey(element);
-  const same = allDraftElements(root).filter((candidate) => baseKey(candidate) === base);
-  return `${base}#${Math.max(0, same.indexOf(element))}`;
+/** 元素 → 草稿 key 的一次性映射（同一 base 内的序号与逐个 indexOf 等价）。 */
+function buildKeyMap(root: HTMLElement): Map<DraftElement, string> {
+  const counters = new Map<string, number>();
+  const keys = new Map<DraftElement, string>();
+  for (const element of allDraftElements(root)) {
+    const base = baseKey(element);
+    const index = counters.get(base) ?? 0;
+    counters.set(base, index + 1);
+    keys.set(element, `${base}#${index}`);
+  }
+  return keys;
 }
 
 /** 回填一个值，并派发 React 能识别的事件。 */
@@ -127,6 +134,18 @@ export function useInputDraftCache(scopeKey: string): void {
   const touched = useRef<Set<string>>(new Set());
   /** 回填动作自己派发的事件不能再被当成"用户输入"。 */
   const restoring = useRef(false);
+  /** 控件 key 的缓存：键入路径只查表，DOM 结构变化时整体失效。 */
+  const keyCache = useRef<{ root: HTMLElement; keys: Map<DraftElement, string> } | null>(null);
+
+  const keysFor = (root: HTMLElement): Map<DraftElement, string> => {
+    const cached = keyCache.current;
+    if (cached !== null && cached.root === root) {
+      return cached.keys;
+    }
+    const keys = buildKeyMap(root);
+    keyCache.current = { root, keys };
+    return keys;
+  };
 
   useEffect(() => {
     const onEdit = (event: Event) => {
@@ -139,7 +158,15 @@ export function useInputDraftCache(scopeKey: string): void {
         return;
       }
       const scope = scopeRef.current;
-      const key = elementKey(root, element);
+      let key = keysFor(root).get(element);
+      if (key === undefined) {
+        /* 缓存过期（新增控件）时重建一次，仍然保住 key 的语义 */
+        keyCache.current = null;
+        key = keysFor(root).get(element);
+      }
+      if (key === undefined) {
+        return;
+      }
       touched.current.add(`${scope}::${key}`);
       const store = readStore();
       const page = store[scope] ?? {};
@@ -149,9 +176,20 @@ export function useInputDraftCache(scopeKey: string): void {
     };
     document.addEventListener('input', onEdit, true);
     document.addEventListener('change', onEdit, true);
+    /* 结构或标识属性一变，序号可能漂移：直接丢弃缓存，下次按键重建一次 */
+    const observer = new MutationObserver(() => {
+      keyCache.current = null;
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-label', 'name', 'id', 'placeholder', 'type', 'data-draft-key', 'data-draft-skip'],
+    });
     return () => {
       document.removeEventListener('input', onEdit, true);
       document.removeEventListener('change', onEdit, true);
+      observer.disconnect();
     };
   }, []);
 
@@ -164,8 +202,7 @@ export function useInputDraftCache(scopeKey: string): void {
         return;
       }
       const page = readStore()[scope] ?? {};
-      for (const element of allDraftElements(root)) {
-        const key = elementKey(root, element);
+      for (const [element, key] of keysFor(root)) {
         if (touched.current.has(`${scope}::${key}`)) {
           continue;
         }

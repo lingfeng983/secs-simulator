@@ -1,0 +1,76 @@
+/* ===== 输入 ===== */
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0.34rem 0.55rem;
+  font: 400 calc(12.5px * var(--font-scale))/1.45 var(--font-sans);
+  transition: border-color var(--fast), box-shadow var(--fast), background var(--fast);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+select {
+  appearance: none;
+  padding-right: 1.65rem;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 52%, calc(100% - 7.5px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+input[type='number'] {
+  width: 6rem;
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--font-scale));
+}
+
+input[type='search'] {
+  font-size: calc(12.5px * var(--font-scale));
+}
+
+input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+textarea {
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.65;
+  tab-size: 2;
+}

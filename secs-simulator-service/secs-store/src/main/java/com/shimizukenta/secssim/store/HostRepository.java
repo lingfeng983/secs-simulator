@@ -247,6 +247,42 @@ public final class HostRepository {
         return id;
     }
 
+    /**
+     * 播种内置主机模板：同 id 已存在即跳过，不覆盖用户改过的行。
+     *
+     * @param id            模板 id（资源里的稳定键）
+     * @param name          模板名
+     * @param host          目标地址
+     * @param port          目标端口
+     * @param deviceIdNum   Device ID 号
+     * @param collectorJson 采集/方案配置（{@code {"collect":[…],"trace":[…]}}）
+     * @param note          备注
+     */
+    public void seedTemplate(String id, String name, String host, int port, int deviceIdNum,
+                             String collectorJson, String note) {
+        long now = System.currentTimeMillis();
+        this.db.writeConfig(connection -> {
+            try (PreparedStatement st = connection.prepareStatement(
+                    "INSERT INTO host_template(id, name, host, port, device_id_num, collector_json, "
+                            + "note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
+                            + "ON CONFLICT (id) DO NOTHING")) {
+                st.setString(1, id);
+                st.setString(2, name);
+                st.setString(3, host);
+                st.setInt(4, port);
+                st.setInt(5, deviceIdNum);
+                st.setString(6, collectorJson == null ? "{}" : collectorJson);
+                st.setString(7, note == null ? "" : note);
+                st.setLong(8, now);
+                st.setLong(9, now);
+                st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("播种主机模板失败: " + e.getMessage(), e);
+            }
+            return null;
+        });
+    }
+
     /** 全部未删除主机模板。 */
     public List<HostTemplateView> listTemplates() {
         try (Connection connection = this.db.readConfig();

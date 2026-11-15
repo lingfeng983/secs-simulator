@@ -1,0 +1,79 @@
+/* ===== 配置 JSON 编辑器：高亮 + 格式化 + 占满高度 ===== */
+.config-json-editor {
+  display: flex;
+  flex-direction: column;
+  height: clamp(320px, calc(100vh - 330px), 1000px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+/* 弹框里的编辑器按弹框空间收敛：fit() 会写行内高度，这里用 !important 压住，
+   否则整页版的"占满视口"会把弹框撑出屏幕。 */
+.modal-body .config-json-editor {
+  height: min(52vh, 520px) !important;
+}
+
+.config-json-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+.config-json-editor-toolbar .spacer {
+  flex: 1 1 auto;
+}
+
+.config-json-editor-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.config-json-editor-body pre,
+.config-json-editor .config-editor {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: calc(12px * var(--font-scale))/1.7 var(--font-mono);
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.config-json-editor-body pre {
+  overflow: hidden;
+  color: var(--fg);
+  pointer-events: none;
+}
+
+.config-json-editor .config-editor {
+  width: 100%;
+  min-height: 0;
+  z-index: 2;
+  resize: none;
+  color: transparent;
+  caret-color: var(--fg);
+}
+
+.config-json-editor .config-editor::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: transparent;
+}
+
+.json-key { color: var(--accent); }
+.json-string { color: var(--ok); }
+.json-number { color: var(--info); }
+.json-literal { color: var(--warn); }
+.json-punct { color: var(--muted); }
+.json-text { color: var(--fg); }

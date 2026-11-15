@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 
 import javax.net.ssl.SSLContext;
 
+import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.secssim.api.http.AccessControl;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.AuditSink;
@@ -157,15 +159,25 @@ public final class Bootstrap {
                     + (report.archived() ? "（原文件已归档到 legacy/）" : "")
                     + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
         }
-        seedTemplates(templateRepo);
+        /*
+         * 内置模板正文全部来自 classpath 的 seed/*.json。资源缺失或解析失败必须
+         * 让启动直接失败：静默跳过留给用户的是一套"看着能开、其实没有模板"的空库。
+         */
         ParamTemplateRepository paramTemplateRepo = new ParamTemplateRepository(db);
-        seedParamTemplates(paramTemplateRepo);
+        HostRepository hostRepo = new HostRepository(db);
+        try {
+            seedTemplates(templateRepo);
+            seedParamTemplates(paramTemplateRepo);
+            seedHostTemplates(hostRepo);
+        } catch (RuntimeException e) {
+            Log.error("内置模板种子加载失败（启动中止）", e);
+            throw e;
+        }
 
         ConfigStore configStore = new ConfigStore(configRepo, templateRepo, options.workDir());
         TemplateStore templates = new TemplateStore(options.workDir(), templateRepo);
         ParamTemplateStore paramTemplates = new ParamTemplateStore(paramTemplateRepo);
         launcher.configStore(configStore);
-        HostRepository hostRepo = new HostRepository(db);
         RuntimeStateRepository linkState = new RuntimeStateRepository(db);
         /* 主机实例在 RuntimeContext 构造时从配置库装回内存（注册表在那儿建） */
 
@@ -536,6 +548,84 @@ public final class Bootstrap {
         if (seeded > 0) {
             Log.info("播种内置参数模板: " + seeded + " 套");
         }
+    }
+
+    private static final String HOST_TEMPLATE_RESOURCE = "seed/host-templates.json";
+
+    /* 主机模板只描述"连哪一类设备"，地址与端口给本机默认；
+       用户从模板新建主机后再按现场改地址。 */
+    private static final String HOST_TEMPLATE_DEFAULT_HOST = "127.0.0.1";
+    private static final int HOST_TEMPLATE_DEFAULT_PORT = 5000;
+
+    /** 播种内置主机模板（同 id 已存在即跳过，不覆盖用户改过的行）。 */
+    private static void seedHostTemplates(HostRepository repo) {
+        JsonHub root = readSeedJson(HOST_TEMPLATE_RESOURCE);
+        if (!root.isArray()) {
+            throw new IllegalStateException(HOST_TEMPLATE_RESOURCE + " 应为 JSON 数组");
+        }
+        com.shimizukenta.jsonhub.JsonHubBuilder builder = JsonHub.getBuilder();
+        for (int i = 0; i < root.length(); i++) {
+            JsonHub item = root.get(i);
+            if (item == null || !item.isObject()) {
+                throw new IllegalStateException(HOST_TEMPLATE_RESOURCE + "[" + i + "] 应为对象");
+            }
+            JsonHub deviceId = item.get("deviceId");
+            if (deviceId == null || !deviceId.isNumber()) {
+                throw new IllegalStateException(HOST_TEMPLATE_RESOURCE + "[" + i + "] 缺少数字字段 deviceId");
+            }
+            String collectorJson = builder.object(
+                    builder.pair("collect", seedArray(item, "collect", i)),
+                    builder.pair("trace", seedArray(item, "trace", i))).toJson();
+            /* host/port 可选：种子文件里给了就用，缺省回落到本机默认端口。 */
+            JsonHub hostField = item.get("host");
+            String host = hostField != null && hostField.isString()
+                    ? hostField.optionalString().orElse(HOST_TEMPLATE_DEFAULT_HOST)
+                    : HOST_TEMPLATE_DEFAULT_HOST;
+            JsonHub portField = item.get("port");
+            int port = portField != null && portField.isNumber()
+                    ? portField.intValue()
+                    : HOST_TEMPLATE_DEFAULT_PORT;
+            repo.seedTemplate(seedText(item, "id", i), seedText(item, "name", i),
+                    host, port, deviceId.intValue(),
+                    collectorJson, seedText(item, "note", i));
+        }
+        if (root.length() > 0) {
+            Log.info("播种内置主机模板: " + root.length() + " 套（已存在则跳过）");
+        }
+    }
+
+    /** 读 classpath 上的种子资源并解析为 JSON；缺失或坏格式一律让启动失败。 */
+    private static JsonHub readSeedJson(String resource) {
+        String text;
+        try (InputStream in = Bootstrap.class.getClassLoader().getResourceAsStream(resource)) {
+            if (in == null) {
+                throw new IllegalStateException("classpath 里没有 " + resource + "：内置模板资源缺失");
+            }
+            text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("读取 " + resource + " 失败: " + e.getMessage(), e);
+        }
+        try {
+            return JsonHub.fromJson(text);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("解析 " + resource + " 失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static String seedText(JsonHub item, String key, int index) {
+        JsonHub value = item.get(key);
+        if (value == null || !value.isString()) {
+            throw new IllegalStateException(HOST_TEMPLATE_RESOURCE + "[" + index + "] 缺少字符串字段 " + key);
+        }
+        return value.optionalString().orElse("");
+    }
+
+    private static JsonHub seedArray(JsonHub item, String key, int index) {
+        JsonHub value = item.get(key);
+        if (value == null || !value.isArray()) {
+            throw new IllegalStateException(HOST_TEMPLATE_RESOURCE + "[" + index + "] 缺少数组字段 " + key);
+        }
+        return value;
     }
 
     /** --reset-runtime：删掉 runtime.db 及其 WAL/SHM（配置库不动）。 */

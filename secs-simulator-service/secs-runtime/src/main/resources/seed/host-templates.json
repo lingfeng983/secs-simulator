@@ -1,0 +1,422 @@
+[
+  {
+    "id": "etch",
+    "name": "刻蚀腔 主机模板",
+    "note": "对应设备模板「刻蚀腔」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5011,
+    "deviceId": 1,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "cvd",
+    "name": "CVD 沉积腔 主机模板",
+    "note": "对应设备模板「CVD 沉积腔」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5012,
+    "deviceId": 2,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "tester",
+    "name": "晶圆测试机（双 SITE） 主机模板",
+    "note": "对应设备模板「晶圆测试机（双 SITE）」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5013,
+    "deviceId": 3,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1003, 1005, 1101, 1103"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1006, 1101"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1006, 1101"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1101, 1103"
+      }
+    ]
+  },
+  {
+    "id": "loadlock",
+    "name": "装载锁室（Loadlock） 主机模板",
+    "note": "对应设备模板「装载锁室（Loadlock）」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5014,
+    "deviceId": 4,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "cmp",
+    "name": "CMP 抛光机 主机模板",
+    "note": "对应设备模板「CMP 抛光机」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5015,
+    "deviceId": 5,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "sputter",
+    "name": "溅射台（PVD） 主机模板",
+    "note": "对应设备模板「溅射台（PVD）」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5016,
+    "deviceId": 6,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "diffusion",
+    "name": "扩散炉 主机模板",
+    "note": "对应设备模板「扩散炉」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5017,
+    "deviceId": 7,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "clean",
+    "name": "湿法清洗台 主机模板",
+    "note": "对应设备模板「湿法清洗台」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5018,
+    "deviceId": 8,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "epi",
+    "name": "外延生长炉 主机模板",
+    "note": "对应设备模板「外延生长炉」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5019,
+    "deviceId": 9,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  },
+  {
+    "id": "inspection",
+    "name": "量测机（OCD） 主机模板",
+    "note": "对应设备模板「量测机（OCD）」：20+ 个 SVID 的周期采集与 Trace 方案。",
+    "host": "127.0.0.1",
+    "port": 5020,
+    "deviceId": 10,
+    "collect": [
+      {
+        "name": "标准 S1F3 采集 1s",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "1000",
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      },
+      {
+        "name": "高频 S1F3 采集 500ms",
+        "startCeid": "2001",
+        "stopCeid": "2002",
+        "intervalMs": "500",
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      }
+    ],
+    "trace": [
+      {
+        "name": "标准 Trace 1s",
+        "trid": 1,
+        "dsper": 1000,
+        "totsmp": 100,
+        "repgsz": 1,
+        "svids": "1001, 1003, 1005, 1007, 1019"
+      },
+      {
+        "name": "长周期 Trace 2s",
+        "trid": 2,
+        "dsper": 2000,
+        "totsmp": 300,
+        "repgsz": 1,
+        "svids": "1001, 1002, 1003, 1005, 1007, 1008, 1017"
+      }
+    ]
+  }
+]

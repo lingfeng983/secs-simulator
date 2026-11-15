@@ -1,31 +1,19 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.time.Instant;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.shimizukenta.secs.SecsCommunicator;
-import com.shimizukenta.secs.SecsException;
 import com.shimizukenta.secs.SecsMessage;
-import com.shimizukenta.secs.SecsWaitReplyMessageException;
-import com.shimizukenta.secs.secs2.Secs2;
 import com.shimizukenta.secssim.app.sml.SmlParser;
 import com.shimizukenta.secssim.app.event.EventBus;
 import com.shimizukenta.secssim.app.event.NoticeBus;
-import com.shimizukenta.secssim.app.event.NoticeEvent;
 import com.shimizukenta.secssim.app.session.DefaultCurves;
 import com.shimizukenta.secssim.app.session.EquipmentControlState;
 import com.shimizukenta.secssim.app.session.HostReportTable;
@@ -33,11 +21,8 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.app.session.SessionSpec;
 import com.shimizukenta.secssim.app.session.SessionState;
 import com.shimizukenta.secssim.app.session.TraceLimits;
-import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.EngineClock;
-import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.domain.EquipmentConstantDef;
-import com.shimizukenta.secssim.core.domain.ValueType;
 import com.shimizukenta.secssim.core.compile.ResolvedCeid;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedReport;
@@ -66,36 +51,32 @@ import com.shimizukenta.secssim.core.value.ValueStore;
 public final class HsmsSessionRuntime implements SessionRuntime {
     private static final long RATE_WINDOW_MS = 1_000L;
     private static final int DEFAULT_MAX_EVENTS_PER_SEC = 50;
-    /** S6F11 等 ACK 的队列上限：主机不答 S6F12 时不能无限堆积。 */
-    private static final int S6F11_ACK_QUEUE = 256;
 
-    private final SessionSpec spec;
+    final SessionSpec spec;
     /** 设备模型：热生效时可整体替换（改单元/变量不再需要重建连接）。 */
-    private volatile ResolvedEquipment model;
+    volatile ResolvedEquipment model;
     private final ValueStore store;
     /** 可热替换的值来源：S6F11/Trace/预览都持有它，模板热生效只换内部实现。 */
-    private final ValueSourceHandle values;
+    final ValueSourceHandle values;
     /** values 委托里的「设定」层（钉值落在它身上）。 */
     private volatile PinnedValueSource pinnedValues;
     /** overview 速率统计(60 秒滑动窗口)。 */
     private final RateTracker msgRate = new RateTracker();
-    private final RateTracker eventRate = new RateTracker();
-    private volatile long lastEventAtMs = 0L;
     private final long openedAtMs = System.currentTimeMillis();
-    private final EngineClock clock;
-    private final HostReportTable hostReports = new HostReportTable();
+    final EngineClock clock;
+    final HostReportTable hostReports = new HostReportTable();
 
     /** Trace（S2F23）容量限制，来自 session.trace 配置段。 */
     private final TraceLimits traceLimits;
     /** S6F11 组装器：随设备模型热替换。 */
-    private volatile S6F11Assembler assembler;
+    volatile S6F11Assembler assembler;
 
     /** 晶圆属性（v7）：报告里的 ctx.<名> 从这里取。 */
-    private volatile com.shimizukenta.secssim.core.context.ContextTable contextTable =
+    volatile com.shimizukenta.secssim.core.context.ContextTable contextTable =
             com.shimizukenta.secssim.core.context.ContextTable.empty();
 
     /** 设备常量取值（v7）：常量也可以是时间函数。 */
-    private volatile EcidValues ecidValues;
+    volatile EcidValues ecidValues;
 
     /** 保护一次 pump 的完整状态推进，见 {@link #pumpNow()}。 */
     private final Object pumpLock = new Object();
@@ -109,19 +90,19 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final Map<Integer, EquipmentConstantDef> constants;
 
     /** 主机侧报文（S2 家族）的协议翻译协作者。 */
-    private final HostCommandHandler hostSide;
+    final HostCommandHandler hostSide;
 
     /** Trace（周期采样）的采集与上报协作者。 */
-    private final TracePump tracePump;
+    final TracePump tracePump;
 
     /** 终端消息收件箱（S10F3 → S10F4）；连接建立后才可用。 */
-    private volatile TerminalInbox terminalInbox;
+    volatile TerminalInbox terminalInbox;
 
     /** 采集事件上报（S6F11）。 */
     private volatile EventReporter eventReporter;
 
     /** Primary 分发：把主机发来的报文分派到对应处理路径。 */
-    private volatile PrimaryDispatcher dispatcher;
+    volatile PrimaryDispatcher dispatcher;
 
     /** 不断连热生效。 */
     private final HotReloader hotReloader;
@@ -142,10 +123,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final SessionMetrics metrics;
 
     /** HSMS 连接。 */
-    private final HsmsConnector connector;
+    final HsmsConnector connector;
 
     /** 事件心跳。 */
-    private final EventTicker ticker;
+    final EventTicker ticker;
 
     /** 运行时编辑（钉值与目录增删改）。 */
     private final RuntimeEditsFacade edits;
@@ -154,45 +135,54 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final ConstantStore constantStore;
 
     /** 控制状态。 */
-    private final ControlStateHolder control;
+    final ControlStateHolder control;
 
     /** 运行时目录：CEID / RPTID / SVID 的临时增删改。 */
     private final RuntimeCatalog catalog;
 
     /** 事件编排的运行时：计划表、限流、条件去抖与延迟链。 */
-    private final EventScheduler scheduler;
+    final EventScheduler scheduler;
 
     /** 报警（S5F1）的发送与活动报警表。 */
     private final AlarmReporter alarmReporter;
     private final Rng eventRng;
 
-    private final AtomicReference<SessionState> state = new AtomicReference<>(SessionState.CREATED);
+    final AtomicReference<SessionState> state = new AtomicReference<>(SessionState.CREATED);
     private final AtomicLong emitted = new AtomicLong();
     private final AtomicLong wbitDropped = new AtomicLong();
 
-    private volatile SecsCommunicator communicator;
-    private volatile String lastError;
+    volatile SecsCommunicator communicator;
     private volatile boolean s6f11Wbit;
     private volatile boolean s6f1Wbit;
     /** 单线程串行等 S6F12：W 位发送会阻塞到 T3，不能占用 100ms 事件心跳。 */
-    private volatile ExecutorService ackSender;
+    volatile ExecutorService ackSender;
     /** 单线程串行等 S6F2：Trace 采样不能被 ACK 阻塞。 */
-    private volatile ExecutorService traceAckSender;
+    volatile ExecutorService traceAckSender;
     /**
      * 单线程串行等 S5F2：报警的 ACK 等待必须与 S6F11 分开。
      *
      * <p>共用一个 ACK 线程时，主机不回 S5F2 会让后续所有 S6F11 的 W 位发送排队，
      * 队列满后成批丢弃采集事件——一条报警就能把事件流堵死。</p>
      */
-    private volatile ExecutorService alarmAckSender;
-    /**
-     * 上次触发事件的时间点。
-     *
-     * <p>目前只由 ticker 线程写，但语义上跨"调度/手动触发"两条路径，
-     * 加 {@code volatile} 是为了后续演进时不引入可见性问题。
-     * </p>
-     */
-    private volatile long lastFireMs;
+    volatile ExecutorService alarmAckSender;
+
+    /** 诊断信息：lastError 与 overview 事件速率。 */
+    private final SessionDiagnostics diagnostics = new SessionDiagnostics();
+
+    /** 链路生命周期：open / disconnect / close 与链路相位。 */
+    private final SessionLifecycle lifecycle;
+
+    /** 计划动作解析。 */
+    private final PlanActionResolver planActions;
+
+    /** 设备模型派生视图（S6F11 组装器与 Trace）。 */
+    private final SessionModelViews modelViews;
+
+    /** 终端消息视图。 */
+    private final SessionTailView tailView;
+
+    /** 发送出口。 */
+    private final SessionSender sender;
 
     /**
      * 用系统时钟创建会话。
@@ -245,6 +235,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.traceLimits = traceLimits == null
                 ? TraceLimits.DEFAULTS
                 : traceLimits;
+        this.lifecycle = new SessionLifecycle(this);
+        this.sender = new SessionSender(this);
+        /* 构造期就被 onModelChanged / HotReloader 以方法引用捕获，必须先建好 */
+        this.modelViews = new SessionModelViews(this, this.traceLimits);
 
         Map<Integer, EquipmentConstantDef> init = new LinkedHashMap<>();
         for (EquipmentConstantDef def : spec.equipment().constants()) {
@@ -260,17 +254,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.hostSide.sessionId(spec.id());
         this.hostSide.modelSupplier(() -> this.model);
         this.hostSide.controlStateSupplier(() -> this.control.state());
-        this.hostSide.replySink((primary, stream, function, body) -> {
-            try {
-                this.communicator.send(primary, stream, function, false, body);
-            } catch (com.shimizukenta.secs.SecsException | InterruptedException e) {
-                /* 回话失败说明链路已经断了：记下错误，让上层决定要不要断链 */
-                if (e instanceof InterruptedException) {
-                    Thread.currentThread().interrupt();
-                }
-                this.recordError(e);
-            }
-        });
+        this.hostSide.replySink(this.sender::reply);
         this.store = new ValueStore(spec.seed());
 
         ValueSource initial;
@@ -286,9 +270,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         this.assembler = new S6F11Assembler(model, this.values, this.hostReports,
                 this.contextTable, this.ecidValues);
-        this.ackSender = newAckSender("s6f11-ack-" + spec.id());
-        this.traceAckSender = newAckSender("s6f1-ack-" + spec.id());
-        this.alarmAckSender = newAckSender("s5f1-ack-" + spec.id());
+        this.ackSender = this.lifecycle.newAckSender("s6f11-ack-" + spec.id());
+        this.traceAckSender = this.lifecycle.newAckSender("s6f1-ack-" + spec.id());
+        this.alarmAckSender = this.lifecycle.newAckSender("s5f1-ack-" + spec.id());
+        this.planActions = new PlanActionResolver(() -> this.assembler,
+                () -> this.s6f11Wbit, () -> this.s6f1Wbit, () -> this.values);
 
         this.scheduler = new EventScheduler(new Rng(spec.seed()).derive("events"),
                 () -> this.clock.nowMs(),
@@ -307,7 +293,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 || this.hostReports.definedCeids().contains(ceid));
         this.scheduler.sessionId(spec.id());
         this.catalog = new RuntimeCatalog(() -> this.model, this.hostReports);
-        this.catalog.onModelChanged(this::refreshModelViews);
+        this.catalog.onModelChanged(this.modelViews::refresh);
         this.catalog.store(this.store);
         this.tracePump = new TracePump(new TraceManager(model, this.values, Instant.now(),
                 this.traceLimits.maxTracesOrDefault(), this.traceLimits.maxSvidCountOrDefault()),
@@ -315,26 +301,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.tracePump.sessionId(spec.id());
         this.tracePump.errorSink(this::recordError);
         this.tracePump.canSend(this::canSendUnsolicited);
-        this.tracePump.sender((stream, function, wbit, body) -> {
-            try {
-                this.communicator.send(stream, function, wbit, body);
-            } catch (com.shimizukenta.secs.SecsException | InterruptedException e) {
-                if (e instanceof InterruptedException) {
-                    Thread.currentThread().interrupt();
-                }
-                this.recordError(e);
-            }
-        });
-        this.tracePump.replyer((primary, stream, function, body) -> {
-            try {
-                this.communicator.send(primary, stream, function, false, body);
-            } catch (com.shimizukenta.secs.SecsException | InterruptedException e) {
-                if (e instanceof InterruptedException) {
-                    Thread.currentThread().interrupt();
-                }
-                this.recordError(e);
-            }
-        });
+        this.tracePump.sender(this.sender::send);
+        this.tracePump.replyer(this.sender::reply);
         this.alarmReporter = new AlarmReporter(() -> this.alarmAckSender, spec.id(),
                 () -> this.communicator,
                 this::publishNotice,
@@ -372,8 +340,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 () -> this.spec.equipment().units().size(),
                 () -> this.spec.port(),
                 () -> this.msgRate.countInWindow(System.currentTimeMillis()),
-                () -> this.eventRate.countInWindow(System.currentTimeMillis()),
-                () -> this.lastEventAtMs,
+                () -> this.diagnostics.eventRate().countInWindow(System.currentTimeMillis()),
+                () -> this.diagnostics.lastEventAtMs(),
                 () -> this.openedAtMs);
         this.svidReader = new SvidReader(() -> this.model,
                 () -> this.values,
@@ -383,7 +351,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.smlSender = new SmlSender(() -> this.communicator,
                 () -> this.state() == com.shimizukenta.secssim.app.session.SessionState.OPEN,
                 () -> this.control.communicatable());
-        this.hotReloader = new HotReloader(this::refreshModelViews,
+        this.hotReloader = new HotReloader(this.modelViews::refresh,
                 this::collectionEventWbit,
                 this::traceWbit,
                 this::enableSchedule,
@@ -397,22 +365,14 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 this.scheduler::previewSchedule,
                 ceid -> this.hostReports.isEnabled(ceid),
                 this.scheduler::recordSkipped,
-                this::recordEventFired,
+                this.diagnostics::recordEventFired,
                 this::publishNotice,
                 () -> this.clock.nowMs(),
                 () -> this.s6f11Wbit,
                 spec.id(),
                 this::recordError);
-    }
 
-    private static ExecutorService newAckSender(String threadName) {
-        return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(S6F11_ACK_QUEUE),
-                runnable -> {
-                    Thread thread = new Thread(runnable, threadName);
-                    thread.setDaemon(true);
-                    return thread;
-                });
+        this.tailView = new SessionTailView(this);
     }
 
     /**
@@ -528,7 +488,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      *
      * @param next 新状态
      */
-    private void changeControlState(EquipmentControlState next) {
+    void changeControlState(EquipmentControlState next) {
         this.control.change(next);
         /* 主机把控制状态切到 ONLINE 时，offlinePolicy=queue 攒下的触发按 FIFO 补跑。
            只在状态迁移时调一次；队列为空时 flushPending 直接返回 0。 */
@@ -554,14 +514,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      */
     public HsmsSessionRuntime dataModel(com.shimizukenta.secssim.core.context.ContextTable context,
                                         EcidValues ecids) {
-        this.contextTable = context == null
-                ? com.shimizukenta.secssim.core.context.ContextTable.empty() : context;
-        this.ecidValues = ecids;
-        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports,
-                this.contextTable, this.ecidValues);
-        if (this.hostSide != null) {
-            this.hostSide.ecidValues(ecids);
-        }
+        this.modelViews.dataModel(context, ecids);
         return this;
     }
 
@@ -687,16 +640,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.edits.removeSvid(svid);
     }
 
-    /** 换设备模型后重建引用它的视图（S6F11 组装器与 Trace）。 */
-    private void refreshModelViews(ResolvedEquipment next) {
-        this.model = next;
-        this.assembler = new S6F11Assembler(this.model, this.values, this.hostReports,
-                this.contextTable, this.ecidValues);
-        /* 容量限制跟随会话配置，热重载时不变 */
-        this.tracePump.traceLimits(this.traceLimits.maxTracesOrDefault(),
-                this.traceLimits.maxSvidCountOrDefault());
-        this.tracePump.reset(this.model, this.values);
-    }
+    
 
     /**
      * 已上报的 S6F11 条数。
@@ -847,350 +791,44 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         executor.actionResolver(this::resolvePlanAction);
     }
 
-    /** SML 动作里的运行时占位符：{@code {{svid.1001}}}。 */
-    private static final Pattern SVID_PLACEHOLDER = Pattern.compile("\\{\\{\\s*svid\\.(\\d+)\\s*\\}\\}");
-
     /**
      * 把一条计划动作解析成可发送报文（设计 §2.7.1 的五种类型）。
      *
-     * <p>S6F11 / SML 直接复用组装器与解析器；alarm / terminal / trace 用
-     * 与 {@code AlarmReporter} / S10F1 / S6F1 相同的数据结构组装报文体，
-     * 参数从 {@code action.params()} 取，缺省值保持现有行为。</p>
+     * <p>具体组装规则见 {@link PlanActionResolver}。</p>
      */
     private SmlParser.Message resolvePlanAction(PlanAction action, int ceid, long atMs)
             throws Exception {
-        return switch (action.kind()) {
-            case PlanAction.KIND_S6F11 -> new SmlParser.Message(6, 11, this.s6f11Wbit,
-                    this.assembler.build(ceid, atMs));
-            case PlanAction.KIND_SML -> SmlParser.parse(resolvePlaceholders(action.sml(), atMs));
-            case PlanAction.KIND_ALARM -> alarmAction(action);
-            case PlanAction.KIND_TERMINAL -> terminalAction(action);
-            case PlanAction.KIND_TRACE -> traceAction(action, atMs);
-            default -> throw new IllegalArgumentException("未知动作类型: " + action.kind());
-        };
+        return this.planActions.resolve(action, ceid, atMs);
     }
-
-    private static SmlParser.Message alarmAction(PlanAction action) {
-        int alid = actionInt(action, "alid", 1);
-        int category = Math.max(1, Math.min(7, actionInt(action, "category", 1)));
-        boolean set = !"false".equalsIgnoreCase(action.params().getOrDefault("set", "true"));
-        String text = action.params().getOrDefault("text", set ? "ALARM " + alid : "CLEAR " + alid);
-        if (!text.chars().allMatch(c -> c < 128)) {
-            throw new IllegalArgumentException("ALTX 只能包含 US-ASCII 字符");
-        }
-        byte alcd = (byte) ((set ? 0x80 : 0x00) | category);
-        var b = Secs2.getBuilder();
-        Secs2 body = b.list(b.binary(alcd), b.uint4(alid), b.ascii(text));
-        /* S5F1 与 AlarmReporter 一致：默认带 W，等 S5F2 */
-        return new SmlParser.Message(5, 1, true, body);
-    }
-
-    private static SmlParser.Message terminalAction(PlanAction action) {
-        int tid = actionInt(action, "tid", 0);
-        String text = action.params().getOrDefault("text", "");
-        var b = Secs2.getBuilder();
-        Secs2 body = b.list(b.binary((byte) tid), b.ascii(text));
-        return new SmlParser.Message(10, 1, false, body);
-    }
-
-    private SmlParser.Message traceAction(PlanAction action, long atMs) {
-        int trid = actionInt(action, "trid", 1);
-        List<Secs2> sampled = new ArrayList<>();
-        String rawSvids = action.params().get("svids");
-        if (rawSvids != null && !rawSvids.isBlank()) {
-            for (String piece : rawSvids.split(",")) {
-                if (piece.isBlank()) {
-                    continue;
-                }
-                int svid;
-                try {
-                    svid = Integer.parseInt(piece.trim());
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("trace 动作 svids 含非法编号: " + piece.trim());
-                }
-                double value = this.values.valueAt(svid, atMs).orElse(0.0);
-                sampled.add(Secs2Mapper.of(ValueType.F8, value));
-            }
-        }
-        var b = Secs2.getBuilder();
-        String stime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMddHHmmss"));
-        Secs2 body = b.list(b.uint4(trid), b.uint4(1L), b.ascii(stime), b.list(sampled));
-        return new SmlParser.Message(6, 1, this.s6f1Wbit, body);
-    }
-
-    private String resolvePlaceholders(String sml, long atMs) {
-        if (sml == null || sml.indexOf('{') < 0) {
-            return sml;
-        }
-        Matcher matcher = SVID_PLACEHOLDER.matcher(sml);
-        StringBuilder sb = new StringBuilder();
-        while (matcher.find()) {
-            int svid = Integer.parseInt(matcher.group(1));
-            double value = this.values.valueAt(svid, atMs).orElse(0.0);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(formatNumber(value)));
-        }
-        matcher.appendTail(sb);
-        return sb.toString();
-    }
-
-    private static String formatNumber(double value) {
-        return value == Math.rint(value) && Math.abs(value) < 1e15
-                ? Long.toString((long) value) : Double.toString(value);
-    }
-
-    private static int actionInt(PlanAction action, String key, int fallback) {
-        String raw = action.params().get(key);
-        if (raw == null || raw.isBlank()) {
-            return fallback;
-        }
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("动作参数 " + key + " 应为整数: " + raw);
-        }
-    }
-
-    /** 链路相位（3.0 需求 1）；变化经 {@code linkListener} 通知（持久化 + SSE 在装配层接）。 */
-    private volatile SessionRuntime.LinkPhase linkPhase = SessionRuntime.LinkPhase.STOPPED;
-    private volatile java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> linkListener;
-
-    /**
-     * 生命周期锁：{@code open / disconnect / close} 互斥。
-     *
-     * <p>没有这把锁时，两个并发「连接」（HTTP 两次点击、或 connect 撞上 reload）
-     * 都能通过 {@code communicator == null} 的检查，各建一条链路；后写者覆盖字段，
-     * 先建的那条失去唯一引用，socket、协议线程、端口全部泄漏，而且两套心跳会
-     * 同时推进调度器（同一事件被重复发出）。</p>
-     */
-    private final Object lifecycleLock = new Object();
-
-    /**
-     * 相位跳变锁：只保护 {@code linkPhase} 的读-改-写。
-     *
-     * <p>相位来自三条线程（协议回调、心跳、HTTP 命令），裸 volatile 上的读改写会丢更新：
-     * 例如 {@code close()} 写入 STOPPED 后，迟到的 {@code communicatable(false)}
-     * 又把它改回 DISCONNECTED，界面上就出现「已销毁但显示已断开」。通知放在锁外发，
-     * 避免持锁做持久化与 SSE 广播。</p>
-     */
-    private final Object phaseLock = new Object();
 
     /** 挂链路相位监听（幂等覆盖）。 */
     public void onLinkPhase(java.util.function.BiConsumer<String, SessionRuntime.LinkPhase> listener) {
-        this.linkListener = listener;
-    }
-
-    private void changeLinkPhase(SessionRuntime.LinkPhase next) {
-        boolean changed;
-        synchronized (this.phaseLock) {
-            changed = this.linkPhase != next;
-            if (changed) {
-                this.linkPhase = next;
-            }
-        }
-        if (!changed) {
-            return;
-        }
-        var listener = this.linkListener;
-        if (listener != null) {
-            try {
-                listener.accept(this.spec.id(), next);
-            } catch (RuntimeException e) {
-                recordError(e);
-            }
-        }
+        this.lifecycle.onLinkPhase(listener);
     }
 
     @Override
     public SessionRuntime.LinkPhase linkPhase() {
-        return this.linkPhase;
+        return this.lifecycle.linkPhase();
     }
 
     @Override
     public void disconnect() {
-        synchronized (this.lifecycleLock) {
-            this.disconnectLocked();
-        }
-    }
-
-    private void disconnectLocked() {
-        /* 只断链：模型 / 值来源 / 编排 / 钉值 / 计划启用态全留在对象里，
-           reconnect() 后原样恢复（3.0 设计 §2.4.1）。 */
-        this.stopTicker();
-        for (ExecutorService pool : new ExecutorService[] {
-                this.ackSender, this.traceAckSender, this.alarmAckSender }) {
-            if (pool != null) {
-                pool.shutdownNow();
-            }
-        }
-        SecsCommunicator comm = this.communicator;
-        this.communicator = null;
-        this.dispatcher = null;
-        this.terminalInbox = null;
-        if (comm != null) {
-            try {
-                comm.close();
-            } catch (IOException e) {
-                recordError(e);
-            }
-        }
-        this.changeControlState(EquipmentControlState.OFFLINE);
-        this.state.set(SessionState.CLOSED);
-        this.changeLinkPhase(SessionRuntime.LinkPhase.DISCONNECTED);
+        this.lifecycle.disconnect();
     }
 
     @Override
     public void reconnect() throws IOException {
-        /* 对象复用：open() 在 communicator 为空时重建链路，内存态天然保留 */
-        this.open();
+        this.lifecycle.reconnect();
     }
 
     @Override
     public void open() throws IOException {
-        synchronized (this.lifecycleLock) {
-            this.openLocked();
-        }
-    }
-
-    private void openLocked() throws IOException {
-        if (this.communicator != null) {
-            throw new IOException("session already opened: " + this.spec.id());
-        }
-
-        this.state.set(SessionState.OPENING);
-        this.changeLinkPhase(SessionRuntime.LinkPhase.STARTING);
-        if (this.ackSender == null || this.ackSender.isShutdown()) {
-            this.ackSender = newAckSender("s6f11-ack-" + this.spec.id());
-        }
-        if (this.traceAckSender == null || this.traceAckSender.isShutdown()) {
-            this.traceAckSender = newAckSender("s6f1-ack-" + this.spec.id());
-        }
-        if (this.alarmAckSender == null || this.alarmAckSender.isShutdown()) {
-            this.alarmAckSender = newAckSender("s5f1-ack-" + this.spec.id());
-        }
-
-        try {
-            /* open() 返回之前就可能收到报文（主机 SELECT 后立刻发 S1F1）。
-               dispatcher 还没建好，直接 dispatch 会 NPE 丢帧——先存起来，就绪后按序补发。 */
-            final Object gate = new Object();
-            final java.util.List<SecsMessage> early = new java.util.ArrayList<>();
-            this.communicator = this.connector.open(
-                    /* 原始收帧（含 secondary 应答）只进报文监控 */
-                    message -> this.publish("in", message),
-                    message -> {
-                        PrimaryDispatcher ready;
-                        synchronized (gate) {
-                            /* 取到局部变量再出锁用：出锁后 dispatcher 可能被
-                               disconnect() 置空（旧写法会在读线程里 NPE，或把旧连接的
-                               在途报文投给重连后的新 dispatcher） */
-                            ready = this.dispatcher;
-                            if (ready == null) {
-                                early.add(message);
-                                return;
-                            }
-                        }
-                        ready.dispatch(message);
-                    },
-                    message -> this.publish("out", message),
-                    value -> {
-                        this.control.communicatable(value);
-                        /* 链路相位跟着 communicatable 走：select 成功 = CONNECTED，
-                           掉线 = DISCONNECTED（被动监听未 select 时保持 LISTENING） */
-                        if (value) {
-                            this.changeLinkPhase(SessionRuntime.LinkPhase.CONNECTED);
-                            if (this.control.state() == EquipmentControlState.OFFLINE) {
-                                this.changeControlState(EquipmentControlState.COMMUNICATING);
-                            }
-                        } else {
-                            this.changeLinkPhase(SessionRuntime.LinkPhase.DISCONNECTED);
-                            this.changeControlState(EquipmentControlState.OFFLINE);
-                        }
-                    },
-                    this::recordFailure);
-            this.terminalInbox = new TerminalInbox(this.communicator, this.spec.id(), this::recordError);
-            synchronized (gate) {
-                this.dispatcher = new PrimaryDispatcher(() -> this.communicator,
-                        this.hostSide,
-                        this.tracePump,
-                        this.terminalInbox,
-                        () -> this.control.state(),
-                        this::changeControlState,
-                        this::replyS1F4,
-                        this::recordError,
-                        this.spec.id());
-                for (SecsMessage pending : early) {
-                    this.dispatcher.dispatch(pending);
-                }
-                early.clear();
-            }
-            this.state.set(SessionState.OPEN);
-            /* 只有被动端在这里推进到 LISTENING（端口已绑、等主机 SELECT）。
-               主动端的 CONNECTED 交给 communicatable(true) 回调：在这里强写会盖掉
-               "连不上"那次回调写的 DISCONNECTED，界面上就成了假的已连接。 */
-            if (this.spec.passive() && this.linkPhase == SessionRuntime.LinkPhase.STARTING) {
-                this.changeLinkPhase(SessionRuntime.LinkPhase.LISTENING);
-            }
-            this.startTicker();
-        } catch (IOException | RuntimeException e) {
-            recordError(e);
-            this.state.set(SessionState.FAILED);
-            this.changeLinkPhase(SessionRuntime.LinkPhase.FAILED);
-            /* connector.open 成功之后、TerminalInbox/PrimaryDispatcher 构造失败时，
-               已打开的 communicator 必须关掉：否则端口/线程会跟着一个 FAILED 会话泄漏。 */
-            SecsCommunicator opened = this.communicator;
-            if (opened != null) {
-                try {
-                    opened.close();
-                } catch (IOException closeError) {
-                    recordError(closeError);
-                } finally {
-                    this.communicator = null;
-                }
-            }
-            throw e;
-        }
+        this.lifecycle.open();
     }
 
     @Override
     public void close() {
-        synchronized (this.lifecycleLock) {
-            this.closeLocked();
-        }
-    }
-
-    private void closeLocked() {
-        this.stopTicker();
-        ExecutorService sender = this.ackSender;
-        if (sender != null) {
-            sender.shutdownNow();
-        }
-        ExecutorService traceSender = this.traceAckSender;
-        if (traceSender != null) {
-            traceSender.shutdownNow();
-        }
-        ExecutorService alarmSender = this.alarmAckSender;
-        if (alarmSender != null) {
-            alarmSender.shutdownNow();
-        }
-
-        SecsCommunicator comm = this.communicator;
-        if (comm == null) {
-            this.state.set(SessionState.CLOSED);
-            this.changeLinkPhase(SessionRuntime.LinkPhase.STOPPED);
-            return;
-        }
-
-        this.state.set(SessionState.CLOSING);
-        try {
-            comm.close();
-        } catch (IOException e) {
-            recordError(e);
-        } finally {
-            this.communicator = null;
-            this.dispatcher = null;
-            this.terminalInbox = null;
-            this.state.set(SessionState.CLOSED);
-            this.changeLinkPhase(SessionRuntime.LinkPhase.STOPPED);
-        }
+        this.lifecycle.close();
     }
 
     @Override
@@ -1296,45 +934,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.state.get();
     }
 
-    /**
-     * 把异常记为会话错误。
-     *
-     * <p>对端超时(W 位等 T3/T5 没等到回复)不算会话故障——报文已发出,
-     * 只是主机没回;把它钉在 lastError 上,设备页会一直飘着一行红色,
-     * 看起来像设备坏了。这类异常只进计数,不进 lastError。</p>
-     *
-     * @param e 异常
-     */
-    private static boolean isPeerTimeout(Throwable e) {
-        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
-            if (cause instanceof SecsWaitReplyMessageException) {
-                return true;
-            }
-            String name = cause.getClass().getName();
-            if (name.contains("HsmsSsTimeout")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void recordError(Exception e) {
-        recordFailure(e);
+    void recordError(Exception e) {
+        this.diagnostics.recordError(e);
     }
 
     /**
-     * 记一次真正发出去的事件（速率与最近时刻）。
-     *
-     * <p>overview 里的 {@code s6f11PerMin} / {@code lastEventAt} 读的就是这两个字段；
-     * 以前它们只有声明没有写入，工作台永远显示 0。</p>
-     */
-    private void recordEventFired() {
-        long now = System.currentTimeMillis();
-        this.eventRate.record(now);
-        this.lastEventAtMs = now;
-    }
 
-    /**
      * 记下一条会话级错误（含协议层日志里的异常）。
      *
      * <p>协议层把 bind 失败、连接被拒、超时等都塞进日志队列；没有监听者时这些信息
@@ -1342,27 +947,13 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      *
      * @param e 错误
      */
-    private void recordFailure(Throwable e) {
-        if (e == null || isPeerTimeout(e)) {
-            return;
-        }
-        this.lastError = e.toString();
+    void recordFailure(Throwable e) {
+        this.diagnostics.recordFailure(e);
     }
 
     @Override
     public String lastError() {
-        return this.lastError;
-    }
-
-    private void startTicker() {
-        /* 事件调度从"现在"起算，不补开以来的周期 */
-        this.scheduler.start();
-        this.lastFireMs = this.clock.nowMs();
-        this.ticker.start(this.clock instanceof ManualEngineClock, this::pumpNow);
-    }
-
-    private void stopTicker() {
-        this.ticker.stop();
+        return this.diagnostics.lastError();
     }
 
     /**
@@ -1372,7 +963,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * 对使用者没有意义，混进报文面板只会造成噪音。
      * </p>
      */
-    private void publish(String direction, SecsMessage message) {
+    void publish(String direction, SecsMessage message) {
         this.notifier.publish(direction, message);
     }
 
@@ -1387,24 +978,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     /** 最近收到的终端消息（新→旧）。 */
     public List<TerminalMessage> terminalMessages() {
-        return this.terminalInbox == null
-                ? List.of()
-                : this.terminalInbox.messages().stream()
-                        .map(m -> new TerminalMessage(m.tid(), m.text(), m.atMillis()))
-                        .toList();
+        return this.tailView.messages();
     }
 
     @Override
     public String terminalMessagesJson() {
-        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
-        java.util.List<com.shimizukenta.jsonhub.JsonHub> items = new java.util.ArrayList<>();
-        for (TerminalMessage message : this.terminalMessages()) {
-            items.add(b.object(
-                    b.pair("tid", message.tid()),
-                    b.pair("text", message.text()),
-                    b.pair("atMillis", message.atMillis())));
-        }
-        return b.array(items).toJson();
+        return this.tailView.json();
     }
 
     /**
@@ -1413,7 +992,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
      * <p>E5 允许空列表表示"全部 SVID"。自动发现型主机常用它一次拿全，
      * 这里与 S1F11 的空列表语义保持一致。</p>
      */
-    private void replyS1F4(SecsMessage primary) throws Exception {
+    void replyS1F4(SecsMessage primary) throws Exception {
         this.svidReader.replyS1F4(primary);
     }
 

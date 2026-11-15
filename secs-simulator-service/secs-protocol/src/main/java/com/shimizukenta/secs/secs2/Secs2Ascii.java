@@ -24,6 +24,9 @@ public class Secs2Ascii extends AbstractSecs2 {
 	private static Secs2Item secs2Item = Secs2Item.ASCII;
 	private static Charset charset = StandardCharsets.US_ASCII;
 
+	/** 本模块不自带日志框架，用 JDK 的 System.Logger（零依赖，原生镜像可用）。 */
+	private static final System.Logger LOGGER = System.getLogger(Secs2Ascii.class.getName());
+
 	private String ascii;
 	private byte[] bytes;
 	
@@ -151,7 +154,11 @@ public class Secs2Ascii extends AbstractSecs2 {
 			return new String(strm.toByteArray(), StandardCharsets.US_ASCII);
 		}
 		catch (IOException notHappen) {
-			notHappen.printStackTrace();
+			/* 不可达：上面只写 ByteArrayOutputStream，write/toByteArray/close 都不抛
+			   IOException（close 是父类声明的无操作实现）。保留分支是为将来改动兜底，
+			   protocol 模块没有日志设施，用 JDK 自带 System.Logger 留下痕迹，
+			   绝不能再把编码失败静默变成空串（调用方会得到一个空的 JSON 值）。 */
+			LOGGER.log(System.Logger.Level.ERROR, "SECS-II A 项 JSON 转义失败", notHappen);
 		}
 		
 		return "";

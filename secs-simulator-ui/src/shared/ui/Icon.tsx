@@ -15,6 +15,8 @@ export type IconName =
   | 'hostsim'
   | 'audit'
   | 'config'
+  | 'template'
+  | 'param'
   | 'search'
   | 'sun'
   | 'moon'
@@ -78,6 +80,22 @@ const ICONS: Record<IconName, JSX.Element> = {
       <circle cx="16" cy="8" r="2.3" />
       <path d="M4 16h3M11 16h9" />
       <circle cx="8" cy="16" r="2.3" />
+    </>
+  ),
+  /* 设备模板：层叠文档 */
+  template: (
+    <>
+      <rect x="4.5" y="3" width="12" height="15" rx="1.8" />
+      <path d="M7.5 7h6M7.5 10.5h6M7.5 14h3.5" />
+      <path d="M17 7.5h2.5V21H9.5v-1.5" />
+    </>
+  ),
+  /* 参数模板：折线波形 */
+  param: (
+    <>
+      <path d="M3 17.5h3.2l2.4-9 3.3 13 2.6-9.5 2.2 5.5H21" />
+      <circle cx="5.6" cy="8.5" r="1.2" />
+      <circle cx="15.5" cy="12" r="1.2" />
     </>
   ),
   search: (

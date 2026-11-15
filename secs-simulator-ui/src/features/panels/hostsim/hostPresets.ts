@@ -145,3 +145,112 @@ export const PRESET_GROUPS = [...new Set(HOST_PRESETS.map((preset) => preset.gro
   items: HOST_PRESETS.filter((preset) => preset.group === group)
     .map((preset) => ({ label: preset.label, value: preset.sml })),
 }));
+/* ===== 用户自定义覆盖 ===== */
+
+/** 一条自定义模板；与内置模板同 `label` 时覆盖内置正文。 */
+export interface PresetOverride {
+  id: string;
+  label: string;
+  group: string;
+  desc: string;
+  reply: string;
+  sml: string;
+}
+
+/**
+ * localStorage 里的覆盖存储。
+ *
+ * <p>内置模板以 `label` 作为稳定键：删除内置只把 label 记进 `deleted`，
+ * 不改本文件的常量，所以刷新页面也不会"复活"。</p>
+ */
+export interface PresetStore {
+  /** 被删除的内置模板 label。 */
+  deleted: readonly string[];
+  custom: readonly PresetOverride[];
+}
+
+/** 覆盖存储的 localStorage 键。 */
+export const PRESET_STORE_KEY = 'secs.host.presets.v1';
+
+const EMPTY_STORE: PresetStore = { deleted: [], custom: [] };
+
+function isOverride(value: unknown): value is PresetOverride {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const item = value as Record<string, unknown>;
+  return ['id', 'label', 'group', 'desc', 'reply', 'sml'].every((key) => typeof item[key] === 'string');
+}
+
+/** 读覆盖存储；localStorage 不可用或内容损坏 → 空覆盖（仍展示内置模板）。 */
+export function readPresetStore(): PresetStore {
+  try {
+    const raw = globalThis.localStorage?.getItem(PRESET_STORE_KEY);
+    if (raw === null || raw === undefined || raw === '') {
+      return EMPTY_STORE;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return EMPTY_STORE;
+    }
+    const record = parsed as Record<string, unknown>;
+    const deleted = Array.isArray(record.deleted)
+      ? record.deleted.filter((item): item is string => typeof item === 'string')
+      : [];
+    const custom = Array.isArray(record.custom) ? record.custom.filter(isOverride) : [];
+    return { deleted, custom };
+  } catch {
+    return EMPTY_STORE;
+  }
+}
+
+/** 写覆盖存储；写失败（隐私模式/配额满）只失效于本次会话，不阻断界面。 */
+export function writePresetStore(store: PresetStore): void {
+  try {
+    globalThis.localStorage?.setItem(
+      PRESET_STORE_KEY,
+      JSON.stringify({ deleted: store.deleted, custom: store.custom }),
+    );
+  } catch {
+    /* 存不下时保持内存态可用 */
+  }
+}
+
+function toPreset(item: PresetOverride, base?: HostPreset): HostPreset {
+  return {
+    label: item.label,
+    group: item.group,
+    desc: item.desc,
+    reply: item.reply,
+    sml: item.sml,
+    ...(base?.quick === undefined ? {} : { quick: base.quick }),
+  };
+}
+
+/** 表格行 = 内置（去掉 `deleted` 中出现的）+ `custom`（同 label 覆盖内置）。 */
+export function mergePresets(store: PresetStore): HostPreset[] {
+  const deleted = new Set(store.deleted);
+  const overrides = new Map(store.custom.map((item) => [item.label, item]));
+  const rows: HostPreset[] = [];
+  for (const preset of HOST_PRESETS) {
+    if (deleted.has(preset.label)) {
+      continue;
+    }
+    const override = overrides.get(preset.label);
+    rows.push(override === undefined ? preset : toPreset(override, preset));
+  }
+  const builtinLabels = new Set(HOST_PRESETS.map((preset) => preset.label));
+  for (const item of store.custom) {
+    if (!builtinLabels.has(item.label)) {
+      rows.push(toPreset(item));
+    }
+  }
+  return rows;
+}
+
+/** 从 SML 首行取 SxFy（`S1F1 W.` → `S1F1`）；取不到时回退分组名。 */
+export function presetTxfy(preset: HostPreset): string {
+  const first = preset.sml.trim().split(/\r?\n/, 1)[0] ?? '';
+  const match = /^S\d+F\d+/.exec(first);
+  return match === null ? preset.group : match[0];
+}

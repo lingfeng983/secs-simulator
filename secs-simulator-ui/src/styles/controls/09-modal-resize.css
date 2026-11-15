@@ -1,0 +1,31 @@
+/* ===== 可缩放对话框：四边四角拖拽 ===== */
+.modal {
+  position: relative;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.modal-resize {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
+  opacity: 0;
+  transition: opacity var(--fast, 120ms) ease;
+}
+
+.modal:hover > .modal-resize {
+  opacity: 0.55;
+  background: var(--accent-line);
+}
+
+.modal-resize.n { top: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.modal-resize.s { bottom: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.modal-resize.e { right: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.modal-resize.w { left: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.modal-resize.ne { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.modal-resize.nw { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.modal-resize.se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.modal-resize.sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
