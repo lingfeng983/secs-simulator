@@ -71,58 +71,7 @@ export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const rows = imported ?? allEntries;
 
   return (
-    <Panel
-      id="panel-audit"
-      title="审计"
-      description="谁在什么时候动了什么。完整历史在服务端日志文件里。"
-    >
-      {/* 过滤条:精确匹配动作/操作者,和表格内的模糊搜索互补 */}
-      {!notAdmin && (
-        <div className="preview-controls">
-          <input
-            type="search"
-            className="table-search"
-            placeholder="动作精确匹配,如 config-save"
-            value={actionInput}
-            onChange={(event) => setActionInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                applyFilter();
-              }
-            }}
-            aria-label="按动作过滤"
-          />
-          <input
-            type="search"
-            className="table-search"
-            placeholder="操作者精确匹配"
-            value={actorInput}
-            onChange={(event) => setActorInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                applyFilter();
-              }
-            }}
-            aria-label="按操作者过滤"
-          />
-          <button type="button" className="primary" onClick={applyFilter}>
-            过滤
-          </button>
-          <button type="button" onClick={clearFilter} disabled={!filterActive}>
-            清除过滤
-          </button>
-          <span className="spacer" />
-          <button
-            type="button"
-            onClick={() => void loadAuditOlder()}
-            disabled={allEntries.length === 0}
-            title="以当前最早一条为游标,向服务端要更早的一页审计"
-          >
-            载入更早
-          </button>
-        </div>
-      )}
-
+    <Panel id="panel-audit" title="审计" headless>
       {notAdmin ? (
         <p className="hint">审计只对管理员开放;当前账号角色是「{health?.role}」。找管理员查操作留痕。</p>
       ) : (
@@ -137,7 +86,7 @@ export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
             rowKey={(row) => `${row.at}-${row.actor}-${row.action}`}
             searchPlaceholder="搜索操作者 / 动作 / 目标"
             exportName="audit"
-        onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
+            onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
             onImport={(importedRows) => {
               const entries: AuditEntryView[] = importedRows.flatMap((row) => {
                 const at = Date.parse(row['时间'] ?? '');
@@ -157,6 +106,51 @@ export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
             }}
             emptyText={filterActive ? '当前过滤条件下没有审计记录' : '暂无审计记录'}
             defaultSort={{ key: 'at', direction: 'desc' }}
+            toolbar={
+              <>
+                {/* 精确过滤（服务端）与表格内的模糊搜索互补：都放在这一行，标题行不再占位 */}
+                <input
+                  type="search"
+                  className="table-search compact"
+                  placeholder="动作精确匹配,如 config-save"
+                  value={actionInput}
+                  onChange={(event) => setActionInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      applyFilter();
+                    }
+                  }}
+                  aria-label="按动作过滤"
+                />
+                <input
+                  type="search"
+                  className="table-search compact"
+                  placeholder="操作者精确匹配"
+                  value={actorInput}
+                  onChange={(event) => setActorInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      applyFilter();
+                    }
+                  }}
+                  aria-label="按操作者过滤"
+                />
+                <button type="button" className="primary" onClick={applyFilter}>
+                  过滤
+                </button>
+                <button type="button" onClick={clearFilter} disabled={!filterActive}>
+                  清除过滤
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadAuditOlder()}
+                  disabled={allEntries.length === 0}
+                  title="以当前最早一条为游标,向服务端要更早的一页审计"
+                >
+                  载入更早
+                </button>
+              </>
+            }
             exportColumns={[
               { header: '时间', value: (row) => new Date(row.at).toISOString() },
               { header: '操作者', value: (row) => row.actor },

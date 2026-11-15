@@ -202,7 +202,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
 
   const columns: Column<EventPlanView>[] = [
     { key: 'id', header: '计划', sortValue: (row) => row.id, render: (row) => <span className="mono">{row.id}</span> },
-    { key: 'ceid', header: 'CEID', align: 'right', sortValue: (row) => row.ceid, render: (row) => row.ceid },
+    { key: 'ceid', header: 'CEID', sortValue: (row) => row.ceid, render: (row) => row.ceid },
     {
       key: 'owner',
       header: '归属',
@@ -216,7 +216,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     {
       key: 'count',
       header: '累计次数',
-      align: 'right',
       sortValue: (row) => stats.get(row.id)?.count ?? 0,
       render: (row) => {
         const item = stats.get(row.id);

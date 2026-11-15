@@ -22,7 +22,10 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--fg);
-  font: var(--font);
+  /* 不写 font 简写：字号要走 --font-scale，简写里放 calc 兼容性差 */
+  font-family: var(--font-sans);
+  font-size: calc(var(--font-base) * var(--font-scale));
+  line-height: 1.55;
   font-feature-settings: "cv05" 1, "ss01" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -86,7 +89,7 @@ kbd {
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--muted);
-  font: 500 10.5px/1.5 var(--font-mono);
+  font: 500 calc(10.5px * var(--font-scale))/1.5 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -118,7 +121,7 @@ kbd {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
   background-clip: content-box;
 }
 
@@ -136,17 +139,17 @@ kbd {
 /* —— 工具类 —— */
 .hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   line-height: 1.65;
 }
 
 .hint code {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .hint-inline {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .mono {

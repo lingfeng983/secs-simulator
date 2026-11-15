@@ -3,17 +3,25 @@ import { filterRows, parseCsv, sortRows, toCsv, type CsvColumn, type SortState }
 import { saveTextFile, type SaveResult } from '../lib/saveFile';
 import { usePersistentState } from '../../state/usePersistentState';
 import { EmptyState } from './EmptyState';
+import { Icon } from './Icon';
 
 /** 一列。 */
 export interface Column<T> {
   /** 列标识，排序与导出都按它定位。 */
   key: string;
+  /** 表头文本：给读屏、给 CSV 表头、给排序提示用。 */
   header: string;
+  /**
+   * 表头里显示的内容；不给就显示 header 文本。
+   *
+   * <p>给"选择"列这种要放控件（全选复选框）的表头用：header 仍是文本，
+   * 导出和搜索不受影响，屏幕上显示的是控件。</p>
+   */
+  headerContent?: ReactNode;
   /** 单元格内容；不给就显示 sortValue 的文本。 */
   render?: (row: T) => ReactNode;
   /** 排序取值；不给就不可排序。 */
   sortValue?: (row: T) => string | number;
-  align?: 'left' | 'right' | 'center';
   width?: string;
   className?: string;
 }
@@ -27,8 +35,15 @@ export interface DataTableProps<T> {
   searchPlaceholder?: string;
   /** 搜索用的文本；不给就用各列的 sortValue 拼。 */
   searchText?: (row: T) => string;
-  /** 搜索框旁边的额外控件。 */
+  /** 搜索框旁边的额外控件（筛选条件一类，靠左排）。 */
   toolbar?: ReactNode;
+  /**
+   * 工具条右端的动作按钮组。
+   *
+   * <p>筛选在左、动作在右：一页的"改看什么"和"改做什么"分开站，
+   * 视线扫过表格时不会把按钮当成筛选的一部分。</p>
+   */
+  toolbarEnd?: ReactNode;
   emptyText?: string;
   /** 给了就显示"导出 CSV"按钮，值是文件名（不含扩展名）。 */
   exportName?: string;
@@ -68,6 +83,7 @@ export function DataTable<T>({
   searchPlaceholder,
   searchText,
   toolbar,
+  toolbarEnd,
   emptyText = '暂无数据',
   exportName,
   exportColumns,
@@ -226,7 +242,8 @@ export function DataTable<T>({
 
   return (
     <div className="table-wrap">
-      {(searchPlaceholder !== undefined || toolbar !== undefined || exportName !== undefined || onImport !== undefined) && (
+      {(searchPlaceholder !== undefined || toolbar !== undefined || toolbarEnd !== undefined
+        || exportName !== undefined || onImport !== undefined) && (
         <div className="table-toolbar">
           {searchPlaceholder !== undefined && (
             <input
@@ -242,38 +259,52 @@ export function DataTable<T>({
             />
           )}
           {toolbar}
-          <span className="table-count">
-            {searching ? `${filtered.length} / ${rows.length}` : `${rows.length}`} 条
-          </span>
-          {exportName !== undefined && (
-            <button type="button" onClick={() => void onExport()} title="导出当前筛选结果为 CSV（可选择保存位置）">
-              导出 CSV
-            </button>
-          )}
-          {onImport !== undefined && (
-            <>
+          {/* 撑开中间的空白：筛选靠左，动作与计数靠右；
+              一行放不下时整块（动作 + 计数 + 图标）一起换行，不会被拆成两半 */}
+          {toolbarEnd !== undefined && <span className="spacer" aria-hidden="true" />}
+          <span className="toolbar-tail">
+            {toolbarEnd !== undefined && <span className="toolbar-end">{toolbarEnd}</span>}
+            <span className="table-count">
+              {searching ? `${filtered.length} / ${rows.length}` : `${rows.length}`} 条
+            </span>
+            {exportName !== undefined && (
               <button
                 type="button"
-                onClick={() => importRef.current?.click()}
-                title={importHint ?? '按导出时的表头导入 CSV'}
+                className="icon-btn"
+                onClick={() => void onExport()}
+                title="导出 CSV：把当前筛选结果存成文件（可选择保存位置）"
+                aria-label="导出 CSV"
               >
-                导入 CSV
+                <Icon name="download" size={15} />
               </button>
-              <input
-                ref={importRef}
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: 'none' }}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (file !== undefined) {
-                    void importCsv(file);
-                  }
-                }}
-              />
-            </>
-          )}
+            )}
+            {onImport !== undefined && (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => importRef.current?.click()}
+                  title={importHint ?? '导入 CSV：按导出时的表头解析，导入的行只在本页查看'}
+                  aria-label="导入 CSV"
+                >
+                  <Icon name="upload" size={15} />
+                </button>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file !== undefined) {
+                      void importCsv(file);
+                    }
+                  }}
+                />
+              </>
+            )}
+          </span>
         </div>
       )}
 
@@ -296,7 +327,6 @@ export function DataTable<T>({
                         ...(tableKey === undefined ? {} : { position: 'relative' }),
                       }}
                       className={[
-                        column.align === undefined ? '' : `align-${column.align}`,
                         column.className ?? '',
                         sortable ? 'sortable' : '',
                         active ? 'sorted' : '',
@@ -327,7 +357,7 @@ export function DataTable<T>({
                           : undefined
                       }
                     >
-                      {column.header}
+                      {column.headerContent ?? column.header}
                       {sortable && (
                         <span className="sort-mark" aria-hidden="true">
                           {active ? (sort?.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
@@ -371,12 +401,7 @@ export function DataTable<T>({
                   {columns.map((column) => (
                     <td
                       key={column.key}
-                      className={[
-                        column.align === undefined ? '' : `align-${column.align}`,
-                        column.className ?? '',
-                      ]
-                        .filter((item) => item !== '')
-                        .join(' ')}
+                      className={column.className ?? ''}
                     >
                       {column.render === undefined
                         ? String(column.sortValue?.(row) ?? '')

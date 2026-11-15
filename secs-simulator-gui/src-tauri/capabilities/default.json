@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window loads the bundled frontend; it invokes connection_info / switch_backend to talk to the local or remote backend.",
+  "description": "Main window loads the bundled frontend; it invokes connection_info / switch_backend to talk to the local or remote backend, and drives the frameless titlebar (minimize / toggle-maximize / close / start-dragging).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
 }

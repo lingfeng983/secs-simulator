@@ -49,7 +49,7 @@
   border-left: 2px solid var(--warn);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 .event-legend-title {
@@ -151,7 +151,7 @@ button.active:not(.segment):not(.segmented > button) {
 .message-filters .chip-count {
   margin-left: 0.3rem;
   opacity: 0.75;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
 }
 
 .message-list {
@@ -169,7 +169,7 @@ button.active:not(.segment):not(.segmented > button) {
   gap: 0.5rem;
   padding: 0.22rem 0.6rem;
   border-bottom: 1px solid var(--line);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   /* 长列表只渲染视口附近的几十行：报文面板默认保留 2000 行，
      全量布局在 trace/压测时每秒重排多次，很容易把主线程占满。 */
   content-visibility: auto;
@@ -182,11 +182,11 @@ button.active:not(.segment):not(.segmented > button) {
 
 .message-time {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
 }
 
 .message-dir {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
   white-space: nowrap;
 }
 
@@ -226,7 +226,7 @@ button.active:not(.segment):not(.segmented > button) {
 .effects-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .effects-table th {
@@ -234,7 +234,7 @@ button.active:not(.segment):not(.segmented > button) {
   text-align: left;
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -250,7 +250,7 @@ button.active:not(.segment):not(.segmented > button) {
 
 .effects-table td .hint-inline {
   display: block;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
 }
 
 .effects-table .input-mini {

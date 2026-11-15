@@ -1811,6 +1811,41 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigProblems' }
+    delete:
+      tags: [configs]
+      summary: 删除设备（软删，先停掉它的会话）
+      description: |
+        从设备清单里删掉这台设备：先停掉它对应的会话（配置没了端口还占着，
+        清单里就查不到是谁占的），再软删库里的设备行。配置正文与版本历史保留，
+        文件名可以重新使用。重复删除回 404 —— "没删到东西"不能报成功。
+      parameters:
+        - $ref: '#/components/parameters/ConfigName'
+      responses:
+        '200':
+          description: 已删除（ok 包络与领域字段 name 并列）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name]
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+        '400':
+          description: 名字非法（含路径穿越），问题清单随响应带回
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
+        '404':
+          description: 设备不存在或已经删掉了
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
+        '500':
+          description: 删除失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
   /api/v1/configs/{name}/validate:
     post:
       tags: [configs]

@@ -1085,6 +1085,14 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     @Override
+    public ConfigResult deleteConfig(String name) {
+        ConfigResult result = this.api.deleteConfig(name);
+        /* 别处开着的清单页要跟着把这一行去掉：删配置与"保存"一样会改目录内容 */
+        this.announceConfig(name, "delete", result);
+        return result;
+    }
+
+    @Override
     public String configTemplatesJson() {
         return this.api.configTemplatesJson();
     }

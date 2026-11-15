@@ -3,6 +3,7 @@ import type { Preferences } from '../../state/usePreferences';
 import type { Notifier } from '../../state/useToasts';
 import type { NoticeWire } from '../../state/useEventStream';
 import type { WireMessage } from '../../api';
+import type { RegionsState } from '../../state/useRegions';
 
 /**
  * 所有面板共有的入参。
@@ -25,4 +26,6 @@ export interface PanelBaseProps {
   liveEvents?: NoticeWire[];
   /** 实时报文（SSE + 历史补拉，按时间升序）；消息监视面板用。 */
   messages?: WireMessage[];
+  /** 设备 / 主机的区域分组（界面侧组织方式，后端无感）。 */
+  regions?: RegionsState;
 }

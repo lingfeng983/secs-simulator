@@ -1,16 +1,49 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ApiClient, BurstResult, HostTemplate, HostV2, SentMessageResult } from '../api';
+import { useCallback, useEffect, useState } from 'react';
+import type { ApiClient, HostV2, SentMessageResult } from '../api';
+import type { CollectPlan, TracePlan } from './hostPlans';
+import {
+  BUILTIN_HOST_TEMPLATES,
+  HOST_TEMPLATE_PLACEHOLDER,
+  decodeHostTemplate,
+  encodeHostTemplate,
+  instantiateTemplatePlans,
+  isHostTemplateBundle,
+  type HostTemplate,
+} from './hostTemplates';
 
 /**
  * 3.0 主机域状态层（v2 独立命名空间）。
  *
  * <p>主机与设备无关：新建只填目标地址；连接/断开/使设置生效都是实例自己的
  * 动作。轮询节奏由调用方控制（详情页 2 秒、列表页 5 秒）。</p>
+ *
+ * <p>主机模板是「方案包」：两份内置模板 + 后端自定义模板，套用时把方案
+ * 复制进该主机的方案库，模板本身不含目标地址 / 端口 / Device ID。</p>
  */
+
+export interface CreateHostRequest {
+  name?: string;
+  host: string;
+  port: number;
+  deviceId?: number;
+  autoReconnect?: boolean;
+  /** 可选：新建后立刻把这套方案复制进新主机的配置区。 */
+  template?: HostTemplate;
+}
+
+export interface SaveHostTemplateRequest {
+  /** 有 id = 更新已有自定义模板；没有 id = 新建。 */
+  id?: string;
+  name: string;
+  note?: string;
+  tracePlans: TracePlan[];
+  collectPlans: CollectPlan[];
+}
 
 export function useHostsV2(client: ApiClient | null) {
   const [hosts, setHosts] = useState<HostV2[]>([]);
-  const [templates, setTemplates] = useState<HostTemplate[]>([]);
+  /* 两份内置模板不依赖后端：接口没回来/后端不可达时也能直接套用 */
+  const [templates, setTemplates] = useState<HostTemplate[]>([...BUILTIN_HOST_TEMPLATES]);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -19,9 +52,15 @@ export function useHostsV2(client: ApiClient | null) {
     }
     setLoading(true);
     try {
-      const [list, tpl] = await Promise.all([client.hostsV2(), client.hostTemplatesV2()]);
+      const [list, rows] = await Promise.all([client.hostsV2(), client.hostTemplatesV2()]);
       setHosts(list);
-      setTemplates(tpl);
+      const builtinIds = new Set(BUILTIN_HOST_TEMPLATES.map((item) => item.id));
+      setTemplates([
+        ...BUILTIN_HOST_TEMPLATES,
+        ...rows
+          .filter((row) => !builtinIds.has(row.id) && isHostTemplateBundle(row))
+          .map(decodeHostTemplate),
+      ]);
     } catch {
       /* 后端不可达时保留现有数据（SSE/下一次轮询会补） */
     } finally {
@@ -38,16 +77,37 @@ export function useHostsV2(client: ApiClient | null) {
     [hosts],
   );
 
-  const create = useCallback(
-    async (request: { name?: string; host: string; port: number; deviceId?: number; autoReconnect?: boolean }) => {
+  /** 把模板里的方案逐条复制进某台主机的方案库（换 id，互不覆盖）。 */
+  const applyTemplate = useCallback(
+    async (hostId: string, template: HostTemplate) => {
       if (client === null) {
         throw new Error('后端未就绪');
       }
-      const hostId = await client.createHostV2(request);
+      const plans = instantiateTemplatePlans(template);
+      for (const plan of plans.trace) {
+        await client.saveHostPlanV2(hostId, 'trace', plan as unknown as Record<string, unknown>);
+      }
+      for (const plan of plans.collect) {
+        await client.saveHostPlanV2(hostId, 'collect', plan as unknown as Record<string, unknown>);
+      }
+    },
+    [client],
+  );
+
+  const create = useCallback(
+    async (request: CreateHostRequest) => {
+      if (client === null) {
+        throw new Error('后端未就绪');
+      }
+      const { template, ...payload } = request;
+      const hostId = await client.createHostV2(payload);
+      if (template !== undefined) {
+        await applyTemplate(hostId, template);
+      }
       await refresh();
       return hostId;
     },
-    [client, refresh],
+    [client, refresh, applyTemplate],
   );
 
   const remove = useCallback(
@@ -116,11 +176,21 @@ export function useHostsV2(client: ApiClient | null) {
   );
 
   const saveTemplate = useCallback(
-    async (request: { id?: string; name: string; host: string; port: number; deviceId?: number; note?: string }) => {
+    async (request: SaveHostTemplateRequest) => {
       if (client === null) {
         throw new Error('后端未就绪');
       }
-      await client.saveHostTemplateV2(request);
+      await client.saveHostTemplateV2({
+        id: request.id,
+        name: request.name,
+        ...HOST_TEMPLATE_PLACEHOLDER,
+        note: encodeHostTemplate({
+          name: request.name,
+          note: request.note ?? '',
+          tracePlans: request.tracePlans,
+          collectPlans: request.collectPlans,
+        }),
+      });
       await refresh();
     },
     [client, refresh],
@@ -137,13 +207,10 @@ export function useHostsV2(client: ApiClient | null) {
     [client, refresh],
   );
 
-  const stats = useMemo(() => ({
-    total: hosts.length,
-    connected: hosts.filter((host) => host.phase === 'CONNECTED').length,
-    failed: hosts.filter((host) => host.phase === 'FAILED').length,
-  }), [hosts]);
-
-  return { hosts, templates, loading, stats, find, refresh, create, remove, connect, disconnect, apply, saveSettings, send, saveTemplate, deleteTemplate };
+  return {
+    hosts, templates, loading, find, refresh, create, remove, connect, disconnect,
+    apply, saveSettings, send, applyTemplate, saveTemplate, deleteTemplate,
+  };
 }
 
 export type HostsV2State = ReturnType<typeof useHostsV2>;

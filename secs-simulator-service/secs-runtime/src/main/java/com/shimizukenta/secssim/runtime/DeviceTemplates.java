@@ -132,7 +132,7 @@ public final class DeviceTemplates {
                     "passive": true,
                     "bindHost": "127.0.0.1",
                     "port": 5010,
-                    "deviceId": 101,
+                    "deviceId": 0,
                     "seed": 20260101
                   },
                   "equipment": {
@@ -227,7 +227,7 @@ public final class DeviceTemplates {
                     "passive": true,
                     "bindHost": "127.0.0.1",
                     "port": 5010,
-                    "deviceId": 102,
+                    "deviceId": 0,
                     "seed": 20260102
                   },
                   "equipment": {
@@ -327,7 +327,7 @@ public final class DeviceTemplates {
                     "passive": true,
                     "bindHost": "127.0.0.1",
                     "port": 5010,
-                    "deviceId": 103,
+                    "deviceId": 0,
                     "seed": 20260103
                   },
                   "equipment": {
@@ -441,7 +441,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 104, "seed": 20260104
+                    "port": 5010, "deviceId": 0, "seed": 20260104
                   },
                   "equipment": {
                     "name": "%s",
@@ -518,7 +518,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 105, "seed": 20260105
+                    "port": 5010, "deviceId": 0, "seed": 20260105
                   },
                   "equipment": {
                     "name": "%s",
@@ -593,7 +593,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 106, "seed": 20260106
+                    "port": 5010, "deviceId": 0, "seed": 20260106
                   },
                   "equipment": {
                     "name": "%s",
@@ -669,7 +669,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 107, "seed": 20260107
+                    "port": 5010, "deviceId": 0, "seed": 20260107
                   },
                   "equipment": {
                     "name": "%s",
@@ -745,7 +745,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 108, "seed": 20260108
+                    "port": 5010, "deviceId": 0, "seed": 20260108
                   },
                   "equipment": {
                     "name": "%s",
@@ -818,7 +818,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 109, "seed": 20260109
+                    "port": 5010, "deviceId": 0, "seed": 20260109
                   },
                   "equipment": {
                     "name": "%s",
@@ -890,7 +890,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 110, "seed": 20260110
+                    "port": 5010, "deviceId": 0, "seed": 20260110
                   },
                   "equipment": {
                     "name": "%s",
@@ -961,7 +961,7 @@ public final class DeviceTemplates {
                   "schemaVersion": 5,
                   "session": {
                     "id": "%s", "passive": true, "bindHost": "127.0.0.1",
-                    "port": 5010, "deviceId": 111, "seed": 20260111
+                    "port": 5010, "deviceId": 0, "seed": 20260111
                   },
                   "equipment": {
                     "name": "%s",

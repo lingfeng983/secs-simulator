@@ -49,7 +49,7 @@ export function HostDetailPage({
   if (host === null) {
     return (
       <Panel id="panel-host-missing" title="主机不存在" description="实例可能已被删除。">
-        <p className="hint">回「主机模拟」列表查看现有实例。</p>
+        <p className="hint">回「主机清单」查看现有实例。</p>
         <button type="button" onClick={() => goTo?.('hosts')}>回主机列表</button>
       </Panel>
     );

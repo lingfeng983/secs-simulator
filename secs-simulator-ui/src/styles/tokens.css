@@ -8,6 +8,9 @@
  *  3. 深浅两套各自调色,深色不是浅色的反相:深色更暗、对比更低、发光更少。
  *
  * 任何组件都不写死 hex,只用这里的语义令牌。
+ *
+ * 主色可换（通用设置 · 主色）：派生色（soft / line / glow / ring / chrome-*）
+ * 全部用 color-mix 从 --accent 推导，预设里只需要写 --accent / --accent-bright。
  */
 
 :root {
@@ -15,7 +18,6 @@
 
   /* —— 画布与层级 —— */
   --canvas: #f1f4f8;
-  --canvas-glow: rgba(15, 118, 110, 0.05);
   --surface: #ffffff;
   --surface-2: #f6f8fb;
   --surface-3: #eaeff5;
@@ -27,8 +29,6 @@
   --chrome-fg: #26313f;
   --chrome-muted: #5f6f85;
   --chrome-line: #e4eaf1;
-  --chrome-active: rgba(15, 118, 110, 0.08);
-  --chrome-hover: rgba(15, 118, 110, 0.05);
   --chrome-badge: rgba(15, 23, 42, 0.06);
   --chrome-badge-fg: #5f6f85;
 
@@ -45,13 +45,19 @@
   --line-strong: #cbd5e1;
   --line-soft: #ebf0f5;
 
-  /* —— 信号色 —— */
+  /* —— 信号色：主色 + 由主色推导的一组派生色 —— */
   --accent: #0f766e;
   --accent-bright: #14b8a6;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(15, 118, 110, 0.08);
-  --accent-line: rgba(15, 118, 110, 0.3);
-  --accent-glow: rgba(20, 184, 166, 0.24);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 32%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-bright) 24%, transparent);
+  --canvas-glow: color-mix(in srgb, var(--accent) 6%, transparent);
+  --chrome-active: color-mix(in srgb, var(--accent) 9%, transparent);
+  --chrome-hover: color-mix(in srgb, var(--accent) 5%, transparent);
+  /* 表头/选中行的极淡主色底：换主色时整片表格会跟着偏色 */
+  --accent-wash: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
+  --accent-wash-strong: color-mix(in srgb, var(--accent) 11%, transparent);
 
   --ok: #0f6b33;
   --ok-soft: rgba(21, 128, 61, 0.1);
@@ -80,7 +86,7 @@
   --shadow-1: 0 1px 2px rgba(12, 20, 32, 0.05);
   --shadow-2: 0 2px 6px rgba(12, 20, 32, 0.06), 0 12px 32px rgba(12, 20, 32, 0.07);
   --shadow-3: 0 24px 64px rgba(12, 20, 32, 0.22);
-  --ring: 0 0 0 3px rgba(15, 118, 110, 0.16);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 
   /* —— 尺寸 —— */
   --radius-panel: 12px;
@@ -89,6 +95,8 @@
   --radius-xs: 5px;
   --sidenav-w: 248px;
   --sidenav-w-collapsed: 66px;
+  /* 顶部信息栏（自绘标题栏）：左栏、内容、右侧监控都从这条线下方开始 */
+  --titlebar-h: 44px;
   --topbar-h: 62px;
   --row-pad: 0.5rem;
   --row-h: 36px;
@@ -103,7 +111,12 @@
     "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", "SF Mono", Consolas,
     "Liberation Mono", "Microsoft YaHei UI", monospace;
-  --font: 13px/1.55 var(--font-sans);
+  --font-base: 13px;
+  /* 字号系数：由「通用设置」写内联变量（当前字号 / 13）。
+     CSS 里写死的 px 字号统一写成 calc(Npx * var(--font-scale))，
+     否则调字号时只有用 rem 的那十几个地方会变。 */
+  --font-scale: 1;
+  --font: calc(var(--font-base) * var(--font-scale))/1.55 var(--font-sans);
 
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --fast: 120ms var(--ease);
@@ -114,7 +127,6 @@
   color-scheme: dark;
 
   --canvas: #070b10;
-  --canvas-glow: rgba(45, 212, 191, 0.06);
   --surface: #0e151d;
   --surface-2: #121a24;
   --surface-3: #090e15;
@@ -125,8 +137,6 @@
   --chrome-fg: #d3deea;
   --chrome-muted: #7f90a4;
   --chrome-line: rgba(255, 255, 255, 0.06);
-  --chrome-active: rgba(45, 212, 191, 0.16);
-  --chrome-hover: rgba(255, 255, 255, 0.05);
   --chrome-badge: rgba(255, 255, 255, 0.1);
   --chrome-badge-fg: #d3deea;
 
@@ -143,9 +153,15 @@
   --accent: #2dd4bf;
   --accent-bright: #5eead4;
   --accent-ink: #032420;
-  --accent-soft: rgba(45, 212, 191, 0.11);
-  --accent-line: rgba(45, 212, 191, 0.34);
-  --accent-glow: rgba(45, 212, 191, 0.22);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 36%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent-bright) 22%, transparent);
+  --canvas-glow: color-mix(in srgb, var(--accent) 7%, transparent);
+  --chrome-active: color-mix(in srgb, var(--accent) 16%, transparent);
+  /* 深色下的 hover 用中性白：主色叠在深底上会发脏 */
+  --chrome-hover: rgba(255, 255, 255, 0.05);
+  --accent-wash: color-mix(in srgb, var(--accent) 6%, var(--surface-2));
+  --accent-wash-strong: color-mix(in srgb, var(--accent) 15%, transparent);
 
   --ok: #4ade80;
   --ok-soft: rgba(74, 222, 128, 0.12);
@@ -173,13 +189,100 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.35);
   --shadow-3: 0 28px 72px rgba(0, 0, 0, 0.6);
-  --ring: 0 0 0 3px rgba(45, 212, 191, 0.22);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
-/* 密度:只动行高与内边距,不动字号——字号变了会牺牲可读性 */
+/* 密度:只动行高;面板间隔/内边距由「通用设置」按密度折算后写内联变量 */
 [data-density='compact'] {
   --row-pad: 0.24rem;
   --row-h: 30px;
-  --panel-pad: 14px;
-  --gap: 10px;
+}
+
+/* ===== 通用设置 · 主色预设 =====
+   默认 teal 不写覆盖规则，沿用上面的浅/深两套取值。
+   预设只需要给 --accent / --accent-bright / --accent-ink：
+   soft、line、glow、ring、chrome-*、accent-wash 都由 color-mix 自动跟随。
+   深色版必须单独给，否则深色下的主按钮会亮得刺眼。 */
+[data-accent='blue'] {
+  --accent: #2563eb;
+  --accent-bright: #3b82f6;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='indigo'] {
+  --accent: #4f46e5;
+  --accent-bright: #6366f1;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='violet'] {
+  --accent: #7c3aed;
+  --accent-bright: #a78bfa;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='rose'] {
+  --accent: #be123c;
+  --accent-bright: #f43f5e;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='amber'] {
+  --accent: #b45309;
+  --accent-bright: #f59e0b;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='emerald'] {
+  --accent: #047857;
+  --accent-bright: #10b981;
+  --accent-ink: #ffffff;
+}
+
+[data-accent='slate'] {
+  --accent: #475569;
+  --accent-bright: #64748b;
+  --accent-ink: #ffffff;
+}
+
+[data-theme='dark'][data-accent='blue'] {
+  --accent: #60a5fa;
+  --accent-bright: #93c5fd;
+  --accent-ink: #061426;
+}
+
+[data-theme='dark'][data-accent='indigo'] {
+  --accent: #818cf8;
+  --accent-bright: #a5b4fc;
+  --accent-ink: #0b1030;
+}
+
+[data-theme='dark'][data-accent='violet'] {
+  --accent: #c084fc;
+  --accent-bright: #d8b4fe;
+  --accent-ink: #1b062e;
+}
+
+[data-theme='dark'][data-accent='rose'] {
+  --accent: #fb7185;
+  --accent-bright: #fda4af;
+  --accent-ink: #2b0413;
+}
+
+[data-theme='dark'][data-accent='amber'] {
+  --accent: #fbbf24;
+  --accent-bright: #fcd34d;
+  --accent-ink: #2a1600;
+}
+
+[data-theme='dark'][data-accent='emerald'] {
+  --accent: #34d399;
+  --accent-bright: #6ee7b7;
+  --accent-ink: #022c22;
+}
+
+[data-theme='dark'][data-accent='slate'] {
+  --accent: #94a3b8;
+  --accent-bright: #cbd5e1;
+  --accent-ink: #0b1220;
 }

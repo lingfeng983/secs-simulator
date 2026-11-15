@@ -6,10 +6,14 @@ import java.util.List;
  * 内置参数模板库：所有设备共享的「参数变化逻辑」起点。
  *
  * <p>按真实工艺参数的典型变化形态整理：温度、压力/真空、流量、电源、
- * 计数/累积、通用六类，共 21 套。每套是一个单曲线简形模板体
+ * 计数/累积、通用六类，共 20 套。每套是一个单曲线简形模板体
  * （{@link com.shimizukenta.secssim.app.config.ParamTemplateBody} 归一化为
  * 完整形入库），设备配置时从库里选择复制。放在后端与设备模板同理：
  * 播种要过模板体校验这道判据，库里不会有起不来的模板。</p>
+ *
+ * <p>目录是"默认送多少条"的唯一来源：条目从目录里删掉后，启动时
+ * {@code Bootstrap} 会把库里同属内置、但已不在目录中的行一并下线
+ * （只动 readonly 行，自定义模板与设备里已复制的快照不受影响）。</p>
  */
 public final class ParamTemplates {
 
@@ -92,10 +96,6 @@ public final class ParamTemplates {
                         "100~300 sccm、3s 重采样：MFC 设定流量附近的随机波动。",
                         """
                         {"curve": {"type": "uniform", "min": 100, "max": 300, "resampleMs": 3000}}"""),
-                new Entry("flow-uniform-small", "小流量均匀波动",
-                        "20~80 sccm、3s 重采样：辅气/吹扫小流量。",
-                        """
-                        {"curve": {"type": "uniform", "min": 20, "max": 80, "resampleMs": 3000}}"""),
                 new Entry("flow-pulse", "脉冲通气（方波）",
                         "0/200 sccm 交替、30s 一拍：脉冲吹扫/脉冲送气的通断流量。",
                         """

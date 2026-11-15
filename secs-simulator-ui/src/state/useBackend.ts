@@ -114,6 +114,8 @@ export interface BackendController {
   setLogLevel: (level: string) => Promise<boolean>;
   /** 新建一份配置；templateId 缺省是空骨架。返回 HTTP 状态码。 */
   createConfig: (name: string, templateId?: string) => Promise<number>;
+  /** 删掉一台设备（软删，后端先停会话）。返回 HTTP 状态码：200 删掉了，404 本来就没有。 */
+  deleteConfig: (name: string) => Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
   configTemplates: () => Promise<ConfigTemplateEntry[]>;
   /** 读配置原文(带 modifiedMs 快照);读不到返回 null。 */

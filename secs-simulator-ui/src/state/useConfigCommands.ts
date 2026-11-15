@@ -48,8 +48,30 @@ export function useConfigCommands({
     [client, refreshConfigs],
   );
 
-  const readConfig = useCallback(
-    async (name: string): Promise<ConfigTextSnapshot | null> => {
+  /**
+   * 删掉一台设备（软删）。
+   *
+   * <p>不在这里弹提示：单个删和批量删的成功口径不一样（批量要看总数），
+   * 提示交给调用方按结果汇总，免得一次批量删弹出十条 toast。</p>
+   */
+  const deleteConfig = useCallback(
+    async (name: string): Promise<number> => {
+      if (client === null) {
+        return 0;
+      }
+      try {
+        const status = await client.deleteConfig(name);
+        await refreshConfigs();
+        return status;
+      } catch (error) {
+        notifierRef.current.error(`删除 ${name} 失败`, (error as Error).message);
+        return 0;
+      }
+    },
+    [client, refreshConfigs],
+  );
+
+  const readConfig = useCallback(    async (name: string): Promise<ConfigTextSnapshot | null> => {
       if (client === null) {
         return null;
       }
@@ -118,7 +140,7 @@ export function useConfigCommands({
   }, [client]);
 
   return useMemo(
-    () => ({ createConfig, readConfig, validateConfig, saveConfig, configTemplates }),
-    [createConfig, readConfig, validateConfig, saveConfig, configTemplates],
+    () => ({ createConfig, deleteConfig, readConfig, validateConfig, saveConfig, configTemplates }),
+    [createConfig, deleteConfig, readConfig, validateConfig, saveConfig, configTemplates],
   );
 }

@@ -627,6 +627,28 @@ final class RuntimeApi {
         return result;
     }
 
+    /**
+     * 删除配置（= 从设备清单里删掉一台设备）。
+     *
+     * <p>先把这份配置对应的会话停掉再删：配置没了端口却还在监听的话，
+     * 界面上这台设备已经消失、端口仍被占着，下一次新建设备会莫名其妙撞端口。</p>
+     *
+     * @param name 文件名
+     * @return 结果
+     */
+    ConfigResult deleteConfig(String name) {
+        for (SessionRuntime session : this.sessions.list()) {
+            if (this.launcher.sourceOf(session.id()).filter(name::equals).isPresent()) {
+                this.closeSession(session.id());
+            }
+        }
+        ConfigResult result = this.configs.delete(name);
+        if (result.outcome() == ConfigOutcome.OK) {
+            Log.info("删除配置 " + name);
+        }
+        return result;
+    }
+
     String configTemplatesJson() {
         return DeviceTemplates.listJson();
     }

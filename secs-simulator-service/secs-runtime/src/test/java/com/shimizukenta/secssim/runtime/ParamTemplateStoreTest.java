@@ -77,4 +77,28 @@ class ParamTemplateStoreTest {
         repo.seed("builtin-1", "恒温保温", "内置", "{\"curves\":[{\"id\":\"main\",\"type\":\"constant\",\"value\":1}],\"result\":\"main.V\"}");
         return new ParamTemplateStore(repo);
     }
+
+    /**
+     * 内置目录缩小后，老库里多出来的内置行要跟着下线；自定义模板不受影响。
+     *
+     * <p>这是「内置多少套」的唯一控制点：目录是 20 套，库里就不能还留着上一版
+     * 的 41 套——否则删条目等于没删。</p>
+     */
+    @Test
+    void pruneBuiltinDropsRowsNoLongerInCatalogButKeepsCustom() {
+        Db db = Db.open(this.temp);
+        ParamTemplateRepository repo = new ParamTemplateRepository(db);
+        String body = "{\"curves\":[{\"id\":\"main\",\"type\":\"constant\",\"value\":1}],\"result\":\"main.V\"}";
+        repo.seed("keep", "留下", "", body);
+        repo.seed("drop", "下线", "", body);
+        repo.createCustom("custom-1", "自定义", "", body);
+
+        assertEquals(1, repo.pruneBuiltin(java.util.List.of("keep")));
+
+        assertEquals(java.util.Set.of("custom-1", "keep"),
+                repo.list().stream().map(ParamTemplateRepository.ParamTemplateView::id)
+                        .collect(java.util.stream.Collectors.toSet()));
+        /* 再跑一次是幂等的：没有可下线的行 */
+        assertEquals(0, repo.pruneBuiltin(java.util.List.of("keep")));
+    }
 }

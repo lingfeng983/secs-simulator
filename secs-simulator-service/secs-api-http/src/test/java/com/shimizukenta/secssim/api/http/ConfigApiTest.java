@@ -119,6 +119,15 @@ class ConfigApiTest {
                 }
                 return ConfigResult.ok();
             }
+
+            @Override
+            public ConfigResult deleteConfig(String name) {
+                ConfigApiTest.this.saves.add("delete:" + name);
+                if ("nope.json".equals(name)) {
+                    return ConfigResult.notFound("配置不存在: " + name);
+                }
+                return ConfigResult.ok();
+            }
         };
 
         this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), access, context);
@@ -273,7 +282,35 @@ class ConfigApiTest {
 
     @Test
     void wrongMethodIsNotAllowed() throws Exception {
-        assertEquals(405, delete("/api/v1/configs/line1.json", OPERATOR_PASS).statusCode());
+        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(this.base + "/api/v1/configs/line1.json"))
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{}")), OPERATOR_PASS);
+
+        assertEquals(405, response.statusCode(), response.body());
+    }
+
+    /** 删除设备：DELETE 落到上下文，回 200。 */
+    @Test
+    void deletesAConfig() throws Exception {
+        HttpResponse<String> response = delete("/api/v1/configs/line1.json", OPERATOR_PASS);
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"name\":\"line1.json\""), response.body());
+        assertTrue(this.saves.contains("delete:line1.json"), this.saves.toString());
+    }
+
+    /** 删一个不存在的设备：404，不能悄悄当成功。 */
+    @Test
+    void deletingAMissingConfigIsNotFound() throws Exception {
+        assertEquals(404, delete("/api/v1/configs/nope.json", OPERATOR_PASS).statusCode());
+    }
+
+    /** 路径形状不合法时要在进删除逻辑之前就被挡住。 */
+    @Test
+    void deletingThroughAPathShapeIsRejected() throws Exception {
+        HttpResponse<String> response = delete("/api/v1/configs/..%2Fevil.json", OPERATOR_PASS);
+
+        assertEquals(400, response.statusCode(), response.body());
+        assertTrue(this.saves.isEmpty(), "路径穿越不得触达删除: " + this.saves);
     }
 
     @Test

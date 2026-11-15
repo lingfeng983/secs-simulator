@@ -18,10 +18,14 @@ import type { CommandItem } from '../shared/lib/command';
 
 import { NAV_ITEMS, routeTitle } from './layout/navigation';
 import { Sidebar, type SidebarDevice } from './layout/Sidebar';
-import { Topbar } from './layout/Topbar';
+import { Titlebar } from './layout/Titlebar';
 
-import { useRoute, type DevicePage, type DeviceZone, type HostPage, type HostZone } from './router';
+import { parseHash, toHash, useRoute, type DevicePage, type DeviceZone, type HostPage, type HostZone } from './router';
 import { useHostsV2, hostPhaseLabel, hostPhaseTone } from '../state/useHostsV2';
+import { useRegions } from '../state/useRegions';
+import { TabBar, type TabCloseMode } from './layout/TabBar';
+import { GeneralSettingsModal } from './layout/GeneralSettingsModal';
+import { nextTabAfterClose, tabIdForRoute, upsertTab, type AppTab } from './layout/tabs';
 import { WorkbenchPage } from '../features/pages/WorkbenchPage';
 import { DevicePage as DevicePageView } from '../features/pages/DevicePage';
 import {
@@ -49,6 +53,9 @@ const MAX_LIVE_MESSAGES = 5_000;
 /** 2.x/3.0 早期的消息子页 hash：页面已下线，命中时自动拉开右侧监控抽屉。 */
 const LEGACY_MONITOR_HASH = /^#\/(?:device\/[^/]+\/(?:runtime\/)?messages|hosts\/[^/]+\/runtime\/monitor)(?:[?#]|$)/;
 
+/** 常驻标签：任何时候都留着，保证关完标签后还有地方可去。 */
+const WORKBENCH_TAB: AppTab = { id: 'workbench', label: '设备清单', hash: '#/workbench' };
+
 /** 快捷键说明表。 */
 const SHORTCUTS: readonly ShortcutHint[] = [
   { keys: 'Ctrl+K', description: '打开命令面板：跳页面、找 CEID、执行动作' },
@@ -70,6 +77,9 @@ const SHORTCUTS: readonly ShortcutHint[] = [
  */
 export function App(): JSX.Element {
   const [connOpen, setConnOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 打开过的页面标签；工作台标签常驻，其余可关闭。 */
+  const [tabs, setTabs] = usePersistentState<AppTab[]>('secs.ui.tabs', [WORKBENCH_TAB]);
   const [draftBase, setDraftBase] = useState('');
   const [shellConn, setShellConn] = useState<ShellConnection | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -92,6 +102,7 @@ export function App(): JSX.Element {
 
   const [route, navigate] = useRoute(preferences.activeTab);
   const hostV2 = useHostsV2(client);
+  const regions = useRegions();
 
   /** 打开「连接设置」：桌面壳内显示当前模式并预填远程地址；浏览器环境维持 localStorage 编辑。 */
   const openConnection = useCallback(() => {
@@ -307,19 +318,25 @@ export function App(): JSX.Element {
       ? { kind: 'host', id: route.hostId }
       : { kind: 'none', id: '' };
 
-  /* 抽屉里一次只看一台设备或一台主机：把可选项一并给它，切换不跳页 */
+  /* 抽屉里一次只看一台设备或一台主机：把可选项一并给它，切换不跳页。
+     区域一起带上——抽屉先按区域收窄，再在区域里选对象。 */
   const monitorTargets: MonitorTarget[] = [
     ...backend.sessions.map((session) => ({
       kind: 'device' as const,
       id: session.id,
       label: session.device === '' ? session.id : session.device,
+      region: regions.deviceRegion(session.config ?? session.id),
     })),
     ...hostV2.hosts.map((host) => ({
       kind: 'host' as const,
       id: host.id,
       label: host.name,
+      region: regions.hostRegion(host.id),
     })),
   ];
+
+  /* 抽屉宽度：用户拖出来的值再按「通用设置」里的上下界夹一次 */
+  const monitorW = Math.max(preferences.monitorMinW, Math.min(preferences.monitorMaxW, monitorWidth));
 
   /* ---------- 命令面板 ---------- */
 
@@ -505,6 +522,70 @@ export function App(): JSX.Element {
       ? hostTitle
       : routeTitle(route);
 
+  /* ---------- 顶部页面标签 ----------
+     一个设备 / 一台主机 / 一个独立页各占一个标签；在子页之间切换只更新该标签
+     最后停留的地址，切回来还落在刚才那一页，又不会把顶栏开成一长排。 */
+  const currentTabId = tabIdForRoute(route);
+  const currentHash = toHash(route);
+  const currentTabLabel = route.name === 'device'
+    ? (deviceName === '' ? '设备' : deviceName)
+    : route.name === 'host'
+      ? (hostV2.find(route.hostId)?.name ?? '主机')
+      : (title.label === '' ? '设备清单' : title.label);
+  useEffect(() => {
+    setTabs((previous) => upsertTab(previous, {
+      id: currentTabId, label: currentTabLabel, hash: currentHash,
+    }));
+  }, [currentTabId, currentTabLabel, currentHash, setTabs]);
+
+  const selectTab = (tab: AppTab) => navigate(parseHash(tab.hash));
+  const closeTab = (tab: AppTab) => {
+    const fallback = nextTabAfterClose(tabs, tab.id);
+    const rest = tabs.filter((item) => item.id !== tab.id);
+    setTabs(rest.length > 0 ? rest : [WORKBENCH_TAB]);
+    if (tab.id === currentTabId) {
+      navigate(parseHash(fallback?.hash ?? '#/workbench'));
+    }
+  };
+
+  /**
+   * 右键菜单的批量关闭。
+   *
+   * <p>工作台标签任何模式下都留着——它是唯一保证"总有地方可去"的锚点。
+   * 关掉的如果是当前页，落到保留下来的最后一个标签上。</p>
+   */
+  const closeManyTabs = (target: AppTab, mode: TabCloseMode) => {
+    const at = tabs.findIndex((item) => item.id === target.id);
+    let next: AppTab[] = tabs;
+    switch (mode) {
+      case 'self':
+        next = tabs.filter((item) => item.id !== target.id);
+        break;
+      case 'others':
+        next = tabs.filter((item) => item.id === target.id || item.id === 'workbench');
+        break;
+      case 'left':
+        next = tabs.filter((item, index) => index >= at || item.id === 'workbench');
+        break;
+      case 'right':
+        next = tabs.filter((item, index) => index <= at || item.id === 'workbench');
+        break;
+      case 'all':
+        next = tabs.filter((item) => item.id === 'workbench');
+        break;
+      default:
+        break;
+    }
+    if (next.length === 0) {
+      next = [WORKBENCH_TAB];
+    }
+    setTabs(next);
+    if (!next.some((item) => item.id === currentTabId)) {
+      const landing = next.find((item) => item.id === target.id) ?? next[next.length - 1];
+      navigate(parseHash(landing.hash));
+    }
+  };
+
   const sidebarDevices: SidebarDevice[] = [
     ...backend.sessions.map((session) => ({
       id: session.id,
@@ -513,6 +594,7 @@ export function App(): JSX.Element {
       controlState: session.controlState,
       template: backend.configList.find((entry) => entry.name === session.config)?.template ?? '',
       config: session.config,
+      region: regions.deviceRegion(session.config ?? session.id),
     })),
     /* 数据库里还没启动的设备也进树：配置区照常可看可改，点「启动」才创建会话 */
     ...backend.configList
@@ -524,6 +606,7 @@ export function App(): JSX.Element {
         template: entry.template ?? '',
         config: entry.name,
         notStarted: true,
+        region: regions.deviceRegion(entry.name),
       })),
   ];
 
@@ -535,78 +618,90 @@ export function App(): JSX.Element {
     goTo,
     liveEvents,
     messages: liveMessages,
+    regions,
   };
 
   return (
     <div
       className={`app${preferences.sidebarCollapsed ? ' sidebar-collapsed' : ''}${monitorOpen ? ' monitor-open' : ''}`}
-      /* 宽度用 CSS 变量驱动 grid 布局：拖动时只改这一个变量，不重排 DOM */
+      /* 宽度用 CSS 变量驱动 grid 布局：拖动时只改这一个变量，不重排 DOM。
+         监控抽屉再宽也不超过窗口的 46%：窄窗口下不把内容区压成一条缝。 */
       style={{
         '--sidenav-w': `${preferences.sidebarWidth}px`,
-        '--monitor-w': `${monitorWidth}px`,
+        '--monitor-w': `min(${monitorW}px, 46vw)`,
       } as CSSProperties}
     >
-      <Sidebar
-        route={route}
-        devices={sidebarDevices}
-        hostInstances={hostV2.hosts}
-        onNavigateHost={(hostId) => goTo(`host-open:${hostId}`)}
-        collapsed={preferences.sidebarCollapsed}
-        width={preferences.sidebarWidth}
-        onResize={(sidebarWidth) => update({ sidebarWidth })}
-        onNavigate={navigate}
-        onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
+      {/* 顶部信息栏横跨整个窗口：左栏、内容、右侧监控都从它下面开始 */}
+      <Titlebar
+        refreshing={backend.refreshing}
+        onRefresh={() => void backend.refreshAll()}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenConnection={openConnection}
+        onOpenSettings={() => setSettingsOpen(true)}
+        resolvedTheme={resolvedTheme}
+        onToggleTheme={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
+        onShowHelp={() => setHelpOpen(true)}
+        monitorOpen={monitorOpen}
+        toggleMonitor={() => setMonitorOpen((previous) => !previous)}
       />
 
-      <div className="main-col">
-        <Topbar
-          title={title}
-          refreshing={backend.refreshing}
-          onRefresh={() => void backend.refreshAll()}
-          onOpenPalette={() => setPaletteOpen(true)}
-          onOpenConnection={openConnection}
-          logLevel={backend.logLevel}
-          onLogLevel={(level) => void backend.setLogLevel(level)}
-          resolvedTheme={resolvedTheme}
-          onToggleTheme={() => update({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
-          density={preferences.density}
-          onToggleDensity={() => update({ density: preferences.density === 'compact' ? 'comfortable' : 'compact' })}
-          onShowHelp={() => setHelpOpen(true)}
-          monitorOpen={monitorOpen}
-          onToggleMonitor={() => setMonitorOpen((previous) => !previous)}
+      <div className="app-body">
+        <Sidebar
+          route={route}
+          devices={sidebarDevices}
+          hostInstances={hostV2.hosts}
+          onNavigateHost={(hostId) => goTo(`host-open:${hostId}`)}
+          collapsed={preferences.sidebarCollapsed}
+          width={preferences.sidebarWidth}
+          onResize={(sidebarWidth) => update({ sidebarWidth })}
+          onNavigate={navigate}
+          onToggleCollapse={() => update({ sidebarCollapsed: !preferences.sidebarCollapsed })}
+          regions={regions}
+          minWidth={preferences.sidebarMinW}
+          maxWidth={preferences.sidebarMaxW}
         />
 
-        {backend.backendError !== '' && (
-          <div className="alert-bar" role="alert">
-            <span>后端不可达：{backend.backendError}</span>
-            <button type="button" onClick={() => void backend.refreshAll()} title="立即重试">
-              重试
-            </button>
-            <button
-              type="button"
-              onClick={openConnection}
-            >
-              修改地址
-            </button>
-          </div>
-        )}
+        <div className="main-col">
+          <TabBar
+            tabs={tabs}
+            activeId={currentTabId}
+            onSelect={selectTab}
+            onClose={closeTab}
+            onCloseMany={closeManyTabs}
+          />
 
-        <main className="content">
-          {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
-          {route.name === 'device' && (
-            <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />
+          {backend.backendError !== '' && (
+            <div className="alert-bar" role="alert">
+              <span>后端不可达：{backend.backendError}</span>
+              <button type="button" onClick={() => void backend.refreshAll()} title="立即重试">
+                重试
+              </button>
+              <button
+                type="button"
+                onClick={openConnection}
+              >
+                修改地址
+              </button>
+            </div>
           )}
-          {route.name === 'hosts' && <HostListPage {...panelProps} hosts={hostV2} />}
-          {route.name === 'host' && (
-            <HostDetailPage {...panelProps} hosts={hostV2} hostId={route.hostId} zone={route.zone} page={route.page} />
-          )}
-          {route.name === 'host-templates' && (
-            <HostTemplatePage {...panelProps} hosts={hostV2} />
-          )}
-          {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
-      {route.name === 'templates' && <TemplatePage {...panelProps} />}
-      {route.name === 'svid-templates' && <SvidTemplatePage {...panelProps} />}
-        </main>
+
+          <main className="content">
+            {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
+            {route.name === 'device' && (
+              <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />
+            )}
+            {route.name === 'hosts' && <HostListPage {...panelProps} hosts={hostV2} />}
+            {route.name === 'host' && (
+              <HostDetailPage {...panelProps} hosts={hostV2} hostId={route.hostId} zone={route.zone} page={route.page} />
+            )}
+            {route.name === 'host-templates' && (
+              <HostTemplatePage {...panelProps} hosts={hostV2} />
+            )}
+            {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
+        {route.name === 'templates' && <TemplatePage {...panelProps} />}
+        {route.name === 'svid-templates' && <SvidTemplatePage {...panelProps} />}
+          </main>
+        </div>
       </div>
 
       <MessageMonitorDrawer
@@ -615,7 +710,11 @@ export function App(): JSX.Element {
         messages={liveMessages}
         scope={monitorScope}
         targets={monitorTargets}
-        width={monitorWidth}
+        regions={regions}
+        windowMin={preferences.monitorWindowMin}
+        width={monitorW}
+        minWidth={preferences.monitorMinW}
+        maxWidth={preferences.monitorMaxW}
         onWidthChange={setMonitorWidth}
       />
 
@@ -693,6 +792,15 @@ export function App(): JSX.Element {
       </Modal>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} hints={SHORTCUTS} />
+
+      <GeneralSettingsModal
+        open={settingsOpen}
+        preferences={preferences}
+        onChange={update}
+        onClose={() => setSettingsOpen(false)}
+        logLevel={backend.logLevel}
+        onLogLevel={(level) => void backend.setLogLevel(level)}
+      />
     </div>
   );
 }

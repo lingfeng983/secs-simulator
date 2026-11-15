@@ -93,7 +93,9 @@ public final class SessionConfigJson {
         if (port < 1 || port > 65_535) {
             throw new ConfigException(sessionPath + ".port", "端口必须填写（1..65535），实际 " + port);
         }
-        int deviceId = JsonAccess.optionalInt(session, "deviceId", sessionPath).orElse(10);
+        /* 设备号缺省 0：与界面「新建设备 / 新建主机」的默认值一致，
+           配置文件不写 deviceId 时两侧都按 0 对齐，连得上 */
+        int deviceId = JsonAccess.optionalInt(session, "deviceId", sessionPath).orElse(0);
         long seed = session.containsKey("seed") ? JsonAccess.longValue(session, "seed", sessionPath) : 0L;
 
         EquipmentSpec equipment = parseEquipment(root, deviceId);

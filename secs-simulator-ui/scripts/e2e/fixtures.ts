@@ -50,10 +50,14 @@ export interface MockState {
   }>;
   templates: Array<{ id: string; label: string; source: string }>;
   hostTemplates: Array<{ id: string; name: string; host: string; port: number; deviceId: number; note: string }>;
+  /** 套用模板复制出来的主机方案，按主机 + 类型分桶。 */
+  hostPlans: Array<{ hostId: string; kind: string; plan: Record<string, unknown> }>;
   /** 记录被调用过的动作（只到路径），便于断言"按钮真的打到后端"。 */
   calls: string[];
   /** 带查询串的完整请求行（审计游标、台账过滤这类参数在这里看）。 */
   queries: string[];
+  /** 已被删除（软删）的配置文件名：列表里不再出现，用来验"删设备"这条路径。 */
+  deletedConfigs: string[];
 }
 
 function initialState(): MockState {
@@ -81,11 +85,22 @@ function initialState(): MockState {
       { id: 'bare', label: '空白设备', source: 'builtin' },
       { id: 'etch', label: '刻蚀机', source: 'builtin' },
     ],
+    /* 主机模板的 note 里装的是方案包 JSON；界面解码后显示方案份数 */
     hostTemplates: [
-      { id: 'ht-1', name: '产线 A 目标', host: '127.0.0.1', port: 5000, deviceId: 10, note: '日常联调' },
+      {
+        id: 'ht-1', name: '产线 A 方案', host: '-', port: 5000, deviceId: 0,
+        note: JSON.stringify({
+          v: 1,
+          description: '日常联调',
+          tracePlans: [{ id: 'ht-1-t', name: '温度 Trace', trid: 1, dsper: 1000, totsmp: 100, repgsz: 1, svids: '1001, 1003', createdAt: 1 }],
+          collectPlans: [{ id: 'ht-1-c', name: '温度采集', startCeid: '2001', stopCeid: '2002', intervalMs: '1000', svids: '1001, 1003', createdAt: 1 }],
+        }),
+      },
     ],
+    hostPlans: [],
     calls: [],
     queries: [],
+    deletedConfigs: [],
   };
 }
 
@@ -352,12 +367,14 @@ export async function mockApi(page: Page): Promise<MockState> {
     if (path === '/api/v1/messages') {
       return ok({
         messages: [
-          { seq: 1, sessionId: 'line1', perspective: 'device', direction: 'in', stream: 1, function: 1, wbit: true, body: '', at: 1_000 },
-          { seq: 2, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 1, function: 2, wbit: false, body: '', at: 1_001 },
-          { seq: 3, sessionId: 'line1', perspective: 'device', direction: 'in', stream: 1, function: 3, wbit: true, body: '<L[1] <U4 1001>>', at: 1_002 },
-          { seq: 4, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 1, function: 4, wbit: false, body: '<L[1] <F4 42.5>>', at: 1_003 },
-          { seq: 5, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 6, function: 11, wbit: true, body: '<L[3]>', at: 1_004 },
-          { seq: 6, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 6, function: 1, wbit: true, body: '<L[4]>', at: 1_005 },
+          /* 时间戳按"刚才"生成：监控抽屉默认只回看最近 1 小时，
+             写死 1970 年的时间会让这些历史报文被时间窗直接滤掉 */
+          { seq: 1, sessionId: 'line1', perspective: 'device', direction: 'in', stream: 1, function: 1, wbit: true, body: '', at: Date.now() - 6_000 },
+          { seq: 2, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 1, function: 2, wbit: false, body: '', at: Date.now() - 5_900 },
+          { seq: 3, sessionId: 'line1', perspective: 'device', direction: 'in', stream: 1, function: 3, wbit: true, body: '<L[1] <U4 1001>>', at: Date.now() - 5_800 },
+          { seq: 4, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 1, function: 4, wbit: false, body: '<L[1] <F4 42.5>>', at: Date.now() - 5_700 },
+          { seq: 5, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 6, function: 11, wbit: true, body: '<L[3]>', at: Date.now() - 5_600 },
+          { seq: 6, sessionId: 'line1', perspective: 'device', direction: 'out', stream: 6, function: 1, wbit: true, body: '<L[4]>', at: Date.now() - 5_500 },
           /* 主机视角：收发记录页要能按 hostId 认领 */
           ...hostMessages(),
         ],
@@ -372,15 +389,26 @@ export async function mockApi(page: Page): Promise<MockState> {
       return ok({ configs: [
         { name: 'line1.json', sizeBytes: CONFIG_TEXT.length, modifiedMs: 1, template: 'etch' },
         { name: 'line2.json', sizeBytes: CONFIG_TEXT.length, modifiedMs: 2, template: 'bare' },
-      ] });
+      ].filter((entry) => !state.deletedConfigs.includes(entry.name)) });
     }
     if (path === '/api/v1/configs' && method === 'POST') {
       return ok({ ok: true }, 201);
     }
+    if (/^\/api\/v1\/configs\/[^/]+$/.test(path) && method === 'DELETE') {
+      const name = decodeURIComponent(path.split('/').pop() ?? '');
+      state.deletedConfigs.push(name);
+      /* 真后端删配置前会先停掉它的会话；夹具照做，否则清单里还留着这一行 */
+      state.sessions = state.sessions.filter((item) => `${item.id}.json` !== name);
+      return ok({ ok: true, name });
+    }
     if (/^\/api\/v1\/configs\/[^/]+$/.test(path)) {
       if (method === 'GET') {
         const name = decodeURIComponent(path.split('/').pop() ?? '');
-        return ok({ name, text: CONFIG_TEXT, modifiedMs: 1 });
+        /* line2 的配置端口与总览里的 5001 对齐，端口列读配置也不会串台 */
+        const text = name.startsWith('line2')
+          ? CONFIG_TEXT.replace('"port": 5000', '"port": 5001')
+          : CONFIG_TEXT;
+        return ok({ name, text, modifiedMs: 1 });
       }
       return ok({ ok: true });
     }
@@ -492,11 +520,46 @@ export async function mockApi(page: Page): Promise<MockState> {
       return ok({ templates: state.hostTemplates });
     }
     if (path === '/api/v2/host-templates' && method === 'POST') {
+      const body = request.postDataJSON() as {
+        id?: string; name?: string; host?: string; port?: number; deviceId?: number; note?: string;
+      } | null;
+      const id = body?.id || `ht-${state.hostTemplates.length + 1}`;
+      const row = {
+        id, name: body?.name ?? id, host: body?.host ?? '-', port: body?.port ?? 5000,
+        deviceId: body?.deviceId ?? 0, note: body?.note ?? '',
+      };
+      const index = state.hostTemplates.findIndex((item) => item.id === id);
+      if (index >= 0) {
+        state.hostTemplates[index] = row;
+      } else {
+        state.hostTemplates.push(row);
+      }
       return ok({ ok: true }, 201);
     }
     if (/^\/api\/v2\/host-templates\/[^/]+$/.test(path) && method === 'DELETE') {
       const id = decodeURIComponent(path.split('/').pop() ?? '');
       state.hostTemplates = state.hostTemplates.filter((item) => item.id !== id);
+      return ok({ ok: true });
+    }
+    /* 主机方案库：套用模板时逐条复制方案到这里；详情页从这里读回 */
+    if (/^\/api\/v2\/hosts\/[^/]+\/plans$/.test(path)) {
+      const hostId = path.split('/')[4];
+      const kind = url.searchParams.get('kind') ?? '';
+      if (method === 'GET') {
+        return ok(state.hostPlans
+          .filter((item) => item.hostId === hostId && item.kind === kind)
+          .map((item) => item.plan));
+      }
+      if (method === 'POST') {
+        const plan = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+        state.hostPlans.push({ hostId, kind, plan });
+        return ok({ ok: true });
+      }
+      return ok({ ok: true });
+    }
+    if (/^\/api\/v2\/hosts\/[^/]+\/plans\/[^/]+$/.test(path) && method === 'DELETE') {
+      const planId = decodeURIComponent(path.split('/').pop() ?? '');
+      state.hostPlans = state.hostPlans.filter((item) => item.plan.id !== planId);
       return ok({ ok: true });
     }
 

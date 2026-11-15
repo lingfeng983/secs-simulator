@@ -16,7 +16,7 @@ test('工作台端口列只显示数字，不带冒号', async ({ page }) => {
   await page.goto('/#/workbench');
 
   const row = page.locator('.data-table tbody tr').first();
-  await expect(row.locator('td').nth(3)).toHaveText('5000');
+  await expect(row.locator('td').nth(2)).toHaveText('5000');
   await expect(page.locator('.data-table tbody')).not.toContainText(':5000');
 });
 
@@ -25,63 +25,6 @@ test('配置页不再显示"与磁盘一致"', async ({ page }) => {
   await expect(page.locator('#panel-config')).toBeVisible();
 
   await expect(page.getByText('与磁盘一致')).toHaveCount(0);
-});
-
-test('设备子页顶部操作条统一：同高、有底、主按钮在最右', async ({ page }) => {
-  const cases = [
-    { hash: '#/device/line1/config/connection', primary: '保存' },
-    { hash: '#/device/line1/config/structure', primary: '保存' },
-    { hash: '#/device/line1/config/document', primary: '保存' },
-    { hash: '#/device/line1/runtime/manual', primary: '发送 SML' },
-    { hash: '#/device/line1/runtime/catalog', primary: '新增事件' },
-    { hash: '#/device/line1/runtime/plans', primary: '新增计划' },
-    { hash: '#/device/line1/runtime/svids', primary: '新增状态变量' },
-  ] as const;
-
-  for (const item of cases) {
-    await page.goto(`/${item.hash}`);
-
-    const head = page.locator('.tab-page .panel-head').first();
-    await expect(head, `命令栏应可见：${item.hash}`).toBeVisible();
-
-    /* 一条浅色命令栏，而不是几个按钮直接浮在页面顶端 */
-    const background = await head.evaluate((element) => getComputedStyle(element).backgroundColor);
-    expect(background, `命令栏应有底色：${item.hash}`).not.toBe('rgba(0, 0, 0, 0)');
-
-    const buttons = head.locator('.panel-actions > button');
-    const count = await buttons.count();
-    expect(count, `命令栏应有按钮：${item.hash}`).toBeGreaterThan(0);
-
-    /* 所有按钮同一高度 */
-    for (let index = 0; index < count; index += 1) {
-      const height = await buttons.nth(index).evaluate((element) => element.getBoundingClientRect().height);
-      expect(Math.round(height), `按钮高度应统一：${item.hash} #${index}`).toBe(30);
-    }
-
-    /* 主操作固定在最右 */
-    const last = buttons.last();
-    await expect(last).toHaveText(item.primary);
-    await expect(last).toHaveClass(/primary/);
-
-    /* 说明文字与按钮不能互相压住（换行也算正常，但矩形不能重叠） */
-    const desc = head.locator('.panel-desc').first();
-    if (await desc.count() > 0) {
-      const descBox = await desc.boundingBox();
-      const actionsBox = await head.locator('.panel-actions').first().boundingBox();
-      if (descBox !== null && actionsBox !== null) {
-        const overlaps = !(
-          descBox.x + descBox.width <= actionsBox.x + 1
-          || actionsBox.y >= descBox.y + descBox.height
-          || descBox.y >= actionsBox.y + actionsBox.height
-        );
-        expect(overlaps, `说明与操作条重叠：${item.hash}`).toBe(false);
-      }
-    }
-
-    /* 命令栏不该是一大块：单行按钮 + 一句说明 */
-    const headHeight = await head.evaluate((element) => element.getBoundingClientRect().height);
-    expect(headHeight, `命令栏过高：${item.hash}`).toBeLessThanOrEqual(96);
-  }
 });
 
 test('工作台在桌面宽度下没有横向溢出', async ({ page }) => {

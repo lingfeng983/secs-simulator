@@ -53,7 +53,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
     items: [
       {
         id: 'hosts',
-        label: '主机模拟',
+        label: '主机清单',
         description: '多主机实例管理',
         icon: 'hostsim',
         route: { name: 'hosts' },
@@ -67,7 +67,7 @@ export const NAV_GROUPS: readonly NavGroupDef[] = [
       {
         id: 'host-templates',
         label: '主机模板',
-        description: '目标地址 / 端口 / Device ID 预设',
+        description: 'Trace / 采集方案包,新建主机时套用',
         icon: 'hostsim',
         route: { name: 'host-templates' },
       },

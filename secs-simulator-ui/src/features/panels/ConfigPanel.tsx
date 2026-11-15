@@ -4,6 +4,7 @@ import { saveHint, saveTextFile } from '../../shared/lib/saveFile';
 import { JsonEditor } from '../../shared/ui/JsonEditor';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { Panel, PanelFootnote } from '../../shared/ui/Panel';
+import { Icon } from '../../shared/ui/Icon';
 import type { ConfigTemplateEntry } from '../../api';
 import type { PanelBaseProps } from './types';
 
@@ -302,18 +303,22 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
           <span className="action-sep" aria-hidden="true" />
           <button
             type="button"
+            className="icon-btn"
             onClick={() => importRef.current?.click()}
-            title="从本地 JSON 文件读入草稿（只进编辑器，仍需校验/保存）"
+            title="导入 JSON：从本地文件读入草稿（只进编辑器，仍需校验/保存）"
+            aria-label="导入 JSON"
           >
-            导入 JSON
+            <Icon name="upload" size={15} />
           </button>
           <button
             type="button"
+            className="icon-btn"
             onClick={() => void exportJson()}
             disabled={draft.trim() === ''}
-            title="把当前草稿导出为 JSON 文件（可选择保存位置）"
+            title="导出 JSON：把当前草稿存成文件（可选择保存位置）"
+            aria-label="导出 JSON"
           >
-            导出 JSON
+            <Icon name="download" size={15} />
           </button>
           <span className="action-sep" aria-hidden="true" />
           <button

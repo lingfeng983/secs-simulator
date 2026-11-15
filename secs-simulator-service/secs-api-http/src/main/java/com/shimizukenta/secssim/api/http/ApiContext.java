@@ -1136,6 +1136,19 @@ public interface ApiContext {
         return this.createConfig(name);
     }
 
+    /**
+     * 删除一份配置（= 从设备清单里删掉一台设备）。
+     *
+     * <p>实现方要先停掉这台设备的会话再删：配置没了、端口还在监听，
+     * 清单里就查不到是谁占着端口了。</p>
+     *
+     * @param name 文件名
+     * @return 结果
+     */
+    default ConfigResult deleteConfig(String name) {
+        return ConfigResult.notFound("当前形态不支持删除配置");
+    }
+
     /** 全部模板（内置 + 自定义）的 JSON 数组。 */
     default String templatesJson() {
         return this.configTemplatesJson();

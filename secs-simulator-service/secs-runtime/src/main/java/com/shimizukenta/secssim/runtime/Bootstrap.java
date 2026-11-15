@@ -519,11 +519,19 @@ public final class Bootstrap {
     /** 播种内置参数模板（只填缺失的行；入库前归一化为完整形，坏模板直接让启动失败）。 */
     private static void seedParamTemplates(ParamTemplateRepository repo) {
         int seeded = 0;
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
         for (ParamTemplates.Entry entry : ParamTemplates.catalog()) {
             String body = com.shimizukenta.secssim.app.config.ParamTemplateBody.normalize(entry.body());
+            ids.add(entry.id());
             if (repo.seed(entry.id(), entry.name(), entry.description(), body)) {
                 seeded++;
             }
+        }
+        /* 目录里删掉的条目要跟着下线，否则老库里还留着上一版的内置模板，
+           「内置多少套」就永远只增不减 */
+        int pruned = repo.pruneBuiltin(ids);
+        if (pruned > 0) {
+            Log.info("下线已移除的内置参数模板: " + pruned + " 套");
         }
         if (seeded > 0) {
             Log.info("播种内置参数模板: " + seeded + " 套");

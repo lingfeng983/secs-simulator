@@ -9,7 +9,7 @@
 
 .spark-id {
   color: var(--fg);
-  font: 500 12px/1.4 var(--font-mono);
+  font: 500 calc(12px * var(--font-scale))/1.4 var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -17,7 +17,7 @@
 
 .spark-owner {
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .spark canvas {
@@ -34,7 +34,7 @@
 
 .spark-readout {
   color: var(--muted);
-  font: 11px/1.45 var(--font-mono);
+  font: calc(11px * var(--font-scale))/1.45 var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -53,7 +53,7 @@
   align-items: baseline;
   gap: 0.5rem;
   margin-bottom: 0.4rem;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .collector-chart-head .mono {
@@ -67,7 +67,7 @@
 }
 
 .collector-chart .spark-readout {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
 }
 
 /* ===== 编辑器 / 结果 / 日志 ===== */
@@ -80,7 +80,7 @@
   border-radius: var(--radius);
   background: var(--surface-inset);
   color: var(--fg);
-  font: 12px/1.7 var(--font-mono);
+  font: calc(12px * var(--font-scale))/1.7 var(--font-mono);
   resize: vertical;
 }
 
@@ -97,7 +97,7 @@
   border-radius: var(--radius);
   background: var(--surface-inset);
   color: var(--fg);
-  font: 11.5px/1.65 var(--font-mono);
+  font: calc(11.5px * var(--font-scale))/1.65 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -124,7 +124,7 @@
   border-left: 2px solid var(--accent);
   border-radius: var(--radius);
   background: var(--surface-2);
-  font: 12px/1.5 var(--font-mono);
+  font: calc(12px * var(--font-scale))/1.5 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -136,7 +136,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-inset);
-  font: 11.5px/1.75 var(--font-mono);
+  font: calc(11.5px * var(--font-scale))/1.75 var(--font-mono);
 }
 
 .diff-line {
@@ -187,7 +187,7 @@
   max-width: 30rem;
   white-space: normal;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   line-height: 1.55;
 }
 
@@ -228,7 +228,7 @@
   padding-bottom: 0.2rem;
   border-bottom: 1px solid var(--line-soft);
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -301,7 +301,7 @@
   gap: 0.9rem;
   flex-wrap: wrap;
   margin-top: 0.3rem;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .variable-chart-readout {
@@ -312,7 +312,7 @@
 /* 事件清单：图上标不下时,这里按时刻列全 */
 .variable-chart-events {
   margin-top: 0.4rem;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 .variable-chart-events > summary {

@@ -290,9 +290,37 @@ public final class ConfigStore {
         return this.createFromText(name, text, templateId);
     }
 
+    /**
+     * 删除一份配置（= 从设备清单里删掉一台设备）。
+     *
+     * <p>只做软删：设备从列表里消失、名字可以再用，正文与版本历史留在库里。
+     * 调用方必须先停掉这台设备的会话——配置删了端口还在监听，
+     * 界面上就会出现"清单里没有、端口却占着"的幽灵设备。</p>
+     *
+     * @param name 文件名
+     * @return 结果
+     */
+    public ConfigResult delete(String name) {
+        String key;
+        try {
+            key = keyOf(name);
+        } catch (ConfigException e) {
+            return ConfigResult.notFound(e.getMessage());
+        }
+        try {
+            if (!this.repository.deleteDevice(key)) {
+                return ConfigResult.notFound("配置不存在: " + name);
+            }
+            Log.info("已删除配置: " + name);
+            return ConfigResult.ok();
+        } catch (StoreException e) {
+            Log.error("删除配置失败: " + name, e);
+            return ConfigResult.failed(e.getMessage());
+        }
+    }
+
     /** 保存配置：先校验，通过后入库（无并发检查）。 */
-    public ConfigResult save(String name, String text) {
-        return this.save(name, text, null);
+    public ConfigResult save(String name, String text) {        return this.save(name, text, null);
     }
 
     /**

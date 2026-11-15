@@ -1,0 +1,344 @@
+/*
+ * 外壳附加件：顶部页面标签、通用设置弹框、侧栏区域分组、居中等布局。
+ * 紧跟 layout.css 之后加载，避免改动既有层叠次序。
+ */
+
+/* ===== 顶部页面标签条 ===== */
+/* 顶栏会随按钮增多折行，标签条不再固定偏移，避免压在第二行上 */
+.tabbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  min-height: 36px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-wash);
+}
+
+.tabbar-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.app-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 190px;
+  min-height: 28px;
+  margin: 4px 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--fast), color var(--fast), border-color var(--fast);
+}
+
+.app-tab:hover {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.app-tab.active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.app-tab-label {
+  min-width: 0;
+  max-width: 160px;
+  padding: 0.2rem 0.35rem 0.2rem 0.6rem;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: calc(11.8px * var(--font-scale));
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.app-tab-close {
+  flex: 0 0 auto;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font-size: calc(14px * var(--font-scale));
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.app-tab-close:hover {
+  background: var(--chrome-badge);
+  opacity: 1;
+}
+
+/* ===== 通用设置 ===== */
+.settings-btn {
+  gap: 0.35rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1.2rem;
+}
+
+.settings-swatches {
+  display: flex;
+  gap: 0.55rem;
+  margin: 0.9rem 0 0.4rem;
+}
+
+.settings-swatch {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-swatch span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+.settings-swatch.active {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.settings-sliders {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.4rem;
+  margin-top: 0.9rem;
+}
+
+/* 弹框内分节标题 */
+.settings-section {
+  margin: 1.15rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* 宽度上下限：两组，每组「标题 + 最小 + 最大」 */
+.settings-bounds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem 1.4rem;
+  margin-top: 0.75rem;
+}
+
+.settings-bound {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.settings-bound-title {
+  flex: 0 0 auto;
+  padding-bottom: 0.4rem;
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.settings-bound-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.settings-bound-field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: calc(11.8px * var(--font-scale));
+}
+
+.settings-slider-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* ===== 侧栏区域分组 ===== */
+.nav-region {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-region-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 24px;
+  padding: 0.15rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--chrome-muted);
+  font-size: calc(10.5px * var(--font-scale));
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-region-head:hover {
+  background: var(--chrome-hover);
+  color: var(--fg);
+}
+
+.nav-region-caret {
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform var(--fast);
+}
+
+.nav-region-head.folded .nav-region-caret {
+  transform: rotate(0deg);
+}
+
+.nav-region-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-region-count {
+  flex: 0 0 auto;
+  color: var(--chrome-muted);
+  font-family: var(--font-mono);
+}
+
+.sidenav.collapsed .nav-region {
+  align-items: center;
+}
+
+/* ===== 整体布局：居中限宽 ===== */
+[data-layout='centered'] .content {
+  max-width: 1280px;
+  margin-inline: auto;
+}
+
+/* 表格头部的区域筛选、以及行内区域下拉 */
+.region-filter {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+.region-filter select {
+  width: auto;
+  min-width: 7rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+.region-cell {
+  width: 100%;
+  min-width: 6rem;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+  font-size: calc(11px * var(--font-scale));
+}
+
+@media (max-width: 700px) {
+  .settings-grid,
+  .settings-sliders {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ===== 页签右键菜单 ===== */
+/* 标签条是横向滚动容器，菜单放进去会被裁掉：走 fixed 浮层 */
+.tab-menu {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.tab-menu button {
+  padding: 0.34rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab-menu button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tab-menu button:disabled {
+  color: var(--faint);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tab-menu-sep {
+  height: 1px;
+  margin: 3px 2px;
+  background: var(--line-soft);
+}

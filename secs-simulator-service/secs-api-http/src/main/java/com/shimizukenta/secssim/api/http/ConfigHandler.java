@@ -1067,9 +1067,9 @@ final class ConfigHandler extends HttpSupport {
     }
 
     /**
-     * 单份配置的读取、校验与保存。
+     * 单份配置的读取、校验、保存与删除。
      *
-     * <p>读是 {@link ApiRole#VIEWER}；保存是 {@link ApiRole#OPERATOR}：
+     * <p>读是 {@link ApiRole#VIEWER}；保存与删除是 {@link ApiRole#OPERATOR}：
      * 配置决定了下一台设备长什么样，改它属于"会改变设备状态"的那一类，
      * 和触发 CEID、增删会话同属一级。
      * </p>
@@ -1080,6 +1080,14 @@ final class ConfigHandler extends HttpSupport {
                 return;
             }
             this.saveConfig(ex);
+            return;
+        }
+
+        if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.deleteConfig(ex);
             return;
         }
 
@@ -1198,9 +1206,32 @@ final class ConfigHandler extends HttpSupport {
     }
 
 
+    /**
+     * DELETE /api/v1/configs/{name}：从设备清单里删掉一台设备。
+     *
+     * <p>删之前先停掉它对应的会话（否则端口还占着、清单里却查不到是谁），
+     * 库里只做软删：配置正文与版本历史留着，名字可以重新使用。</p>
+     */
+    void deleteConfig(HttpExchange ex) throws IOException {
+        String name = configNameFromPath(ex);
+        if (name == null || isValidatePath(ex)) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+
+        ConfigResult result = this.context.deleteConfig(name);
+        audit(ex, "config-delete", name, "outcome=" + result.outcome());
+        switch (result.outcome()) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"name\":\"" + json(name) + "\"}");
+            /* 已经删掉了 / 本来就不存在：都不是错误，但要让调用方知道"没删到东西" */
+            case NOT_FOUND -> respond(ex, 404, problemsJson(false, result.problems()));
+            default -> respond(ex, 500, problemsJson(false, result.problems()));
+        }
+    }
+
+
     /** 问题清单的 JSON。 */
-    static String problemsJson(boolean valid, List<String> problems) {
-        StringBuilder sb = new StringBuilder("{\"ok\":").append(valid)
+    static String problemsJson(boolean valid, List<String> problems) {        StringBuilder sb = new StringBuilder("{\"ok\":").append(valid)
                 .append(",\"valid\":").append(valid)
                 .append(",\"problems\":[");
         for (int i = 0; i < problems.size(); i++) {

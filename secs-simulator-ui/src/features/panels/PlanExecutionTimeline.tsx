@@ -10,6 +10,7 @@ import { useState, type CSSProperties } from 'react';
 import type { NoticeWire } from '../../state/useEventStream';
 import type { Notifier } from '../../state/useToasts';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
+import { Icon } from '../../shared/ui/Icon';
 import { usePlanExecutions } from '../../state/usePlanExecutions';
 
 interface Props {
@@ -88,7 +89,15 @@ export function PlanExecutionTimeline({ deviceId, liveEvents, notifier }: Props)
             </select>
           </label>
           <button type="button" onClick={() => void exec.refresh()}>刷新</button>
-          <button type="button" onClick={() => void runExport()}>导出 CSV</button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => void runExport()}
+            title="导出 CSV：把当前筛选的执行记录存成文件"
+            aria-label="导出 CSV"
+          >
+            <Icon name="download" size={15} />
+          </button>
           <button
             type="button"
             className="danger"

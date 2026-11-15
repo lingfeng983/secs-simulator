@@ -11,6 +11,7 @@ type ConfigApi = Pick<
   ApiClient,
   | 'configs'
   | 'createConfig'
+  | 'deleteConfig'
   | 'configTemplates'
   | 'templates'
   | 'templateText'
@@ -59,6 +60,13 @@ export const configApi: ConfigApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify(templateId ? { name, template: templateId } : { name }),
+    });
+    return commandStatus(response);
+  },
+  async deleteConfig(name) {
+    /* 后端会先停掉这台设备的会话再软删配置：删完它就从这个清单里消失了 */
+    const response = await request(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {
+      method: 'DELETE',
     });
     return commandStatus(response);
   },

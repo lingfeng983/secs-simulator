@@ -72,3 +72,4 @@ secs-simulator-gui/src-tauri/target/
 # ---- 会话工具临时目录(本地状态,不入库) ----
 .zcode/
 secs-simulator-ui/.pw-tmp/
+/.workbuddy-ai/

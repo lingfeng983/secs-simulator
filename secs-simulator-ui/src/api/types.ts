@@ -431,6 +431,8 @@ export interface ApiClient {
   configs(): Promise<ConfigEntry[]>;
   /** 新建一份配置；templateId 缺省是空骨架，其余取内置设备模板目录里的 id。 */
   createConfig(name: string, templateId?: string): Promise<number>;
+  /** 删掉一台设备（软删，后端先停会话）；404 = 本来就没有。 */
+  deleteConfig(name: string): Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
   configTemplates(): Promise<ConfigTemplateEntry[]>;
   /** 内置 + 自定义模板。 */
@@ -510,7 +512,7 @@ export interface ApiClient {
   disconnectHostV2(hostId: string): Promise<void>;
   applyHostV2(hostId: string): Promise<void>;
   sendHostV2(hostId: string, sml: string): Promise<SentMessageResult>;
-  hostTemplatesV2(): Promise<import('./hostsV2').HostTemplate[]>;
+  hostTemplatesV2(): Promise<import('./hostsV2').HostTemplateRow[]>;
   /** 主机配置区方案库（Trace / S1F3 采集，落 config.db）。 */
   listHostPlansV2(hostId: string, kind: 'trace' | 'collect'): Promise<Record<string, unknown>[]>;
   saveHostPlanV2(hostId: string, kind: 'trace' | 'collect', plan: Record<string, unknown>): Promise<void>;

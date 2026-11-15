@@ -42,13 +42,13 @@
 
 .session-field-name {
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
   font-weight: 500;
 }
 
 .session-field-help {
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   line-height: 1.55;
 }
 
@@ -61,7 +61,7 @@
 .session-subhead {
   margin: 1rem 0 0.5rem;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 500;
 }
 
@@ -83,14 +83,14 @@
   border-radius: var(--radius);
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 11.8px;
+  font-size: calc(11.8px * var(--font-scale));
   line-height: 1.7;
 }
 
 .template-guide h3 {
   margin: 0.75rem 0 0.3rem;
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
 }
 
 .template-guide h3:first-child {
@@ -144,7 +144,7 @@
 .svid-check-name {
   overflow: hidden;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -168,7 +168,7 @@
   gap: 8px 16px;
   min-height: 48px;
   padding: 8px 14px;
-  background: var(--surface-2);
+  background: var(--accent-wash);
   border-bottom: 1px solid var(--line-soft);
   /* 命令栏是面板的第一块：给上圆角，别把卡片圆角盖成直角 */
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
@@ -178,8 +178,26 @@
   margin: 0;
   max-width: 78ch;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   line-height: 1.5;
+}
+
+/* 标题已隐藏，气泡就没有锚点了：命令栏里的说明改成常驻文字。
+   其它页面的面板仍是「悬浮才出说明」，这里按子页形态单独放开。 */
+.tab-page .panel-tip {
+  position: static;
+  max-width: 78ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--font-scale));
+  line-height: 1.5;
+  pointer-events: auto;
 }
 
 .tab-page .panel-actions {

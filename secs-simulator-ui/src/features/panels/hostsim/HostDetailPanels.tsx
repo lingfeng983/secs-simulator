@@ -403,10 +403,10 @@ function TracePlanTable({
   const editing = mode === 'config';
   const columns: Column<TracePlan>[] = [
     { key: 'name', header: '方案', sortValue: (row) => row.name, render: (row) => row.name },
-    { key: 'trid', header: 'TRID', align: 'right', sortValue: (row) => row.trid, render: (row) => <span className="mono">{row.trid}</span> },
-    { key: 'dsper', header: '采样周期', align: 'right', sortValue: (row) => row.dsper, render: (row) => <span className="mono">{row.dsper}ms</span> },
-    { key: 'totsmp', header: '样本数', align: 'right', sortValue: (row) => row.totsmp, render: (row) => <span className="mono">{row.totsmp}</span> },
-    { key: 'repgsz', header: 'REPGSZ', align: 'right', sortValue: (row) => row.repgsz, render: (row) => <span className="mono">{row.repgsz}</span> },
+    { key: 'trid', header: 'TRID', sortValue: (row) => row.trid, render: (row) => <span className="mono">{row.trid}</span> },
+    { key: 'dsper', header: '采样周期', sortValue: (row) => row.dsper, render: (row) => <span className="mono">{row.dsper}ms</span> },
+    { key: 'totsmp', header: '样本数', sortValue: (row) => row.totsmp, render: (row) => <span className="mono">{row.totsmp}</span> },
+    { key: 'repgsz', header: 'REPGSZ', sortValue: (row) => row.repgsz, render: (row) => <span className="mono">{row.repgsz}</span> },
     { key: 'svids', header: 'SVID', render: (row) => <span className="mono hint-inline">{row.svids}</span> },
     {
       key: 'actions',
@@ -831,9 +831,9 @@ function CollectPlanTable({
   const editing = mode === 'config';
   const columns: Column<CollectPlan>[] = [
     { key: 'name', header: '配置', sortValue: (row) => row.name, render: (row) => row.name },
-    { key: 'startCeid', header: '启动 CEID', align: 'right', sortValue: (row) => Number(row.startCeid) || 0, render: (row) => <span className="mono">{row.startCeid}</span> },
-    { key: 'stopCeid', header: '停止 CEID', align: 'right', sortValue: (row) => Number(row.stopCeid) || 0, render: (row) => <span className="mono">{row.stopCeid}</span> },
-    { key: 'intervalMs', header: '周期', align: 'right', sortValue: (row) => Number(row.intervalMs) || 0, render: (row) => <span className="mono">{row.intervalMs}ms</span> },
+    { key: 'startCeid', header: '启动 CEID', sortValue: (row) => Number(row.startCeid) || 0, render: (row) => <span className="mono">{row.startCeid}</span> },
+    { key: 'stopCeid', header: '停止 CEID', sortValue: (row) => Number(row.stopCeid) || 0, render: (row) => <span className="mono">{row.stopCeid}</span> },
+    { key: 'intervalMs', header: '周期', sortValue: (row) => Number(row.intervalMs) || 0, render: (row) => <span className="mono">{row.intervalMs}ms</span> },
     { key: 'svids', header: 'SVID', render: (row) => <span className="mono hint-inline">{row.svids}</span> },
     {
       key: 'actions',

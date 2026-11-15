@@ -1,16 +1,26 @@
 /*
- * 应用外壳:机箱(侧栏) + 顶栏 + 内容区 + 页面头。
+ * 应用外壳:顶部信息栏(通栏) + 机身(侧栏 + 内容区) + 右侧消息监控。
  */
 
 /* ===== 外壳 ===== */
+/* 整窗固定高度：顶部信息栏不随内容滚走，内容区自己滚 */
 .app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 机身：顶部信息栏以下的部分才分左右两栏 */
+.app-body {
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: var(--sidenav-w) minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: 0;
   transition: grid-template-columns 180ms var(--ease);
 }
 
-.app.sidebar-collapsed {
+.app.sidebar-collapsed .app-body {
   grid-template-columns: var(--sidenav-w-collapsed) minmax(0, 1fr);
 }
 
@@ -20,14 +30,18 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .content {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   width: 100%;
   padding: 18px 22px 56px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ===== 侧栏宽度拖拽 ===== */
@@ -71,7 +85,7 @@ body.sidenav-resizing {
   user-select: none;
 }
 
-body.sidenav-resizing .app {
+body.sidenav-resizing .app-body {
   transition: none;
 }
 
@@ -82,13 +96,14 @@ body.sidenav-resizing .app {
 }
 
 /* ===== 侧栏:跟随主题的导航栏(不再是固定深色机箱) ===== */
+/* 顶部信息栏是独立一行，侧栏从它下面开始，所以这里不再 sticky 到视口顶端 */
 .sidenav {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 50;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: var(--chrome);
   border-right: 1px solid var(--chrome-line);
@@ -130,7 +145,7 @@ body.sidenav-resizing .app {
 .nav-group-title {
   padding: 0.45rem 0.6rem 0.3rem;
   color: var(--chrome-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -149,7 +164,7 @@ body.sidenav-resizing .app {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--chrome-fg);
-  font-size: 12.8px;
+  font-size: calc(12.8px * var(--font-scale));
   font-weight: 450;
   text-align: left;
   justify-content: flex-start;
@@ -206,7 +221,7 @@ body.sidenav-resizing .app {
   margin: 0;
   padding: 0.15rem 0.6rem;
   color: var(--chrome-muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 /* 折叠态的设备徽标:首字母 + 状态色,替代"只有一个小圆点" */
@@ -220,7 +235,7 @@ body.sidenav-resizing .app {
   border: 1px solid var(--line);
   background: var(--chrome-badge);
   color: var(--chrome-fg);
-  font: 600 9.5px/1 var(--font-mono);
+  font: 600 calc(9.5px * var(--font-scale))/1 var(--font-mono);
   letter-spacing: 0.02em;
 }
 
@@ -266,7 +281,7 @@ body.sidenav-resizing .app {
 .nav-item .nav-state {
   flex: 0 0 auto;
   color: var(--chrome-muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
   letter-spacing: 0.02em;
 }
 
@@ -340,124 +355,118 @@ body.sidenav-resizing .app {
   padding: 0.55rem 0.4rem;
 }
 
-/* ===== 顶栏 ===== */
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 40;
+/* ===== 顶部信息栏（自绘标题栏） ===== */
+/* 整条横跨窗口：左边是应用图标，中间是当前页面路径，右边是动作与窗口控制。
+   高度固定一行，绝不折行——折行会把下面的侧栏顶下去。 */
+.titlebar {
+  position: relative;
+  z-index: 60;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.1rem;
-  min-height: var(--topbar-h);
-  padding: 0.55rem 22px;
+  flex: 0 0 auto;
+  gap: 0.55rem;
+  height: var(--titlebar-h);
+  padding-left: 10px;
+  /* 右侧留一点气口；窗口控制按钮再用负 margin 贴回窗口边缘 */
+  padding-right: 8px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
   backdrop-filter: blur(14px) saturate(1.5);
   -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  /* 标题栏不是文本区：拖动时不该选中文字 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* 标题区压成一行：分组名/一句话说明不再各占一行 */
-.page-title {
+/* 最左：GUI 图标区 */
+.titlebar-brand {
   display: flex;
   align-items: center;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-.page-path {
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  min-width: 0;
-  max-width: min(46vw, 620px);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.page-name {
-  display: inline-block;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 0.95rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.page-sep {
+  gap: 0.5rem;
   flex: 0 0 auto;
-  color: var(--faint);
-  font-size: 13px;
+  padding-right: 0.15rem;
 }
 
-.page-desc {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 11.5px;
+.titlebar-brand .app-mark {
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
-.monitor-toggle {
-  gap: 0.35rem;
-}
-
+/* 消息监控按钮的开启态：主色描边 + 淡主色底 */
 .monitor-toggle.active {
   color: var(--accent);
   border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 
-.topbar-actions {
+/* 动作区与窗口控制按钮同一行：靠右，永不换行 */
+.titlebar-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.28rem;
   margin-left: auto;
 }
 
-.topbar-divider {
+.titlebar-divider {
+  flex: 0 0 auto;
   width: 1px;
   height: 18px;
-  margin: 0 0.3rem;
+  margin: 0 0.28rem;
   background: var(--line);
 }
 
-.loglevel-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0 0.25rem;
+/* ===== 窗口控制：最小化 / 最大化 / 关闭 ===== */
+/* 和动作按钮排在同一行，贴着窗口右上角，高度撑满标题栏 */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin-left: 0.3rem;
+  margin-right: -8px;
+}
+
+.wc-btn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
-  font-size: 11.5px;
+  cursor: default;
+  transition: background var(--fast), color var(--fast);
 }
 
-.loglevel-picker select {
-  min-width: 4.6rem;
-  padding-top: 0.15rem;
-  padding-bottom: 0.15rem;
-  font-family: var(--font-mono);
-  font-size: 11px;
+.wc-btn:hover:not(:disabled) {
+  border: 0;
+  background: var(--surface-3);
+  color: var(--fg-strong);
 }
 
-.palette-btn {
-  padding-left: 0.55rem;
-  padding-right: 0.55rem;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  background: var(--surface);
+.wc-btn:active:not(:disabled) {
+  background: var(--surface-2);
 }
 
-.palette-btn:hover:not(:disabled) {
-  border-color: var(--line-strong);
+.wc-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
-.palette-btn kbd {
-  margin-left: 0.15rem;
-  opacity: 0.9;
+/* 关闭用系统红：这是唯一允许在标题栏上出现的强色块 */
+.wc-btn.close:hover:not(:disabled) {
+  background: #d13438;
+  color: #fff;
+}
+
+.wc-btn.close:active:not(:disabled) {
+  background: #b32b2f;
+  color: #fff;
 }
 
 /* ===== 页面级骨架 ===== */
@@ -523,7 +532,7 @@ body.sidenav-resizing .app {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   cursor: pointer;
 }
 
@@ -545,7 +554,7 @@ body.sidenav-resizing .app {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 10.8px;
+  font-size: calc(10.8px * var(--font-scale));
   text-align: left;
   cursor: pointer;
 }

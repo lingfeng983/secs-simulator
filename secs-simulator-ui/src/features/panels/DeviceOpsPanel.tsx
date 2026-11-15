@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfigTemplateEntry, SessionBulkResult, SessionSummary } from '../../api';
-import { Panel, PanelFootnote } from '../../shared/ui/Panel';
+import { Panel } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
 import { Modal } from '../../shared/ui/Modal';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
@@ -12,10 +12,11 @@ import {
   DEVICE_STATUS_TONE,
   deviceStatus,
   deviceStatusHint,
-  type DeviceStatusSource,
+  type DeviceStatus,
 } from '../../shared/lib/deviceStatus';
 import type { PanelBaseProps } from './types';
 import { saveHint } from '../../shared/lib/saveFile';
+import { DEFAULT_REGION } from '../../state/useRegions';
 
 /** 合并行:会话摘要打底,速率/端口/角色来自 /overview,同一台设备只占一行。
  *  configOnly 非空 = 数据库里还没启动的设备（无会话 id），「启动」= 按配置创建会话。 */
@@ -29,6 +30,21 @@ interface DeviceRow extends SessionSummary {
   configOnly?: string;
 }
 
+/** 状态筛选下拉的选项顺序：按操作员关心的顺序排（先"能不能用"，再"在不在线"）。 */
+const STATE_FILTER_ORDER: readonly DeviceStatus[] = ['started', 'stopped', 'offline', 'online'];
+
+/** 新增设备弹框的输入：链接信息、设备模板与区域一次填完。 */
+interface CreateDeviceDraft {
+  name: string;
+  host: string;
+  port: string;
+  deviceId: string;
+  passive: string;
+  templateId: string;
+  region: string;
+  newRegion: string;
+}
+
 /**
  * 设备与会话(工作台主体)。
  *
@@ -37,14 +53,24 @@ interface DeviceRow extends SessionSummary {
  * 状态/速率/计数是这张行的"读数",勾选与右侧动作是"操作",
  * 点行进设备页。批量工具条常驻在表格下方,勾选后才可用。</p>
  */
-export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX.Element {
-  const [stateFilter, setStateFilter] = useState<'all' | 'online' | 'offline'>('all');
+export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBaseProps): JSX.Element {
+  /** 状态筛选：四态（启动/停止/离线/在线）+ 空串看全部。 */
+  const [stateFilter, setStateFilter] = useState<DeviceStatus | ''>('');
+  /** 区域筛选：空串看全部，其余只看该区域的设备。 */
+  const [regionFilter, setRegionFilter] = useState('');
+  /** 新增设备弹框：链接信息 + 模板 + 区域都在这一个框里填。 */
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createDraft, setCreateDraft] = useState<CreateDeviceDraft>({
+    name: '', host: '0.0.0.0', port: '5010', deviceId: '0',
+    passive: 'true', templateId: 'etch', region: DEFAULT_REGION, newRegion: '',
+  });
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkConfig, setBulkConfig] = useState('');
   const [bulkCount, setBulkCount] = useState(5);
   const [bulkPrefix, setBulkPrefix] = useState('dev-');
   const [bulkPortBase, setBulkPortBase] = useState(5100);
-  const [bulkDeviceBase, setBulkDeviceBase] = useState(100);
+  const [bulkDeviceBase, setBulkDeviceBase] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string>('');
@@ -55,15 +81,17 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
   const [bulkTplName, setBulkTplName] = useState('');
   /** 待确认的断开目标:null = 不弹;label 是确认文案里的人话描述。 */
   const [closeTarget, setCloseTarget] = useState<{ ids: readonly string[]; label: string } | null>(null);
+  /** 待确认的删除目标：配置文件名 + 人话描述。删设备是不可撤销的，一律先问一次。 */
+  const [deleteTarget, setDeleteTarget] = useState<{ configs: readonly string[]; label: string } | null>(null);
   const [bulkTplBusy, setBulkTplBusy] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncPortBase, setSyncPortBase] = useState(5100);
-  const [syncDeviceBase, setSyncDeviceBase] = useState(100);
+  const [syncDeviceBase, setSyncDeviceBase] = useState(0);
   const [newTemplateId, setNewTemplateId] = useState('bare');
   const [templateList, setTemplateList] = useState<ConfigTemplateEntry[]>([]);
   /* 连续新建时轮询还没刷新，用本地已分配端口兜底，避免两台设备抢同一端口 */
   const allocatedPorts = useRef<Set<number>>(new Set());
-  const { sessions, overview, configList, bulkCreateSessions, batchReload, batchClose } = backend;
+  const { sessions, overview, configList, readConfig, bulkCreateSessions, batchReload, batchClose } = backend;
 
   /* 模板目录：工作台新建设备只选模板，不再手填配置名 */
   useEffect(() => {
@@ -78,7 +106,57 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     });
   }, [backend.client]);
 
-  const onlineCount = sessions.filter((item) => deviceStatus(item) === 'online').length;
+  /* 端口列的默认来源是设备配置里的 session.port，不是运行态总览：
+     未启动（还没会话）的设备也要能一眼看到"它启动后会占哪个端口"。
+     按 配置文件名 + 修改时间 缓存，配置没变就不重复读原文。 */
+  const [configPorts, setConfigPorts] = useState<Record<string, number>>({});
+  const configPortCache = useRef<Map<string, { modifiedMs: number; port: number }>>(new Map());
+  const configKey = useMemo(
+    () => configList.map((entry) => `${entry.name}:${entry.modifiedMs}`).join('|'),
+    [configList],
+  );
+  useEffect(() => {
+    if (backend.client === null || backend.client === undefined) {
+      return;
+    }
+    const pending = configList.filter(
+      (entry) => configPortCache.current.get(entry.name)?.modifiedMs !== entry.modifiedMs,
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(pending.map(async (entry) => {
+      try {
+        const snapshot = await readConfig(entry.name);
+        const parsed = snapshot === null
+          ? null
+          : JSON.parse(snapshot.text) as { session?: { port?: number } };
+        const raw = parsed?.session?.port;
+        return {
+          name: entry.name,
+          modifiedMs: entry.modifiedMs,
+          port: typeof raw === 'number' && raw > 0 && raw <= 65535 ? raw : 0,
+        };
+      } catch {
+        /* 配置原文坏了/读不到：端口退回运行态数据，不拖垮整张表 */
+        return { name: entry.name, modifiedMs: entry.modifiedMs, port: 0 };
+      }
+    })).then((results) => {
+      if (cancelled) {
+        return;
+      }
+      for (const item of results) {
+        configPortCache.current.set(item.name, { modifiedMs: item.modifiedMs, port: item.port });
+      }
+      setConfigPorts(Object.fromEntries(
+        [...configPortCache.current].map(([name, value]) => [name, value.port]),
+      ));
+    });
+    return () => { cancelled = true; };
+    // configKey 覆盖 configList 的内容变化；readConfig 由 useCallback 固定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configKey, readConfig, backend.client]);
 
   /* /overview 按 id 并进会话行:计数以会话为准,速率/端口/角色以总览为准 */
   const overviewById = useMemo(() => new Map((overview ?? []).map((row) => [row.id, row])), [overview]);
@@ -94,7 +172,9 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         controlState: session.controlState ?? info?.controlState,
         device: info?.device ?? session.device,
         units: info?.units ?? session.units,
-        port: info?.port ?? 0,
+        /* 配置里写的端口是"这台设备定义要监听哪个端口"的默认答案；
+           只有配置读不到时才退回总览里的运行态端口。 */
+        port: (session.config !== undefined ? configPorts[session.config] : 0) || info?.port || 0,
         hostSim: info?.hostSim ?? false,
         msgsPerMin: info?.msgsPerMin ?? 0,
         s6f11PerMin: info?.s6f11PerMin ?? 0,
@@ -118,25 +198,46 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           units: 0,
           lastError: '',
           counters: {},
+          port: configPorts[entry.name] ?? 0,
           configOnly: entry.name,
         } as DeviceRow);
       }
     }
     return [...others, ...[...byConfig.values()]];
-  }, [sessions, overviewById, configList]);
+  }, [sessions, overviewById, configList, configPorts]);
 
-  /* "在线"只认 GEM 的 ONLINE：端口开着（启动）、或连着但主机没让上线（离线）
-     都不算在线，否则列表里会出现"显示在线、报文一条都没有"。 */
-  const connected = (state: DeviceStatusSource) => deviceStatus(state) === 'online';
+  /* 四态筛选：判据与「状态」列、设备页头、侧栏完全同源（deviceStatus），
+     不再用"是否在线"这种二分法——那样「启动」「离线」两档就筛不出来。 */
   const visible = useMemo(() => rows.filter((row) => {
-    if (stateFilter === 'online' && !connected(row)) {
+    if (stateFilter !== '' && deviceStatus(row) !== stateFilter) {
       return false;
     }
-    if (stateFilter === 'offline' && connected(row)) {
+    if (regionFilter !== '' && (regions?.deviceRegion(row.config ?? row.id) ?? DEFAULT_REGION) !== regionFilter) {
       return false;
     }
     return true;
-  }), [rows, stateFilter]);
+  }), [rows, stateFilter, regionFilter, regions]);
+
+  /* 勾选只认"当前看得见的行"：筛选一变，勾中的隐藏行不该继续参与批量动作。
+     未启动的设备（configOnly）也能勾——它照样是一台设备，能删、能启动。 */
+  const selectedRows = useMemo(
+    () => visible.filter((row) => selected.has(row.id)),
+    [visible, selected],
+  );
+  /** 批量重载/停止/同步只对"有会话"的行有意义（未启动的设备没有会话 id）。 */
+  const selectedSessionIds = useMemo(
+    () => selectedRows.filter((row) => row.configOnly === undefined).map((row) => row.id),
+    [selectedRows],
+  );
+  /** 删除按配置文件名走；没有配置文件的会话（外部 --config 启动）删不了。 */
+  const selectedConfigs = useMemo(
+    () => selectedRows
+      .map((row) => row.config ?? '')
+      .filter((name) => name !== ''),
+    [selectedRows],
+  );
+  const allSelected = visible.length > 0 && selectedRows.length === visible.length;
+  const someSelected = selectedRows.length > 0 && !allSelected;
 
   /* 批量新建预检:会话 id 冲突可以提前算——这是最常见的重复创建问题 */
   const bulkIds = new Set(sessions.map((item) => item.id));
@@ -150,24 +251,42 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     {
       key: 'select',
       header: '选择',
+      width: '46px',
+      className: 'select-column',
+      /* 表头本身就是"全选"：勾上=全选当前筛选结果，再点=清空。
+         原来工具条上的「全选 / 清空选择」两个按钮因此可以撤掉。 */
+      headerContent: (
+        <input
+          type="checkbox"
+          checked={allSelected}
+          ref={(element) => {
+            if (element !== null) {
+              /* 部分勾选时画成"半选"，一眼能看出还没全选 */
+              element.indeterminate = someSelected;
+            }
+          }}
+          onChange={() => setSelected(allSelected ? new Set() : new Set(visible.map((row) => row.id)))}
+          onClick={(event) => event.stopPropagation()}
+          aria-label="全选 / 清空"
+          title="勾选=全选当前筛选结果，再点=清空"
+        />
+      ),
       render: (row) => (
-        row.configOnly === undefined ? (
-          <input
-            type="checkbox"
-            checked={selected.has(row.id)}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => {
-              const next = new Set(selected);
-              if (event.target.checked) {
-                next.add(row.id);
-              } else {
-                next.delete(row.id);
-              }
-              setSelected(next);
-            }}
-            aria-label={`选择 ${row.id}`}
-          />
-        ) : null
+        <input
+          type="checkbox"
+          checked={selected.has(row.id)}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => {
+            const next = new Set(selected);
+            if (event.target.checked) {
+              next.add(row.id);
+            } else {
+              next.delete(row.id);
+            }
+            setSelected(next);
+          }}
+          aria-label={`选择 ${row.device}`}
+        />
       ),
     },
     {
@@ -203,18 +322,35 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       ),
     },
     {
-      key: 'id',
-      header: '会话',
-      sortValue: (row) => row.id,
-      render: (row) => <span className="mono">{row.id}</span>,
-    },
-    {
       key: 'port',
       header: '端口',
-      align: 'right',
       sortValue: (row) => row.port,
-      /* 端口列只放数字：冒号是"host:port"写法的一部分，单独一列时是噪音 */
+      /* 端口列只放数字：冒号是"host:port"写法的一部分，单独一列时是噪音。
+         数字优先取设备配置里的 session.port（未启动的设备也读得到）。 */
       render: (row) => <span className="mono">{row.port}</span>,
+    },
+    {
+      key: 'region',
+      header: '区域',
+      sortValue: (row) => regions?.deviceRegion(row.config ?? row.id) ?? DEFAULT_REGION,
+      render: (row) => {
+        const key = row.config ?? row.id;
+        if (regions === undefined) {
+          return <span className="hint-inline">{DEFAULT_REGION}</span>;
+        }
+        return (
+          <select
+            className="region-cell"
+            value={regions.deviceRegion(key)}
+            aria-label={`${row.device} 的区域`}
+            title="修改这台设备所属的区域，左侧菜单会跟着重新归类"
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => regions.setDeviceRegion(key, event.target.value)}
+          >
+            {regions.names.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        );
+      },
     },
     {
       key: 'control',
@@ -241,28 +377,24 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     {
       key: 'msgs',
       header: '报文/分',
-      align: 'right',
       sortValue: (row) => row.msgsPerMin,
       render: (row) => (row.msgsPerMin > 0 ? <strong>{row.msgsPerMin}</strong> : <span className="hint-inline">0</span>),
     },
     {
       key: 'events',
       header: '事件/分',
-      align: 'right',
       sortValue: (row) => row.s6f11PerMin,
       render: (row) => (row.s6f11PerMin > 0 ? <strong>{row.s6f11PerMin}</strong> : <span className="hint-inline">0</span>),
     },
     {
       key: 'emitted',
       header: '已上报',
-      align: 'right',
       sortValue: (row) => row.counters.emitted ?? 0,
       render: (row) => formatCount(row.counters.emitted),
     },
     {
       key: 'alarms',
       header: '活动报警',
-      align: 'right',
       sortValue: (row) => row.activeAlarms,
       render: (row) => (row.activeAlarms > 0
         ? <span className="badge tone-danger">{row.activeAlarms}</span>
@@ -270,7 +402,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     },
     {
       key: 'actions',
-      header: '',
+      header: '操作',
       render: (row) => {
         /* 三个动作对应三件事，互不替代：
            「重载」= 重启（按配置文件重新装载）；
@@ -339,6 +471,22 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
                 )}
               </>
             )}
+            {/* 删除这台设备：先停会话再软删配置（历史留着）。没有配置文件的外部会话删不了 */}
+            <button
+              type="button"
+              className="danger"
+              disabled={row.config === undefined || row.config === ''}
+              onClick={() => {
+                if (row.config !== undefined && row.config !== '') {
+                  setDeleteTarget({ configs: [row.config], label: `设备 ${row.device}` });
+                }
+              }}
+              title={row.config === undefined || row.config === ''
+                ? '这条会话没有配置文件（外部启动），删不了设备'
+                : '删除这台设备：先停止端口监听，再从清单里删掉；配置历史仍留在库里'}
+            >
+              删除
+            </button>
           </div>
         );
       },
@@ -348,9 +496,9 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
   /** 以第一个选中的设备为源，把其余选中设备的配置同步成一致；
       只保留各自的会话 id、端口、设备号与设备名，其余段原样复制。 */
   const syncSelected = async () => {
-    const ids = [...selected];
+    const ids = selectedSessionIds;
     if (ids.length < 2) {
-      notifier.error('至少选择两台设备');
+      notifier.error('至少选择两台已启动的设备');
       return;
     }
     const source = sessions.find((item) => item.id === ids[0]);
@@ -409,35 +557,104 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
     }
   };
 
-  /** 只选模板新建设备：自动生成唯一设备名/端口/设备号，配置文件名为<设备名>.json。 */
-  const createFromTemplate = async () => {
+  /** 打开新增弹框时给一组可用的默认值：端口避开已占用，模板取目录里第一份。 */
+  const openCreate = () => {
+    const used = new Set<number>([
+      ...overview.map((row) => row.port),
+      ...Object.values(configPorts),
+      ...allocatedPorts.current,
+    ]);
+    let port = 5010;
+    while (used.has(port)) {
+      port += 1;
+    }
+    setCreateError('');
+    setCreateDraft({
+      name: '',
+      host: '0.0.0.0',
+      port: String(port),
+      deviceId: '0',
+      passive: 'true',
+      templateId: newTemplateId,
+      region: DEFAULT_REGION,
+      newRegion: '',
+    });
+    setCreateOpen(true);
+  };
+
+  /**
+   * 删设备：逐台走 DELETE /configs/{name}。
+   *
+   * <p>后端在删之前会先停掉这台设备的会话（配置没了端口还占着，
+   * 清单里就查不到是谁占的了）。删完清空勾选——勾着的行已经不在了。</p>
+   */
+  const removeDevices = async (configs: readonly string[]) => {
+    if (configs.length === 0) {
+      return;
+    }
+    setBatchBusy(true);
+    let done = 0;
+    let missing = 0;
+    try {
+      for (let index = 0; index < configs.length; index += 1) {
+        setBatchProgress(`删除 ${index + 1}/${configs.length}`);
+        const status = await backend.deleteConfig(configs[index]);
+        if (status === 200) {
+          done += 1;
+        } else if (status === 404) {
+          missing += 1;
+        }
+      }
+      const tail = missing > 0 ? `${missing} 台本来就不在库里` : '';
+      if (done === 0) {
+        notifier.warn('没有删掉任何设备', tail);
+      } else {
+        notifier.success(`已删除 ${done} 台设备`, tail);
+      }
+      setSelected(new Set());
+    } finally {
+      setBatchBusy(false);
+      setBatchProgress('');
+    }
+  };
+
+  /** 按弹框里填的链接信息 + 模板建设备：配置文件名取设备名，其余写进 session 段。 */
+  const createFromTemplate = async (draft: CreateDeviceDraft) => {
     if (backend.client === null || backend.client === undefined) {
       return;
     }
-    if (newTemplateId === '') {
-      notifier.error('请选择设备模板');
+    const label = draft.name.trim();
+    if (label === '') {
+      setCreateError('请填写设备名称');
       return;
     }
-    const base = newTemplateId.trim().replace(/[^A-Za-z0-9._-]/g, '-');
-    /* 以服务端最新目录为准，避免连续点击时 state 还没刷新导致同名冲突 */
+    if (draft.templateId === '') {
+      setCreateError('请选择设备模板');
+      return;
+    }
+    const sessionId = label.replace(/[^A-Za-z0-9._-]/g, '-');
+    const name = `${sessionId}.json`;
+    const port = Number(draft.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setCreateError('端口需要是 1–65535 之间的整数');
+      return;
+    }
+    const deviceId = Number(draft.deviceId) || 0;
     const freshConfigs = await backend.client.configs();
     const existing = new Set([
       ...freshConfigs.map((entry) => entry.name),
       ...configList.map((entry) => entry.name),
       ...sessions.map((session) => session.config),
     ]);
-    let sequence = 1;
-    let name = '';
-    do {
-      name = `${base}-${String(sequence).padStart(2, '0')}.json`;
-      sequence += 1;
-    } while (existing.has(name));
-    const sessionId = name.replace(/\.json$/i, '');
-    const usedPorts = new Set(overview.map((row) => row.port));
-    for (const port of allocatedPorts.current) {
-      usedPorts.add(port);
+    if (existing.has(name)) {
+      setCreateError(`设备 ${sessionId} 已存在，换一个名称`);
+      return;
     }
-    /* 轮询可能还没反映刚建的会话：把配置文件里的端口也读进来，避免连续新建时撞端口 */
+    const usedPorts = new Set<number>([
+      ...overview.map((row) => row.port),
+      ...Object.values(configPorts),
+      ...allocatedPorts.current,
+    ]);
     for (const entry of freshConfigs) {
       try {
         const snapshot = await backend.readConfig(entry.name);
@@ -451,19 +668,18 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         /* 坏配置跳过 */
       }
     }
-    /* 5000 留给 HTTP(开发期 vite 代理也指向它),设备 HSMS 从 5010 起分配 */
-    let port = 5010;
-    while (usedPorts.has(port)) {
-      port += 1;
+    if (usedPorts.has(port)) {
+      setCreateError(`端口 ${port} 已被占用，请换一个端口`);
+      return;
     }
     allocatedPorts.current.add(port);
-    const deviceId = 10 + sessions.length + 1;
+    setCreateError('');
     setBatchBusy(true);
     setBatchProgress('新建设备…');
     try {
-      const status = await backend.client.createConfig(name, newTemplateId);
+      const status = await backend.client.createConfig(name, draft.templateId);
       if (status !== 201 && status !== 200) {
-        notifier.error('按模板创建设备失败', `HTTP ${status}`);
+        setCreateError(`按模板创建设备失败（HTTP ${status}）`);
         return;
       }
       const snapshot = await backend.readConfig(name);
@@ -474,9 +690,16 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
             ? root.session as Record<string, unknown>
             : {};
           session.id = sessionId;
+          session.passive = draft.passive === 'true';
+          session.bindHost = draft.host.trim() === '' ? '0.0.0.0' : draft.host.trim();
           session.port = port;
           session.deviceId = deviceId;
           root.session = session;
+          const equipment = root.equipment !== null && typeof root.equipment === 'object'
+            ? root.equipment as Record<string, unknown>
+            : {};
+          equipment.name = label;
+          root.equipment = equipment;
           await backend.saveConfig(name, JSON.stringify(root, null, 2), null);
         } catch {
           /* 模板原文不是合法 JSON 时由后续启动报错 */
@@ -484,7 +707,13 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
       }
       await backend.createSession(name);
       await backend.refreshConfigs();
-      notifier.success(`已按模板 ${newTemplateId} 新建设备 ${sessionId}`, `端口 ${port}，Device ID ${deviceId}`);
+      const region = draft.newRegion.trim() === '' ? draft.region : draft.newRegion.trim();
+      if (region !== '') {
+        regions?.addRegion(region);
+        regions?.setDeviceRegion(name, region);
+      }
+      setCreateOpen(false);
+      notifier.success(`已新建设备 ${sessionId}`, `端口 ${port}，Device ID ${deviceId}`);
     } finally {
       setBatchBusy(false);
       setBatchProgress('');
@@ -492,53 +721,25 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
   };
 
   return (
-    <Panel
-      id="panel-sessions"
-      title="设备与会话"
-      description="一行一台设备:状态、速率与计数是读数,勾选后可批量操作,点行进设备页。"
-      actions={
-        <>
-          <label className="field field-wide">
-            设备模板
-            <select
-              value={newTemplateId}
-              onChange={(event) => setNewTemplateId(event.target.value)}
-              aria-label="新建设备使用的模板"
-            >
-              {templateList.length === 0 && <option value="">（还没有模板）</option>}
-              {templateList.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}（{item.id}）{item.source === 'custom' ? ' · 自定义' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void createFromTemplate()}
-            disabled={batchBusy || newTemplateId === '' || templateList.length === 0}
-            title="只选模板即可：自动生成唯一设备名、端口与 Device ID"
-          >
-            新建设备
-          </button>
-          <button type="button" onClick={() => goTo?.('templates')} title="没有合适的模板？去模板管理新建">
-            管理模板
-          </button>
-        </>
-      }
-    >
-      {templateList.length === 0 && (
-        <p className="problems">
-          还没有设备模板。先在「管理模板」里新建一个，再回来这里选模板新建设备。
-        </p>
-      )}
+    /* 标题行已删：新建/批量这些页面级动作统一落在表格工具条上，一页只有"一行操作 + 一张表" */
+    <Panel id="panel-sessions" title="设备与会话" headless>
       <DataTable
         tableKey="sessions"
         columns={columns}
         rows={visible}
         rowKey={(row) => (row.configOnly !== undefined ? `config:${row.configOnly}` : row.id)}
-        searchPlaceholder="搜索会话 id / 设备 / 状态"
+        searchPlaceholder="搜索设备名 / 会话 id / 状态"
+        /* 会话列已从表格里去掉，但仍要能按会话 id 搜到这台设备：
+           搜索文本自己拼，顺带把中文状态（在线/离线…）也纳进来。 */
+        searchText={(row) => [
+          row.device,
+          row.id,
+          row.config ?? '',
+          String(row.port),
+          DEVICE_STATUS_LABEL[deviceStatus(row)],
+          row.hostSim ? '主机模拟' : '设备',
+          regions?.deviceRegion(row.config ?? row.id) ?? DEFAULT_REGION,
+        ].join(' ')}
         exportName="sessions"
         onExported={(result) => { const hint = saveHint(result); if (hint !== '') { notifier.success('已导出', hint); } }}
         onImport={async (imported) => {
@@ -579,25 +780,118 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           }
         }}
         emptyText="暂无设备:点「新建设备」创建;已保存的设备会显示为「停止」状态,点「启动」开始"
-        defaultSort={{ key: 'id', direction: 'asc' }}
+        defaultSort={{ key: 'device', direction: 'asc' }}
         toolbar={
-          <div className="segmented" role="tablist">
-            {([['all', '全部'], ['online', '在线'], ['offline', '离线']] as const).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={stateFilter === value ? 'active' : ''}
-                onClick={() => setStateFilter(value)}
+          <>
+            <label className="field region-filter">
+              <span>状态</span>
+              <select
+                value={stateFilter}
+                aria-label="按状态筛选设备"
+                onChange={(event) => setStateFilter(event.target.value as DeviceStatus | '')}
               >
-                {label}
-              </button>
-            ))}
-          </div>
+                <option value="">全部</option>
+                {STATE_FILTER_ORDER.map((status) => (
+                  <option key={status} value={status}>{DEVICE_STATUS_LABEL[status]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field region-filter">
+              <span>区域</span>
+              <select
+                value={regionFilter}
+                aria-label="按区域筛选设备"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '__new__') {
+                    const name = window.prompt('新区域名称')?.trim();
+                    if (name !== undefined && name !== '') {
+                      regions?.addRegion(name);
+                      setRegionFilter(name);
+                    }
+                    return;
+                  }
+                  setRegionFilter(value);
+                }}
+              >
+                <option value="">全部区域</option>
+                {(regions?.names ?? [DEFAULT_REGION]).map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+                <option value="__new__">＋ 新建区域</option>
+              </select>
+            </label>
+          </>
+        }
+        /* 动作靠右：筛选是"改看什么"，按钮是"改做什么"，两件事分开站 */
+        toolbarEnd={
+          <>
+            <button
+              type="button"
+              className="primary"
+              onClick={openCreate}
+              disabled={batchBusy}
+              title="新增设备：填写链接信息并选择设备模板"
+            >
+              新建设备
+            </button>
+            <button
+              type="button"
+              disabled={selectedSessionIds.length < 2 || batchBusy}
+              title="以选中的第一台为原始配置，把其余设备的配置同步为一致，只改会话 id/端口/设备号/名称"
+              onClick={() => setSyncOpen(true)}
+            >
+              批量同步配置
+            </button>
+            <button
+              type="button"
+              disabled={selectedSessionIds.length === 0 || batchBusy}
+              title="对选中的设备逐台重载（配置有问题时旧会话不受影响；主机会断连）"
+              onClick={() => {
+                setBatchBusy(true);
+                void batchReload(new Set(selectedSessionIds), (done, total) => setBatchProgress(`重载 ${done}/${total}`))
+                  .finally(() => { setBatchBusy(false); setBatchProgress(''); });
+              }}
+            >
+              批量重载
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={selectedSessionIds.length === 0 || batchBusy}
+              title="停止选中设备的端口监听（链路断开、端口立即释放；设备保留，可再启动）"
+              onClick={() => setCloseTarget({
+                ids: selectedSessionIds,
+                label: `选中的 ${selectedSessionIds.length} 台设备`,
+              })}
+            >
+              批量停止
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={selectedConfigs.length === 0 || batchBusy}
+              title="从清单里删掉选中的设备：先停端口监听再软删配置，配置历史仍留在库里"
+              onClick={() => setDeleteTarget({
+                configs: selectedConfigs,
+                label: `选中的 ${selectedConfigs.length} 台设备`,
+              })}
+            >
+              批量删除
+            </button>
+            {/* 选中数量与批量进度：只在有勾选或正在批量时出现，不占常驻版面 */}
+            {batchBusy && batchProgress !== '' ? (
+              <span className="table-selection">{batchProgress}</span>
+            ) : selectedRows.length > 0 ? (
+              <span className="table-selection">已选 {selectedRows.length} 台</span>
+            ) : null}
+          </>
         }
         exportColumns={[
           { header: '会话', value: (row) => row.id },
           { header: '设备', value: (row) => row.device },
           { header: '配置', value: (row) => row.config },
+          { header: '区域', value: (row) => regions?.deviceRegion(row.config ?? row.id) ?? DEFAULT_REGION },
           { header: '端口', value: (row) => row.port },
           { header: '状态', value: (row) => DEVICE_STATUS_LABEL[deviceStatus(row)] },
           { header: '会话状态', value: (row) => row.state },
@@ -615,60 +909,6 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         ]}
         onRowClick={(row) => goTo?.(`device:${row.id}`)}
       />
-
-      {/* 批量工具条:勾选后才可用 */}
-      <div className="batch-bar" data-active={selected.size > 0 || batchBusy ? 'true' : undefined}>
-        <span className="table-count">
-          {batchBusy && batchProgress !== '' ? batchProgress : `已选 ${selected.size} 台`}
-        </span>
-        <button
-          type="button"
-          /* 全选的前提是"有行可选"，不是"已经选了东西"：之前一进来按钮就是灰的 */
-          disabled={rows.length === 0 || batchBusy}
-          onClick={() => setSelected(new Set(sessions.map((item) => item.id)))}
-        >
-          全选
-        </button>
-        <button type="button" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
-          清空选择
-        </button>
-        <span className="spacer" />
-        <button
-          type="button"
-          className="primary"
-          disabled={selected.size < 2 || batchBusy}
-          title="以选中的第一台为原始配置，把其余设备的配置同步为一致，只改会话 id/端口/设备号/名称"
-          onClick={() => setSyncOpen(true)}
-        >
-          批量同步配置
-        </button>
-        <button
-          type="button"
-          disabled={selected.size === 0 || batchBusy}
-          title="对选中的设备逐台重载(配置有问题时旧会话不受影响;主机会断连)"
-          onClick={() => {
-            setBatchBusy(true);
-            void batchReload(selected, (done, total) => setBatchProgress(`重载 ${done}/${total}`))
-              .finally(() => { setBatchBusy(false); setBatchProgress(''); });
-          }}
-        >
-          批量重载
-        </button>
-        <button
-          type="button"
-          className="danger"
-          disabled={selected.size === 0 || batchBusy}
-          title="停止选中设备的端口监听(链路断开、端口立即释放;设备保留,可再启动)"
-          onClick={() => setCloseTarget({ ids: [...selected], label: `选中的 ${selected.size} 台设备` })}
-        >
-          批量停止
-        </button>
-      </div>
-
-      <p className="hint">
-        配置只认 <code>--work-dir</code> 下的文件名。批量操作对勾选的设备逐台执行；
-        「批量同步配置」以第一台为原始配置，其余设备只改会话 id、端口、设备号与名称，其余段完全一致。
-      </p>
 
       <Modal
         open={syncOpen}
@@ -688,7 +928,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           只改各自的会话 id、端口、设备号与设备名，其余配置保持一致。
         </p>
         <p className="hint">
-          原始设备：<code>{[...selected][0] ?? '—'}</code>；目标 {Math.max(0, selected.size - 1)} 台。
+          原始设备：<code>{selectedSessionIds[0] ?? '—'}</code>；目标 {Math.max(0, selectedSessionIds.length - 1)} 台。
         </p>
         <div className="form-row">
           <label className="field">
@@ -711,6 +951,18 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
           </label>
         </div>
       </Modal>
+
+      <CreateDeviceModal
+        open={createOpen}
+        draft={createDraft}
+        templates={templateList}
+        regionNames={regions?.names ?? [DEFAULT_REGION]}
+        busy={batchBusy}
+        error={createError}
+        onChange={setCreateDraft}
+        onClose={() => setCreateOpen(false)}
+        onCreate={(draft) => void createFromTemplate(draft)}
+      />
 
       <ConfirmModal
         open={closeTarget !== null}
@@ -738,16 +990,22 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
             });
         }}
       />
-      <PanelFootnote
-        items={[
-          { label: '会话数', value: sessions.length },
-          { label: '在线', value: onlineCount, tone: onlineCount > 0 ? 'ok' : undefined },
-          {
-            label: '活动报警',
-            value: rows.reduce((sum, row) => sum + row.activeAlarms, 0),
-            tone: rows.some((row) => row.activeAlarms > 0) ? 'danger' : undefined,
-          },
-        ]}
+      {/* 删除确认：删设备不可撤销，一律先问一次 */}
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title="删除设备"
+        danger
+        confirmLabel="删除"
+        message={deleteTarget === null ? '' : `确定删除${deleteTarget.label}？端口监听会立即停止，设备从清单里消失；配置正文与版本历史仍留在库里，但界面上不再显示。`}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget === null) {
+            return;
+          }
+          const configs = deleteTarget.configs;
+          setDeleteTarget(null);
+          void removeDevices(configs);
+        }}
       />
 
       <Modal
@@ -879,5 +1137,145 @@ export function DeviceOpsPanel({ backend, notifier, goTo }: PanelBaseProps): JSX
         )}
       </Modal>
     </Panel>
+  );
+}
+
+/** 新增设备弹框：链接信息 + 设备模板 + 区域，一次填完再建。 */
+function CreateDeviceModal({
+  open,
+  draft,
+  templates,
+  regionNames,
+  busy,
+  error,
+  onChange,
+  onClose,
+  onCreate,
+}: {
+  open: boolean;
+  draft: CreateDeviceDraft;
+  templates: readonly ConfigTemplateEntry[];
+  regionNames: readonly string[];
+  busy: boolean;
+  error: string;
+  onChange: (draft: CreateDeviceDraft) => void;
+  onClose: () => void;
+  onCreate: (draft: CreateDeviceDraft) => void;
+}): JSX.Element | null {
+  const patch = (part: Partial<CreateDeviceDraft>) => onChange({ ...draft, ...part });
+  const valid = draft.name.trim() !== '' && draft.templateId !== '' && templates.length > 0;
+  return (
+    <Modal
+      open={open}
+      title="新增设备"
+      width="min(620px, 92vw)"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose}>取消</button>
+          <button type="button" className="primary" disabled={busy || !valid} onClick={() => onCreate(draft)}>
+            {busy ? '创建中…' : '创建设备'}
+          </button>
+        </>
+      }
+    >
+      {error !== '' && <p className="problems">{error}</p>}
+      <div className="form-row">
+        <label className="field">
+          设备名称
+          <input
+            value={draft.name}
+            onChange={(event) => patch({ name: event.target.value })}
+            placeholder="如 etch-line-a"
+            aria-label="设备名称"
+          />
+        </label>
+        <label className="field">
+          设备模板
+          <select
+            value={draft.templateId}
+            onChange={(event) => patch({ templateId: event.target.value })}
+            aria-label="新建设备使用的模板"
+          >
+            {templates.length === 0 && <option value="">（还没有模板）</option>}
+            {templates.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}（{item.id}）{item.source === 'custom' ? ' · 自定义' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="section-head"><h3>链接信息</h3></div>
+      <div className="form-row">
+        <label className="field">
+          监听地址
+          <input
+            value={draft.host}
+            onChange={(event) => patch({ host: event.target.value })}
+            placeholder="0.0.0.0"
+            aria-label="监听地址"
+          />
+        </label>
+        <label className="field">
+          端口
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={draft.port}
+            onChange={(event) => patch({ port: event.target.value })}
+            aria-label="端口"
+          />
+        </label>
+        <label className="field">
+          Device ID
+          <input
+            type="number"
+            min={0}
+            max={32767}
+            value={draft.deviceId}
+            onChange={(event) => patch({ deviceId: event.target.value })}
+            aria-label="Device ID"
+          />
+        </label>
+        <label className="field">
+          连接模式
+          <select
+            value={draft.passive}
+            onChange={(event) => patch({ passive: event.target.value })}
+            aria-label="连接模式"
+          >
+            <option value="true">被动监听（等主机连入）</option>
+            <option value="false">主动连接（连目标主机）</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="section-head"><h3>区域分组</h3></div>
+      <div className="form-row">
+        <label className="field">
+          所属区域
+          <select
+            value={draft.region}
+            onChange={(event) => patch({ region: event.target.value })}
+            aria-label="所属区域"
+          >
+            {regionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          新建区域（可选）
+          <input
+            value={draft.newRegion}
+            onChange={(event) => patch({ newRegion: event.target.value })}
+            placeholder="填了就建新区域并归入"
+            aria-label="新建区域"
+          />
+        </label>
+      </div>
+      <p className="hint">名称同时用作配置文件名与会话 id；端口不能与已有设备重复。</p>
+    </Modal>
   );
 }

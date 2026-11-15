@@ -80,7 +80,7 @@
   align-items: center;
   gap: 0.4rem;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   white-space: nowrap;
 }
 
@@ -93,7 +93,7 @@
 .template-output-row input,
 .template-output-row select {
   width: 8rem;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   padding: 0.2rem 0.4rem;
 }
 
@@ -138,13 +138,13 @@
 .template-badge {
   margin-left: auto;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-family: var(--font-mono);
 }
 
 .template-label {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 600;
 }
 
@@ -166,7 +166,7 @@
 
 .template-subhead {
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -178,7 +178,7 @@
 .template-subrow input,
 .template-subrow select {
   width: 100%;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   padding: 0.2rem 0.4rem;
 }
 
@@ -240,7 +240,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 600;
 }
 
@@ -299,7 +299,7 @@ textarea.invalid {
   padding: 0.35rem 0.7rem;
   border-bottom: 1px solid var(--line-soft);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .live-event-list li:last-child {
@@ -308,7 +308,7 @@ textarea.invalid {
 
 .live-event-list li .mono {
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 /* 面板脚注贴住底边:它属于面板"外框",不是正文的一部分 */
@@ -400,7 +400,7 @@ textarea.invalid {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--accent-soft);
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 /* 外层标题已经声明了 SVID 时,曲线只留画布 + 读数 */
@@ -419,53 +419,5 @@ textarea.invalid {
 
   .spark.spark-no-id .spark-readout {
     grid-column: 1;
-  }
-}
-
-/* 宽屏时 KPI 不该被拉成一整块空地:数字靠右,标签靠左 */
-.kpi-card .kpi-value {
-  text-align: right;
-  white-space: nowrap;
-}
-
-/* 批量工具条:常驻表格下方,勾选后整块点亮 */
-.batch-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  transition: border-color var(--fast), background var(--fast);
-}
-
-.batch-bar[data-active='true'] {
-  border-style: solid;
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.batch-bar .table-count {
-  min-width: 4.5rem;
-}
-
-/* 批量工具条在窄屏折行时保持可读:计数与 CEID 各自成组,按钮靠右 */
-@media (max-width: 680px) {
-  .batch-bar {
-    gap: 0.4rem;
-  }
-
-  .batch-bar .field {
-    flex: 1 1 8rem;
-  }
-
-  .batch-bar .spacer {
-    display: none;
-  }
-
-  .batch-bar button {
-    flex: 1 1 auto;
   }
 }

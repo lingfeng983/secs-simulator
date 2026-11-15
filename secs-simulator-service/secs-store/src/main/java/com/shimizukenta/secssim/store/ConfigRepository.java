@@ -290,9 +290,38 @@ public final class ConfigRepository {
         }
     }
 
+    /**
+     * 软删设备：列表里不再出现，名字可以重新使用。
+     *
+     * <p>不物理删除：配置正文、版本历史与运行台账都是排障时要翻的东西，
+     * 一台设备从清单里删掉之后，"它上周为什么报警"仍然要查得到。
+     * {@code deleted_at} 一落，它就从设备列表消失；{@code legacy_id} 同时置空——
+     * 配置文件名（= legacy_id）的唯一索引不看 {@code deleted_at}，
+     * 不置空的话同名设备再也建不回来。</p>
+     *
+     * @param key 设备 key（legacy_id 优先，其次 id）
+     * @return 是否真的删掉了一台在用的设备（不存在或已删返回 {@code false}）
+     */
+    public boolean deleteDevice(String key) {
+        Objects.requireNonNull(key, "key");
+        return this.db.writeConfig(connection -> {
+            long now = System.currentTimeMillis();
+            try (PreparedStatement st = connection.prepareStatement(
+                    "UPDATE device SET deleted_at=?, updated_at=?, legacy_id=NULL "
+                            + "WHERE deleted_at IS NULL AND (legacy_id=? OR id=?)")) {
+                st.setLong(1, now);
+                st.setLong(2, now);
+                st.setString(3, key);
+                st.setString(4, key);
+                return st.executeUpdate() > 0;
+            } catch (SQLException e) {
+                throw new StoreException("删除设备失败: " + e.getMessage(), e);
+            }
+        });
+    }
+
     /** 读当前正文。 */
-    public Optional<DocumentView> readDocument(String key) {
-        try (Connection connection = this.db.readConfig()) {
+    public Optional<DocumentView> readDocument(String key) {        try (Connection connection = this.db.readConfig()) {
             DeviceRow device = findLiveDevice(connection, key);
             try (PreparedStatement st = connection.prepareStatement(
                     "SELECT device_id, body, revision, content_sha256, updated_at, updated_by, change_note "

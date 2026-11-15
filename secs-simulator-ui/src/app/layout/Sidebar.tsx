@@ -13,6 +13,7 @@ import {
 } from '../router';
 import { NAV_GROUPS } from './navigation';
 import { useEffect, useRef, useState } from 'react';
+import { DEFAULT_REGION, type RegionsState } from '../../state/useRegions';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import {
   SIDEBAR_DEFAULT_W,
@@ -43,6 +44,8 @@ export interface SidebarDevice {
   config?: string;
   /** 数据库里还没启动的设备（无会话行）：默认落配置区，子页只列配置区。 */
   notStarted?: boolean;
+  /** 区域分组；不传按 Default 处理。 */
+  region?: string;
 }
 
 /** 侧栏「主机清单」动态组里的一台主机（v2 独立实例）。 */
@@ -65,6 +68,40 @@ export interface SidebarProps {
   onResize: (width: number) => void;
   onNavigate: (route: Route) => void;
   onToggleCollapse: () => void;
+  /** 区域分组数据；不给就只显示 Default 一组。 */
+  regions?: RegionsState;
+  /** 拖动时的宽度下界 / 上界（来自「通用设置」）。 */
+  minWidth?: number;
+  maxWidth?: number;
+}
+
+/** 把一组实例按区域装进桶里，桶的顺序跟分组目录一致，并按筛选值收窄。 */
+function groupByRegion<T>(
+  items: readonly T[],
+  regionOf: (item: T) => string,
+  names: readonly string[],
+  filter: string,
+): Array<{ name: string; items: T[] }> {
+  const buckets = new Map<string, T[]>();
+  for (const item of items) {
+    const name = regionOf(item) || DEFAULT_REGION;
+    if (filter !== '' && name !== filter) {
+      continue;
+    }
+    const bucket = buckets.get(name);
+    if (bucket === undefined) {
+      buckets.set(name, [item]);
+    } else {
+      bucket.push(item);
+    }
+  }
+  return [...buckets.entries()]
+    .sort((left, right) => {
+      const li = names.indexOf(left[0]);
+      const ri = names.indexOf(right[0]);
+      return (li < 0 ? 999 : li) - (ri < 0 ? 999 : ri);
+    })
+    .map(([name, list]) => ({ name, items: list }));
 }
 
 /**
@@ -82,7 +119,13 @@ export function Sidebar({
   onResize,
   onNavigate,
   onToggleCollapse,
+  regions,
+  minWidth = SIDEBAR_MIN_W,
+  maxWidth = SIDEBAR_MAX_W,
 }: SidebarProps): JSX.Element {
+  const regionNames = regions?.names ?? [DEFAULT_REGION];
+  /** 折叠的区域分组，key 带类型前缀避免设备/主机同名组互相影响。 */
+  const [foldedRegions, setFoldedRegions] = useState<ReadonlySet<string>>(new Set());
   /* ===== 宽度拖动 =====
      指针按下后把移动/抬起交给 handle 自己（pointer capture），
      这样鼠标划过内容区也不会丢事件；双击恢复默认宽度。 */
@@ -132,7 +175,7 @@ export function Sidebar({
     if (drag === null) {
       return;
     }
-    scheduleResize(clampSidebarWidth(drag.startWidth + (event.clientX - drag.startX)));
+    scheduleResize(clampSidebarWidth(drag.startWidth + (event.clientX - drag.startX), minWidth, maxWidth));
   };
 
   const endResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -159,16 +202,16 @@ export function Sidebar({
   const resizeByKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      onResize(clampSidebarWidth(width - 16));
+      onResize(clampSidebarWidth(width - 16, minWidth, maxWidth));
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      onResize(clampSidebarWidth(width + 16));
+      onResize(clampSidebarWidth(width + 16, minWidth, maxWidth));
     } else if (event.key === 'Home') {
       event.preventDefault();
-      onResize(SIDEBAR_MIN_W);
+      onResize(minWidth);
     } else if (event.key === 'End') {
       event.preventDefault();
-      onResize(SIDEBAR_MAX_W);
+      onResize(maxWidth);
     }
   };
 
@@ -220,6 +263,27 @@ export function Sidebar({
       }
       return next;
     });
+  };
+
+  /** 区域分组标题：点一下收起/展开，右侧显示该组实例数。 */
+  const renderRegionHead = (key: string, name: string, count: number) => {
+    if (collapsed) {
+      return null;
+    }
+    const folded = foldedRegions.has(key);
+    return (
+      <button
+        type="button"
+        className={`nav-region-head${folded ? ' folded' : ''}`}
+        aria-expanded={!folded}
+        onClick={() => toggleSet(setFoldedRegions, key)}
+        title={`${name} · ${count} 项`}
+      >
+        <span className="nav-region-caret" aria-hidden="true">▸</span>
+        <span className="nav-region-name">{name}</span>
+        <span className="nav-region-count">{count}</span>
+      </button>
+    );
   };
 
   const renderDevice = (device: SidebarDevice, withPages: boolean) => {
@@ -291,21 +355,43 @@ export function Sidebar({
     );
   };
 
-  const renderDeviceTree = () => (
-    <>
-      {!collapsed && <div className="nav-group-title nav-group-subtitle">设备 · {onlineCount}/{devices.length}</div>}
-      {devices.length === 0 && !collapsed && <p className="nav-empty">暂无设备</p>}
-      {devices.map((device) => renderDevice(device, !collapsed))}
-    </>
-  );
+  const renderDeviceTree = () => {
+    const groups = groupByRegion(
+      devices,
+      (device) => device.region ?? DEFAULT_REGION,
+      regionNames,
+      '',
+    );
+    return (
+      <>
+        {!collapsed && <div className="nav-group-title nav-group-subtitle">设备 · {onlineCount}/{devices.length}</div>}
+        {devices.length === 0 && !collapsed && <p className="nav-empty">暂无设备</p>}
+        {groups.map((group) => {
+          const key = `devices:${group.name}`;
+          return (
+            <div className="nav-region" key={key}>
+              {renderRegionHead(key, group.name, group.items.length)}
+              {!foldedRegions.has(key) && group.items.map((device) => renderDevice(device, !collapsed))}
+            </div>
+          );
+        })}
+      </>
+    );
+  };
 
   /* ===== 主机树 ===== */
   const [expandedHosts, setExpandedHosts] = useState<ReadonlySet<string>>(new Set());
 
   const renderHostTree = () => {
     const connected = hostInstances.filter((host) => host.phase === 'CONNECTED').length;
+    const groups = groupByRegion(
+      hostInstances,
+      (host) => regions?.hostRegion(host.id) ?? DEFAULT_REGION,
+      regionNames,
+      '',
+    );
     if (collapsed) {
-      return hostInstances.map((host) => {
+      return groups.map((group) => group.items.map((host) => {
         const active = route.name === 'host' && route.hostId === host.id;
         return (
           <button
@@ -320,67 +406,73 @@ export function Sidebar({
             </span>
           </button>
         );
-      });
+      }));
     }
     return (
       <>
         <div className="nav-group-title nav-group-subtitle">主机 · {connected}/{hostInstances.length}</div>
         {hostInstances.length === 0 && <p className="nav-empty">暂无主机</p>}
-        {hostInstances.map((host) => {
-          const active = route.name === 'host' && route.hostId === host.id;
-          const expanded = expandedHosts.has(host.id);
-          const tone = hostPhaseTone(host.phase);
-          const phase = hostPhaseLabel(host.phase);
+        {groups.map((group) => {
+          const key = `hosts:${group.name}`;
           return (
-            <div className="nav-device" key={host.id}>
-              <div className="nav-device-row">
-                <button
-                  type="button"
-                  className={`nav-item${active ? ' active' : ''}`}
-                  onClick={() => onNavigateHost?.(host.id)}
-                  aria-current={active ? 'page' : undefined}
-                  title={`${host.name}（${phase}）\n${host.target}`}
-                >
-                  <span className="nav-icon" aria-hidden="true">
-                    <span className={`conn-dot ${tone}`} />
-                  </span>
-                  {!collapsed && <span className="nav-label">{host.name}</span>}
-                  {!collapsed && <span className={`nav-state tone-${tone}`}>{phase}</span>}
-                </button>
-                {!collapsed && (
-                  <button
-                    type="button"
-                    className={`nav-caret${expanded ? ' open' : ''}`}
-                    aria-label={`${expanded ? '收起' : '展开'} ${host.name} 的子页`}
-                    aria-expanded={expanded}
-                    onClick={() => toggleSet(setExpandedHosts, host.id)}
-                  >
-                    ▸
-                  </button>
-                )}
-              </div>
-              {!collapsed && expanded && (
-                <div className="nav-subpages">
-                  {[
-                    ...HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id], zone: 'config' as const })),
-                    ...HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const })),
-                  ].map((entry) => {
-                    const selected = active && route.name === 'host' && route.zone === entry.zone && route.page === entry.id;
-                    return (
+            <div className="nav-region" key={key}>
+              {renderRegionHead(key, group.name, group.items.length)}
+              {!foldedRegions.has(key) && group.items.map((host) => {
+                const active = route.name === 'host' && route.hostId === host.id;
+                const expanded = expandedHosts.has(host.id);
+                const tone = hostPhaseTone(host.phase);
+                const phase = hostPhaseLabel(host.phase);
+                return (
+                  <div className="nav-device" key={host.id}>
+                    <div className="nav-device-row">
                       <button
-                        key={`${entry.zone}:${entry.id}`}
                         type="button"
-                        className={`nav-subpage${selected ? ' active' : ''}`}
-                        onClick={() => onNavigate({
-                          name: 'host', hostId: host.id, zone: entry.zone, page: entry.id,
-                        })}
+                        className={`nav-item${active ? ' active' : ''}`}
+                        onClick={() => onNavigateHost?.(host.id)}
+                        aria-current={active ? 'page' : undefined}
+                        title={`${host.name}（${phase}）\n${host.target}`}
                       >
-                        {entry.zone === 'runtime' ? '◉ ' : '▣ '}{entry.label}
+                        <span className="nav-icon" aria-hidden="true">
+                          <span className={`conn-dot ${tone}`} />
+                        </span>
+                        <span className="nav-label">{host.name}</span>
+                        <span className={`nav-state tone-${tone}`}>{phase}</span>
                       </button>
-                    );
-                  })}
-                </div>
-              )}
+                      <button
+                        type="button"
+                        className={`nav-caret${expanded ? ' open' : ''}`}
+                        aria-label={`${expanded ? '收起' : '展开'} ${host.name} 的子页`}
+                        aria-expanded={expanded}
+                        onClick={() => toggleSet(setExpandedHosts, host.id)}
+                      >
+                        ▸
+                      </button>
+                    </div>
+                    {expanded && (
+                      <div className="nav-subpages">
+                        {[
+                          ...HOST_CONFIG_PAGES.map((id) => ({ id, label: HOST_CONFIG_PAGE_LABELS[id], zone: 'config' as const })),
+                          ...HOST_RUNTIME_PAGES.map((id) => ({ id, label: HOST_RUNTIME_PAGE_LABELS[id], zone: 'runtime' as const })),
+                        ].map((entry) => {
+                          const selected = active && route.name === 'host' && route.zone === entry.zone && route.page === entry.id;
+                          return (
+                            <button
+                              key={`${entry.zone}:${entry.id}`}
+                              type="button"
+                              className={`nav-subpage${selected ? ' active' : ''}`}
+                              onClick={() => onNavigate({
+                                name: 'host', hostId: host.id, zone: entry.zone, page: entry.id,
+                              })}
+                            >
+                              {entry.zone === 'runtime' ? '◉ ' : '▣ '}{entry.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -396,8 +488,8 @@ export function Sidebar({
           role="separator"
           aria-orientation="vertical"
           aria-label="拖动调整导航宽度（双击恢复默认）"
-          aria-valuemin={SIDEBAR_MIN_W}
-          aria-valuemax={SIDEBAR_MAX_W}
+          aria-valuemin={minWidth}
+          aria-valuemax={maxWidth}
           aria-valuenow={Math.round(width)}
           tabIndex={0}
           title="拖动调整宽度，双击恢复默认"
@@ -405,7 +497,7 @@ export function Sidebar({
           onPointerMove={moveResize}
           onPointerUp={endResize}
           onPointerCancel={endResize}
-          onDoubleClick={() => onResize(SIDEBAR_DEFAULT_W)}
+          onDoubleClick={() => onResize(clampSidebarWidth(SIDEBAR_DEFAULT_W, minWidth, maxWidth))}
           onKeyDown={resizeByKey}
         />
       )}

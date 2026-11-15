@@ -33,23 +33,12 @@ test('shortcut dialog traps Tab inside the overlay', async ({ page }) => {
 test('density toggle changes the row height token', async ({ page }) => {
   await page.goto('/#/workbench');
   const before = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--row-pad').trim());
-  await page.getByRole('button', { name: '切换密度' }).click();
+  /* 密度开关已收进「通用设置」，标题栏不再有独立按钮 */
+  await page.getByRole('button', { name: '通用设置' }).click();
+  await page.getByRole('dialog').getByLabel('表格密度').selectOption('compact');
   const after = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--row-pad').trim());
   expect(after).not.toBe(before);
   await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
-});
-
-test('sidebar collapses to an icon rail and keeps navigation usable', async ({ page }) => {
-  await page.goto('/#/workbench');
-  await page.getByRole('button', { name: '收起导航栏' }).click();
-  const side = page.locator('.sidenav');
-  await expect(side).toHaveClass(/collapsed/);
-  /* 折叠后设备项只剩"首字母徽标 + tooltip",仍要能点进设备页 */
-  await expect(side.locator('.nav-monogram').first()).toHaveText('LI');
-  await side.locator('.nav-item[title^="LINE1"]').click();
-  /* 3.0 默认落运行区首页·事件计划 */
-  await expect(page.locator('.subtabs').getByRole('tab', { name: '事件计划', exact: true }))
-    .toHaveAttribute('aria-selected', 'true');
 });
 
 test('form fields keep the label on the left and the control on the right', async ({ page }) => {

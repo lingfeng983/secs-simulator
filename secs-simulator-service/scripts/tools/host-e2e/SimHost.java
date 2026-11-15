@@ -454,9 +454,14 @@ public final class SimHost {
         check(valBad.statusCode() == 200 && valBad.body().contains("\"ok\":false")
                         && valBad.body().contains("schemaVersion"),
                 "非法 schemaVersion → 校验问题清单", "status=" + valBad.statusCode() + " " + brief(valBad.body()));
-        /* DELETE /configs/{name} 本来就未提供（配置只能新建/保存/校验） */
+        /* DELETE /configs/{name} 删设备（软删）：删掉 demo-copy 后列表里不该再有它，
+           再删一次要回 404 —— "没删到东西"不能报成功 */
         HttpResponse<String> cfgDel = call("DELETE", "/api/v1/configs/demo-copy.json", null);
-        check(cfgDel.statusCode() == 405, "DELETE config → 405（无此能力）", "status=" + cfgDel.statusCode());
+        check(cfgDel.statusCode() == 200, "DELETE config → 200", "status=" + cfgDel.statusCode());
+        HttpResponse<String> afterDel = call("GET", "/api/v1/configs", null);
+        check(!afterDel.body().contains("demo-copy"), "删除后列表里不再有 demo-copy", brief(afterDel.body()));
+        HttpResponse<String> delAgain = call("DELETE", "/api/v1/configs/demo-copy.json", null);
+        check(delAgain.statusCode() == 404, "重复删除 → 404", "status=" + delAgain.statusCode());
 
         expect(200, "config-templates", call("GET", "/api/v1/config-templates", null));
         expect(200, "templates 列表", call("GET", "/api/v1/templates", null));

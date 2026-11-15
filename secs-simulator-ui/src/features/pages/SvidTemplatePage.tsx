@@ -117,24 +117,8 @@ export function SvidTemplatePage({ backend, notifier }: PanelBaseProps): JSX.Ele
 
   return (
     <div className="panel-stack">
-      <Panel
-        id="panel-svid-templates"
-        title="参数模板（参数变化逻辑库）"
-        description={
-          '所有设备共享一份「参数的变化逻辑」库：单曲线或 曲线+组合表达式，不绑定 SVID。\n'
-          + '设备在「变量配置」的值来源里从库中选择，选中即复制进该设备的配置；之后改库不影响已配置的设备。'
-        }
-        actions={
-          <>
-            <button type="button" onClick={() => void library.reload()} disabled={busy}>
-              刷新
-            </button>
-            <button type="button" className="primary" onClick={openCreate}>
-              ＋ 新建模板
-            </button>
-          </>
-        }
-      >
+      {/* 标题行已删；「刷新」也去掉了——顶栏已有全局刷新（R），这里只留新建 */}
+      <Panel id="panel-svid-templates" title="参数模板（参数变化逻辑库）" headless>
         {error !== '' && <p className="inline-note danger">{error}</p>}
         <DataTable
           tableKey="param-templates"
@@ -143,6 +127,12 @@ export function SvidTemplatePage({ backend, notifier }: PanelBaseProps): JSX.Ele
           rowKey={(row) => row.id}
           searchPlaceholder="搜索名称 / 说明"
           emptyText="参数模板库是空的。点「＋ 新建模板」定义一条变化逻辑，或重启后端载入内置模板。"
+          /* 新增按钮靠右：左边是搜索，右边是"动手做什么" */
+          toolbarEnd={
+            <button type="button" className="primary" onClick={openCreate}>
+              ＋ 新建模板
+            </button>
+          }
         />
       </Panel>
 

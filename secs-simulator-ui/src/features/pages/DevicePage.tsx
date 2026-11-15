@@ -17,6 +17,7 @@ import { SvidConfigPanel } from '../panels/SvidConfigPanel';
 import { CeidReportConfigPanel } from '../panels/CeidReportConfigPanel';
 import { PlanConfigPanel } from '../panels/PlanConfigPanel';
 import { InstanceHead, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
+import { Panel } from '../../shared/ui/Panel';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -264,7 +265,7 @@ export function DevicePage({
   );
 }
 
-/** 配置区·概览:设备定义摘要(从配置原文提炼,不重复编辑入口)。 */
+/** 配置区·概览:与其它配置子页一样用 Panel 外壳，只放这台设备的定义摘要。 */
 function DeviceOverviewPanel({
   sessionId,
   configName,
@@ -275,10 +276,11 @@ function DeviceOverviewPanel({
   /* 未启动的库内设备没有会话行：设备名退回配置文件名（去 .json） */
   const deviceLabel = summary?.device ?? configName.replace(/\.json$/i, '');
   return (
-    <section className="panel-section">
-      <div className="section-head">
-        <h2>设备定义摘要</h2>
-      </div>
+    <Panel
+      id="panel-overview"
+      title="概览"
+      description="这台设备的身份与配置来源；改名、连接、变量、事件等编辑在配置区其它子页，保存后需重载生效。"
+    >
       <table className="effects-table">
         <tbody>
           <tr><th>会话 id</th><td className="mono">{summary?.id ?? '—（未启动）'}</td></tr>
@@ -291,8 +293,7 @@ function DeviceOverviewPanel({
           </td></tr>
         </tbody>
       </table>
-      <p className="hint">连接 / 变量 / 事件与报告 / 事件计划 / 常量 / 原文的编辑在配置区的其它子页;保存后需重载使生效。</p>
-    </section>
+    </Panel>
   );
 }
 

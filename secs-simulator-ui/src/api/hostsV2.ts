@@ -29,8 +29,14 @@ export interface HostV2 {
   lastError?: string;
 }
 
-/** 主机实例模板。 */
-export interface HostTemplate {
+/**
+ * 后端 host_template 的一行（旧端点形状）。
+ *
+ * <p>目标地址 / 端口 / Device ID 是主机实例自己的设置，不属于模板；
+ * 界面不再展示这三个字段，界面用的「方案包模板」见 state/hostTemplates.ts。
+ * 后端字段仍留着只是为了让现有端点继续可用，方案包编码在 note 里。</p>
+ */
+export interface HostTemplateRow {
   id: string;
   name: string;
   host: string;
@@ -122,7 +128,7 @@ export const hostsV2Api: HostsV2Api = {
     );
   },
   async hostTemplatesV2() {
-    const body = await readJson<{ templates?: HostTemplate[] }>(
+    const body = await readJson<{ templates?: HostTemplateRow[] }>(
       await request(apiUrl('/api/v2/host-templates')),
     );
     return body.templates ?? [];
@@ -151,7 +157,8 @@ export const hostsV2Api: HostsV2Api = {
   },
   async saveHostPlanV2(hostId, kind, plan) {
     const body = await readJson<{ ok?: boolean; error?: string }>(
-      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/plans`), {
+      /* kind 同时放查询串和请求体：后端读请求体，走查用的假后端读查询串 */
+      await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/plans?kind=${kind}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify({ ...plan, kind }),

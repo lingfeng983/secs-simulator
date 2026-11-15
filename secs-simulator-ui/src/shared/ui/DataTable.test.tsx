@@ -14,7 +14,7 @@ const ROWS: Row[] = [
 
 const COLUMNS: Column<Row>[] = [
   { key: 'id', header: '标识', sortValue: (row) => row.id },
-  { key: 'count', header: '计数', align: 'right', sortValue: (row) => row.count },
+  { key: 'count', header: '计数', sortValue: (row) => row.count },
 ];
 
 describe('DataTable', () => {

@@ -65,12 +65,31 @@ http.createServer(async (req, res) => {
       nextRetryAt: 0, settingRevision: 1, appliedRevision: 1, session: '', mode: 'target',
       remote: true, lastError: '' },
   ];
+  /* 主机模板只装方案，方案包编码在 note 里；内置两份由前端提供 */
   const v2Templates = [
-    { id: 'ht_01MDEMOTPL00000000000000A', name: '产线 A 目标', host: '127.0.0.1', port: 5000,
-      deviceId: 10, note: '日常联调' },
+    {
+      id: 'ht_01MDEMOTPL00000000000000A', name: '产线 A 方案', host: '-', port: 5000, deviceId: 0,
+      note: JSON.stringify({
+        v: 1, description: '日常联调',
+        tracePlans: [{ id: 'ht-a-t', name: '温度 Trace', trid: 1, dsper: 1000, totsmp: 100, repgsz: 1, svids: '1001, 1003', createdAt: 1 }],
+        collectPlans: [{ id: 'ht-a-c', name: '温度采集', startCeid: '2001', stopCeid: '2002', intervalMs: '1000', svids: '1001, 1003', createdAt: 1 }],
+      }),
+    },
   ];
-  if (path === '/api/v2/hosts') {
+  if (path === '/api/v2/hosts' && req.method === 'GET') {
     return json(res, { hosts: v2Hosts });
+  }
+  if (path === '/api/v2/hosts' && req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) { chunks.push(chunk); }
+    let body = {};
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* 用默认值 */ }
+    const id = `host_walk_${v2Hosts.length + 1}`;
+    v2Hosts.push({ id, name: body.name ?? id, phase: 'DISCONNECTED', open: false,
+      target: `${body.host ?? '127.0.0.1'}:${body.port ?? 5000}`, port: body.port ?? 5000,
+      deviceId: body.deviceId ?? 0, autoReconnect: false, retryCount: 0, nextRetryAt: 0,
+      settingRevision: 1, appliedRevision: 0, session: '', mode: 'target', remote: true, lastError: '' });
+    return json(res, { ok: true, hostId: id });
   }
   /* ---- 主机配置区方案库（落"库"=内存 Map，重启即清，仅走查用） ---- */
   /* hostPlans 定义在模块级（见文件顶部） */
@@ -109,8 +128,20 @@ http.createServer(async (req, res) => {
     }
     return json(res, { ok: false, error: 'host-not-found' }, 404);
   }
-  if (path === '/api/v2/host-templates') {
+  if (path === '/api/v2/host-templates' && req.method === 'GET') {
     return json(res, { templates: v2Templates });
+  }
+  if (path === '/api/v2/host-templates' && req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) { chunks.push(chunk); }
+    let body = {};
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* 用默认值 */ }
+    const id = body.id ?? `ht_walk_${v2Templates.length + 1}`;
+    const row = { id, name: body.name ?? id, host: body.host ?? '-', port: body.port ?? 5000,
+      deviceId: body.deviceId ?? 0, note: body.note ?? '' };
+    const index = v2Templates.findIndex((item) => item.id === id);
+    if (index >= 0) { v2Templates[index] = row; } else { v2Templates.push(row); }
+    return json(res, { ok: true });
   }
   /* ---- 参数模板库（内存 Map，内置 2 条，仅走查用） ---- */
   /* paramTemplates 定义在模块级（见文件顶部） */
@@ -139,6 +170,9 @@ http.createServer(async (req, res) => {
     return json(res, { ok: true });
   }
   if (path.startsWith('/api/v2/host-templates/')) {
+    const id = path.split('/').pop();
+    const index = v2Templates.findIndex((item) => item.id === id);
+    if (index >= 0) { v2Templates.splice(index, 1); }
     return json(res, { ok: true });
   }
   /* 3.0 M4：事件计划执行台账（含 SVID before→after、报文摘要、试跑记录） */

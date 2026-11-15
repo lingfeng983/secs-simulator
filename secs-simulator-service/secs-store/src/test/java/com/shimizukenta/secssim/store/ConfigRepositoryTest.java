@@ -144,4 +144,36 @@ class ConfigRepositoryTest {
         assertTrue(this.repo.findDevice(id).isPresent());
         assertFalse(this.repo.findDevice("没有的").isPresent());
     }
+
+    @Test
+    void deleteDeviceHidesRowButKeepsHistoryAndFreesTheName() throws SQLException {
+        setUp();
+        String id = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+
+        assertTrue(this.repo.deleteDevice("line1"), "第一次删除应当删掉一台在用设备");
+        /* 清单里消失：列表与按 key 查都查不到（key 解析只认未删除设备） */
+        assertTrue(this.repo.listDevices().isEmpty());
+        assertFalse(this.repo.findDevice("line1").isPresent());
+        /* 正文与版本历史留在库里：删掉之后"它当时是什么配置"仍要查得到 */
+        assertEquals(1, countOf("SELECT COUNT(*) FROM config_document WHERE device_id=?", id));
+        assertEquals(1, countOf("SELECT COUNT(*) FROM config_revision WHERE device_id=?", id));
+
+        /* 再删一次不是"又删了一台"；同名设备可以重建（唯一索引只约束未删除行） */
+        assertFalse(this.repo.deleteDevice("line1"));
+        String again = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        assertEquals(1, this.repo.listDevices().size());
+        assertTrue(this.repo.findDevice("line1").isPresent());
+        assertFalse(again.equals(id), "重建得到的是新设备行，不复用旧 id");
+    }
+
+    /** 直接查一行计数：软删之后仓储接口查不到，只能看表本身。 */
+    private int countOf(String sql, String deviceId) throws SQLException {
+        try (Connection connection = this.db.readConfig();
+             var st = connection.prepareStatement(sql)) {
+            st.setString(1, deviceId);
+            try (var rs = st.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : -1;
+            }
+        }
+    }
 }

@@ -5,6 +5,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -202,5 +204,38 @@ public final class ParamTemplateRepository {
     private static ParamTemplateView toView(ResultSet rs) throws SQLException {
         return new ParamTemplateView(rs.getString(1), rs.getString(2), rs.getString(3),
                 rs.getString(4), rs.getInt(5) == 1, rs.getString(6), rs.getLong(7), rs.getLong(8));
+    }
+
+    /**
+     * 下线已从内置目录里移除的内置模板（软删）。
+     *
+     * <p>只动 {@code readonly=1} 的行：自定义模板、以及设备配置里已经复制走的
+     * 模板体快照都不受影响——快照是复制语义，本来就不依赖库里的那一行。</p>
+     *
+     * @param keepIds 当前内置目录的 id 集合
+     * @return 本次下线的条数
+     */
+    public int pruneBuiltin(Collection<String> keepIds) {
+        Objects.requireNonNull(keepIds, "keepIds");
+        long now = System.currentTimeMillis();
+        return this.db.writeConfig(connection -> {
+            StringBuilder sql = new StringBuilder(
+                    "UPDATE param_template SET deleted_at=? WHERE deleted_at IS NULL AND readonly=1");
+            if (!keepIds.isEmpty()) {
+                sql.append(" AND id NOT IN (")
+                        .append(String.join(",", Collections.nCopies(keepIds.size(), "?")))
+                        .append(')');
+            }
+            try (PreparedStatement st = connection.prepareStatement(sql.toString())) {
+                st.setLong(1, now);
+                int index = 2;
+                for (String id : keepIds) {
+                    st.setString(index++, id);
+                }
+                return st.executeUpdate();
+            } catch (SQLException e) {
+                throw new StoreException("下线旧内置参数模板失败: " + e.getMessage(), e);
+            }
+        });
     }
 }

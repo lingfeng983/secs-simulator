@@ -10,14 +10,16 @@
 
 .monitor-drawer {
   position: fixed;
-  top: 0;
+  /* 从顶部信息栏下方开始：抽屉不直通顶部，标题栏永远完整可见 */
+  top: var(--titlebar-h);
   right: 0;
   bottom: 0;
   z-index: 45;
   display: flex;
   flex-direction: column;
-  min-width: 300px;
-  max-width: 720px;
+  /* 宽度完全由外壳的 --monitor-w 决定（上下限在通用设置里配） */
+  min-width: 0;
+  max-width: none;
   border-left: 1px solid var(--line-strong);
   background: var(--canvas);
   box-shadow: -12px 0 32px rgba(15, 23, 42, 0.08);
@@ -38,29 +40,31 @@
 }
 
 .monitor-head {
-  padding: 10px 12px 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
+  background: var(--accent-wash);
 }
 
-.monitor-head-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.monitor-head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-/* 查看对象：一次只看一台设备或一台主机，用下拉切换 */
+/* 头部只有一行：区域 → 查看对象 → 关闭 */
 .monitor-target {
-  margin-top: 6px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
 }
 
 .monitor-target .field {
-  width: 100%;
+  width: auto;
+  min-width: 0;
+}
+
+.monitor-region {
+  flex: 0 0 auto;
+  width: 7.2rem;
+}
+
+.monitor-target-pick {
+  flex: 1 1 auto;
 }
 
 .monitor-target .field > select {
@@ -68,12 +72,17 @@
   min-width: 0;
 }
 
+.monitor-close {
+  flex: 0 0 auto;
+  align-self: flex-end;
+}
+
 .mm-chip {
   display: inline-flex;
   align-items: center;
   padding: 1px 7px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -100,12 +109,14 @@
 }
 
 .monitor-filters .field {
-  min-width: 0;
-  flex: 1 1 92px;
+  /* 给一个"再窄就换行"的下限：否则字号调大后 select 会被压成一个小方块 */
+  min-width: 4.8rem;
+  flex: 1 1 6.5rem;
 }
 
 .monitor-filters .field-wide {
-  flex: 2 1 160px;
+  min-width: 7rem;
+  flex: 2 1 9rem;
 }
 
 /* 抽屉只有 300~720px 宽：控件必须跟着字段宽度收缩。
@@ -133,7 +144,7 @@
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .monitor-list {
@@ -180,12 +191,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .mm-caret {
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   width: 0.8em;
   flex: 0 0 auto;
 }
@@ -202,7 +213,7 @@
   margin-top: 5px;
   padding-top: 5px;
   border-top: 1px dashed var(--line);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-all;
@@ -213,7 +224,7 @@
 }
 
 .mm-cat {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   white-space: nowrap;
 }
 
@@ -234,7 +245,7 @@
   border-radius: 7px;
   padding: 6px 9px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .plan-row .plan-name {
@@ -244,7 +255,7 @@
 
 .plan-row .plan-meta {
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .plan-chips {
@@ -260,7 +271,7 @@
   background: var(--surface);
   color: var(--text-2);
   padding: 3px 10px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   cursor: pointer;
 }
 
@@ -286,7 +297,7 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 2px 9px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   background: var(--surface);
   cursor: pointer;
 }
@@ -334,7 +345,7 @@
 
 .preset-case h4 {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -343,7 +354,7 @@
 .preset-case p {
   margin: 0 0 6px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   line-height: 1.4;
   /* 说明最多两行，保持每张卡片的正文起点对齐 */
   display: -webkit-box;
@@ -362,7 +373,7 @@
   border: 1px solid var(--line);
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   line-height: 1.5;
   white-space: pre;
   word-break: normal;
@@ -390,11 +401,11 @@
 
 .overview-card h3 {
   margin: 0 0 6px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
 }
 
 .overview-card .overview-value {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale));
   font-weight: 700;
 }
 
@@ -402,7 +413,7 @@
   margin: 6px 0 0;
   padding-left: 18px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 @media (max-width: 960px) {
