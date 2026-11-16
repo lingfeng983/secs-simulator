@@ -452,6 +452,23 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.deviceV2.setPlanEnabledV2(deviceId, planId, enabled);
     }
 
+    /* ---------- 3.3 v2：工艺周期（2026-11-16 设计 §2.4） ---------- */
+
+    @Override
+    public String cycleJsonV2(String deviceId) {
+        return this.deviceV2.cycleJsonV2(deviceId);
+    }
+
+    @Override
+    public SessionOutcome cycleStartV2(String deviceId) {
+        return this.deviceV2.cycleStartV2(deviceId);
+    }
+
+    @Override
+    public SessionOutcome cycleStopV2(String deviceId) {
+        return this.deviceV2.cycleStopV2(deviceId);
+    }
+
     /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
 
     @Override

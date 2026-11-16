@@ -55,8 +55,7 @@ class SessionOnConditionTest {
         session.enableSchedule(new EventSchedule(List.of(
                 new EventPlan("hot", 2001,
                         new Trigger.OnCondition(Expression.parse("svid.1001 > 190"), 1_000L)))), 20);
-        /* 计划默认禁用：先显式启动，否则条件成立也不会发，去抖断言全部失效 */
-        session.setEventEnabled("hot", true);
+        /* 计划默认禁用；§2.2 起启动还要 ONLINE 门控——挪到 S1F17 之后再启动 */
         session.open();
 
         try (SecsCommunicator client = connect(port)) {
@@ -73,6 +72,9 @@ class SessionOnConditionTest {
             client.send(1, 13, true, Secs2.getBuilder().list());
             client.send(1, 17, true, Secs2.getBuilder().list());
             awaitPeer(session);
+
+            /* 已 ONLINE：显式启动（去抖从启动时刻起算） */
+            session.setEventEnabled("hot", true);
 
             values.value = 200.0;
             session.pumpNow();

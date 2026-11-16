@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { ConfigEditShell } from './ConfigEditShell';
 import { EventsForm } from '../editors/ConfigFormEditor';
-import { CycleForm } from '../editors/CycleForm';
 import { collectSvids, type JsonObject } from '../editors/templateConfig';
 import { EventPreview } from '../charts/EventPreview';
 import { HintTitle } from '../../shared/ui/FieldLabel';
@@ -17,14 +16,13 @@ const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
 ];
 
 /**
- * 设备 · 配置区 · 事件计划（events.plans 定义）+ 草稿周期预览。
+ * 设备 · 配置区 · 事件计划（events.plans 定义）+ 草稿预览。
  *
- * <p>三块都在这一页：<b>工艺周期</b>（cycle，按片重复）、<b>事件计划</b>
- * （events.plans，周期外的异常路径）、<b>草稿预览</b>。事件只上报、不改值。</p>
+ * <p>2026-11-16 拆分：工艺周期（cycle）独立成「工艺周期」页（CyclePanel），
+ * 这里只管周期外的异常路径（events.plans）。事件只上报、不改值。</p>
  *
- * <p>下方「事件周期预览」按<b>草稿原文</b>（含未保存改动）做确定性重放，
- * 草稿一变（防抖 600ms）自动重算——边配置边看"这份编排会画出什么曲线"，
- * 不需要先保存再开会话。</p>
+ * <p>下方草稿预览按<b>草稿原文</b>（含未保存改动）做确定性重放，草稿一变
+ * （防抖 600ms）自动重算——片内事件的竖线由后端按「如果现在启动」合成。</p>
  */
 export function PlanConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { backend, sessionId, configName } = props;
@@ -34,7 +32,7 @@ export function PlanConfigPanel(props: PanelBaseProps & { sessionId?: string; co
       sessionId={sessionId}
       configName={configName}
       panelId="panel-plan-config"
-      title="事件计划与工艺周期"
+      title="事件计划"
     >
       {({ root, edit, text }) => <PlanEditor root={root} edit={edit} text={text} backend={backend} />}
     </ConfigEditShell>
@@ -98,7 +96,6 @@ export function PlanEditor({ root, edit, text, backend }: {
 
   return (
     <>
-      <CycleForm root={root} edit={edit} />
       <EventsForm root={root} edit={edit} />
 
       <section className="panel-section block" id="plan-draft-preview">

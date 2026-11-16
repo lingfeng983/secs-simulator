@@ -43,6 +43,7 @@ export interface MockState {
   hostConnected: boolean;
   eventEnabled: boolean;
   sessions: Array<{ id: string; device: string; controlState: string; state: string; port: number }>;
+  cycle: { state: 'STOPPED' | 'RUNNING' | 'FINISHED'; startedAt: number; waferIndex: number; phaseMs: number; totalWafers: number; firedCount: number; hasCycle: boolean };
   hosts: Array<{
     id: string; name: string; phase: string; open: boolean; target: string; port: number;
     deviceId: number; autoReconnect: boolean; retryCount: number; settingRevision: number;
@@ -64,7 +65,8 @@ function initialState(): MockState {
   return {
     deviceOnline: true,
     hostConnected: true,
-    eventEnabled: false,
+    cycle: { state: 'STOPPED', startedAt: 0, waferIndex: 0, phaseMs: 0, totalWafers: 25, firedCount: 0, hasCycle: true },
+      eventEnabled: false,
     sessions: [
       { id: 'line1', device: 'LINE1', controlState: 'ONLINE', state: 'OPEN', port: 5000 },
       { id: 'line2', device: 'LINE2', controlState: 'OFFLINE', state: 'OPEN', port: 5001 },
@@ -296,6 +298,21 @@ export async function mockApi(page: Page): Promise<MockState> {
       });
     }
 
+    /* 工艺周期（2026-11-16 M3/M4）：GET 运行态，start/stop 改状态 */
+    if (/^\/api\/v2\/devices\/([^/]+)\/cycle$/.test(path) && method === 'GET') {
+      return ok(state.cycle);
+    }
+    if (/^\/api\/v2\/devices\/([^/]+)\/cycle\/start$/.test(path) && method === 'POST') {
+      state.cycle.state = 'RUNNING';
+      state.cycle.startedAt = 1;
+      state.cycle.firedCount = 0;
+      return ok({ ok: true, state: 'RUNNING' }, 200);
+    }
+    if (/^\/api\/v2\/devices\/([^/]+)\/cycle\/stop$/.test(path) && method === 'POST') {
+      state.cycle.state = 'STOPPED';
+      return ok({ ok: true, state: 'STOPPED' }, 200);
+    }
+
     /* 目录 / 事件 / 报告 / 报警 / 终端 / 预览 */
     if (/^\/api\/v1\/sessions\/[^/]+\/catalog$/.test(path)) {
       return ok({
@@ -314,6 +331,8 @@ export async function mockApi(page: Page): Promise<MockState> {
           id: 'beat', ceid: 2001, owner: 'CH1', enabled: state.eventEnabled,
           status: state.eventEnabled ? (online ? 'running' : 'waiting') : 'stopped',
           statusReason: state.eventEnabled && !online ? 'offline' : '',
+          nextFireAt: state.eventEnabled && online ? 61_000 : 0,
+          nextFireInMs: state.eventEnabled && online ? 900 : 0,
           triggerType: 'periodic', periodMs: 1000, jitterMs: 0,
           effects: [{ svid: 1001, op: 'set', value: 80 }],
         }],

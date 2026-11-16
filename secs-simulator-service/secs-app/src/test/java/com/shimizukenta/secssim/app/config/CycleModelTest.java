@@ -93,7 +93,9 @@ class CycleModelTest {
         SessionConfig config = SessionConfigJson.parse(JSON);
 
         assertEquals(0, config.schedule().size(), "配置里手写计划为空");
-        assertEquals(3, config.effectiveSchedule().size(), "3 片 × 1 个事件 = 3 条计划");
+        /* M3 拆分：cycle 不再混进编排表；按片展开只留给预览合成 */
+        assertEquals(3, config.cycle().expandPlans(config.spec().seed()).size(),
+                "3 片 × 1 个事件 = 3 条展开计划（仅预览合成用）");
     }
 
     @Test

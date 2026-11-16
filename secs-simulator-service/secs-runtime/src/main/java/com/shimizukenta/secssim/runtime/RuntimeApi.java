@@ -82,7 +82,7 @@ final class RuntimeApi {
                 @Override public com.shimizukenta.secssim.app.session.EquipmentControlState controlState() { return session.controlState(); }
                 @Override public String eventsJson() { return session.eventsJson(); }
                 @Override public String overviewJson() { return session.overviewJson(); }
-                @Override public boolean setEventEnabled(String planId, boolean enabled) { return session.setEventEnabled(planId, enabled); }
+                @Override public com.shimizukenta.secssim.app.session.PlanEnableOutcome setEventEnabled(String planId, boolean enabled) { return session.setEventEnabled(planId, enabled); }
                 @Override public String previewJson(long fromMs, long toMs, int buckets) { return session.previewJson(fromMs, toMs, buckets); }
                 @Override public String previewJson(long fromMs, long toMs, int buckets, java.util.Set<Integer> svids, boolean withEvents) { return session.previewJson(fromMs, toMs, buckets, svids, withEvents); }
                 @Override public byte[] previewBinary(long fromMs, long toMs, int buckets) { return session.previewBinary(fromMs, toMs, buckets); }
@@ -185,12 +185,18 @@ final class RuntimeApi {
         if (session == null) {
             return EventOutcome.UNKNOWN_SESSION;
         }
-        if (!session.setEventEnabled(planId, enabled)) {
+        com.shimizukenta.secssim.app.session.PlanEnableOutcome outcome =
+                session.setEventEnabled(planId, enabled);
+        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.UNKNOWN_PLAN) {
             return EventOutcome.UNKNOWN_PLAN;
         }
-        /* 启用态是「断开保留、重启恢复」的一部分：v1 与 v2 两条路径都在这里落库，
-           next_fire_at 交给调度器推进，不写死一个可能与 OnCondition 冲突的时刻。 */
-        this.persister.planState(sessionId, planId, enabled);
+        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.NOT_ONLINE) {
+            /* 2026-11-16 设计 §2.2：离线时拒绝启动（409 not-online），界面禁用按钮 */
+            return EventOutcome.NOT_ONLINE;
+        }
+        /* next_fire_at 开始写入：周期计划 = enabledAt + k×period 的下一次（§2.1）；
+           启用态不再跨重启回放（D4），本行只承载统计与倒计时初值 */
+        this.persister.planState(sessionId, planId, enabled, session.nextFireAtOf(planId));
         return EventOutcome.OK;
     }
 
@@ -545,16 +551,29 @@ final class RuntimeApi {
                         com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
                 java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> events =
                         java.util.List.of();
-                /* 周期事件在构建期按片展开：预览与启动必须看同一张表 */
-                com.shimizukenta.secssim.core.event.EventSchedule schedule = config.effectiveSchedule();
-                if (withEvents && !schedule.plans().isEmpty()) {
-                    events = com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
-                                    schedule, values, config.spec().seed(), fromMs, toMs,
-                                    com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS)
-                            .stream()
-                            .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
-                                    fire.atMs(), fire.ceid(), fire.planId()))
-                            .toList();
+                /* cycle 已从编排表拆出（M3）：草稿预览的事件时间线 = 手写计划模拟
+                   ∪ CycleRunner.simulateFires（锚 = 窗口起点，"如果现在启动"）；
+                   值曲线的草稿时间线也从窗口起点起算，预览与实跑同锚（M3 追加 3） */
+                com.shimizukenta.secssim.core.event.EventSchedule schedule = config.schedule();
+                if (withEvents) {
+                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> marks =
+                            new java.util.ArrayList<>(com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
+                                            schedule, values, config.spec().seed(), fromMs, toMs,
+                                            com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS)
+                                    .stream()
+                                    .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
+                                            fire.atMs(), fire.ceid(), fire.planId()))
+                                    .toList());
+                    if (config.cycle() != null) {
+                        for (long[] mark : com.shimizukenta.secssim.runtime.session.CycleRunner.simulateFires(
+                                config.cycle(), config.spec().seed(), fromMs, fromMs, toMs)) {
+                            marks.add(new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
+                                    mark[0], (int) mark[1], "cycle"));
+                        }
+                        marks.sort(java.util.Comparator.comparingLong(
+                                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent::atMs));
+                    }
+                    events = java.util.List.copyOf(marks);
                 }
                 com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
                         com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(

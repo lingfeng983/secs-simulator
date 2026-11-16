@@ -281,6 +281,9 @@ public interface ApiContextSessionOps {
     /**
      * v2：运行时启停计划，并持久化到 runtime.db。
      *
+     * <p>启用方向有 ONLINE 门控（2026-11-16 设计 §2.2）：设备离线回
+     * {@code NOT_ONLINE}（HTTP 409 not-online）。</p>
+     *
      * @param deviceId 设备 id
      * @param planId   计划 id
      * @param enabled  是否启用
@@ -288,6 +291,21 @@ public interface ApiContextSessionOps {
      */
     default SessionOutcome setPlanEnabledV2(String deviceId, String planId, boolean enabled) {
         return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /** v2：工艺周期运行态 JSON（M3）；设备不在返回 {@code null}。 */
+    default String cycleJsonV2(String deviceId) {
+        return null;
+    }
+
+    /** v2：启动工艺周期——ONLINE 门控同计划启停；没有 cycle 段回 FAILED。 */
+    default SessionOutcome cycleStartV2(String deviceId) {
+        return SessionOutcome.FAILED;
+    }
+
+    /** v2：停止工艺周期（禁用方向不受 ONLINE 限制）。 */
+    default SessionOutcome cycleStopV2(String deviceId) {
+        return SessionOutcome.OK;
     }
 
     /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */

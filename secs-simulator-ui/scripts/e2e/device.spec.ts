@@ -153,7 +153,7 @@ test('设备清单：离线可手动上线，在线可下线（等价 S1F17 / S1
   await expect(row.getByRole('button', { name: '上线' })).toHaveCount(0);
 });
 
-test('运行区·事件计划：设备离线时启动只到「等待上线」，消息不会真发', async ({ page }) => {
+test('运行区·事件计划：离线禁用启动（§2.2 门控），上线后启动即运行', async ({ page }) => {
   const state = await mockApi(page);
   /* line2 置成"已连接但离线"：严格 GEM 下这种状态不能上报 S6F11 */
   const line2 = state.sessions.find((item) => item.id === 'line2');
@@ -166,12 +166,36 @@ test('运行区·事件计划：设备离线时启动只到「等待上线」，
   const row = page.locator('#panel-events tbody tr', { hasText: 'beat' }).first();
   await expect(row.locator('.badge', { hasText: '已停止' })).toBeVisible();
 
-  await row.getByRole('button', { name: '启动' }).click();
-  /* 启动了 ≠ 在发：离线时状态必须是「等待上线」，否则操作员会盯着一个不发报文的"运行中" */
-  await expect(row.locator('.badge', { hasText: '等待上线' })).toBeVisible();
-  await expect(row.locator('.badge', { hasText: '运行中' })).toHaveCount(0);
-  /* 徽标 title 要说清楚为什么没在发、怎么才能发 */
-  await expect(row.locator('.badge', { hasText: '等待上线' })).toHaveAttribute('title', /上线|S1F17/);
+  /* §2.2 ONLINE 门控：离线时启动按钮直接禁用（后端同样 409 not-online） */
+  const start = row.getByRole('button', { name: '启动' });
+  await expect(start).toBeDisabled();
+  await expect(start).toHaveAttribute('title', /设备离线/);
+  /* 周期预览已归「工艺周期」页（M4 拆分） */
+  await expect(page.locator('#panel-events')).not.toContainText('事件周期预览');
+
+  /* 上线后可启动：周期计划启动即触发一次（D2），状态徽标直接进「运行中」 */
+  line2.controlState = 'ONLINE';
+  await page.reload();
+  const rowAfter = page.locator('#panel-events tbody tr', { hasText: 'beat' }).first();
+  await rowAfter.getByRole('button', { name: '启动' }).click();
+  await expect(rowAfter.locator('.badge', { hasText: '运行中' })).toBeVisible();
+});
+
+test('配置区·工艺周期：运行卡轮询 + 启动/停止（§2.4 M4）', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/#/device/line1/config/cycle');
+  const run = page.locator('#panel-cycle-run');
+  await expect(run).toBeVisible();
+  await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();
+  await expect(run).toContainText('进度 1/25 片');
+
+  await run.getByRole('button', { name: '启动周期' }).click();
+  await expect.poll(() => state.cycle.state, { timeout: 5_000 }).toBe('RUNNING');
+  await expect(run.locator('.state-pill', { hasText: '运行中' })).toBeVisible();
+  await expect(run).toContainText('第 1 片');
+
+  await run.getByRole('button', { name: '停止周期' }).click();
+  await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();
 });
 
 test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色', async ({ page }) => {

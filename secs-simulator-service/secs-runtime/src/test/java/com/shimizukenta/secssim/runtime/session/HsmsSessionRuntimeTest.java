@@ -74,6 +74,57 @@ class HsmsSessionRuntimeTest {
         assertTrue(session.eventsJson().contains("600"));
     }
 
+    /**
+     * P0 修复回归（2026-11-16 设计 M1-6）：热重载此前丢弃新编译的
+     * 晶圆属性表与设备常量取值器——热路径必须一起换（S2F13/S6F11 才能看到新值）。
+     */
+    @Test
+    void applyHotSwapsContextTableAndEcidValues() throws Exception {
+        ManualEngineClock clock = new ManualEngineClock(0L);
+        HsmsSessionRuntime session = runtime(clock, "dm", "V1");
+        session.open();
+
+        var oldContext = session.contextTable;
+        var oldEcids = session.ecidValues;
+
+        var newContext = com.shimizukenta.secssim.core.context.ContextTable.empty();
+        var newEcids = new EcidValues(java.util.Map.of(), java.util.Map.of(), null, 1L);
+        session.applyHot(schedule("p", 500L), 20, false, false, session.model, null,
+                newContext, newEcids, null, null);
+
+        org.junit.jupiter.api.Assertions.assertTrue(session.contextTable != oldContext,
+                "热重载要换晶圆属性表（审计 P0）");
+        org.junit.jupiter.api.Assertions.assertTrue(session.ecidValues != oldEcids,
+                "热重载要换设备常量取值器（审计 P0）");
+        org.junit.jupiter.api.Assertions.assertEquals(SessionState.OPEN, session.state(),
+                "热生效不断连");
+    }
+
+    /**
+     * D6（2026-11-16 设计 §2.1-6）：钉值 = 参数变化 → 全停——启用中的计划回到 stopped。
+     */
+    @Test
+    void pinValueStopsAllPlans() throws Exception {
+        ManualEngineClock clock = new ManualEngineClock(0L);
+        HsmsSessionRuntime session = runtime(clock, "pin-stop", "V1");
+        session.open();
+        session.applyHot(schedule("beat", 1_000L), 20, false, false, null);
+
+        /* 测试直接推控制状态：链路 SELECTED + ONLINE 才允许启动计划（§2.2） */
+        session.control.communicatable(true);
+        session.control.change(com.shimizukenta.secssim.app.session.EquipmentControlState.ONLINE);
+        org.junit.jupiter.api.Assertions.assertEquals(
+                com.shimizukenta.secssim.app.session.PlanEnableOutcome.OK,
+                session.setEventEnabled("beat", true));
+        org.junit.jupiter.api.Assertions.assertFalse(session.scheduler.isDisabled("beat"), "计划已启用");
+
+        int svid = session.model.svids().keySet().iterator().next();
+        org.junit.jupiter.api.Assertions.assertTrue(session.pinSvidValue(svid, 42.0), "钉值应成功");
+        org.junit.jupiter.api.Assertions.assertTrue(session.scheduler.isDisabled("beat"),
+                "钉值 = 参数变化 → 全停（D6）：计划回到 stopped");
+        org.junit.jupiter.api.Assertions.assertTrue(session.isSvidPinned(svid), "钉值本身生效");
+    }
+
     /* ---------- helpers ---------- */
 
     private HsmsSessionRuntime runtime(ManualEngineClock clock, String id, String marker) {

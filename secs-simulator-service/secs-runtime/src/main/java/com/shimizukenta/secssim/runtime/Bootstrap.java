@@ -388,15 +388,9 @@ public final class Bootstrap {
         } catch (RuntimeException e) {
             Log.error("恢复钉值失败（跳过）: " + deviceId + " " + e.getMessage(), e);
         }
-        try {
-            /* 停用也要恢复：计划加载时一律默认禁用，只有这里回放用户上次的选择，
-               否则重启后用户手动启动过的计划会全部退回停止 */
-            for (RuntimeStateRepository.PlanStateRow row : state.planStates(deviceId)) {
-                hsms.setEventEnabled(row.planId(), row.enabled());
-            }
-        } catch (RuntimeException e) {
-            Log.error("恢复计划启用态失败（跳过）: " + deviceId + " " + e.getMessage(), e);
-        }
+        /* 计划启用态不再跨重启/重建回放（2026-11-16 设计 D4）：
+           "刚启动的设备所有计划都是停止的"。runtime_plan_state 只留统计
+           （fire_count / last_fire_at / last_error），enabled 列成为历史读数。 */
     }
 
     private static void restoreCatalogEdit(HsmsSessionRuntime hsms, String kind, int key,

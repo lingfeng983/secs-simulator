@@ -538,7 +538,9 @@ class SessionConfigJsonTest {
     @Test
     void cycleEventsExpandPerWafer() {
         SessionConfig config = SessionConfigJson.parse(V7_SAMPLE);
-        var plans = config.effectiveSchedule().plans();
+        /* M3 拆分：编排表只含手写计划；展开改走 CycleConfig.expandPlans（预览合成用） */
+        assertEquals(0, config.schedule().plans().size(), "手写计划为空");
+        var plans = config.cycle().expandPlans(config.spec().seed());
         assertEquals(3, plans.size(), "3 片 × 1 条周期事件");
         assertEquals("cyc0-0", plans.get(0).id());
         assertEquals(3_000L, ((Trigger.At) plans.get(0).trigger()).atMs(), "第一片事件在片内 3s");

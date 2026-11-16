@@ -62,8 +62,10 @@ class RuntimeRestoreTest {
 
             String events = session.eventsJson();
             assertTrue(events.contains("p1"), "运行时计划正文应恢复: " + events);
-            assertTrue(events.contains("\"enabled\":true"),
-                    "计划启用态应恢复: " + events);
+            /* D4（2026-11-16 设计）：计划启用态不再跨重启/重建回放——
+               刚启动的设备所有计划都是停止的，由操作员手动逐条启动 */
+            assertTrue(events.contains("\"enabled\":false"),
+                    "计划启用态应保持停止（不回放）: " + events);
         }
     }
 

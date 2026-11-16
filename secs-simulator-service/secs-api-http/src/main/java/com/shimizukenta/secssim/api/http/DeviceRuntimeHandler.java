@@ -115,12 +115,63 @@ final class DeviceRuntimeHandler extends HttpSupport {
                 this.plans.handleExecutionsV2(ex, deviceId);
             }
             case "plans" -> this.plans.handlePlansV2(ex, deviceId, method, parts);
+            case "cycle" -> this.handleDeviceCycleV2(ex, deviceId, method, parts);
             case "catalog" -> this.catalogs.handleCatalogEditV2(ex, deviceId, method, parts);
             case "svids" -> this.catalogs.handleSvidPinV2(ex, deviceId, method, parts);
             case "message" -> this.handleDeviceMessageV2(ex, deviceId, method);
             case "alarm" -> this.handleDeviceAlarmV2(ex, deviceId, method, parts);
             case "ceid" -> this.handleDeviceCeidV2(ex, deviceId, method, parts);
             default -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+        }
+    }
+
+    /**
+     * v2 工艺周期（2026-11-16 设计 §2.4/M3）：
+     * {@code GET /runtime/cycle} 运行态；{@code POST /runtime/cycle/start|stop} 启停。
+     *
+     * <p>启动有 ONLINE 门控（409 {@code not-online}，同计划启停）；
+     * 配置里没有 cycle 段时启动回 409 {@code no-cycle}。</p>
+     */
+    private void handleDeviceCycleV2(HttpExchange ex, String deviceId, String method, String[] parts)
+            throws IOException {
+        if (parts.length == 3) {
+            if (!"GET".equals(method)) {
+                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+                return;
+            }
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            String json = this.context.cycleJsonV2(deviceId);
+            if (json == null) {
+                respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+                return;
+            }
+            respond(ex, 200, json);
+            return;
+        }
+        String action = parts.length > 3 ? parts[3] : "";
+        if (!"start".equals(action) && !"stop".equals(action)) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if (!"POST".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        SessionOutcome outcome = "start".equals(action)
+                ? this.context.cycleStartV2(deviceId)
+                : this.context.cycleStopV2(deviceId);
+        audit(ex, "cycle-" + action, deviceId, "outcome=" + outcome);
+        switch (outcome) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"state\":\""
+                    + ("start".equals(action) ? "RUNNING" : "STOPPED") + "\"}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            case NOT_ONLINE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-online\"}");
+            default -> respond(ex, 409, "{\"ok\":false,\"error\":\"no-cycle\"}");
         }
     }
 

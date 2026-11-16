@@ -197,6 +197,7 @@ final class PlanExecutionsHandler extends HttpSupport {
         switch (outcome) {
             case OK -> respond(ex, 200, "{\"ok\":true,\"planId\":\"" + json(planId)
                     + "\",\"enabled\":" + enabled + "}");
+            case NOT_ONLINE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-online\"}");
             case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
             default -> respond(ex, 400, "{\"ok\":false,\"error\":\"plan-not-found\"}");
         }

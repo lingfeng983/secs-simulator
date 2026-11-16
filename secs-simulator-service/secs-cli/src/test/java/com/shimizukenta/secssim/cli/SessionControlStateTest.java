@@ -1,5 +1,7 @@
 package com.shimizukenta.secssim.cli;
 
+import com.shimizukenta.secssim.app.session.PlanEnableOutcome;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -172,33 +174,48 @@ class SessionControlStateTest {
                     "刚选上链路：已连接但设备仍离线");
 
             /* 计划默认禁用：必须显式启动，否则下面的"该发"永远不成立，等于没测 */
-            assertTrue(f.session.setEventEnabled("beat", true), "计划应能启动");
+            /* §2.2：未 ONLINE 时拒绝启动（HTTP 409 not-online）；计划保持 stopped */
+            assertEquals(PlanEnableOutcome.NOT_ONLINE, f.session.setEventEnabled("beat", true),
+                    "已通信但未 ONLINE：启动应被拒绝");
 
             f.tick();
             assertEquals(0L, f.session.counters().get("emitted"),
                     "已连接但未上线：严格 GEM 下不得上报 S6F11");
 
-            /* 路径一：操作员手动上线（等价主机发 S1F17） */
+            /* 路径一：操作员手动上线（等价主机发 S1F17）。上线不恢复任何计划——
+               全停（§2.1-4）后要手动重新启动 */
             assertTrue(f.session.setOnline(true), "链路已建，应能手动上线");
             assertEquals(EquipmentControlState.ONLINE, f.session.controlState());
 
             f.tick();
-            assertEquals(1L, f.session.counters().get("emitted"), "上线后按触发规则上报");
+            assertEquals(0L, f.session.counters().get("emitted"), "上线不自动恢复计划：仍是 stopped");
 
-            /* 手动下线（等价主机发 S1F15）后停发 */
+            /* 手动启动：周期计划启动即触发一次（D2），过限流走台账 */
+            assertEquals(PlanEnableOutcome.OK, f.session.setEventEnabled("beat", true));
+            assertEquals(1L, f.session.counters().get("emitted"), "启动即触发一条");
+
+            f.tick();
+            assertEquals(2L, f.session.counters().get("emitted"), "enabledAt + period 触发下一条");
+
+            /* 手动下线（等价主机发 S1F15）= 全停：计划回 stopped */
             assertTrue(f.session.setOnline(false));
             assertEquals(EquipmentControlState.OFFLINE, f.session.controlState());
 
             f.tick();
-            assertEquals(1L, f.session.counters().get("emitted"), "下线后不得继续上报");
+            assertEquals(2L, f.session.counters().get("emitted"), "下线后不得继续上报");
 
-            /* 路径二：主机自己把设备拉上线 */
+            /* 路径二：主机自己把设备拉上线——计划仍是 stopped（不回放，D4） */
             f.send(1, 13, Secs2.getBuilder().list());
             f.send(1, 17, Secs2.getBuilder().list());
             assertEquals(EquipmentControlState.ONLINE, f.session.controlState(), "S1F17 应把设备置为 ONLINE");
 
             f.tick();
-            assertEquals(2L, f.session.counters().get("emitted"), "主机上线后恢复上报");
+            assertEquals(2L, f.session.counters().get("emitted"), "重新上线不自动恢复计划");
+
+            /* 再手动启动：锚点 = 此刻，启动即触发一条 */
+            assertEquals(PlanEnableOutcome.OK, f.session.setEventEnabled("beat", true));
+            f.tick();
+            assertEquals(4L, f.session.counters().get("emitted"), "启动即触发一条 + enabledAt + period");
         }
     }
 

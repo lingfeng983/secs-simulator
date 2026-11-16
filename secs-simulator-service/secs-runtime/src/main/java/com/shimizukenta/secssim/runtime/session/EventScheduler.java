@@ -11,7 +11,6 @@ import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.core.event.ConditionDebouncer;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
-import com.shimizukenta.secssim.core.event.RateLimiter;
 import com.shimizukenta.secssim.core.event.Fire;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.template.ExpressionException;
@@ -28,12 +27,6 @@ final class EventScheduler {
 
     /** 每个 tick 求值条件的节流间隔（毫秒）。 */
     private static final long EVENT_TICK_MS = 100L;
-
-    /** 限流窗口（毫秒）。 */
-    private static final long RATE_WINDOW_MS = 1_000L;
-
-    /** 默认每秒最多上报多少条。 */
-    private static final int DEFAULT_MAX_EVENTS_PER_SEC = 50;
 
     /** 当前编排表。 */
     private volatile EventSchedule schedule = EventSchedule.empty();
@@ -52,8 +45,8 @@ final class EventScheduler {
     /** 事件随机源（抖动与运行时同源）。 */
     private final Rng eventRng;
 
-    /** 限流器。 */
-    private volatile RateLimiter limiter = new RateLimiter(DEFAULT_MAX_EVENTS_PER_SEC, RATE_WINDOW_MS);
+    /** 设备级限流闸：与工艺周期共用同一只（拆分后两个运行时共享上限）。 */
+    private final SessionRateGate gate;
 
     /** 上一次算到的时间点。 */
     private volatile long lastFireMs;
@@ -72,6 +65,15 @@ final class EventScheduler {
 
     /** 被禁用的计划（运行时启停）。 */
     private final Set<String> disabledPlans = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 每条计划的启动锚点（planId → enabledAt，时钟系毫秒）。
+     *
+     * <p>手动启动时刻即该计划的初始时间（2026-11-16 设计 D2）：At 在
+     * {@code enabledAt + atMs} 触发、Periodic 第 k 次在 {@code enabledAt + k×period}；
+     * 全停 / 禁用时移除。没有锚点的计划按时钟零点求值（纯区间语义）。</p>
+     */
+    private final Map<String, Long> enabledAnchors = new ConcurrentHashMap<>();
 
     /** CEID 是否已定义（供引用校验用）。 */
     private java.util.function.IntPredicate knownCeid;
@@ -120,11 +122,13 @@ final class EventScheduler {
     }
 
     EventScheduler(Rng eventRng,
+                   SessionRateGate rateGate,
                    java.util.function.LongSupplier clock,
                    java.util.function.Supplier<ValueSource> values,
                    java.util.function.BooleanSupplier canSend,
                    java.util.function.BiConsumer<Integer, String> emit) {
         this.eventRng = eventRng;
+        this.gate = rateGate;
         this.clock = clock;
         this.values = values;
         this.canSend = canSend;
@@ -200,7 +204,7 @@ final class EventScheduler {
      */
     void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
         this.schedule = schedule == null ? EventSchedule.empty() : schedule;
-        this.limiter = new RateLimiter(maxEventsPerSec, RATE_WINDOW_MS);
+        this.gate.configure(maxEventsPerSec);
 
         /* 3.0 需求：所有计划默认禁用。
            配置里的计划只描述"触发规则"，不表示"现在就要跑"——设备一上线就
@@ -213,6 +217,7 @@ final class EventScheduler {
 
         this.conditionDebouncers.clear();
         this.conditionErrorLogged.clear();
+        this.enabledAnchors.clear();
         synchronized (this.pendingFires) {
             this.pendingFires.clear();
         }
@@ -220,6 +225,26 @@ final class EventScheduler {
             if (plan.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
             }
+        }
+    }
+
+    /**
+     * 全停：所有计划回到 stopped，清启用锚点、去抖进度与延迟链（设计 §2.1）。
+     *
+     * <p>挂点在 {@code HsmsSessionRuntime.stopAllPlans()}：控制状态离开 ONLINE、
+     * 链路相位脱离 SELECTED、热重载（经 enableSchedule）、钉值 / S2F15 写常量 /
+     * W 位与限流变化。工艺周期由调用方一并停掉。</p>
+     */
+    void stopAll() {
+        this.disabledPlans.clear();
+        for (EventPlan plan : this.schedule.plans()) {
+            this.disabledPlans.add(plan.id());
+        }
+        this.enabledAnchors.clear();
+        this.conditionDebouncers.clear();
+        this.conditionErrorLogged.clear();
+        synchronized (this.pendingFires) {
+            this.pendingFires.clear();
         }
     }
 
@@ -244,8 +269,26 @@ final class EventScheduler {
      */
     String eventsJson(java.util.function.IntFunction<String> ceidOwner,
                       java.util.Map<String, PlanRuntimeStat> stats) {
+        /* next_fire_at 的活值在调度器手里（锚 = 启动时刻）：覆盖 DB 里可能过期的读数，
+           周期计划启动后倒计时精确显示（2026-11-16 设计 §2.1） */
+        java.util.Map<String, PlanRuntimeStat> merged = new java.util.LinkedHashMap<>(stats);
+        for (EventPlan plan : this.schedule.plans()) {
+            Long next = this.nextFireAt(plan.id());
+            if (next == null) {
+                continue;
+            }
+            PlanRuntimeStat old = merged.getOrDefault(plan.id(), PlanRuntimeStat.EMPTY);
+            /* nextFireInMs：界面倒计时直接用（会话时钟与浏览器时钟不同源，绝对时刻没法减） */
+            merged.put(plan.id(), new PlanRuntimeStat(old.fireCount(), old.skippedCount(),
+                    old.lastFireAt(), next, old.lastError(), Math.max(0L, next - this.clock.getAsLong())));
+        }
         return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans,
-                ceidOwner, stats, this::planStatus);
+                ceidOwner, merged, this::planStatus);
+    }
+
+    /** 计划当前是否处于停止（含全停后的状态）。 */
+    boolean isDisabled(String planId) {
+        return this.disabledPlans.contains(planId);
     }
 
     /**
@@ -275,8 +318,14 @@ final class EventScheduler {
     /**
      * 运行时启用/禁用一个计划。
      *
-     * <p>禁用会清掉该计划的条件去抖状态与延迟队列条目：重新启用后
+     * <p>启用：锚点 = 当前时刻（手动启动时间即初始时间，D2）；
+     * {@link Trigger.Periodic periodic} 计划<b>立即触发一次</b>（过限流、走台账），
+     * 此后第 k 次在 {@code enabledAt + k×period ± 抖动}。
+     * 禁用会清掉该计划的条件去抖状态、延迟队列条目与锚点：重新启用后
      * 不应把禁用期间攒下的事件补发出去。</p>
+     *
+     * <p>ONLINE 门控在 {@code HsmsSessionRuntime} 层做（409 not-online）——
+     * 调度器不认识控制状态。</p>
      *
      * @param planId  计划标识
      * @param enabled 是否启用
@@ -295,19 +344,56 @@ final class EventScheduler {
         }
 
         if (enabled) {
+            long now = this.clock.getAsLong();
             this.disabledPlans.remove(planId);
+            this.enabledAnchors.put(planId, now);
             if (target.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.computeIfAbsent(planId,
                         id -> new ConditionDebouncer(condition.debounceMs()));
             }
+            if (target.trigger() instanceof Trigger.Periodic) {
+                /* 周期计划启动即触发一次（D2）：走 firePlan 过限流与 S2F37，落台账 */
+                this.firePlan(planId, target.ceid(), now, now);
+            }
         } else {
             this.disabledPlans.add(planId);
+            this.enabledAnchors.remove(planId);
             this.conditionDebouncers.remove(planId);
             synchronized (this.pendingFires) {
                 this.pendingFires.removeIf(fire -> fire.planId().equals(planId));
             }
         }
         return true;
+    }
+
+    /**
+     * 周期计划的下一次触发时刻（倒计时用；锚 = 启动时刻）。
+     *
+     * <p>不含抖动（±jitterMs 内浮动）；禁用 / 非周期 / 未启用返回 {@code null}。</p>
+     *
+     * @param planId 计划标识
+     * @return 下次触发时刻，或 {@code null}
+     */
+    Long nextFireAt(String planId) {
+        Long anchor = this.enabledAnchors.get(planId);
+        if (anchor == null) {
+            return null;
+        }
+        for (EventPlan plan : this.schedule.plans()) {
+            if (!plan.id().equals(planId)) {
+                continue;
+            }
+            if (!(plan.trigger() instanceof Trigger.Periodic periodic)) {
+                return null;
+            }
+            long now = this.clock.getAsLong();
+            long k = Math.floorDiv(now - anchor, periodic.periodMs()) + 1L;
+            if (k < 1L) {
+                k = 1L;
+            }
+            return anchor + k * periodic.periodMs();
+        }
+        return null;
     }
 
 
@@ -360,6 +446,10 @@ final class EventScheduler {
         }
         plans.set(index, next);
         replaceSchedule(new EventSchedule(plans));
+        /* 改的是启用中的计划：锚点重置为现在，新触发规则从改完这刻起算 */
+        if (!this.disabledPlans.contains(planId)) {
+            this.enabledAnchors.put(planId, this.clock.getAsLong());
+        }
         return true;
     }
 
@@ -420,7 +510,8 @@ final class EventScheduler {
 
             if (now > from) {
                 this.lastFireMs = now;
-                for (Fire fire : this.schedule.between(from, now, this.eventRng)) {
+                /* per-plan 启动锚点：At/Periodic 从 enabledAt 起算（D2） */
+                for (Fire fire : this.schedule.between(from, now, this.eventRng, this.enabledAnchors)) {
                     this.firePlan(fire.planId(), fire.ceid(), fire.atMs(), now);
                 }
             }
@@ -493,7 +584,7 @@ final class EventScheduler {
             this.skippedCounter.incrementAndGet();
             return;
         }
-        if (!this.limiter.tryAcquire(nowMs)) {
+        if (!this.gate.tryAcquire(nowMs)) {
             this.rejectedCounter.incrementAndGet();
             return;
         }

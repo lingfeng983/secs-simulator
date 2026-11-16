@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import com.shimizukenta.secssim.app.session.DefaultCurves;
+import com.shimizukenta.secssim.core.context.ContextTable;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.value.CurveValueSource;
@@ -38,6 +39,12 @@ final class HotReloader {
     /** 当前设备定义（规格）。 */
     private final java.util.function.Supplier<com.shimizukenta.secssim.core.domain.EquipmentSpec> equipment;
 
+    /**
+     * 换晶圆属性表 + 设备常量取值器（P0 修复：热路径此前丢弃新编译结果，
+     * Context / EcidValues 只在 open 时挂一次，热重载后 S6F11 / S2F13 仍是旧值）。
+     */
+    private final java.util.function.BiConsumer<ContextTable, EcidValues> dataModel;
+
     HotReloader(java.util.function.Consumer<ResolvedEquipment> refreshModelViews,
                 java.util.function.Consumer<Boolean> collectionEventWbit,
                 java.util.function.Consumer<Boolean> traceWbit,
@@ -45,6 +52,18 @@ final class HotReloader {
                 ValueSourceHandle values,
                 ValueStore store,
                 java.util.function.Supplier<com.shimizukenta.secssim.core.domain.EquipmentSpec> equipment) {
+        this(refreshModelViews, collectionEventWbit, traceWbit, enableSchedule,
+                values, store, equipment, null);
+    }
+
+    HotReloader(java.util.function.Consumer<ResolvedEquipment> refreshModelViews,
+                java.util.function.Consumer<Boolean> collectionEventWbit,
+                java.util.function.Consumer<Boolean> traceWbit,
+                java.util.function.BiConsumer<EventSchedule, Integer> enableSchedule,
+                ValueSourceHandle values,
+                ValueStore store,
+                java.util.function.Supplier<com.shimizukenta.secssim.core.domain.EquipmentSpec> equipment,
+                java.util.function.BiConsumer<ContextTable, EcidValues> dataModel) {
         this.refreshModelViews = refreshModelViews;
         this.collectionEventWbit = collectionEventWbit;
         this.traceWbit = traceWbit;
@@ -52,6 +71,7 @@ final class HotReloader {
         this.values = values;
         this.store = store;
         this.equipment = equipment;
+        this.dataModel = dataModel == null ? (c, e) -> { } : dataModel;
     }
 
     /**
@@ -70,10 +90,15 @@ final class HotReloader {
      */
     ValueSource apply(EventSchedule schedule, int maxEventsPerSec,
                       boolean s6f11Wbit, boolean s6f1Wbit,
-                      ResolvedEquipment model, ValueSource values) {
+                      ResolvedEquipment model, ValueSource values,
+                      ContextTable contextTable, EcidValues ecidValues) {
         this.collectionEventWbit.accept(s6f11Wbit);
         this.traceWbit.accept(s6f1Wbit);
         this.refreshModelViews.accept(model);
+        /* 晶圆属性表 / 设备常量取值器跟着换：热路径此前漏了这两份（审计 P0） */
+        if (contextTable != null && ecidValues != null) {
+            this.dataModel.accept(contextTable, ecidValues);
+        }
         this.enableSchedule.accept(schedule, maxEventsPerSec);
         if (values != null) {
             this.values.set(values);

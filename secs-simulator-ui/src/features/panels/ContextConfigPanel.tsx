@@ -120,7 +120,7 @@ export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): 
           <button
             type="button"
             className="primary"
-            title="「按片变化」的 pattern 用 {03} 表示补零到 3 位的片序，例如 W{03} 生成 W001、W002；every 表示每几片进一档（每 25 片换批号时 every 填 25）。"
+            title="「按片变化」的 pattern 用 {03} 表示补零到 3 位的片序，例如 W{03} 生成 W001、W002；every 表示每几片进一档（每 25 片换批号时 every 填 25）。晶圆属性随工艺周期换片：停止时冻结，启动后从第 0 片起跑。"
             onClick={() => setEditing(null)}
           >
             ＋ 新建属性

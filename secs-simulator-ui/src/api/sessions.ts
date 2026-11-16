@@ -9,6 +9,7 @@ import type {
   BurstResult,
   BurstStatus,
   Catalog,
+  CycleRuntimeView,
   EventPlanView,
   Health,
   OverviewRow,
@@ -35,6 +36,9 @@ type SessionApi = Pick<
   | 'preview'
   | 'events'
   | 'setEventEnabled'
+  | 'cycle'
+  | 'cycleStart'
+  | 'cycleStop'
   | 'sendSml'
   | 'overview'
   | 'burst'
@@ -182,6 +186,30 @@ export const sessionApi: SessionApi = {
         apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`),
         { method: 'POST' },
       ),
+    );
+  },
+  async cycle(deviceId: string): Promise<CycleRuntimeView | null> {
+    const response = await request(
+      apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/cycle`),
+    );
+    if (response.status === 404) {
+      /* 设备没启动（没有运行态） */
+      return null;
+    }
+    return readJson<CycleRuntimeView>(response);
+  },
+  async cycleStart(deviceId: string) {
+    return commandStatus(
+      await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/cycle/start`), {
+        method: 'POST',
+      }),
+    );
+  },
+  async cycleStop(deviceId: string) {
+    return commandStatus(
+      await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/cycle/stop`), {
+        method: 'POST',
+      }),
     );
   },
   async sendSml(sessionId, sml) {

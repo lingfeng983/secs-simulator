@@ -18,7 +18,13 @@ import com.shimizukenta.secssim.core.template.Expression;
 public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.OnCondition, Trigger.AfterEvent {
 
     /**
-     * 计算区间内应触发的时刻。
+     * 计算区间内应触发的时刻（锚点 = 仿真时钟零点）。
+     *
+     * <p>这是旧语义：{@link At} 的 {@code atMs} 与 {@link Periodic} 的
+     * {@code k × period} 都从时钟零点起算。运行时调度（3.3 起）改用
+     * {@link #fireTimes(long, long, Rng, String, long)}——手动启动时刻即初始时间；
+     * 旧三参入口保留给 {@link EventSchedule#between(long, long, Rng)}
+     * （纯区间语义）与既有测试。</p>
      *
      * @param fromMs 起始（不含）
      * @param toMs   结束（含）
@@ -29,15 +35,48 @@ public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.On
     List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId);
 
     /**
+     * 计算区间内应触发的时刻（带锚点）。
+     *
+     * <p>锚点 = 计划的启动时刻（{@code enabledAt}）：</p>
+     * <ul>
+     *   <li>{@link At}：在 {@code anchorMs + atMs} 触发一次——"启动后 atMs 毫秒触发"，
+     *       启动晚了不再直接错过；</li>
+     *   <li>{@link Periodic}：第 {@code k} 次（k ≥ 1）在
+     *       {@code anchorMs + k × period ± 抖动}——"手动启动时间 = 初始时间"；
+     *       启动即发的那一条（k = 0）由运行时在 {@code setEventEnabled(true)} 里直接触发，
+     *       不走区间求值；</li>
+     *   <li>{@link OnCondition} / {@link AfterEvent}：返回空（与无锚点一致）。</li>
+     * </ul>
+     *
+     * <p>{@code anchorMs = 0} 时与旧语义完全一致。</p>
+     *
+     * @param fromMs   起始（不含）
+     * @param toMs     结束（含）
+     * @param rng      噪声源
+     * @param planId   计划标识
+     * @param anchorMs 启动锚点（毫秒，时钟系）
+     * @return 时刻列表（升序）
+     */
+    default List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId, long anchorMs) {
+        return this.fireTimes(fromMs, toMs, rng, planId);
+    }
+
+    /**
      * 一次性触发。
      *
-     * @param atMs 绝对时刻（相对仿真起点）
+     * @param atMs 绝对时刻（相对仿真起点；带锚点求值时相对锚点）
      */
     record At(long atMs) implements Trigger {
 
         @Override
         public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId) {
             return (fromMs < this.atMs && this.atMs <= toMs) ? List.of(this.atMs) : List.of();
+        }
+
+        @Override
+        public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId, long anchorMs) {
+            long at = anchorMs + this.atMs;
+            return (fromMs < at && at <= toMs) ? List.of(at) : List.of();
         }
     }
 
@@ -154,6 +193,35 @@ public sealed interface Trigger permits Trigger.At, Trigger.Periodic, Trigger.On
 
             for (long k = firstK; k <= lastK; k++) {
                 long base = k * this.periodMs;
+                long offset = 0L;
+
+                if (this.jitterMs > 0L) {
+                    double u = stream.uniform01(k) * 2.0 - 1.0;
+                    offset = Math.round(u * this.jitterMs);
+                }
+
+                long at = base + offset;
+                if (fromMs < at && at <= toMs) {
+                    times.add(at);
+                }
+            }
+
+            return List.copyOf(times);
+        }
+
+        @Override
+        public List<Long> fireTimes(long fromMs, long toMs, Rng rng, String planId, long anchorMs) {
+            // 与无锚点版本同一套扫描口径，只是 base 整体平移 anchorMs：
+            // k 的区间按 (from - anchor, to - anchor] ± jitter 反推，过滤仍按绝对时刻。
+            long firstK = Math.max(1L,
+                    Math.floorDiv(fromMs - anchorMs - this.jitterMs, this.periodMs) + 1L);
+            long lastK = Math.floorDiv(toMs - anchorMs + this.jitterMs, this.periodMs);
+            java.util.TreeSet<Long> times = new java.util.TreeSet<>();
+
+            Rng stream = rng.derive("plan:" + planId);
+
+            for (long k = firstK; k <= lastK; k++) {
+                long base = anchorMs + k * this.periodMs;
                 long offset = 0L;
 
                 if (this.jitterMs > 0L) {

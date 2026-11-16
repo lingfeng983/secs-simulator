@@ -242,7 +242,7 @@ export function SvidTable({ equipment, edit, library }: {
           <button
             type="button"
             className="primary"
-            title="没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。"
+            title="没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。"
             onClick={() => setEditing({ scope: firstUnit, index: null })}
           >
             ＋ 新建变量

@@ -49,6 +49,12 @@ final class HostCommandHandler {
 
     /** 写常量后的落盘回调；{@code null} 表示不落盘。 */
     private HostCommandHandler.ConstantSaver constantSaver;
+    /** 参数变化全停钩子（S2F15 写常量成功后触发；由会话注入）。 */
+    private volatile Runnable stopAllHook = () -> { };
+    /** 注入参数变化全停钩子。 */
+    void stopAllHook(Runnable hook) {
+        this.stopAllHook = hook == null ? () -> { } : hook;
+    }
 
     /** 出错时的回调（记入会话的最后错误）。 */
     private java.util.function.Consumer<Exception> errorSink;
@@ -444,6 +450,8 @@ final class HostCommandHandler {
             this.constants.clear();
             this.constants.putAll(next);
         }
+        /* 参数变化一律全停（2026-11-16 设计 D6）：S2F15 写设备常量属于 §2.1 清单第 6 条 */
+        this.stopAllHook.run();
         return 0;
     }
 

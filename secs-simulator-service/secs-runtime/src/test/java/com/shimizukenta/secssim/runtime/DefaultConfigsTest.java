@@ -71,11 +71,14 @@ class DefaultConfigsTest {
             assertTrue(config.hasSources(), name + " 应给变量配值定义");
             assertEquals(5, config.context().size(), name + " 应演示 5 个晶圆属性");
             assertNotNull(config.cycle(), name + " 应演示 wafer 周期");
-            /* 周期事件在构建期按片展开：片数 × 每条事件 + 手写计划 */
+            /* M3 拆分：编排表只含手写计划（cycle 由 CycleRunner 驱动，不再按片展开混入）；
+               展开结果仅供预览合成 */
             int perCycle = config.cycle().events().size();
-            int expected = config.cycle().count() * perCycle + config.schedule().plans().size();
-            assertEquals(expected, config.effectiveSchedule().plans().size(),
-                    name + " 的周期事件应逐片展开");
+            assertEquals(config.cycle().count() * perCycle,
+                    config.cycle().expandPlans(config.spec().seed()).size(),
+                    name + " 的周期事件按片展开（预览合成用）");
+            assertTrue(config.schedule().plans().stream().noneMatch(p -> p.id().startsWith("cyc")),
+                    name + " 的编排表里不应再出现 cyc* 计划");
         }
     }
 }

@@ -179,64 +179,23 @@ class PlanExecutorTest {
     }
 
     /**
-     * queue：离线只入内存队列；重连后 FIFO 补跑，效果/报文按补跑时刻 now 求值，
-     * 台账 scheduled_at 保留原锚点，幂等键带 {@code |queued|}。
+     * queue 已废弃（2026-11-16 设计 M2 去补跑）：按 skip 处理——记 SKIPPED 台账，
+     * 不排队、不补发；配置解析保留该值只为给迁移 Issue（4.0 删除）。
      */
     @Test
-    void offlineQueueReplaysFifoOnReconnectUsingNow() throws Exception {
+    void offlineQueuePolicyIsDegradedToSkipWithoutReplay() throws Exception {
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
-        List<Long> buildAt = new CopyOnWriteArrayList<>();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
         EventPlan queued = plan("p", 2001, List.of(), EventPlan.OFFLINE_QUEUE, EventPlan.FAILURE_KEEP);
 
-        long[] anchors = {AT, AT + 10, AT + 20};
-        for (long anchor : anchors) {
-            executor.execute(queued, "p", 2001, anchor, null, false,
-                    (ceid, at) -> null, false);
-        }
+        executor.execute(queued, "p", 2001, AT, null, false,
+                (ceid, at) -> null, false);
 
-        assertEquals(3, executor.pendingCount());
-        assertTrue(rec.ledger.isEmpty(), "排队期间不记执行台账（不是 Spooling）");
-
-        long beforeReplay = System.currentTimeMillis();
-        int replayed = executor.flushPending(new PlanExecutor.Dependencies(
-                comm(sends, null), true,
-                (ceid, atMs) -> { buildAt.add(atMs); return null; }, false));
-
-        assertEquals(3, replayed);
-        assertEquals(0, executor.pendingCount());
-        assertEquals(3, sends.size());
-        assertEquals(3, buildAt.size());
-        assertTrue(buildAt.stream().allMatch(t -> t >= beforeReplay),
-                "pulse/decay 必须用补跑时刻求值，不能回放旧时刻: " + buildAt);
-        assertEquals(anchors[0], rec.ledger.get(0).scheduledAt());
-        assertEquals(anchors[1], rec.ledger.get(1).scheduledAt());
-        assertEquals(anchors[2], rec.ledger.get(2).scheduledAt());
-        assertTrue(rec.ledger.stream().allMatch(e -> e.idempotencyKey().contains("|queued|")));
-        assertEquals(0, executor.flushPending(new PlanExecutor.Dependencies(
-                comm(sends, null), true, (ceid, at) -> null, false)),
-                "队列空后重复补跑不得再发");
-    }
-
-    /** 超过 256 丢最旧，并给它记一条 SKIPPED 台账（不静默丢）。 */
-    @Test
-    void queueOverflowDropsOldestWithAnExplicitLedgerRow() throws Exception {
-        Recorder rec = new Recorder();
-        PlanExecutor executor = new PlanExecutor(DEVICE, rec);
-        EventPlan queued = plan("p", 2001, List.of(), EventPlan.OFFLINE_QUEUE, EventPlan.FAILURE_KEEP);
-
-        for (int i = 0; i < PlanExecutor.QUEUE_CAPACITY + 1; i++) {
-            executor.execute(queued, "p", 2001, AT + i, null, false,
-                    (ceid, at) -> null, false);
-        }
-
-        assertEquals(PlanExecutor.QUEUE_CAPACITY, executor.pendingCount());
-        assertEquals(1, rec.ledger.size(), "只丢最旧那一条，且必须留痕");
+        assertEquals(0, sends.size(), "queue 降级后离线不发送");
+        assertEquals(1, rec.ledger.size(), "按 skip 口径记台账");
         assertEquals("SKIPPED", rec.ledger.get(0).status());
-        assertTrue(rec.ledger.get(0).error().contains("256"));
-        assertTrue(rec.ledger.get(0).error().contains("不是 Spooling"));
-        assertTrue(rec.ledger.get(0).idempotencyKey().contains("|overflow|"));
+        assertTrue(rec.ledger.get(0).error().contains("skip"));
     }
 
     /* ------------------------------------------------------------------ */
@@ -417,8 +376,16 @@ class PlanExecutorTest {
 
             assertTrue(reported.await(2, TimeUnit.SECONDS));
             assertEquals(List.of("对端拒收"), errors);
-            assertEquals("SENT", rec.ledger.get(0).status(),
-                    "异步 ACK 的最终结果不改变本次编排结论（明细由链路日志记录）");
+            /* D7：W 位异步失败在入队行（SENT）之外补一条 FAILED 台账（|ack|seq），
+               并计入计划 fire（失败口径），不重试不补发 */
+            assertEquals(2, rec.ledger.size(), "入队行 + 异步失败行");
+            assertEquals("SENT", rec.ledger.get(0).status());
+            assertEquals("FAILED", rec.ledger.get(1).status());
+            assertTrue(rec.ledger.get(1).idempotencyKey().contains("|ack|"),
+                    "异步失败行用新幂等键: " + rec.ledger.get(1).idempotencyKey());
+            assertEquals("对端拒收", rec.ledger.get(1).error());
+            assertEquals(List.of("p|true|", "p|false|对端拒收"), rec.fires,
+                    "入队行计成功 fire，异步失败行再计一次失败 fire");
         } finally {
             ack.shutdownNow();
         }

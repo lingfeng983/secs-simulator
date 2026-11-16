@@ -60,7 +60,7 @@ public record CycleConfig(long durationMs, long jitterMs, int count, boolean noi
      * @return 时钟
      */
     public CycleClock clock(long seed) {
-        return new CycleClock(this.durationMs, this.jitterMs, this.count, seed);
+        return CycleClock.of(this.durationMs, this.jitterMs, this.count, seed);
     }
 
     /**
@@ -93,7 +93,7 @@ public record CycleConfig(long durationMs, long jitterMs, int count, boolean noi
      * @param path 字段路径
      * @return 周期定义；没有该段返回 {@code null}
      */
-    static CycleConfig parse(JsonHub root, String path) {
+    public static CycleConfig parse(JsonHub root, String path) {
         if (!root.containsKey("cycle")) {
             return null;
         }

@@ -122,6 +122,11 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
     /**
      * 周期时钟：没有 {@code cycle} 段时退化为直通（相位 = 绝对时刻）。
      *
+     * <p>3.3 起只供预览 / 测试取编译期片表用；运行装配统一改传
+     * {@link #lifecycleCycleClock()}——三套值对象（SVID 曲线 / 晶圆属性 /
+     * 设备常量）与工艺周期状态机共用同一个装饰器实例，
+     * 值随周期启停（2026-11-16 设计 §5.2）。</p>
+     *
      * @return 时钟
      */
     public CycleClock cycleClock() {
@@ -129,7 +134,36 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
     }
 
     /**
-     * 晶圆属性表。
+     * 生命周期周期时钟：值求值与工艺周期状态机的共享实例。
+     *
+     * <p>有 {@code cycle} 段：初态 STOPPED（待手动启动，全停清单 §2.1）；
+     * 没有：自动 RUNNING、锚 = 时钟零点（D12——与 3.1 行为一致，
+     * 顺带修掉 passthrough 相位无界：24h 后 FINISHED 冻结）。</p>
+     *
+     * @return 生命周期时钟
+     */
+    public com.shimizukenta.secssim.core.cycle.LifecycleCycleClock lifecycleCycleClock() {
+        return this.cycle == null
+                ? new com.shimizukenta.secssim.core.cycle.LifecycleCycleClock(
+                        CycleClock.passthrough(),
+                        com.shimizukenta.secssim.core.cycle.LifecycleCycleClock.State.RUNNING)
+                : new com.shimizukenta.secssim.core.cycle.LifecycleCycleClock(
+                        this.cycle.clock(this.spec.seed()),
+                        com.shimizukenta.secssim.core.cycle.LifecycleCycleClock.State.STOPPED);
+    }
+
+    /**
+     * 晶圆属性表（装配处传入共享的生命周期时钟）。
+     *
+     * @param clock 生命周期时钟
+     * @return 表
+     */
+    public ContextTable contextTable(CycleClock clock) {
+        return new ContextTable(this.context, clock);
+    }
+
+    /**
+     * 晶圆属性表（独立时钟；预览 / 测试用）。
      *
      * @return 表
      */
@@ -138,20 +172,16 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
     }
 
     /**
-     * 运行时真正生效的编排：手写计划 + 周期事件按片展开。
+     * 编排表：只有手写的 {@code events.plans}。
      *
-     * <p>展开在取用时算，<b>不回写配置</b>——否则 {@code toJson} 会把生成的计划
-     * 也写进文档，存一次翻一倍。</p>
+     * <p>3.3 起工艺周期不再按片展开混进编排表——cycle 由独立的
+     * {@code CycleRunner} 驱动（锚点 = 启动时刻），编排页只列手写计划。
+     * {@link CycleConfig#expandPlans(long)} 保留给预览合成用。</p>
      *
      * @return 编排
      */
-    public EventSchedule effectiveSchedule() {
-        if (this.cycle == null || this.cycle.events().isEmpty()) {
-            return this.schedule;
-        }
-        List<EventPlan> plans = new ArrayList<>(this.schedule.plans());
-        plans.addAll(this.cycle.expandPlans(this.spec.seed()));
-        return new EventSchedule(plans);
+    public EventSchedule schedule() {
+        return this.schedule;
     }
 
     /**

@@ -112,12 +112,49 @@ final class DeviceV2Delegates {
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
-        if (!session.setEventEnabled(planId, enabled)) {
+        com.shimizukenta.secssim.app.session.PlanEnableOutcome outcome = session.setEventEnabled(planId, enabled);
+        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.UNKNOWN_PLAN) {
             return SessionOutcome.FAILED;
         }
-        /* next_fire_at 由调度器在下一次扫描时推进；这里只持久化启停态，
-           不写死一个可能与 OnCondition / AfterEvent 冲突的时刻（设计 §2.7.3）。 */
-        this.linkState.savePlanState(this.ids.canonical(deviceId), planId, enabled, null, "");
+        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.NOT_ONLINE) {
+            /* 2026-11-16 设计 §2.2：离线时拒绝启动（409 not-online），界面禁用按钮 */
+            return SessionOutcome.NOT_ONLINE;
+        }
+        /* next_fire_at 开始写入（§2.1）：周期计划 = enabledAt + k×period 的下一次；
+           启用态不再跨重启回放（D4），本行只承载统计与倒计时初值 */
+        this.linkState.savePlanState(this.ids.canonical(deviceId), planId, enabled,
+                session.nextFireAtOf(planId), "");
+        return SessionOutcome.OK;
+    }
+
+    /** 工艺周期运行态 JSON（M3）；设备不在返回 {@code null}。 */
+    String cycleJsonV2(String deviceId) {
+        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        return session == null ? null : session.cycleJson();
+    }
+
+    /** 启动工艺周期：ONLINE 门控同计划启停；没有 cycle 段返回 FAILED（409 no-cycle）。 */
+    SessionOutcome cycleStartV2(String deviceId) {
+        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        com.shimizukenta.secssim.app.session.PlanEnableOutcome outcome = session.cycleStart();
+        return switch (outcome) {
+            case OK -> SessionOutcome.OK;
+            case NOT_ONLINE -> SessionOutcome.NOT_ONLINE;
+            case NO_CYCLE -> SessionOutcome.FAILED;
+            case UNKNOWN_PLAN -> SessionOutcome.FAILED;
+        };
+    }
+
+    /** 停止工艺周期（禁用方向不受 ONLINE 限制）。 */
+    SessionOutcome cycleStopV2(String deviceId) {
+        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        if (session == null) {
+            return SessionOutcome.UNKNOWN_SESSION;
+        }
+        session.cycleStop();
         return SessionOutcome.OK;
     }
 
@@ -134,7 +171,7 @@ final class DeviceV2Delegates {
             stats.put(row.planId(), new PlanRuntimeStat(row.fireCount(), row.skippedCount(),
                     row.lastFireAt() == null ? 0L : row.lastFireAt(),
                     row.nextFireAt() == null ? 0L : row.nextFireAt(),
-                    row.lastError() == null ? "" : row.lastError()));
+                    row.lastError() == null ? "" : row.lastError(), 0L));
         }
         return session.eventsJson(stats);
     }

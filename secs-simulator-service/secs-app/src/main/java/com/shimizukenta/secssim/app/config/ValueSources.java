@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.app.config;
 
 import com.shimizukenta.secssim.app.session.DefaultCurves;
+import com.shimizukenta.secssim.core.cycle.CycleClock;
 import com.shimizukenta.secssim.core.compile.ResolvedEquipment;
 import com.shimizukenta.secssim.core.compile.ResolvedSvid;
 import com.shimizukenta.secssim.core.domain.UnitSpec;
@@ -32,13 +33,29 @@ public final class ValueSources {
     }
 
     /**
-     * 按配置构建值来源。
+     * 按配置构建值来源（自带编译期周期时钟；预览 / 测试用）。
      *
      * @param config    会话配置
      * @param equipment 已编译的设备模型
      * @return 值来源
      */
     public static ValueSource of(SessionConfig config, ResolvedEquipment equipment) {
+        return of(config, equipment, config.cycleClock());
+    }
+
+    /**
+     * 按配置构建值来源（共享生命周期时钟）。
+     *
+     * <p>运行装配传 {@code SessionConfig.lifecycleCycleClock()}：SVID 曲线与
+     * 晶圆属性 / 设备常量、工艺周期状态机共用同一个实例，值随周期启停
+     * （2026-11-16 设计 §5.2）。草稿预览传编译期时钟（模拟时间线）。</p>
+     *
+     * @param config    会话配置
+     * @param equipment 已编译的设备模型
+     * @param clock     周期时钟（生命周期装饰器或编译期时钟）
+     * @return 值来源
+     */
+    public static ValueSource of(SessionConfig config, ResolvedEquipment equipment, CycleClock clock) {
         final ValueSource values;
 
         if (config.hasSources()) {
@@ -46,7 +63,7 @@ public final class ValueSources {
                周期时钟决定曲线拿到的是片内相位还是绝对时刻。 */
             values = new DataSourceValueSource(
                     config.svidSources(),
-                    config.cycleClock(),
+                    clock,
                     config.spec().seed(),
                     config.cycle() != null && config.cycle().noisePerWafer());
         } else {

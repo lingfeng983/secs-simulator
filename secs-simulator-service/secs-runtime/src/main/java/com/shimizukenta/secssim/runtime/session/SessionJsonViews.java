@@ -114,6 +114,7 @@ final class SessionJsonViews {
                 pairs.add(b.pair("skippedCount", stat.skippedCount()));
                 pairs.add(b.pair("lastFireAt", stat.lastFireAt()));
                 pairs.add(b.pair("nextFireAt", stat.nextFireAt()));
+                pairs.add(b.pair("nextFireInMs", stat.nextFireInMs()));
                 pairs.add(b.pair("lastError", stat.lastError() == null ? "" : stat.lastError()));
             }
             triggerJson(plan.trigger(), pairs, b);

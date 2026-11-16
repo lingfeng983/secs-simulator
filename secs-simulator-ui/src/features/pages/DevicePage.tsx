@@ -12,6 +12,7 @@ import { SvidConfigPanel } from '../panels/SvidConfigPanel';
 import { ContextConfigPanel } from '../panels/ContextConfigPanel';
 import { CeidReportConfigPanel } from '../panels/CeidReportConfigPanel';
 import { PlanConfigPanel } from '../panels/PlanConfigPanel';
+import { CyclePanel } from '../panels/CyclePanel';
 import { EndpointTag, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
 import { useDeviceEndpoint } from '../../state/deviceEndpoint';
@@ -227,6 +228,9 @@ export function DevicePage({
         )}
         {zone === 'config' && page === 'events' && (
           <CeidReportConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+        )}
+        {zone === 'config' && page === 'cycle' && (
+          <CyclePanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'plans' && (
           <PlanConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />

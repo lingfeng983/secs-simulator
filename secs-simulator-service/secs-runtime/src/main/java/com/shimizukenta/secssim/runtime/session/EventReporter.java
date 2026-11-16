@@ -127,6 +127,22 @@ final class EventReporter {
      * @throws IOException 会话未打开或发送失败
      */
     void emit(int ceid, String planId) throws IOException {
+        this.emit(ceid, planId, this.clock.getAsLong());
+    }
+
+    /**
+     * 上报一次采集事件（带显式触发时刻）。
+     *
+     * <p>工艺周期用：台账 {@code scheduled_at} 记「排定的片内时刻」而不是
+     * 当前时刻——同一 tick 里两条片内事件才不会撞同一个幂等键，追溯时也能
+     * 看到它本该在什么时候发。</p>
+     *
+     * @param ceid   采集事件号
+     * @param planId 触发它的计划 id（cycle 片内事件传 {@code "cycle"}）；手动 {@code null}
+     * @param atMs   排定的触发时刻（幂等键成分）
+     * @throws IOException 会话未打开或发送失败
+     */
+    void emit(int ceid, String planId, long atMs) throws IOException {
         SecsCommunicator comm = this.communicator.get();
         if (comm == null) {
             throw new IOException("session not open: " + this.sessionId);
@@ -157,7 +173,6 @@ final class EventReporter {
             EventPlan effective = firedPlan != null ? firedPlan
                     : new EventPlan(planId == null ? "manual" : planId, ceid,
                             new com.shimizukenta.secssim.core.event.Trigger.Periodic(60_000L, 0L));
-            long atMs = this.clock.getAsLong();
             /*
              * 台账/幂等键上的计划标识：手动触发（planId 为 null）必须落到"实际匹配到的那条计划"上。
              * 否则两次手动触发（不同 CEID）在同一毫秒会撞上同一个幂等键 deviceId|manual|atMs，
@@ -255,28 +270,8 @@ final class EventReporter {
         this.publishS6f11Notice(target.ceid(), planId);
     }
 
-    /**
-     * 重连后按 FIFO 补跑离线队列（{@code offlinePolicy=queue}）。
-     *
-     * <p>报文体按补跑时刻求值：这里给执行器的组装回调直接用当前时刻，
-     * 而不是排队时的 {@code atMs}。</p>
-     */
-    void replayPending() {
-        PlanExecutor executor = this.planExecutor;
-        if (executor == null) {
-            return;
-        }
-        SecsCommunicator comm = this.communicator.get();
-        if (comm == null || !this.onlineCheck.getAsBoolean()) {
-            return;
-        }
-        long now = this.clock.getAsLong();
-        executor.flushPending(new PlanExecutor.Dependencies(
-                comm, true,
-                (ceidArg, atMsArg) -> this.assembler.get().build(ceidArg, now),
-                this.wbit.getAsBoolean()));
-    }
-
+    /* offlinePolicy=queue 的补跑链路已随 2026-11-16 设计（M2 去补跑）删除：
+       不在线的触发在调度层就被清场丢弃（D8），发送失败也不重试不补发。 */
     /**
      * 挂编排执行器(3.0):触发路径全部改走它并落台账。
      *

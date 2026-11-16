@@ -178,9 +178,14 @@ public final class SessionLauncher {
                限流、W 位的任何变化都原地替换，主机连接保持不断。 */
             if (current instanceof HsmsSessionRuntime running
                     && fingerprint != null && fingerprint.equals(source.fingerprint())) {
+                /* 全量热生效（2026-11-16 设计 M1-6）：晶圆属性表 / 设备常量取值器 /
+                   工艺周期一起换（此前热路径丢弃这两份——审计 P0）；值重建后时钟
+                   回 STOPPED，计划启用态随 enableSchedule 清空——热重载即全停 */
                 running.applyHot(prepared.schedule, prepared.maxPerSec,
                         prepared.s6f11Wbit, prepared.s6f1Wbit,
-                        prepared.model, prepared.values);
+                        prepared.model, prepared.values,
+                        prepared.contextTable, prepared.ecidValues,
+                        prepared.cycle, prepared.lifecycleClock);
                 this.sources.put(id, source.withLastGood(prepared, fingerprint));
                 Log.info("会话 " + id + " 已热生效（设备模型/编排/模板原地替换，主机连接未断）");
                 return true;
@@ -379,8 +384,13 @@ public final class SessionLauncher {
         SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
                 configured.seed(), configured.equipment(), configured.timeouts());
 
+        /* 生命周期周期时钟：值求值与工艺周期状态机的共享实例（2026-11-16 设计 §5.2）。
+           有 cycle 段初态 STOPPED（待手动启动）；没有则自动 RUNNING、锚 = 时钟零点（D12）。 */
+        com.shimizukenta.secssim.core.cycle.LifecycleCycleClock lifecycleClock =
+                config.lifecycleCycleClock();
+
         /* 值来源统一从这里出：默认曲线 / 模板图 / SVID 直配（v6）的分支只在 ValueSources 里有一份 */
-        ValueSource values = ValueSources.of(config, compiled.equipment());
+        ValueSource values = ValueSources.of(config, compiled.equipment(), lifecycleClock);
 
         java.util.Map<Integer, com.shimizukenta.secssim.core.domain.EquipmentConstantDef> constants =
                 new java.util.LinkedHashMap<>();
@@ -388,14 +398,16 @@ public final class SessionLauncher {
                 : config.spec().equipment().constants()) {
             constants.put(def.id(), def);
         }
-        com.shimizukenta.secssim.core.context.ContextTable contextTable = config.contextTable();
+        com.shimizukenta.secssim.core.context.ContextTable contextTable = config.contextTable(lifecycleClock);
         com.shimizukenta.secssim.runtime.session.EcidValues ecidValues =
                 new com.shimizukenta.secssim.runtime.session.EcidValues(
-                        constants, config.ecidSources(), config.cycleClock(), config.spec().seed());
+                        constants, config.ecidSources(), lifecycleClock, config.spec().seed());
 
-        return new Prepared(spec, compiled.equipment(), values, config.effectiveSchedule(),
+        /* cycle 不再按片展开混进编排表（M3 拆分）：events.plans 进 EventScheduler，
+           cycle 由 CycleRunner 驱动（锚点 = 启动时刻） */
+        return new Prepared(spec, compiled.equipment(), values, config.schedule(),
                 config.maxEventsPerSec(), config.s6f11Wbit(), config.s6f1Wbit(), constantWriter(),
-                contextTable, ecidValues);
+                contextTable, ecidValues, config.cycle(), lifecycleClock);
     }
 
     /** S2F15 的常量回写目标：接到配置门面（正文在 config.db）。 */
@@ -493,11 +505,17 @@ public final class SessionLauncher {
         private final boolean s6f1Wbit;
         private final ConstantWriter constantWriter;
 
+        /** cycle 配置段（M3 拆分）；{@code null} = 没有 cycle 段。 */
+        private final com.shimizukenta.secssim.app.config.CycleConfig cycle;
+
+        /** 生命周期周期时钟（与 values 内部同实例）。 */
+        private final com.shimizukenta.secssim.core.cycle.LifecycleCycleClock lifecycleClock;
+
         Prepared(SessionSpec spec, ResolvedEquipment model,
                  ValueSource values, EventSchedule schedule, int maxPerSec,
                  boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter) {
             this(spec, model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, constantWriter,
-                    com.shimizukenta.secssim.core.context.ContextTable.empty(), null);
+                    com.shimizukenta.secssim.core.context.ContextTable.empty(), null, null, null);
         }
 
         Prepared(SessionSpec spec, ResolvedEquipment model,
@@ -505,8 +523,21 @@ public final class SessionLauncher {
                  boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter,
                  com.shimizukenta.secssim.core.context.ContextTable contextTable,
                  com.shimizukenta.secssim.runtime.session.EcidValues ecidValues) {
+            this(spec, model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit, constantWriter,
+                    contextTable, ecidValues, null, null);
+        }
+
+        Prepared(SessionSpec spec, ResolvedEquipment model,
+                 ValueSource values, EventSchedule schedule, int maxPerSec,
+                 boolean s6f11Wbit, boolean s6f1Wbit, ConstantWriter constantWriter,
+                 com.shimizukenta.secssim.core.context.ContextTable contextTable,
+                 com.shimizukenta.secssim.runtime.session.EcidValues ecidValues,
+                 com.shimizukenta.secssim.app.config.CycleConfig cycle,
+                 com.shimizukenta.secssim.core.cycle.LifecycleCycleClock lifecycleClock) {
             this.contextTable = contextTable;
             this.ecidValues = ecidValues;
+            this.cycle = cycle;
+            this.lifecycleClock = lifecycleClock;
             this.spec = spec;
             this.model = model;
             this.values = values;
@@ -537,7 +568,7 @@ public final class SessionLauncher {
          */
         HsmsSessionRuntime open(EventBus bus, NoticeBus notices, String configName) throws IOException {
             HsmsSessionRuntime runtime = new HsmsSessionRuntime(this.spec, this.model,
-                    EngineClock.system(), this.values);
+                    EngineClock.system(), this.values, null, this.cycle, this.lifecycleClock);
             runtime.dataModel(this.contextTable, this.ecidValues);
             if (bus != null) {
                 runtime.eventBus(bus);

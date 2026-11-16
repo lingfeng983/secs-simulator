@@ -1,9 +1,7 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -28,6 +26,12 @@ import com.shimizukenta.secssim.store.PlanExecutionRepository;
  * <p>一次触发 = 一条台账：幂等预留 → 可发判定（离线策略）→ 逐条动作发送
  * → 台账提交。台账经 {@link PlanExecutionRepository} 异步批量落库
  * （发送线程零同步 DB 写）。</p>
+ *
+ * <p>2026-11-16 设计（M2 去补跑）：{@code offlinePolicy=queue} 与整条补跑链路
+ * （离线队列 / flush / replay / 溢出台账）已删除——调度层在不在线时直接清场，
+ * 触发静默丢弃（D8）；发送失败记 FAILED，不重试不补发。W 位异步失败
+ * （T3 超时 / 中断）补一条 {@code FAILED} 台账（新幂等键后缀 {@code |ack|seq}，
+ * D7）并更新计划 last_error。</p>
  *
  * <p><b>事件不改值</b>（schema v7）：触发只上报，报文体里的值由数据项自己的
  * {@code source} 决定。台账的 effects 字段保留为空数组——DB 列不动，
@@ -70,20 +74,18 @@ public final class PlanExecutor {
         SmlParser.Message resolve(PlanAction action, int ceid, long atMs) throws Exception;
     }
 
-    /** 一次触发可用的会话依赖（重连补跑时整体换成当前连接）。 */
+    /**
+     * 一次触发可用的会话依赖。
+     *
+     * <p>补跑链路删除后，{@code online=false} 只剩 manual / step 两条入口可达：
+     * 调度路径在不在线时由 pumpEvents 清场，根本不会走到这里（D8）。</p>
+     */
     public record Dependencies(SecsCommunicator comm, boolean online,
                                Secs2BodySupplier s6f11Body, boolean s6f11Wbit) {
     }
 
-    /** 离线排队的一条触发。 */
-    private record Pending(EventPlan plan, String planId, int ceid, long atMs) {
-    }
-
     /** 幂等窗口：同键 60 秒内视为重复触发。 */
     private static final long IDEMPOTENT_WINDOW_MS = 60_000L;
-
-    /** 离线有界队列上限（不是 Spooling，进程重启即丢）。 */
-    public static final int QUEUE_CAPACITY = 256;
 
     private final String deviceId;
     private final Sink sink;
@@ -91,8 +93,8 @@ public final class PlanExecutor {
     /** 幂等表清理节拍（每 256 次执行扫一次，见 {@code executeInternal}）。 */
     private final AtomicLong pruneTick = new AtomicLong();
     private final AtomicLong stepSequence = new AtomicLong();
-    private final AtomicLong replaySequence = new AtomicLong();
-    private final Deque<Pending> pending = new ArrayDeque<>();
+    /** W 位异步失败的台账序号（幂等键后缀 |ack|seq，D7）。 */
+    private final AtomicLong ackSequence = new AtomicLong();
 
     private volatile ActionResolver actionResolver;
     private volatile Supplier<ExecutorService> ackSender;
@@ -191,16 +193,11 @@ public final class PlanExecutor {
 
         final String ledgerPlanId = planId == null ? "manual" : planId;
 
-        /* 1. 离线策略：不在线/未连接时按计划策略处理 */
+        /* 1. 离线策略：不在线/未连接时按计划策略处理。
+           queue 已废弃（M2 去补跑）：解析层保留该值但按 skip 处理并给迁移 Issue。 */
         if (deps.comm() == null || !deps.online()) {
             String policy = planId == null ? EventPlan.OFFLINE_SKIP
                     : plan.offlinePolicy().toLowerCase(Locale.ROOT);
-            if (EventPlan.OFFLINE_QUEUE.equals(policy)) {
-                /* 有界内存队列（≤256），重连后 FIFO 补跑；
-                   不是 Spooling，不落 S2F43–F48，进程重启即丢。 */
-                enqueuePending(new Pending(plan, planId, ceid, atMs), key);
-                return;
-            }
             if (EventPlan.OFFLINE_FAIL.equals(policy)) {
                 commit(key, ledgerPlanId, ceid, atMs, dryRun, Status.FAILED,
                         "[]", "[]", "设备离线（offlinePolicy=fail）", "device-offline");
@@ -229,7 +226,7 @@ public final class PlanExecutor {
             long startedAt = System.currentTimeMillis();
             try {
                 SmlParser.Message message = resolve(action, ceid, buildAtMs, deps);
-                send(deps.comm(), message);
+                send(deps.comm(), message, ledgerPlanId, ceid, scheduledAt, dryRun);
                 messages.add(messageEntry(action.kind(), message.stream(), message.function(),
                         message.wbit(), startedAt, "", ""));
                 sent++;
@@ -275,8 +272,16 @@ public final class PlanExecutor {
         return message;
     }
 
-    /** W 位发送进单线程 ACK 队列，不阻塞事件心跳；队列满视为该动作失败。 */
-    private void send(SecsCommunicator comm, SmlParser.Message message) throws Exception {
+    /**
+     * 发送：W 位进单线程 ACK 队列（不阻塞事件心跳）；队列满视为该动作失败。
+     *
+     * <p>异步发送失败（T3 超时 / 被中断）走 {@link #recordAckFailure}：
+     * 台账补一条 FAILED（新幂等键 {@code |ack|seq}）+ 计划 last_error，
+     * 不重试不补发（D7）。原行在入队时刻已按 SENT 提交——异步失败不翻旧行，
+     * 只追加一条排障证据。</p>
+     */
+    private void send(SecsCommunicator comm, SmlParser.Message message,
+                      String ledgerPlanId, int ceid, long atMs, boolean dryRun) throws Exception {
         if (message.wbit() && this.ackSender != null) {
             ExecutorService pool = this.ackSender.get();
             if (pool == null) {
@@ -288,10 +293,11 @@ public final class PlanExecutor {
                         comm.send(message.stream(), message.function(), true, message.body());
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        this.errorSink.accept(new IllegalStateException(
-                                "等待 S" + message.stream() + "F" + message.function() + " 回复被中断", e));
+                        this.recordAckFailure(ledgerPlanId, ceid, atMs, dryRun,
+                                "等待 S" + message.stream() + "F" + message.function() + " 回复被中断");
                     } catch (Exception e) {
-                        this.errorSink.accept(e);
+                        String error = e.getMessage() == null ? e.toString() : e.getMessage();
+                        this.recordAckFailure(ledgerPlanId, ceid, atMs, dryRun, error);
                     }
                 });
             } catch (RejectedExecutionException e) {
@@ -303,65 +309,18 @@ public final class PlanExecutor {
         comm.send(message.stream(), message.function(), message.wbit(), message.body());
     }
 
-    /** 离线队列入队；超过 256 丢最旧并给它记一条 SKIPPED 台账（不静默丢）。 */
-    private void enqueuePending(Pending item, String key) {
-        Pending dropped = null;
-        synchronized (this.pending) {
-            if (this.pending.size() >= QUEUE_CAPACITY) {
-                dropped = this.pending.pollFirst();
-            }
-            this.pending.addLast(item);
-        }
-        if (dropped != null) {
-            String dropKey = this.deviceId + "|" + dropped.planId() + "|" + dropped.atMs()
-                    + "|overflow|" + this.replaySequence.incrementAndGet();
-            commit(dropKey, dropped.planId(), dropped.ceid(), dropped.atMs(), false,
-                    Status.SKIPPED, "[]", "[]",
-                    "离线队列已满（256），丢弃最早触发；不是 Spooling，不实现 S2F43–F48",
-                    "offline-queue-overflow");
-        }
+    /** W 位异步失败：补一条 FAILED 台账（幂等键 {@code |ack|seq}）+ fire 计数 / last_error。 */
+    private void recordAckFailure(String ledgerPlanId, int ceid, long atMs, boolean dryRun, String error) {
+        String key = this.deviceId + "|" + ledgerPlanId + "|" + atMs
+                + "|ack|" + this.ackSequence.incrementAndGet();
+        /* 先落台账再报错：errorSink 的订阅方（测试 / 通知）看到失败时，证据已经在 */
+        commit(key, ledgerPlanId, ceid, atMs, dryRun, Status.FAILED,
+                "[]", "[]", error, error);
+        this.errorSink.accept(new IllegalStateException(error));
     }
 
-    /**
-     * 重连后按 FIFO 补跑离线队列（设计 §2.7.2）。
-     *
-     * <p>台账 {@code scheduled_at} 记原触发时刻便于追溯，但效果与报文体一律按
-     * 补跑时刻 {@code now} 施加/求值（pulse/decay 是时间函数，用旧时刻会错乱）。
-     * 队列是内存态，进程重启即丢。</p>
-     *
-     * @param deps 当前在线会话的依赖
-     * @return 补跑条数
-     */
-    public int flushPending(Dependencies deps) {
-        if (deps == null || deps.comm() == null || !deps.online()) {
-            return 0;
-        }
-        int replayed = 0;
-        while (true) {
-            Pending item;
-            synchronized (this.pending) {
-                item = this.pending.pollFirst();
-            }
-            if (item == null) {
-                break;
-            }
-            String key = this.deviceId + "|" + (item.planId() == null ? "manual" : item.planId())
-                    + "|" + item.atMs() + "|queued|" + this.replaySequence.incrementAndGet();
-            runOnline(item.plan(), item.planId(), item.ceid(), item.atMs(), key,
-                    item.planId() == null ? "manual" : item.planId(), deps, false,
-                    System.currentTimeMillis());
-            replayed++;
-        }
-        return replayed;
-    }
-
-    /** 离线队列里等待补跑的条数（诊断用）。 */
-    public int pendingCount() {
-        synchronized (this.pending) {
-            return this.pending.size();
-        }
-    }
-
+    /* 离线补跑（enqueuePending / flushPending / pendingCount）已删除——M2 去补跑。
+       设备不在线时调度层清场（D8），发送失败不重试。 */
     /** 记一条台账 + 触发计数 + SSE 摘要，三件事都只做内存/异步操作。 */
     private void commit(String key, String planId, int ceid, long atMs, boolean dryRun,
                         Status status, String messagesJson, String effectsJson,
@@ -396,10 +355,6 @@ public final class PlanExecutor {
 
     private static String failedEntry(String kind, String error) {
         return "{\"kind\":\"" + escape(kind) + "\",\"error\":\"" + escape(error) + "\"}";
-    }
-
-    private static String appendError(String previous, String extra) {
-        return previous == null || previous.isEmpty() ? extra : previous + "; " + extra;
     }
 
     /** 单条执行摘要（合并窗口里一帧携带多条这样的对象）。 */

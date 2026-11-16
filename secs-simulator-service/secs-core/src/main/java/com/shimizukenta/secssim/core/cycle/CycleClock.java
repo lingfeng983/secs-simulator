@@ -1,13 +1,20 @@
 package com.shimizukenta.secssim.core.cycle;
 
-import com.shimizukenta.secssim.core.curve.Rng;
-
 /**
  * wafer 周期时钟：把连续时间映射成「第几片 + 片内相位」。
  *
  * <p>一个周期就是一片 wafer 的处理过程。周期长度是 {@code periodMs} 加上
  * 每片独立的抖动 {@code ±jitterMs}——抖动由种子派生，因此<b>可复现</b>：
  * 同一份配置、同一个种子，第 7 片的起点永远是同一个时刻。</p>
+ *
+ * <p>两条实现：</p>
+ * <ul>
+ *   <li>{@link CompiledCycleClock}：纯函数——时间轴从 0 起算，片表由种子惰性构建；</li>
+ *   <li>{@link LifecycleCycleClock}：装饰器——持有工艺周期的运行状态
+ *       （停止 / 运行 / 已完成），相位锚 = 启动时刻（2026-11-16 计划生命周期重设计
+ *       §5.2）。值求值（{@code SourceEvaluator}）只认这个接口，
+ *       装配处注入装饰器即可让「值随周期启停」。</li>
+ * </ul>
  *
  * <p>三条边界语义：</p>
  * <ul>
@@ -21,56 +28,36 @@ import com.shimizukenta.secssim.core.curve.Rng;
  * <p>片数必须是有限值：事件在编译期按片展开（见 {@code CycleConfig}），
  * 无限片会让展开无界。要长时间跑就配一个大一点的 {@code count}。</p>
  */
-public final class CycleClock {
+public interface CycleClock {
 
     /** 周期长度的下限：太短的周期会让事件挤在同一个 tick 上。 */
-    public static final long MIN_PERIOD_MS = 1_000L;
-
-    private final long periodMs;
-    private final long jitterMs;
-    private final int count;
-    private final Rng rng;
-
-    /** {@code starts[i]} = 第 i 片起点；{@code starts[count]} = 整段结束时刻。惰性构建。 */
-    private volatile long[] starts;
-
-    /**
-     * 创建。
-     *
-     * @param periodMs 标准周期长度（毫秒）
-     * @param jitterMs 每片长度误差（±，毫秒），0 表示不抖
-     * @param count    片数（≥1）
-     * @param seed     种子：抖动的确定性来源
-     */
-    public CycleClock(long periodMs, long jitterMs, int count, long seed) {
-        if (periodMs < MIN_PERIOD_MS) {
-            throw new IllegalArgumentException("periodMs must be >= " + MIN_PERIOD_MS + " but was " + periodMs);
-        }
-        if (jitterMs < 0L) {
-            throw new IllegalArgumentException("jitterMs must be >= 0 but was " + jitterMs);
-        }
-        if (jitterMs >= periodMs) {
-            throw new IllegalArgumentException("jitterMs must be < periodMs but was " + jitterMs);
-        }
-        if (count < 1) {
-            throw new IllegalArgumentException("count must be >= 1 but was " + count);
-        }
-        this.periodMs = periodMs;
-        this.jitterMs = jitterMs;
-        this.count = count;
-        this.rng = new Rng(seed);
-    }
+    long MIN_PERIOD_MS = 1_000L;
 
     /**
      * 单周期直通时钟：相位恒等于绝对时刻。
      *
      * <p>配置里没有 {@code cycle} 段时用它——{@link DataSource.Clock#PHASE}
-     * 因此退化成"只跑一次"，旧配置的语义不必额外分支。</p>
+     * 因此退化成"只跑一次"，旧配置的语义不必额外分支。
+     * （3.3 起装配处会再包一层 {@link LifecycleCycleClock}：
+     * 自动 RUNNING、24h 后 FINISHED 冻结，见设计 D12。）</p>
      *
      * @return 直通时钟
      */
-    public static CycleClock passthrough() {
-        return new CycleClock(86_400_000L, 0L, 1, 0L);
+    static CycleClock passthrough() {
+        return CompiledCycleClock.passthrough();
+    }
+
+    /**
+     * 编译期时钟：片表由种子确定。
+     *
+     * @param periodMs 标准周期长度（毫秒）
+     * @param jitterMs 每片长度误差（±，毫秒），0 表示不抖
+     * @param count    片数（≥1）
+     * @param seed     种子：抖动的确定性来源
+     * @return 编译期时钟
+     */
+    static CycleClock of(long periodMs, long jitterMs, int count, long seed) {
+        return new CompiledCycleClock(periodMs, jitterMs, count, seed);
     }
 
     /**
@@ -78,27 +65,21 @@ public final class CycleClock {
      *
      * @return 毫秒
      */
-    public long periodMs() {
-        return this.periodMs;
-    }
+    long periodMs();
 
     /**
      * 每片长度误差。
      *
      * @return 毫秒
      */
-    public long jitterMs() {
-        return this.jitterMs;
-    }
+    long jitterMs();
 
     /**
      * 片数。
      *
      * @return 片数
      */
-    public int count() {
-        return this.count;
-    }
+    int count();
 
     /**
      * 第 {@code i} 片的实际长度。
@@ -106,14 +87,7 @@ public final class CycleClock {
      * @param i 片号（从 0 开始）
      * @return 毫秒
      */
-    public long durationOf(int i) {
-        if (this.jitterMs == 0L) {
-            return this.periodMs;
-        }
-        double u = this.rng.derive("cycle:" + i).uniform01(0L);
-        long delta = Math.round((u * 2.0 - 1.0) * this.jitterMs);
-        return Math.max(MIN_PERIOD_MS, this.periodMs + delta);
-    }
+    long durationOf(int i);
 
     /**
      * 第 {@code i} 片的起点。
@@ -121,13 +95,7 @@ public final class CycleClock {
      * @param i 片号（从 0 开始；{@code i == count} 返回整段结束时刻）
      * @return 毫秒
      */
-    public long startOf(int i) {
-        if (i <= 0) {
-            return 0L;
-        }
-        long[] table = this.starts();
-        return table[Math.min(i, this.count)];
-    }
+    long startOf(int i);
 
     /**
      * 当前时刻落在第几片。
@@ -138,20 +106,7 @@ public final class CycleClock {
      * @param tMs 时刻
      * @return 片号（从 0 开始）
      */
-    public int indexAt(long tMs) {
-        long[] table = this.starts();
-        int lo = 0;
-        int hi = this.count - 1;
-        while (lo < hi) {
-            int mid = (lo + hi + 1) >>> 1;
-            if (table[mid] <= tMs) {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
-        }
-        return lo;
-    }
+    int indexAt(long tMs);
 
     /**
      * 片内相位：{@code t - startOf(indexAt(t))}。
@@ -159,30 +114,24 @@ public final class CycleClock {
      * @param tMs 时刻
      * @return 相位（毫秒，从 0 开始）
      */
-    public long phaseAt(long tMs) {
-        return tMs - this.startOf(this.indexAt(tMs));
-    }
+    long phaseAt(long tMs);
+
+    /**
+     * ABSOLUTE 曲线的本地时刻。
+     *
+     * <p>编译期时钟下就是 {@code tMs} 本身（时钟零点起算）；生命周期装饰器下是
+     * {@code t - startedAt}——ABSOLUTE 曲线随周期重锚，重启周期即重放
+     * （2026-11-16 设计 D11）。</p>
+     *
+     * @param tMs 时刻
+     * @return 本地时刻（毫秒）
+     */
+    long elapsedAt(long tMs);
 
     /**
      * 整段结束时刻。
      *
      * @return 毫秒
      */
-    public long endMs() {
-        return this.starts()[this.count];
-    }
-
-    /** 惰性构建前缀表；并发下允许重复构建（结果相同），不额外加锁。 */
-    private long[] starts() {
-        long[] table = this.starts;
-        if (table != null) {
-            return table;
-        }
-        table = new long[this.count + 1];
-        for (int i = 0; i < this.count; i++) {
-            table[i + 1] = table[i] + this.durationOf(i);
-        }
-        this.starts = table;
-        return table;
-    }
+    long endMs();
 }

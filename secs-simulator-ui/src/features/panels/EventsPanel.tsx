@@ -114,11 +114,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     }
   };
 
-  /* 事件周期预览:看一个完整周期里所有参数怎么变 */
-  const [cyclePreview, setCyclePreview] = useState<PreviewData | null>(null);
-  /* 默认 120s：60s 周期的计划在 30s 窗口里一个都看不到 */
-  const [cycleWindowMs, setCycleWindowMs] = useState(120_000);
-  const [cycleBusy, setCycleBusy] = useState(false);
   /* 单计划预览：只回放选中的这条计划，看它携带的效果 */
   const [planPreview, setPlanPreview] = useState<{ planId: string; data: PreviewData } | null>(null);
   const [planPreviewBusy, setPlanPreviewBusy] = useState(false);
@@ -193,28 +188,11 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
   const allSelected = visiblePlans.length > 0 && selectedPlans.length === visiblePlans.length;
   const canStartSelected = selectedPlans.some((plan) => !plan.enabled);
   const canStopSelected = selectedPlans.some((plan) => plan.enabled);
+  /* ONLINE 门控（2026-11-16 设计 §2.2）：启动方向要设备在线；禁用方向不受限 */
+  const online = (backend.sessions.find((item) => item.id === activeSession)?.controlState ?? '')
+    === 'ONLINE';
 
-  /**
-   * 预览一个完整事件周期。
-   *
-   * <p>按当前编排做一次确定性模拟,画出所有变量在窗口内的变化,
-   * 并把发送事件的时刻标在图上——这是"参数在事件作用下怎么变"的唯一
-   * 可视化方式。</p>
-   */
-  const loadCyclePreview = async () => {
-    if (activeSession === '') {
-      return;
-    }
-    setCycleBusy(true);
-    try {
-      const data = await backend.previewAll(activeSession, cycleWindowMs);
-      if (data !== null) {
-        setCyclePreview(data);
-      }
-    } finally {
-      setCycleBusy(false);
-    }
-  };
+  /* 周期预览已归「工艺周期」页（2026-11-16 拆分 M4）：这里只留单计划预览。 */
 
   /**
    * 只看一条计划：排除其它计划的效果，回答"这个事件自己带来了什么变化"。
@@ -292,20 +270,15 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     {
       key: 'next',
       header: '下次事件',
-      sortValue: (row) => {
-        const item = stats.get(row.id);
-        const period = row.triggerType === 'periodic' ? (row.periodMs ?? 0) : 0;
-        const nextIn = period > 0 && item && item.lastAt > 0 ? Math.max(0, item.lastAt + period - now) : Number.MAX_SAFE_INTEGER;
-        return nextIn;
-      },
+      /* 3.3 起倒计时由后端直出（nextFireInMs = enabledAt + k×period - now）：
+         会话时钟与浏览器时钟不同源，前端自己减会算错 */
+      sortValue: (row) => (row.nextFireInMs !== undefined && row.nextFireInMs > 0
+        ? row.nextFireInMs : Number.MAX_SAFE_INTEGER),
       render: (row) => {
-        const item = stats.get(row.id);
-        const period = row.triggerType === 'periodic' ? (row.periodMs ?? 0) : 0;
-        const nextIn = period > 0 && item && item.lastAt > 0
-          ? Math.max(0, item.lastAt + period - now) : null;
+        const remaining = row.nextFireInMs ?? 0;
         return (
           <span className="hint-inline">
-            {nextIn === null ? '条件驱动 / 暂无数据' : `${Math.ceil(nextIn / 1000)} 秒`}
+            {remaining > 0 ? `${Math.ceil(remaining / 1000)} 秒` : '条件驱动 / 暂无数据'}
           </span>
         );
       },
@@ -375,8 +348,12 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
           <button
             type="button"
             onClick={() => void applyEnabled(!row.enabled, [row], new Set([row.id]))}
-            disabled={activeSession === '' || bulkBusy}
-            title={row.enabled ? '停止后不再触发;已排队的延迟事件会清掉' : '启动后按触发规则发送事件(设备在线才真正发出);停止期间的事件不补发'}
+            disabled={activeSession === '' || bulkBusy || (!row.enabled && !online)}
+            title={!row.enabled && !online
+              ? '设备离线：先上线再启动'
+              : row.enabled
+                ? '停止后不再触发;已排队的延迟事件会清掉'
+                : '启动后立即按锚点重新计时;周期计划启动即触发一次'}
           >
             {row.enabled ? '停止' : '启动'}
           </button>
@@ -394,9 +371,11 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         <>
           <button
             type="button"
-            disabled={activeSession === '' || bulkBusy || eventPlans.length === 0}
+            disabled={activeSession === '' || bulkBusy || eventPlans.length === 0 || !online}
             onClick={() => void applyEnabled(true, eventPlans, new Set(eventPlans.map((plan) => plan.id)))}
-            title="启动全部计划：设备在线时立即按各自的触发规则发送事件"
+            title={online
+              ? '启动全部计划：周期计划启动即触发一次（锚点 = 此刻）'
+              : '设备离线：先上线再启动'}
           >
             {bulkBusy ? '处理中…' : '全部启动'}
           </button>
@@ -407,14 +386,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
             title="停止全部计划：已在队列里的延迟事件一并清除"
           >
             全部停止
-          </button>
-          <button
-            type="button"
-            disabled={activeSession === '' || cycleBusy}
-            onClick={() => void loadCyclePreview()}
-            title="按当前编排做一次确定性模拟：看所有变量在一个周期内的变化，事件时刻标在图上"
-          >
-            {cycleBusy ? '模拟中…' : '事件周期预览'}
           </button>
         </>
       }
@@ -445,7 +416,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         toolbarEnd={
           <>
             <span className="table-selection" role="status">{bulkBusy ? progress : `已选 ${selectedPlans.length} 条`}</span>
-            <button type="button" disabled={activeSession === '' || bulkBusy || !canStartSelected}
+            <button type="button" disabled={activeSession === '' || bulkBusy || !canStartSelected || !online}
               onClick={() => void applyEnabled(true, visiblePlans, selected)}>批量启动</button>
             <button type="button" disabled={activeSession === '' || bulkBusy || !canStopSelected}
               onClick={() => void applyEnabled(false, visiblePlans, selected)}>批量停止</button>
@@ -523,43 +494,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
             height={92}
             labels={svidLabels}
             eventLabel="触发"
-          />
-        </section>
-      )}
-
-      {/* 事件周期预览:所有参数在编排作用下怎么变 */}
-      {cyclePreview !== null && (
-        <section className="panel-section block">
-          <div className="section-head">
-            <h2>
-              <HintTitle text="一次确定性模拟的结果：横轴是时间，纵轴是各状态变量的值。不同颜色的竖线代表不同计划/CEID 的触发时刻，颜色与下方图例一一对应——竖线之后的曲线变化就是该事件的效果（set / pulse / shift / add 依次叠加）。只想看某一条计划时，用列表行的「预览」按钮。">
-                事件周期预览
-              </HintTitle>
-            </h2>
-            <div className="preview-controls">
-              <label className="field">
-                周期长度
-                <select
-                  value={cycleWindowMs}
-                  onChange={(event) => setCycleWindowMs(Number(event.target.value))}
-                  aria-label="事件周期长度"
-                >
-                  {[30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000].map((ms) => (
-                    <option key={ms} value={ms}>{ms >= 60_000 ? `${ms / 60_000} 分钟` : `${ms / 1000} 秒`}</option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" disabled={cycleBusy} onClick={() => void loadCyclePreview()}>
-                {cycleBusy ? '模拟中…' : '重算'}
-              </button>
-              <button type="button" onClick={() => setCyclePreview(null)}>收起</button>
-            </div>
-          </div>
-          <EventPreview
-            data={cyclePreview}
-            height={92}
-            labels={svidLabels}
-            eventLabel="发送事件"
           />
         </section>
       )}

@@ -27,6 +27,7 @@ import com.shimizukenta.secssim.core.ManualEngineClock;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.EquipmentCompiler;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
+import com.shimizukenta.secssim.app.session.PlanEnableOutcome;
 import com.shimizukenta.secssim.core.event.EventPlan;
 import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
@@ -68,31 +69,37 @@ class SessionEventControlTest {
                     "加载后默认禁用，等操作员显式启动");
             assertEquals("periodic", before.get("events").get(0).get("triggerType").optionalString().orElse(""));
 
-            assertTrue(session.setEventEnabled("beat", true));
+            assertEquals(PlanEnableOutcome.OK, session.setEventEnabled("beat", true));
             JsonHub started = JsonHub.fromJson(session.eventsJson());
             assertTrue(started.get("events").get(0).get("enabled").booleanValue(), "启动后应显示运行中");
 
+            /* D2：周期计划启动即触发一条（过限流走台账） */
+            assertEquals(1L, session.emittedCount());
+            assertNotNull(events.poll(5L, TimeUnit.SECONDS), "启动即发一条");
+
             clock.advanceMs(1_000L);
             session.pumpNow();
-            assertNotNull(events.poll(5L, TimeUnit.SECONDS), "启用时周期计划应上报");
-            assertEquals(1L, session.emittedCount());
+            assertNotNull(events.poll(5L, TimeUnit.SECONDS), "enabledAt + period 触发下一条");
+            assertEquals(2L, session.emittedCount());
 
-            assertTrue(session.setEventEnabled("beat", false));
+            assertEquals(PlanEnableOutcome.OK, session.setEventEnabled("beat", false));
             JsonHub disabled = JsonHub.fromJson(session.eventsJson());
             assertFalse(disabled.get("events").get(0).get("enabled").booleanValue());
 
             clock.advanceMs(1_000L);
             session.pumpNow();
             assertNull(events.poll(300L, TimeUnit.MILLISECONDS), "禁用期间不应再上报");
-            assertEquals(1L, session.emittedCount());
+            assertEquals(2L, session.emittedCount());
 
-            assertFalse(session.setEventEnabled("missing", true), "未知计划应返回 false");
+            assertEquals(PlanEnableOutcome.UNKNOWN_PLAN, session.setEventEnabled("missing", true),
+                    "未知计划应返回 UNKNOWN_PLAN");
 
-            assertTrue(session.setEventEnabled("beat", true));
+            /* 重新启用：锚点重置为现在，又立即触发一条 */
+            assertEquals(PlanEnableOutcome.OK, session.setEventEnabled("beat", true));
             clock.advanceMs(1_000L);
             session.pumpNow();
-            assertNotNull(events.poll(5L, TimeUnit.SECONDS), "重新启用后应恢复");
-            assertEquals(2L, session.emittedCount());
+            assertNotNull(events.poll(5L, TimeUnit.SECONDS), "重启周期后 enabledAt + period 再触发");
+            assertEquals(4L, session.emittedCount());
         } finally {
             session.close();
         }

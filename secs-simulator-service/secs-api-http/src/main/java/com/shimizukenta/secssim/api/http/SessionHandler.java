@@ -590,6 +590,7 @@ final class SessionHandler extends HttpSupport {
                     "plan=" + parts[2] + " enabled=" + enabled + " outcome=" + eventOutcome);
             switch (eventOutcome) {
                 case OK -> respond(ex, 200, "{\"ok\":true}");
+                case NOT_ONLINE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-online\"}");
                 case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
                 case UNKNOWN_PLAN -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-plan\"}");
             }

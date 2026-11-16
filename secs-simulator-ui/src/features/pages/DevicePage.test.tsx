@@ -93,7 +93,7 @@ describe('DevicePage 骨架', () => {
   it('配置导航按结构、常量、属性、变量的顺序展示', () => {
     const html = renderDevice('overview', 'config');
     const tabs = html.slice(html.indexOf('subtabs'), html.indexOf('tab-page'));
-    const labels = ['概览', '连接', '结构', '设备常量', '晶圆属性', '变量配置', '事件与报告', '事件计划', '配置原文', '版本历史'];
+    const labels = ['概览', '连接', '结构', '设备常量', '晶圆属性', '变量配置', '事件与报告', '工艺周期', '事件计划', '配置原文', '版本历史'];
     let position = -1;
     for (const label of labels) {
       const next = tabs.indexOf(`>${label}<`);

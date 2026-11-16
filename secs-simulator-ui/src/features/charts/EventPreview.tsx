@@ -30,15 +30,17 @@ export function EventPreview({
   labels,
   eventLabel = '事件',
 }: EventPreviewProps): JSX.Element {
+  /* series 缺省防御：草稿预览端点不可用（返回空对象）时不至于整页崩溃 */
+  const allSeries = data.series ?? [];
   const selected = svids === undefined
-    ? data.series
-    : data.series.filter((item) => svids.includes(item.svid));
+    ? allSeries
+    : allSeries.filter((item) => svids.includes(item.svid));
 
   const events: PreviewEventMark[] = data.events ?? [];
   /* 所有行共享一个缩放区间，便于对齐读同一段时间 */
   const [zoom, setZoom] = useState<ZoomRange | null>(null);
   const [showLegend, setShowLegend] = useState(true);
-  const bucketCount = data.series[0]?.avg.length ?? 0;
+  const bucketCount = allSeries[0]?.avg.length ?? 0;
 
   const zoomBy = (factor: number) => {
     if (bucketCount <= 1) {

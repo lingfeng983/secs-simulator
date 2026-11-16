@@ -69,7 +69,7 @@ class EventReporterTest {
 
     /** 真实调度器；值来源与发送口都不参与（测试只走 add/update/remove 与预览表）。 */
     private static EventScheduler scheduler() {
-        return new EventScheduler(new Rng(7L).derive("events"),
+        return new EventScheduler(new Rng(7L).derive("events"), new SessionRateGate(),
                 () -> NOW, () -> null, () -> true, (ceid, planId) -> { });
     }
 
@@ -150,7 +150,7 @@ class EventReporterTest {
         java.util.concurrent.atomic.AtomicBoolean online = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicBoolean ceidAllowed = new java.util.concurrent.atomic.AtomicBoolean(true);
         EventScheduler scheduler = new EventScheduler(new Rng(7L).derive("events"),
-                () -> NOW, () -> null, online::get, (ceid, planId) -> { });
+                new SessionRateGate(), () -> NOW, () -> null, online::get, (ceid, planId) -> { });
         scheduler.ceidEnabled(ceid -> ceidAllowed.get());
 
         EventPlan plan = plan("s", 2001);

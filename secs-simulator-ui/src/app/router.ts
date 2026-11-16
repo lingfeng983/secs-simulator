@@ -26,6 +26,7 @@ export type DeviceConfigPage =
   | 'svids'       // 变量配置：SVID 定义（写入配置草稿）
   | 'context'     // 晶圆属性：LOTID/RCPID/PPID/WAFERID（写入配置草稿）
   | 'events'      // 事件与报告：CEID/RPT 定义（写入配置草稿）
+  | 'cycle'       // 工艺周期：节拍参数 + 片内事件 + 运行卡（2026-11-16 拆分）
   | 'plans'       // 事件计划：events.plans 定义（写入配置草稿）
   | 'document'    // 配置原文
   | 'constants'   // 设备常量（ECV）
@@ -41,7 +42,7 @@ export type DeviceZone = 'config' | 'runtime';
 export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
 
 export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
-  'overview', 'connection', 'structure', 'constants', 'context', 'svids', 'events', 'plans', 'document', 'revisions',
+  'overview', 'connection', 'structure', 'constants', 'context', 'svids', 'events', 'cycle', 'plans', 'document', 'revisions',
 ];
 /* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
    报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */
@@ -81,6 +82,7 @@ export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
   svids: '变量配置',
   context: '晶圆属性',
   events: '事件与报告',
+  cycle: '工艺周期',
   plans: '事件计划',
   document: '配置原文',
   constants: '设备常量',
@@ -110,7 +112,8 @@ export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
   svids: '状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。',
   context: '晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。',
   events: '事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。',
-  plans: '工艺周期与事件计划：片内重复写在 cycle，周期外的异常路径写 plans。',
+  cycle: '工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。',
+  plans: '事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。',
   document: '配置原文 JSON 与版本 diff。',
   constants: '设备常量（ECV）定义：写入配置草稿，校验后保存。',
   revisions: '配置版本历史与回看。',

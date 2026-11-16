@@ -62,10 +62,28 @@ public final class EventSchedule {
      * @return 事件列表
      */
     public List<Fire> between(long fromMs, long toMs, Rng rng) {
+        return this.between(fromMs, toMs, rng, java.util.Map.of());
+    }
+
+    /**
+     * 计算区间内应发生的全部事件（带每计划启动锚点），按时间升序。
+     *
+     * <p>锚点来自 {@code EventScheduler} 的 per-plan {@code enabledAt}：
+     * 手动启动一条计划时写入，全停/禁用时移除。没有锚点的计划按
+     * 仿真时钟零点求值（纯区间语义，预览与旧测试用）。</p>
+     *
+     * @param fromMs  起始（不含）
+     * @param toMs    结束（含）
+     * @param rng     噪声源
+     * @param anchors planId → 启动时刻（毫秒，时钟系）
+     * @return 事件列表
+     */
+    public List<Fire> between(long fromMs, long toMs, Rng rng, java.util.Map<String, Long> anchors) {
         List<Fire> fires = new ArrayList<>();
 
         for (EventPlan plan : this.plans) {
-            for (long at : plan.trigger().fireTimes(fromMs, toMs, rng, plan.id())) {
+            long anchor = anchors.getOrDefault(plan.id(), 0L);
+            for (long at : plan.trigger().fireTimes(fromMs, toMs, rng, plan.id(), anchor)) {
                 fires.add(new Fire(at, plan.id(), plan.ceid()));
             }
         }

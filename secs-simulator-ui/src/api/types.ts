@@ -121,6 +121,10 @@ export interface EventPlanView {
   status?: 'stopped' | 'waiting' | 'running';
   /** 未运行的原因：offline / ceid-disabled。 */
   statusReason?: string;
+  /** 周期计划下一次触发时刻（会话时钟系；后端直出，0 = 未知/非周期）。 */
+  nextFireAt?: number;
+  /** 周期计划下一次触发的剩余毫秒（界面倒计时直接用；0 = 未知/非周期）。 */
+  nextFireInMs?: number;
   triggerType: string;
   atMs?: number;
   periodMs?: number;
@@ -129,6 +133,25 @@ export interface EventPlanView {
   debounceMs?: number;
   sourcePlan?: string;
   delayMs?: number;
+}
+
+/**
+ * 工艺周期运行态（2026-11-16 设计 §2.4：GET /api/v2/devices/{id}/cycle）。
+ */
+export interface CycleRuntimeView {
+  state: 'STOPPED' | 'RUNNING' | 'FINISHED';
+  /** 启动锚点（会话时钟系）；未启动过为 0。 */
+  startedAt: number;
+  /** 当前片号（从 0 开始）。 */
+  waferIndex: number;
+  /** 片内相位（毫秒）。 */
+  phaseMs: number;
+  /** 总片数（配置 cycle.count；无 cycle 段为 0）。 */
+  totalWafers: number;
+  /** 已发片内事件数。 */
+  firedCount: number;
+  /** 配置里是否有 cycle 段。 */
+  hasCycle: boolean;
 }
 
 /** 手动发送 SML 的结果。 */
@@ -429,6 +452,12 @@ export interface ApiClient {
   events(sessionId: string): Promise<EventPlanView[]>;
   /** 运行时启用/禁用一个计划。 */
   setEventEnabled(sessionId: string, planId: string, enabled: boolean): Promise<number>;
+  /** 工艺周期运行态（M3）；设备未启动返回 null。 */
+  cycle(deviceId: string): Promise<CycleRuntimeView | null>;
+  /** 启动工艺周期；409 = 设备离线 / 没有 cycle 段。 */
+  cycleStart(deviceId: string): Promise<number>;
+  /** 停止工艺周期。 */
+  cycleStop(deviceId: string): Promise<number>;
   /** 手动发送一条 SML 报文。 */
   sendSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 最近报文历史；session/direction 为空串表示全部。 */

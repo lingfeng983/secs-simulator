@@ -7,6 +7,9 @@ const DIST = new URL('../dist', import.meta.url).pathname.replace(/^\/([A-Za-z]:
 const PORT = 4199;
 
 /* 走查用的内存库：必须放在模块级，否则每个请求都会重置。 */
+/* 工艺周期运行态（M4 走查）：start/stop 改状态，GET 回读 */
+const cycleState = { state: 'STOPPED', startedAt: 0, waferIndex: 0, phaseMs: 0, totalWafers: 25, firedCount: 0, hasCycle: true };
+
 const v2Hosts = [
   { id: 'host_01MDEMO0000000000000000A', name: '产线 A 主机', phase: 'CONNECTED', open: true,
     target: '127.0.0.1:5000', port: 5000, deviceId: 10, autoReconnect: true, retryCount: 0,
@@ -58,6 +61,9 @@ http.createServer(async (req, res) => {
     if (path === '/api/v1/sessions/line1/events') return json(res, { events: [{ id: 'beat', ceid: 2001, enabled: true, triggerType: 'periodic', periodMs: 1000, jitterMs: 0 }] });
     if (path === '/api/v1/sessions/line1/catalog') return json(res, { ceids: [{ ceid: 2001, owner: 'CH1', slot: 'TEMP_HIGH', reports: [1], source: 'local' }], reports: [{ rptid: 1, owner: 'CH1', slot: 'TEMP', svids: [1001], source: 'local' }], svids: [{ svid: 1001, owner: 'CH1', slot: 'TEMP', type: 'F4', unit: 'C' }] });
     if (path === '/api/v1/preview') return json(res, { from: 0, to: 60000, buckets: 4, bucketMs: 15000, svidTotal: 2, truncated: false, series: [{ svid: 1001, owner: 'CH1', unit: 'C', min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] }] });
+    if (path === '/api/v1/config-preview') {
+      return json(res, { from: 0, to: 60000, buckets: 4, bucketMs: 15000, svidTotal: 2, truncated: false, series: [{ svid: 1001, owner: 'CH1', unit: 'C', min: [10, 20, 30, 40], max: [20, 30, 40, 50], avg: [15, 25, 35, 45] }], events: [{ atMs: 15000, ceid: 2001, planId: 'beat' }, { atMs: 45000, ceid: 2001, planId: 'cycle' }] });
+    }
     if (path === '/api/v1/messages') return json(res, { messages: [{ sessionId: 'line1', direction: 'in', stream: 1, function: 1, wbit: false, body: 'S1F1\n<L\n  <B 0x81>\n>.', at: 1700000000000 }], total: 1, limit: 500, truncated: false });
     if (path === '/api/v1/configs') return json(res, { configs: [
       { name: 'line1.json', sizeBytes: 100, modifiedMs: 1 },
@@ -102,6 +108,20 @@ http.createServer(async (req, res) => {
     return json(res, {});
   }
   // 静态文件(未知路径回 index.html)
+  /* ---- 工艺周期（M4 走查）：GET 运行态，start/stop 改状态 ---- */
+  if (path === '/api/v2/devices/line1/cycle' && req.method === 'GET') return json(res, cycleState);
+  if (path === '/api/v2/devices/line1/cycle/start' && req.method === 'POST') {
+    cycleState.state = 'RUNNING';
+    cycleState.startedAt = 60000;
+    cycleState.waferIndex = 0;
+    cycleState.firedCount = 0;
+    return json(res, { ok: true, state: 'RUNNING' });
+  }
+  if (path === '/api/v2/devices/line1/cycle/stop' && req.method === 'POST') {
+    cycleState.state = 'STOPPED';
+    return json(res, { ok: true, state: 'STOPPED' });
+  }
+
   /* ---- 3.0 v2 mock:主机独立命名空间 + 配置版本历史（v2Hosts/v2Templates 定义在模块级） ---- */
   if (path === '/api/v2/hosts' && req.method === 'GET') {
     return json(res, { hosts: v2Hosts });

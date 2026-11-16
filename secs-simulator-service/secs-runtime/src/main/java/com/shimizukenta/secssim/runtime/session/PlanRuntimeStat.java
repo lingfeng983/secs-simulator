@@ -13,12 +13,12 @@ package com.shimizukenta.secssim.runtime.session;
  * @param fireCount    真实触发次数（不含单步试跑）
  * @param skippedCount 被跳过的次数（限流、条件未满足、执行失败）
  * @param lastFireAt   最近一次触发时刻（毫秒）；0 = 从未触发
- * @param nextFireAt   下一次计划触发时刻（毫秒）；0 = 未知（由调度器现场推算）
+ * @param nextFireAt   下一次计划触发时刻（毫秒，会话时钟系）；0 = 未知（由调度器现场推算）
  * @param lastError    最近一次失败原因；无则空串
  */
 public record PlanRuntimeStat(long fireCount, long skippedCount, long lastFireAt,
-                              long nextFireAt, String lastError) {
+                              long nextFireAt, String lastError, long nextFireInMs) {
 
     /** 还没跑过、也没有任何统计的计划。 */
-    public static final PlanRuntimeStat EMPTY = new PlanRuntimeStat(0L, 0L, 0L, 0L, "");
+    public static final PlanRuntimeStat EMPTY = new PlanRuntimeStat(0L, 0L, 0L, 0L, "", 0L);
 }

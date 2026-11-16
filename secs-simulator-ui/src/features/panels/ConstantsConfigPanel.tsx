@@ -126,7 +126,7 @@ export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edi
           <button
             type="button"
             className="primary"
-            title="常量可以只给「初始值」（可用 S2F15 写入），也可以配一份值定义让它随时间/周期变化；配了值定义之后 S2F15 会拒写（写死一个随时间变的值没有意义）。"
+            title="常量可以只给「初始值」（可用 S2F15 写入），也可以配一份值定义让它随时间/周期变化；配了值定义之后 S2F15 会拒写（写死一个随时间变的值没有意义）。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。"
             onClick={() => setEditing(null)}
           >
             ＋ 新建常量

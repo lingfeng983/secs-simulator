@@ -888,11 +888,15 @@ paths:
   /api/v2/devices/{id}/runtime/plans:
     get:
       tags: [devices]
-      summary: 计划列表 + 运行统计（启用态、触发次数、上次触发/跳过原因）
+      summary: 计划列表 + 运行统计（启用态、触发次数、上次触发/跳过原因、下次触发倒计时）
       description: |
         计划正文来自配置与运行时覆盖（runtime_plan_override）；fireCount / skippedCount /
         lastFireAt / lastError 来自 runtime_plan_state。两个时刻字段为 0 表示「没有记录」，
         不用 null——前端按 > 0 判断，少一条空值分支。
+
+        3.3 起（2026-11-16 计划生命周期重设计）：列表只含手写计划（工艺周期不再按片展开
+        混入）；Periodic 计划新增 nextFireAt（会话时钟系）与 nextFireInMs（剩余毫秒，
+        界面倒计时直接用）——锚点 = 启动时刻，启动即触发一次。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -1085,6 +1089,39 @@ paths:
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
         '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
+  /api/v2/devices/{id}/cycle:
+    get:
+      tags: [devices]
+      summary: 工艺周期运行态（3.3 M3 拆分）
+      description: |
+        {state: STOPPED|RUNNING|FINISHED, startedAt, waferIndex, phaseMs, totalWafers,
+        firedCount, hasCycle}。state 同时承载值冻结语义：STOPPED 期间 SVID 读值为冻结值、
+        Trace 采得平线；FINISHED 冻结在末相位。片内事件经台账（plan_id=cycle）与
+        设备级限流。设备未启动回 404。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 运行态 JSON }
+        '404': { description: 设备不存在 }
+  /api/v2/devices/{id}/cycle/start:
+    post:
+      tags: [devices]
+      summary: 启动工艺周期（锚点 = 此刻；值与片内事件从第 0 片起跑）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已启动 }
+        '404': { description: 设备不存在 }
+        '409': { description: '设备不在线（error=not-online）或配置里没有 cycle 段（error=no-cycle）' }
+  /api/v2/devices/{id}/cycle/stop:
+    post:
+      tags: [devices]
+      summary: 停止工艺周期（值冻结在进入停止时的表现；重启从第 0 片重来）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已停止 }
+        '404': { description: 设备不存在 }
   /api/v2/devices/{id}/runtime/executions:
     get:
       tags: [devices]
@@ -1136,6 +1173,7 @@ paths:
         '200': { description: 已更新（内存调度器 + runtime_plan_state） }
         '400': { description: 计划不存在或请求体非法 }
         '404': { description: 设备不存在 }
+        '409': { description: 'enabled=true 且设备不在线：error=not-online（3.3 ONLINE 门控，§2.2）' }
     put:
       tags: [devices]
       summary: 同 POST（设计 §2.5 GET/PUT 契约的写路径）
@@ -1153,6 +1191,7 @@ paths:
         '200': { description: 已更新 }
         '400': { description: 计划不存在或请求体非法 }
         '404': { description: 设备不存在 }
+        '409': { description: 'enabled=true 且设备不在线：error=not-online（3.3 ONLINE 门控，§2.2）' }
   /api/v2/devices/{id}/link:
     get:
       tags: [devices]

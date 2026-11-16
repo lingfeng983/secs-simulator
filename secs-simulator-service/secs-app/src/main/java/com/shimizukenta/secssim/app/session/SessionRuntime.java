@@ -201,12 +201,26 @@ public interface SessionRuntime {
     /**
      * 运行时启用/禁用一个编排计划。
      *
+     * <p>启用方向有 ONLINE 门控（2026-11-16 设计 §2.2）：设备离线时拒绝启动，
+     * 返回 {@link PlanEnableOutcome#NOT_ONLINE}（HTTP 409 {@code not-online}）；
+     * 禁用方向不受限。</p>
+     *
      * @param planId  计划标识
      * @param enabled 是否启用
-     * @return 计划存在返回 {@code true}
+     * @return 启停结果
      */
-    default boolean setEventEnabled(String planId, boolean enabled) {
-        return false;
+    default PlanEnableOutcome setEventEnabled(String planId, boolean enabled) {
+        return PlanEnableOutcome.UNKNOWN_PLAN;
+    }
+
+    /**
+     * 周期计划的下一次触发时刻（倒计时用；锚 = 启动时刻）。
+     *
+     * @param planId 计划标识
+     * @return 下次触发时刻；禁用 / 非周期 / 不存在返回 {@code null}
+     */
+    default Long nextFireAtOf(String planId) {
+        return null;
     }
 
     /**

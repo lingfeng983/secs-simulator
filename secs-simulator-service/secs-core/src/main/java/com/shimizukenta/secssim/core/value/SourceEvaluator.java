@@ -101,7 +101,10 @@ public final class SourceEvaluator {
     public static long localTime(DataSource.Clock clockKind, long tMs, CycleClock clock) {
         return switch (clockKind) {
             case PHASE -> clock.phaseAt(tMs);
-            case ABSOLUTE -> tMs;
+            /* ABSOLUTE 走生命周期锚：无装饰器时 = tMs（时钟零点起算，3.1 语义不变）；
+               有 LifecycleCycleClock 时 = t - startedAt——ABSOLUTE 曲线随周期重锚，
+               重启周期即重放（2026-11-16 设计 D11）。 */
+            case ABSOLUTE -> clock.elapsedAt(tMs);
             case CYCLE -> clock.indexAt(tMs);
         };
     }

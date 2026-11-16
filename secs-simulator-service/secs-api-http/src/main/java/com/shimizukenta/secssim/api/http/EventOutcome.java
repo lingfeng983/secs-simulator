@@ -9,6 +9,9 @@ package com.shimizukenta.secssim.api.http;
 public enum EventOutcome {
     /** 成功。 */
     OK,
+
+    /** 设备不在线（链路未 SELECTED 或控制状态非 ONLINE）：拒绝启动（409 not-online）。 */
+    NOT_ONLINE,
     /** 会话不存在。 */
     UNKNOWN_SESSION,
     /** 会话存在，但没有这个计划。 */

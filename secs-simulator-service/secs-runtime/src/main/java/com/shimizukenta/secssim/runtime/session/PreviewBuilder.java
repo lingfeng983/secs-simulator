@@ -1,5 +1,6 @@
 package com.shimizukenta.secssim.runtime.session;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -35,14 +36,26 @@ final class PreviewBuilder {
      */
     private static final long MAX_HISTORY_MS = 2L * 60L * 60L * 1000L;
 
+    /** 工艺周期运行时：片内事件标记的来源（null 安全——测试桩可能不接）。 */
+    private final java.util.function.Supplier<CycleRunner> cycleRunner;
+
     PreviewBuilder(java.util.function.Supplier<ValueSource> values,
                    java.util.function.Supplier<ResolvedEquipment> model,
                    java.util.function.Supplier<EventSchedule> schedule,
                    long seed) {
+        this(values, model, schedule, seed, () -> null);
+    }
+
+    PreviewBuilder(java.util.function.Supplier<ValueSource> values,
+                   java.util.function.Supplier<ResolvedEquipment> model,
+                   java.util.function.Supplier<EventSchedule> schedule,
+                   long seed,
+                   java.util.function.Supplier<CycleRunner> cycleRunner) {
         this.values = values;
         this.model = model;
         this.schedule = schedule;
         this.seed = seed;
+        this.cycleRunner = cycleRunner;
     }
 
     /**
@@ -82,10 +95,19 @@ final class PreviewBuilder {
             EventSimulator.SimResult sim = EventSimulator.simulateWithValues(
                     scheduleToRun, source, this.seed,
                     simFrom, toMs, EventSimulator.DEFAULT_MAX_EVENTS);
-            events = sim.fires().stream()
+            List<PreviewSupport.PreviewEvent> marks = new ArrayList<>(sim.fires().stream()
                     .filter(fire -> fire.atMs() >= fromMs && fire.atMs() <= toMs)
                     .map(fire -> new PreviewSupport.PreviewEvent(fire.atMs(), fire.ceid(), fire.planId()))
-                    .toList();
+                    .toList());
+            /* 工艺周期已从编排表拆出（M3）：片内事件的标记由 CycleRunner 按当前
+               状态补齐——RUNNING 用真实锚点，窗口里的竖线与实跑一致 */
+            if (planId == null || planId.isBlank()) {
+                for (long[] mark : this.cycleRunner.get().markFires(fromMs, toMs)) {
+                    marks.add(new PreviewSupport.PreviewEvent(mark[0], (int) mark[1], "cycle"));
+                }
+                marks.sort(java.util.Comparator.comparingLong(PreviewSupport.PreviewEvent::atMs));
+            }
+            events = marks;
         }
         PreviewSupport.PreviewData data = PreviewSupport.compute(
                 source, this.model.get(), fromMs, toMs, buckets, svids, events);

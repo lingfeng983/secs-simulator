@@ -21,6 +21,9 @@ public enum SessionOutcome {
     /** 会话在，但链路没建立（没有主机），不能上线/下线。 */
     NOT_CONNECTED,
 
+    /** 设备不在线（链路未 SELECTED 或控制状态非 ONLINE）：拒绝启动计划/周期。 */
+    NOT_ONLINE,
+
     /** 标识已被占用。 */
     CONFLICT,
 
