@@ -73,3 +73,5 @@ secs-simulator-gui/src-tauri/target/
 .zcode/
 secs-simulator-ui/.pw-tmp/
 /.workbuddy-ai/
+.live-work/
+secs-simulator-service/secs-cli/cp.txt

@@ -56,6 +56,12 @@ final class DeviceRuntimeHandler extends HttpSupport {
             respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
+        if (parts.length >= 2 && "cycle".equals(parts[1]) && !parts[0].isBlank()) {
+            /* 工艺周期（2026-11-16 设计 §2.4）：/api/v2/devices/{id}/cycle[/{start|stop}]，
+               与契约同形——不在 runtime 段下 */
+            this.handleDeviceCycleV2(ex, parts[0], ex.getRequestMethod().toUpperCase(Locale.ROOT), parts);
+            return;
+        }
         if (parts.length >= 3 && !parts[0].isBlank() && "runtime".equals(parts[1])) {
             this.handleDeviceRuntimeV2(ex, parts);
             return;
@@ -134,7 +140,7 @@ final class DeviceRuntimeHandler extends HttpSupport {
      */
     private void handleDeviceCycleV2(HttpExchange ex, String deviceId, String method, String[] parts)
             throws IOException {
-        if (parts.length == 3) {
+        if (parts.length == 2) {
             if (!"GET".equals(method)) {
                 respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
                 return;
@@ -150,7 +156,7 @@ final class DeviceRuntimeHandler extends HttpSupport {
             respond(ex, 200, json);
             return;
         }
-        String action = parts.length > 3 ? parts[3] : "";
+        String action = parts.length > 2 ? parts[2] : "";
         if (!"start".equals(action) && !"stop".equals(action)) {
             respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
