@@ -1,4 +1,5 @@
 import { NumberField } from '../../shared/ui/CommitFields';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import {
   collectCeids,
   isJsonObject,
@@ -23,6 +24,9 @@ type Edit = (mutate: (root: JsonObject) => void) => void;
 export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const cycle = isJsonObject(root.cycle) ? root.cycle : null;
   const ceidChoices = collectCeids(root);
+  /* 事件计划里已有计划时，标题说明里追加它与片内事件的分工（原底部提示的展示条件） */
+  const hasEventPlans = isJsonObject(root.events)
+    && Array.isArray(root.events.plans) && (root.events.plans as unknown[]).length > 0;
 
   if (cycle === null) {
     return (
@@ -67,7 +71,11 @@ export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX
   return (
     <div className="cfg-section">
       <div className="template-head">
-        <h3>工艺周期（cycle）</h3>
+        <h3>
+          <HintTitle text={`时间轴只有一条：曲线用片内相位（每片从 0 重放），事件用片内偏移；时长误差只改变片长，不移动片内事件位置。${hasEventPlans ? '下面的「事件计划」里的周期触发不会自动转成片内事件：片内重复请写在上面这张表，事件计划留给周期外的异常路径（启动一次、条件触发、事件后跟随）。' : ''}`}>
+            工艺周期（cycle）
+          </HintTitle>
+        </h3>
         <button
           type="button"
           onClick={() => edit((draft) => {
@@ -77,10 +85,6 @@ export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX
           移除周期段
         </button>
       </div>
-      <p className="hint">
-        时间轴只有一条：曲线用片内相位（每片从 0 重放），事件用片内偏移；
-        时长误差只改变片长，不移动片内事件位置。
-      </p>
 
       <div className="form-row">
         <label className="field field-cell">
@@ -203,12 +207,6 @@ export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX
 
       {jitterMs >= durationMs && (
         <p className="problems">每片误差必须小于周期时长，否则最短片长 ≤ 0。</p>
-      )}
-      {isJsonObject(root.events) && Array.isArray(root.events.plans) && (root.events.plans as unknown[]).length > 0 && (
-        <p className="hint">
-          下面的「事件计划」里的周期触发不会自动转成片内事件：片内重复请写在上面这张表，
-          事件计划留给周期外的异常路径（启动一次、条件触发、事件后跟随）。
-        </p>
       )}
     </div>
   );

@@ -33,7 +33,6 @@ export function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   return (
     <Panel id="panel-host-send" title="消息发送" headless>
       {error !== '' && <p className="inline-note danger">{error}</p>}
-      <p className="hint">以本主机身份发一条 SML；收发明细在右侧「实时消息监控」，配置区·报文模板里有可直接填入的 SML 案例。</p>
       <div className="preview-controls">
         {HOST_PRESETS.filter((preset) => preset.quick).map((preset) => (
           <button key={preset.label} type="button" title={preset.desc}
@@ -48,10 +47,11 @@ export function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         aria-label="本主机 SML 报文内容"
+        title="以本主机身份发一条 SML；收发明细在右侧「实时消息监控」，配置区·报文模板里有可直接填入的 SML 案例。"
       />
       <div className="editor-foot">
-        <span className="hint">带 W 的报文会等待设备回复;模板填入后仍可修改再发送。</span>
         <button type="button" className="primary" disabled={busy || !host.open || draft.trim() === ''}
+          title="带 W 的报文会等待设备回复；模板填入后仍可修改再发送。"
           onClick={() => void send()}>
           {busy ? '发送中…' : '发送'}
         </button>

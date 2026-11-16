@@ -193,6 +193,7 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
         toolbarEnd={<button type="button" className="primary" disabled={busy || client === null} onClick={() => void openEditor()}>新建模板</button>} />
 
       <Modal open={editor !== null} title={creating ? '新建设备模板' : `编辑设备模板 · ${editor?.id ?? ''}`}
+        hint="各页修改汇总到同一份模板，点底部「保存」后才生效；已创建的设备不会随模板改变。"
         onClose={requestClose} width="min(1240px, 96vw)"
         footer={
           <>

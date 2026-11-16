@@ -196,12 +196,8 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
         onChange={(event) => setDraft(event.target.value)}
         placeholder={'S1F1 W.\n<L\n  <B 0x81>\n>.'}
         aria-label="SML 报文内容"
+        title="报文头写 SxFy，可带 W；数据项支持 L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8。W 位会等 T3，没有对端时服务端回 409。同一条消息要重复发送就用下面的压测。"
       />
-      <p className="hint">
-        报文头写 <code>SxFy</code>，可带 <code>W</code>；数据项支持
-        <code>L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8</code>。W 位会等 T3，
-        没有对端时服务端回 409。同一条消息要重复发送就用下面的压测。
-      </p>
 
       <h3 className="sub-title">压测发送（服务端循环这条消息）</h3>
       <div className="toolbar">

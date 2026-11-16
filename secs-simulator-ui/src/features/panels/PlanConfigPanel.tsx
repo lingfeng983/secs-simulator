@@ -5,6 +5,7 @@ import { EventsForm } from '../editors/ConfigFormEditor';
 import { CycleForm } from '../editors/CycleForm';
 import { collectSvids, type JsonObject } from '../editors/templateConfig';
 import { EventPreview } from '../charts/EventPreview';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import type { PreviewData } from '../../api';
 
 /** 预览时间窗候选（草稿是确定性重放，右端点相对模拟时钟 0）。 */
@@ -102,7 +103,11 @@ export function PlanEditor({ root, edit, text, backend }: {
 
       <section className="panel-section block" id="plan-draft-preview">
         <div className="section-head">
-          <h3 style={{ margin: 0 }}>事件周期预览（按草稿）</h3>
+          <h3 style={{ margin: 0 }}>
+            <HintTitle text="不需要保存或启动设备：直接按当前草稿（含未保存改动）做一次确定性重放。横轴是模拟时间，竖线是各计划按触发规则会发送事件的时刻——边改周期与触发规则边看曲线变化。">
+              事件周期预览（按草稿）
+            </HintTitle>
+          </h3>
           <div className="preview-controls">
             <label className="check-inline">
               <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} />
@@ -119,11 +124,6 @@ export function PlanEditor({ root, edit, text, backend }: {
             </button>
           </div>
         </div>
-        <p className="hint">
-          不需要保存或启动设备：直接按当前草稿（含未保存改动）做一次确定性重放。
-          横轴是模拟时间，竖线是各计划按触发规则会发送事件的时刻——
-          边改周期与触发规则边看曲线变化。
-        </p>
         {preview === null ? (
           <p className="hint">
             {invalid

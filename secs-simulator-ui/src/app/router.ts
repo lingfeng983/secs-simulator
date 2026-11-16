@@ -117,7 +117,7 @@ export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
 };
 export const DEVICE_RUNTIME_PAGE_NOTES: Record<DeviceRuntimePage, string> = {
   plans: '计划启停等运行态设置；改动仅本次运行有效。',
-  manual: '手动 SML 发送、压测发送与报警置位/清除。',
+  manual: '手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。',
 };
 export const HOST_CONFIG_PAGE_NOTES: Record<HostConfigPage, string> = {
   overview: '主机身份与目标；保存后需「使设置生效」。',

@@ -165,6 +165,33 @@ test('新建主机：默认值即可创建，清空目标地址才禁用', async
   await dialog.getByRole('button', { name: '取消' }).click();
 });
 
+test('新建主机：「立即连接」默认开；关掉只建实例不建链', async ({ page }) => {
+  const state = await mockApi(page);
+  await openHosts(page);
+  const panel = page.locator('#panel-hosts-v2');
+
+  /* 默认勾选：创建后马上连上（与旧行为一致） */
+  await panel.getByRole('button', { name: '＋ 新建主机' }).click();
+  let dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('立即连接')).toBeChecked();
+  await dialog.getByRole('button', { name: '创建' }).click();
+  await expect.poll(() => state.hosts.find((host) => host.id === 'host-3')?.open).toBe(true);
+  /* 创建成功后界面自动跳到新主机详情；等它落定再回清单，否则跳转会把路由抢回去 */
+  await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-3');
+
+  /* 关掉开关：只建实例，停在断开态，之后可从列表再连 */
+  await openHosts(page);
+  await panel.getByRole('button', { name: '＋ 新建主机' }).click();
+  dialog = page.getByRole('dialog');
+  await dialog.getByLabel('立即连接').uncheck();
+  await dialog.getByRole('button', { name: '创建' }).click();
+  await expect.poll(() => state.hosts.length).toBe(4);
+  await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-4');
+  const idle = state.hosts.find((host) => host.id === 'host-4');
+  expect(idle?.open).toBe(false);
+  expect(idle?.phase).toBe('DISCONNECTED');
+});
+
 /* ==================== 详情：配置区 ==================== */
 
 test('主机配置区不再有连接页签，连接动作在实例头', async ({ page }) => {

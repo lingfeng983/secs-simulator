@@ -2,8 +2,10 @@
  * 由 panels.css 按主题拆出（原行 1880-2158）；
  * 规则内容未改动，汇总顺序见 ../panels.css。
  */
-/* ===== 连接页：属性 + 含义 + 控件 ===== */
-.session-form .session-fields {
+/* ===== 连接页：属性 + 含义 + 控件 =====
+ * 可编辑表单行已改用 .modal-field（标题列对齐 + 说明悬浮，见 11-modal-form.css）；
+ * .session-field 卡片样式只剩只读展示（SVID 模板信息）在用。 */
+.session-fields {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;

@@ -13,6 +13,7 @@ import { ToastHost } from '../shared/ui/ToastHost';
 import { CommandPalette } from '../shared/ui/CommandPalette';
 import { ShortcutHelp, type ShortcutHint } from '../shared/ui/ShortcutHelp';
 import { Modal } from '../shared/ui/Modal';
+import { FieldLabel } from '../shared/ui/FieldLabel';
 import { useHotkeys } from '../shared/ui/useHotkeys';
 import type { CommandItem } from '../shared/lib/command';
 
@@ -777,9 +778,14 @@ export function App(): JSX.Element {
                 : `远程服务端（${shellConn.url}）`}
           </p>
         )}
-        <div className="form-row">
-          <label className="field">
-            后端地址
+        <div className="modal-form">
+          <label className="field modal-field">
+            <FieldLabel
+              text="后端地址"
+              help={inDesktopShell
+                ? '填远程服务端地址（如 http://192.168.1.10:8080）切换到远程，本机后端会停止；留空切回本机。远程端直接访问，不需要任何令牌或账号。'
+                : '默认同源访问；要把这个界面指向另一台机器上的运行时后端，填它的地址（如 http://192.168.1.10:8080），保存后页面重载。'}
+            />
             <input
               value={draftBase}
               onChange={(event) => setDraftBase(event.target.value)}
@@ -788,19 +794,6 @@ export function App(): JSX.Element {
             />
           </label>
         </div>
-        <p className="hint">
-          {inDesktopShell ? (
-            <>
-              填远程服务端地址（如 <code>http://192.168.1.10:8080</code>）切换到远程，
-              本机后端会停止；留空切回本机。远程端直接访问，不需要任何令牌或账号。
-            </>
-          ) : (
-            <>
-              默认同源访问；要把这个界面指向另一台机器上的运行时后端，
-              填它的地址（如 <code>http://192.168.1.10:8080</code>），保存后页面重载。
-            </>
-          )}
-        </p>
       </Modal>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} hints={SHORTCUTS} />

@@ -60,11 +60,31 @@ final class HostSimRegistry {
      * @return 新实例 id；冲突/失败经 SessionOutcome 表达
      */
     synchronized CreateResult open(String name, HsmsConnectionTarget target, boolean autoReconnect) {
+        return open(name, target, autoReconnect, true);
+    }
+
+    /**
+     * 新建主机实例，可选是否立即建链（界面「立即连接」开关）。
+     *
+     * <p>{@code connect=false} 时只装配实例不建链：实例停在 DISCONNECTED，
+     * 与重启后装回内存的实例同态，之后由操作员点「连接」。</p>
+     *
+     * @param name          显示名
+     * @param target        连接目标
+     * @param autoReconnect 失败后是否自动重连
+     * @param connect       是否立即连接
+     * @return 新实例 id；冲突/失败经 SessionOutcome 表达
+     */
+    synchronized CreateResult open(String name, HsmsConnectionTarget target, boolean autoReconnect,
+                                   boolean connect) {
         String id = this.hosts.create(name, target.bindHost(), target.port(), target.deviceId(),
                 "{}", autoReconnect, "");
         HostSimulator sim = attach(id);
         if (sim == null) {
             return new CreateResult(id, SessionOutcome.FAILED);
+        }
+        if (!connect) {
+            return new CreateResult(id, SessionOutcome.OK);
         }
         try {
             sim.connect();

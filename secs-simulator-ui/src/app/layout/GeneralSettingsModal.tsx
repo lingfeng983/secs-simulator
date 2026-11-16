@@ -78,6 +78,7 @@ export function GeneralSettingsModal({
     <Modal
       open={open}
       title="通用设置"
+      hint={`调整会立即生效，并保存在当前浏览器里；换浏览器或清除浏览器数据后回到默认值。消息监控只回看所选时长内的报文（${MONITOR_WINDOW_RANGE.min}～${MONITOR_WINDOW_RANGE.max} 分钟）。`}
       width="min(720px, 94vw)"
       onClose={onClose}
       footer={
@@ -304,11 +305,6 @@ export function GeneralSettingsModal({
           </select>
         </label>
       </div>
-
-      <p className="hint">
-        调整会立即生效，并保存在当前浏览器里；换浏览器或清除浏览器数据后回到默认值。
-        消息监控只回看所选时长内的报文（{MONITOR_WINDOW_RANGE.min}～{MONITOR_WINDOW_RANGE.max} 分钟）。
-      </p>
     </Modal>
   );
 }

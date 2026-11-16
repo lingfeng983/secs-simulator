@@ -3,6 +3,7 @@ import type { PanelBaseProps } from '../panels/types';
 import { Panel } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
 import { Modal } from '../../shared/ui/Modal';
+import { FieldLabel } from '../../shared/ui/FieldLabel';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import type { HostsV2State, SaveHostTemplateRequest } from '../../state/useHostsV2';
 import type { HostTemplate } from '../../state/hostTemplates';
@@ -31,7 +32,7 @@ export function HostTemplatePage({
   /** 按模板新建一台主机：方案复制进新主机的方案库。 */
   const createFromTemplate = (
     template: HostTemplate,
-    target: { name: string; host: string; port: number; deviceId: number },
+    target: { name: string; host: string; port: number; deviceId: number; connect: boolean },
   ) => {
     setBusy(true);
     setError('');
@@ -325,6 +326,7 @@ function HostTemplateForm({
     <Modal
       open={open}
       title={editing === null ? '新建主机模板' : `编辑模板 · ${editing.name}`}
+      hint={`模板里只存 Trace 与 S1F3 采集方案。目标地址、端口、Device ID 是每台主机自己的设置，新建主机时填写。${editing?.builtin === true ? ' 内置模板只读，保存会生成一份自定义副本。' : ''}方案先加入模板，点弹框底部的「保存模板」才会写入。`}
       onClose={onClose}
       width="min(60rem, 100%)"
       footer={
@@ -358,10 +360,6 @@ function HostTemplateForm({
           <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="可选" />
         </label>
       </div>
-      <p className="hint">
-        模板里只存 Trace 与 S1F3 采集方案。目标地址、端口、Device ID 是每台主机自己的设置，新建主机时填写。
-        {editing?.builtin === true ? ' 内置模板只读，保存会生成一份自定义副本。' : ''}
-      </p>
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {problems.length > 0 && (
         <ul className="problems">{problems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
@@ -504,7 +502,6 @@ function HostTemplateForm({
             </>
           )}
           <div className="editor-foot">
-            <span className="hint">方案先加入模板，点弹框底部的「保存模板」才会写入。</span>
             <button type="button" onClick={() => { setDraft(null); setProblems([]); }}>取消</button>
             <button type="button" className="primary" onClick={commitPlan}>加入模板</button>
           </div>
@@ -529,18 +526,21 @@ function CreateHostFromTemplateModal({
   busy: boolean;
   error: string;
   onClose: () => void;
-  onCreate: (target: { name: string; host: string; port: number; deviceId: number }) => void;
+  onCreate: (target: { name: string; host: string; port: number; deviceId: number; connect: boolean }) => void;
 }): JSX.Element {
   const [name, setName] = useState(template?.name ?? 'host');
   const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState('5000');
   const [deviceId, setDeviceId] = useState('0');
+  /* 「立即连接」开关：默认开，与主机清单页的新建弹窗同语义 */
+  const [connectNow, setConnectNow] = useState(true);
   const valid = host.trim() !== '' && Number(port) >= 1 && Number(port) <= 65535;
 
   return (
     <Modal
       open={template !== null}
       title={template === null ? '' : `按模板「${template.name}」新建主机`}
+      hint={`将复制 ${template === null ? 0 : template.tracePlans.length} 份 Trace 方案、${template === null ? 0 : template.collectPlans.length} 份采集方案到这台主机。下面是这台主机自己的目标信息，不属于模板。`}
       onClose={onClose}
       footer={
         <>
@@ -554,6 +554,7 @@ function CreateHostFromTemplateModal({
               host: host.trim(),
               port: Number(port),
               deviceId: Number(deviceId) || 0,
+              connect: connectNow,
             })}
           >
             创建主机
@@ -561,11 +562,6 @@ function CreateHostFromTemplateModal({
         </>
       }
     >
-      <p className="hint">
-        将复制 {template === null ? 0 : template.tracePlans.length} 份 Trace 方案、
-        {template === null ? 0 : template.collectPlans.length} 份采集方案到这台主机。
-        下面是这台主机自己的目标信息，不属于模板。
-      </p>
       {error !== '' && <p className="inline-note danger">{error}</p>}
       <div className="form-row">
         <label className="field">
@@ -585,6 +581,23 @@ function CreateHostFromTemplateModal({
         <label className="field">
           Device ID
           <input type="number" min={0} value={deviceId} onChange={(event) => setDeviceId(event.target.value)} />
+        </label>
+      </div>
+      <div className="form-row">
+        <label className="field modal-field">
+          <FieldLabel
+            text="立即连接"
+            help="创建后马上连接目标；不勾选则只建实例，之后在主机清单或详情页点「连接」。"
+          />
+          <span className="check-inline">
+            <input
+              type="checkbox"
+              checked={connectNow}
+              aria-label="立即连接"
+              onChange={(event) => setConnectNow(event.target.checked)}
+            />
+            创建后立即连接
+          </span>
         </label>
       </div>
     </Modal>

@@ -451,13 +451,18 @@ export async function mockApi(page: Page): Promise<MockState> {
       return ok({ hosts: state.hosts.map((host) => hostJson(state, host)) });
     }
     if (path === '/api/v2/hosts' && method === 'POST') {
-      const body = request.postDataJSON() as { name?: string; host?: string; port?: number; deviceId?: number } | null;
+      const body = request.postDataJSON() as {
+        name?: string; host?: string; port?: number; deviceId?: number; connect?: boolean;
+      } | null;
       const id = `host-${state.hosts.length + 1}`;
+      /* 「立即连接」开关：缺省创建即建链；关掉只建实例，停在断开态 */
+      const connect = body?.connect !== false;
       state.hosts.push({
-        id, name: body?.name ?? id, phase: 'DISCONNECTED', open: false,
+        id, name: body?.name ?? id, phase: connect ? 'CONNECTED' : 'DISCONNECTED', open: connect,
         target: `${body?.host ?? '127.0.0.1'}:${body?.port ?? 5000}`,
         port: body?.port ?? 5000, deviceId: body?.deviceId ?? 0,
-        autoReconnect: false, retryCount: 0, settingRevision: 1, appliedRevision: 0, lastError: '',
+        autoReconnect: false, retryCount: 0, settingRevision: 1,
+        appliedRevision: connect ? 1 : 0, lastError: '',
       });
       return ok({ ok: true, hostId: id }, 201);
     }

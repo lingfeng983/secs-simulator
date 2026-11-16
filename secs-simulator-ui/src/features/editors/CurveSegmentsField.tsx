@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CurveFields } from './CurveFields';
 import { SourcePreview } from './SourcePreview';
 import { NumberField } from '../../shared/ui/CommitFields';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import {
   arrayField,
   defaultCurveFields,
@@ -60,7 +61,9 @@ export function CurveSegmentsField({ curve, mutateCurve }: {
     <div className="curve-segments">
       <div className="curve-segments-head">
         <span className="template-label">
-          分段（{segments.length} 段 · 合计 {(totalMs / 1_000).toFixed(1)}s）
+          <HintTitle text="段内时间从 0 重新开始，子曲线自己的时长/周期照常填写；走完末段停在末值，勾选「走完末段后从头循环」则整条重复。">
+            分段（{segments.length} 段 · 合计 {(totalMs / 1_000).toFixed(1)}s）
+          </HintTitle>
         </span>
         <button
           type="button"
@@ -142,10 +145,6 @@ export function CurveSegmentsField({ curve, mutateCurve }: {
           </div>
         );
       })}
-      <p className="hint">
-        段内时间从 0 重新开始，子曲线自己的时长/周期照常填写；走完末段停在末值，
-        勾选「走完末段后从头循环」则整条重复。
-      </p>
       {isJsonObject(previewSegment) && previewIndex !== null && (
         <SourcePreview
           open

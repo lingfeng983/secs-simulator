@@ -78,6 +78,16 @@ class ApiContractHardeningTest {
             }
 
             @Override
+            public ApiContext.HostOpenResult openHostV2(String name, String host, int port,
+                                                        int deviceId, boolean autoReconnect,
+                                                        boolean connect) {
+                calls.add("open:" + name + ":" + host + ":" + port + ":" + autoReconnect
+                        + ":connect=" + connect);
+                return new ApiContext.HostOpenResult(ApiContractHardeningTest.this.actionOutcome,
+                        "h-new");
+            }
+
+            @Override
             public SessionOutcome saveHostV2(String hostId, String name, String host,
                                              int port, int deviceId) {
                 calls.add("save:" + hostId);
@@ -229,6 +239,28 @@ class ApiContractHardeningTest {
         this.actionOutcome = SessionOutcome.CONFLICT;
         assertEquals(409, send("POST", "/api/v2/hosts",
                 "{\"name\":\"n\",\"host\":\"1.1.1.1\",\"port\":5000}").statusCode());
+    }
+
+    @Test
+    void hostOpenConnectFlagDefaultsTrueAndPassesThrough() throws Exception {
+        this.actionOutcome = SessionOutcome.OK;
+        /* 缺省不带 connect：保持创建即连接的旧行为 */
+        assertEquals(201, send("POST", "/api/v2/hosts",
+                "{\"host\":\"1.1.1.1\",\"port\":5000}").statusCode());
+        assertTrue(this.calls.get(this.calls.size() - 1).endsWith(":connect=true"),
+                this.calls.toString());
+
+        /* 显式关掉：只建实例不建链，开关要原样传到业务层 */
+        assertEquals(201, send("POST", "/api/v2/hosts",
+                "{\"host\":\"1.1.1.1\",\"port\":5000,\"connect\":false}").statusCode());
+        assertTrue(this.calls.get(this.calls.size() - 1).endsWith(":connect=false"),
+                this.calls.toString());
+
+        /* 字段存在但不是布尔：与 autoReconnect 同口径，optionalBoolean 宽容退回缺省 true */
+        assertEquals(201, send("POST", "/api/v2/hosts",
+                "{\"host\":\"1.1.1.1\",\"port\":5000,\"connect\":\"yes\"}").statusCode());
+        assertTrue(this.calls.get(this.calls.size() - 1).endsWith(":connect=true"),
+                this.calls.toString());
     }
 
     /* ---------- limit 参数 ---------- */

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { Panel } from '../../shared/ui/Panel';
 import { Modal } from '../../shared/ui/Modal';
+import { FieldLabel } from '../../shared/ui/FieldLabel';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
 import { hostPhaseLabel, hostPhaseTone, type HostsV2State } from '../../state/useHostsV2';
@@ -439,13 +440,15 @@ function CreateHostModal({
   onClose: () => void;
   onCreate: (request: {
     name?: string; host: string; port: number; deviceId?: number; template?: HostTemplate;
-    region: string; newRegion: string;
+    connect: boolean; region: string; newRegion: string;
   }) => void;
 }): JSX.Element {
   const [name, setName] = useState('host');
   const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState('5000');
   const [deviceId, setDeviceId] = useState('0');
+  /* 「立即连接」开关：默认开，保持创建即连接的习惯；关掉只建实例不建链 */
+  const [connectNow, setConnectNow] = useState(true);
   const [templateId, setTemplateId] = useState('');
   const [region, setRegion] = useState(DEFAULT_REGION);
   const [newRegion, setNewRegion] = useState('');
@@ -494,6 +497,7 @@ function CreateHostModal({
               port: Number(port),
               deviceId: Number(deviceId) || 0,
               template: selectedTemplate,
+              connect: connectNow,
               region,
               newRegion,
             })}
@@ -503,90 +507,86 @@ function CreateHostModal({
         </>
       }
     >
-      {templates.length > 0 && (
-        <HostTemplatePicker
-          templates={templates}
-          value={templateId}
-          onChange={(template) => setTemplateId(template?.id ?? '')}
-        />
-      )}
-      <div className="session-form">
+      <div className="session-form modal-form">
+        {templates.length > 0 && (
+          <HostTemplatePicker
+            templates={templates}
+            value={templateId}
+            onChange={(template) => setTemplateId(template?.id ?? '')}
+          />
+        )}
         {/* 一线操作：已经启动的设备直接拿来当目标，省掉抄地址/端口/Device ID */}
-        <div className="form-row">
-          <label className="field">
-            快速链接设备
-            <select
-              value={quickId}
-              disabled={picking}
-              aria-label="快速链接设备"
-              onChange={(event) => void applyQuickDevice(event.target.value)}
-            >
-              <option value="">
-                {quickDevices.length === 0 ? '— 没有已启动的设备 —' : '— 手动填写 —'}
-              </option>
-              {quickDevices.map((device) => (
-                <option key={device.id} value={device.id}>{device.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <p className="hint">
-          选一台已经启动的设备：目标地址、端口、Device ID 按它的配置填好，名称用
-          <span className="mono"> host-设备名</span>；填完仍可手改。
-        </p>
-        <div className="session-fields">
-          <label className="session-field">
-            <span className="session-field-text">
-              <span className="session-field-name">名称</span>
-              <span className="session-field-help">实例列表里显示的名字;多台主机各起一个好认的。</span>
-            </span>
-            <input value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label className="session-field">
-            <span className="session-field-text">
-              <span className="session-field-name">目标地址</span>
-              <span className="session-field-help">设备或第三方模拟器的 IP / 主机名;清空则禁用创建。</span>
-            </span>
-            <input value={host} onChange={(event) => setHost(event.target.value)} />
-          </label>
-          <label className="session-field">
-            <span className="session-field-text">
-              <span className="session-field-name">端口</span>
-              <span className="session-field-help">目标设备的 HSMS 端口(1–65535)。</span>
-            </span>
-            <input type="number" min={1} max={65535} value={port}
-              onChange={(event) => setPort(event.target.value)} />
-          </label>
-          <label className="session-field">
-            <span className="session-field-text">
-              <span className="session-field-name">Device ID</span>
-              <span className="session-field-help">目标设备的 HSMS Device ID(0–32767),两侧必须一致。</span>
-            </span>
-            <input type="number" min={0} max={32767} value={deviceId}
-              onChange={(event) => setDeviceId(event.target.value)} />
-          </label>
-        </div>
-        <div className="form-row">
-          <label className="field">
-            所属区域
-            <select value={region} onChange={(event) => setRegion(event.target.value)} aria-label="所属区域">
-              {regionNames.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            新建区域（可选）
+        <label className="field modal-field">
+          <FieldLabel
+            text="快速链接设备"
+            help="选一台已经启动的设备：目标地址、端口、Device ID 按它的配置填好，名称用 host-设备名；填完仍可手改。"
+          />
+          <select
+            value={quickId}
+            disabled={picking}
+            aria-label="快速链接设备"
+            onChange={(event) => void applyQuickDevice(event.target.value)}
+          >
+            <option value="">
+              {quickDevices.length === 0 ? '— 没有已启动的设备 —' : '— 手动填写 —'}
+            </option>
+            {quickDevices.map((device) => (
+              <option key={device.id} value={device.id}>{device.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field modal-field">
+          <FieldLabel text="名称" help="实例列表里显示的名字；多台主机各起一个好认的。" />
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label className="field modal-field">
+          <FieldLabel
+            text="目标地址"
+            help="设备或第三方模拟器的 IP / 主机名；清空则禁用创建。目标与设备列表无关，可连续新建多台，多台可指向同一地址（先连上的保持「已连接」，后来者停在「连接失败 · 目标已有主机」，互不影响）。"
+          />
+          <input value={host} onChange={(event) => setHost(event.target.value)} />
+        </label>
+        <label className="field modal-field">
+          <FieldLabel text="端口" help="目标设备的 HSMS 端口（1–65535）。" />
+          <input type="number" min={1} max={65535} value={port}
+            onChange={(event) => setPort(event.target.value)} />
+        </label>
+        <label className="field modal-field">
+          <FieldLabel text="Device ID" help="目标设备的 HSMS Device ID（0–32767），两侧必须一致。" />
+          <input type="number" min={0} max={32767} value={deviceId}
+            onChange={(event) => setDeviceId(event.target.value)} />
+        </label>
+        {/* 开关行：标题在左、勾选在右，与其余字段同一套对齐网格 */}
+        <label className="field modal-field">
+          <FieldLabel
+            text="立即连接"
+            help="创建后马上连接目标；关掉则只建实例，之后在列表或详情页点「连接」。"
+          />
+          <span className="check-inline">
             <input
-              value={newRegion}
-              onChange={(event) => setNewRegion(event.target.value)}
-              placeholder="填了就建新区域并归入"
-              aria-label="新建区域"
+              type="checkbox"
+              checked={connectNow}
+              aria-label="立即连接"
+              onChange={(event) => setConnectNow(event.target.checked)}
             />
-          </label>
-        </div>
-        <p className="hint">
-          目标可以是任意设备或第三方模拟器地址;与设备列表无关。可连续新建多台,多台可指向同一地址
-          （先连上的保持「已连接」,后来者停在「连接失败 · 目标已有主机」,互不影响）。
-        </p>
+            创建后立即连接
+          </span>
+        </label>
+        <label className="field modal-field">
+          <FieldLabel text="所属区域" help="主机归入的区域分组，用于列表筛选与侧栏归类。" />
+          <select value={region} onChange={(event) => setRegion(event.target.value)} aria-label="所属区域">
+            {regionNames.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field modal-field">
+          <FieldLabel text="新建区域（可选）" help="填了就新建一个区域并把主机归入，优先于上面选择的区域。" />
+          <input
+            value={newRegion}
+            onChange={(event) => setNewRegion(event.target.value)}
+            placeholder="填了就建新区域并归入"
+            aria-label="新建区域"
+          />
+        </label>
       </div>
     </Modal>
   );

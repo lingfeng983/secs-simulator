@@ -3,6 +3,7 @@ import type { PanelBaseProps } from '../panels/types';
 import { Panel } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
 import { Modal } from '../../shared/ui/Modal';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { TextField } from '../../shared/ui/CommitFields';
 import { tokenizeJson } from '../../shared/lib/jsonHighlight';
@@ -276,6 +277,9 @@ function ParamTemplatePreview({
     <Modal
       open={entry !== null}
       title={entry === null ? '' : `预览参数模板 · ${entry.name}`}
+      hint={simulation === null
+        ? undefined
+        : `按这段值定义在本地试跑：横轴时间、纵轴输出值（${simulation.shape}）。曲线为示意——运行时噪声种子由会话与数据项派生，晶圆属性还按片号变化。`}
       onClose={onClose}
       width="min(940px, 94vw)"
       footer={<button type="button" onClick={onClose}>关闭</button>}
@@ -342,13 +346,13 @@ function ParamTemplatePreview({
           />
 
           {simulation.warning !== '' && <p className="inline-note danger">模拟提示：{simulation.warning}</p>}
-          <p className="hint">
-            按这段值定义在本地试跑：横轴时间、纵轴输出值（{simulation.shape}）。
-            曲线为示意——运行时噪声种子由会话与数据项派生，晶圆属性还按片号变化。
-          </p>
 
           <details className="param-preview-details">
-            <summary>模板信息与定义原文（只读）</summary>
+            <summary>
+              <HintTitle text="设备里从模板库选中一条时复制的是这份内容的深拷贝；之后修改库不影响已配置的设备。">
+                模板信息与定义原文（只读）
+              </HintTitle>
+            </summary>
             <div className="session-form">
               <div className="session-field">
                 <span className="session-field-name">来源</span>
@@ -369,7 +373,6 @@ function ParamTemplatePreview({
             <pre className="sml-result param-template-preview-code">{tokens.map((token, index) => (
               <span key={index} className={`json-${token.kind}`}>{token.text}</span>
             ))}</pre>
-            <p className="hint">设备里从模板库选中一条时复制的是这份内容的深拷贝；之后修改库不影响已配置的设备。</p>
           </details>
         </div>
       )}
@@ -437,6 +440,7 @@ function ParamTemplateForm({
         : copying !== null
           ? `复制参数模板 ${copying.name}`
           : '新建参数模板'}
+      hint="模板体只有一段值定义：常量 / 曲线 / 表达式（私有曲线组合）/ 按片。设备里选中它时复制的是这段内容的深拷贝，不保留任何引用。"
       onClose={onClose}
       width="min(920px, 92vw)"
       footer={
@@ -484,10 +488,6 @@ function ParamTemplateForm({
       )}
 
       {errorText !== '' && <p className="problems">{errorText}</p>}
-      <p className="hint">
-        模板体只有一段值定义：常量 / 曲线 / 表达式（私有曲线组合）/ 按片。
-        设备里选中它时复制的是这段内容的深拷贝，不保留任何引用。
-      </p>
     </Modal>
   );
 }

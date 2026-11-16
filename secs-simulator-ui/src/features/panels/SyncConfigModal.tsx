@@ -26,6 +26,7 @@ export function SyncConfigModal({
     <Modal
       open={open}
       title="批量同步配置"
+      hint={`以选中的第一台（${sessionIds[0] ?? '—'}）为原始配置，把设备/单元/SVID/报告/事件/模板复制到其余 ${Math.max(0, sessionIds.length - 1)} 台选中设备；只改各自的会话 id、端口、设备号与设备名，其余配置保持一致。`}
       onClose={onClose}
       footer={
         <>
@@ -36,13 +37,6 @@ export function SyncConfigModal({
         </>
       }
     >
-      <p className="hint">
-        以选中的第一台为原始配置，把设备/单元/SVID/报告/事件/模板复制到其余选中设备；
-        只改各自的会话 id、端口、设备号与设备名，其余配置保持一致。
-      </p>
-      <p className="hint">
-        原始设备：<code>{sessionIds[0] ?? '—'}</code>；目标 {Math.max(0, sessionIds.length - 1)} 台。
-      </p>
       <div className="form-row">
         <label className="field">
           起始端口

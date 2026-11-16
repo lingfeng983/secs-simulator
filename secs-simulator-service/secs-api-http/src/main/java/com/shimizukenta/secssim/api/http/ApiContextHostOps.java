@@ -18,10 +18,22 @@ public interface ApiContextHostOps {
         return "{\"ok\":false,\"error\":\"not-supported\"}";
     }
 
-    /** v2：新建主机。 */
+    /** v2：新建主机（默认立即连接）。 */
     default ApiContext.HostOpenResult openHostV2(String name, String host, int port, int deviceId,
                                                 boolean autoReconnect) {
         return ApiContext.HostOpenResult.failed(SessionOutcome.FAILED);
+    }
+
+    /**
+     * v2：新建主机，可选是否立即建链（界面「立即连接」开关）。
+     *
+     * <p>默认实现退回旧重载：不支持开关的形态（如测试桩）保持原行为。</p>
+     *
+     * @param connect {@code false} 时只建实例不连接，停在断开态
+     */
+    default ApiContext.HostOpenResult openHostV2(String name, String host, int port, int deviceId,
+                                                boolean autoReconnect, boolean connect) {
+        return openHostV2(name, host, port, deviceId, autoReconnect);
     }
 
     /** v2：单主机状态。 */

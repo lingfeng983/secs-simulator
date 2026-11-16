@@ -35,6 +35,7 @@ export function ConfigItemModal({ title, initial, problemOf, onClose, onSubmit, 
     <Modal
       open
       title={title}
+      hint="「确定」只改到本页草稿，点页面底部的「保存」后才写入配置；取消或 Esc 不留痕迹。"
       onClose={onClose}
       width="min(920px, 92vw)"
       footer={
@@ -54,7 +55,6 @@ export function ConfigItemModal({ title, initial, problemOf, onClose, onSubmit, 
     >
       {children(item, mutate)}
       {problem !== '' && <p className="problems">{problem}</p>}
-      <p className="hint">「确定」只改到本页，点页面底部的「保存」后才写入配置。</p>
     </Modal>
   );
 }

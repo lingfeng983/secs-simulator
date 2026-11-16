@@ -117,13 +117,16 @@ export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): 
         searchText={(row) => stringField(row.item, 'id')}
         emptyText="还没有晶圆属性。加一条 LOTID / WAFERID，就能在报告里勾选它，S6F11 会带上「这一片」的批次号与片号。"
         toolbarEnd={
-          <button type="button" className="primary" onClick={() => setEditing(null)}>＋ 新建属性</button>
+          <button
+            type="button"
+            className="primary"
+            title="「按片变化」的 pattern 用 {03} 表示补零到 3 位的片序，例如 W{03} 生成 W001、W002；every 表示每几片进一档（每 25 片换批号时 every 填 25）。"
+            onClick={() => setEditing(null)}
+          >
+            ＋ 新建属性
+          </button>
         }
       />
-      <p className="hint">
-        「按片变化」的 pattern 用 {'{03}'} 表示补零到 3 位的片序，例如 W{'{03}'} 生成 W001、W002；
-        every 表示每几片进一档（每 25 片换批号时 every 填 25）。
-      </p>
 
       {editing !== undefined && (editing === null || editingRow !== undefined) && (
         <ContextEditModal

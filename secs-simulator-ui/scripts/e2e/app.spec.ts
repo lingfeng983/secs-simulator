@@ -284,7 +284,8 @@ test('批量同步配置弹窗能打开并给出目标台数', async ({ page }) 
   await page.locator('#panel-sessions .table-toolbar').getByRole('button', { name: '批量同步配置' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('批量同步配置');
-  await expect(dialog).toContainText('目标 1 台');
+  /* 说明收进标题悬浮气泡（3.2 悬浮化），台数跟着文案走 */
+  await expect(dialog).toContainText('其余 1 台选中设备');
   await dialog.getByRole('button', { name: '取消' }).click();
   await expect(dialog).toHaveCount(0);
 });
@@ -334,6 +335,27 @@ test('新增设备弹框：填链接信息 + 选模板，建出配置与会话',
   await expect.poll(() => state.calls.filter((call) => call === 'POST /api/v1/sessions').length).toBe(1);
   await expect(page.locator('.toast', { hasText: '已新建设备' }).first()).toBeVisible();
   await expect.poll(() => state.sessions.some((item) => item.id === 'etch-a')).toBe(true);
+});
+
+test('新增设备：关掉「立即启动」只保存设备，不启动会话', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/');
+  const panel = page.locator('#panel-sessions');
+  await panel.getByRole('button', { name: '新建设备' }).click();
+  const dialog = page.getByRole('dialog');
+  /* 默认勾选：创建后马上启动；关掉则只保存设备 */
+  await expect(dialog.getByLabel('立即启动设备')).toBeChecked();
+  await dialog.getByLabel('立即启动设备').uncheck();
+  await dialog.getByLabel('设备名称').fill('etch-idle');
+  await dialog.getByLabel('新建设备使用的模板').selectOption('etch');
+  await dialog.getByLabel('端口').fill('5111');
+  await dialog.getByRole('button', { name: '创建设备' }).click();
+
+  await expect.poll(() => state.calls.filter((call) => call === 'POST /api/v1/configs').length).toBe(1);
+  await expect(page.locator('.toast', { hasText: '已新建设备' }).first()).toBeVisible();
+  /* 开关关掉后不再打会话创建：设备以停止态留在清单里 */
+  expect(state.calls.filter((call) => call === 'POST /api/v1/sessions')).toHaveLength(0);
+  expect(state.sessions.some((item) => item.id === 'etch-idle')).toBe(false);
 });
 
 test('设备清单：批量动作与新建都在表格工具条这一行', async ({ page }) => {

@@ -27,6 +27,8 @@ export interface CreateHostRequest {
   port: number;
   deviceId?: number;
   autoReconnect?: boolean;
+  /** 「立即连接」开关：缺省 true；false 时只建实例，之后手动点「连接」。 */
+  connect?: boolean;
   /** 可选：新建后立刻把这套方案复制进新主机的配置区。 */
   template?: HostTemplate;
 }

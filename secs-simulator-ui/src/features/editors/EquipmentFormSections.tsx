@@ -1,5 +1,6 @@
 import { RefDropdownSelect, type RefChoice } from './RefDropdownSelect';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import {
   booleanField,
   isJsonObject,
@@ -51,17 +52,21 @@ export function EquipmentForm({ root, edit, onPreviewSvid }: {
   return (
     <div className="cfg-section">
       <div className="template-head">
-        <h3>设备全局</h3>
+        <h3>
+          <HintTitle text="这里只管号段规划与单元标识。变量、设备常量、事件与报告分别到「变量配置」「设备常量」「事件与报告」页维护。">
+            设备全局
+          </HintTitle>
+        </h3>
       </div>
-      <p className="hint">
-        这里只管号段规划与单元标识。变量、设备常量、事件与报告分别到
-        「变量配置」「设备常量」「事件与报告」页维护。
-      </p>
 
       <IdSpaceForm equipment={equipment} edit={edit} />
 
       <div className="template-head" style={{ marginTop: '1.25rem' }}>
-        <h3>单元</h3>
+        <h3>
+          <HintTitle text="单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）；单元里的变量、报告、事件到「变量配置」「事件与报告」页维护，避免同一份数据在几个地方填。">
+            单元
+          </HintTitle>
+        </h3>
         {typeof units !== 'string' && (
           <button
             type="button"
@@ -122,7 +127,11 @@ function IdSpaceForm({ equipment, edit }: { equipment: JsonObject; edit: Edit })
   return (
     <div className="template-card">
       <div className="template-card-head">
-        <span className="template-label">号段规划（idSpace）</span>
+        <span className="template-label">
+          <HintTitle text="绝对 ID = 段起点 + (单元位置-1) × 步长 + offset。每个单元内最大 offset 必须小于步长。">
+            号段规划（idSpace）
+          </HintTitle>
+        </span>
       </div>
       <div className="form-row">
         <label className="field field-cell">
@@ -150,9 +159,6 @@ function IdSpaceForm({ equipment, edit }: { equipment: JsonObject; edit: Edit })
           <NumberField value={numberField(idSpace, 'reportStride')} integer onCommit={(next) => setNumber('reportStride', next)} />
         </label>
       </div>
-      <p className="hint">
-        绝对 ID = 段起点 + (单元位置-1) × 步长 + offset。每个单元内最大 offset 必须小于步长。
-      </p>
       {reserve.length > 0 && (
         <div className="template-subtable">
           <div className="template-subhead">

@@ -551,7 +551,13 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public HostOpenResult openHostV2(String name, String host, int port, int deviceId, boolean autoReconnect) {
-        return this.hostV2.openHostV2(name, host, port, deviceId, autoReconnect);
+        return this.hostV2.openHostV2(name, host, port, deviceId, autoReconnect, true);
+    }
+
+    @Override
+    public HostOpenResult openHostV2(String name, String host, int port, int deviceId,
+                                     boolean autoReconnect, boolean connect) {
+        return this.hostV2.openHostV2(name, host, port, deviceId, autoReconnect, connect);
     }
 
     @Override

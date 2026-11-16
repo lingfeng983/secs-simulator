@@ -33,13 +33,13 @@ final class HostV2Delegates {
     }
 
     ApiContext.HostOpenResult openHostV2(String name, String host, int port, int deviceId,
-            boolean autoReconnect) {
+            boolean autoReconnect, boolean connect) {
         if (host == null || host.isBlank() || port < 1 || port > 65535) {
             return ApiContext.HostOpenResult.failed(SessionOutcome.FAILED);
         }
         var result = this.hosts.open(name == null || name.isBlank() ? "host" : name,
                 new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId),
-                autoReconnect);
+                autoReconnect, connect);
         /* id 随结果返回，不再落到共享字段上（并发创建会串号） */
         return new ApiContext.HostOpenResult(result.outcome(),
                 result.hostId() == null ? "" : result.hostId());

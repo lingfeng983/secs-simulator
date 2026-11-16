@@ -42,6 +42,7 @@ export function SourcePreview({ open, title, def, autoDurationMs, axisNote, onCl
     <Modal
       open={open}
       title={`预览 · ${title}`}
+      hint={`${axisNote ?? '横轴是片内相位（有 cycle 段时每片重放）'}，纵轴是这条值定义的输出（${simulation.shape}）。这是示意：运行时噪声种子由会话与数据项派生。`}
       onClose={onClose}
       width="min(880px, 94vw)"
       footer={<button type="button" onClick={onClose}>关闭</button>}
@@ -81,10 +82,6 @@ export function SourcePreview({ open, title, def, autoDurationMs, axisNote, onCl
         />
 
         {simulation.warning !== '' && <p className="inline-note danger">模拟提示：{simulation.warning}</p>}
-        <p className="hint">
-          {axisNote ?? '横轴是片内相位（有 cycle 段时每片重放）'}，纵轴是这条值定义的输出（{simulation.shape}）。
-          这是示意：运行时噪声种子由会话与数据项派生。
-        </p>
       </div>
     </Modal>
   );

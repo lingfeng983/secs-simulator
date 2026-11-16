@@ -13,6 +13,7 @@
  *   blocks      空状态、折叠块、错误清单、报警条
  *   modal-resize 对话框四边四角缩放
  *   json-editor 配置 JSON 编辑器与高亮
+ *   modal-form  新建弹框表单：一行一个配置项、标题悬浮说明
  *
  * 这里的 @import 顺序 = 原文件段落顺序，层叠结果与拆分前一致；
  * 新增规则请放进对应类别文件，而不是继续往汇总文件里写。
@@ -28,3 +29,4 @@
 @import './controls/08-blocks.css';
 @import './controls/09-modal-resize.css';
 @import './controls/10-json-editor.css';
+@import './controls/11-modal-form.css';

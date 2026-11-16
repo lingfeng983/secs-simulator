@@ -1,0 +1,114 @@
+/* ===== 新建弹框表单：一行一个配置项、标题列对齐 =====
+ * 用于「新增设备」「新建主机」这类创建弹框：
+ * 每行 = 固定宽标题（左）+ 控件（右），说明默认收起，
+ * 悬浮/聚焦在标题上时以气泡展示（见 FieldLabel）。 */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.modal-form .section-head {
+  margin: 0.35rem 0 0;
+}
+
+/* 行网格：标题列固定宽，控件列吃满剩余空间——各行控件左边缘齐平。
+   .modal-field 不依赖 .modal-form 容器：连接页等面板表单（SessionField）也用它。 */
+.modal-field {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  white-space: normal;
+}
+
+.modal-field > input,
+.modal-field > select,
+.modal-field > .check-inline {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 勾选行：勾选框贴着控件列左边缘，不随整列拉伸 */
+.modal-field > .check-inline {
+  justify-content: flex-start;
+}
+
+/* 标题：右对齐贴住控件，与其他行的标题一列对齐 */
+.modal-field-label {
+  position: relative;
+  justify-self: stretch;
+  text-align: right;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* 带说明的标题：虚线下划线提示"这里有说明"，悬浮/聚焦出气泡。
+   字段标题（.modal-field-label）与小节/弹框标题（.hint-title）共用。 */
+.has-help {
+  cursor: help;
+  text-decoration: underline dotted var(--muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* 小节标题：整段说明挂在它下面，标题本身仍随上下文排版 */
+.hint-title {
+  position: relative;
+}
+
+/* 说明气泡：默认不展示；悬浮/键盘聚焦在标题上时出现。
+   字段标题在标题上方弹（贴近控件列上方），小节标题在下方弹（顶着弹框头/面板头，向上会被裁）。 */
+.field-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(320px, 72vw);
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: calc(11.5px * var(--font-scale));
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
+  pointer-events: none;
+}
+
+.hint-title .field-tip {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+
+.has-help:hover .field-tip,
+.has-help:focus-visible .field-tip {
+  display: block;
+}
+
+/* 第一行的标题上方就是弹框头/面板头：气泡改到标题下方，避免被裁剪 */
+.modal-form > .modal-field:first-child .field-tip,
+.modal-form > .problems + .modal-field .field-tip,
+.session-fields > .modal-field:first-child .field-tip,
+.session-form > .modal-field:first-child .field-tip {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+
+@media (max-width: 640px) {
+  /* 窄屏：标题在上、控件在下，仍是一行一个配置项 */
+  .modal-form .modal-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
+  }
+
+  .modal-field-label {
+    text-align: left;
+  }
+}

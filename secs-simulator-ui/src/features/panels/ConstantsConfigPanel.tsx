@@ -123,13 +123,16 @@ export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edi
         searchText={(row) => `${stringField(row.item, 'name')} ${numberField(row.item, 'id') ?? ''}`}
         emptyText="没有设备常量；没有时主机查询（S2F13）得到空列表、写入（S2F15）被拒绝。点「＋ 新建常量」添加。"
         toolbarEnd={
-          <button type="button" className="primary" onClick={() => setEditing(null)}>＋ 新建常量</button>
+          <button
+            type="button"
+            className="primary"
+            title="常量可以只给「初始值」（可用 S2F15 写入），也可以配一份值定义让它随时间/周期变化；配了值定义之后 S2F15 会拒写（写死一个随时间变的值没有意义）。"
+            onClick={() => setEditing(null)}
+          >
+            ＋ 新建常量
+          </button>
         }
       />
-      <p className="hint">
-        常量可以只给「初始值」（可用 S2F15 写入），也可以配一份值定义让它随时间/周期变化；
-        配了值定义之后 S2F15 会拒写（写死一个随时间变的值没有意义）。
-      </p>
 
       {editing !== undefined && (editing === null || editingRow !== undefined) && (
         <ConstantEditModal
@@ -220,7 +223,7 @@ function ConstantEditModal({ creating, initial, others, onClose, onSubmit }: {
     >
       {(item, mutate) => (
         <>
-          <div className="session-form">
+          <div className="session-fields">
             <SessionField label="ECID" help="主机查询（S2F13）/ 写入（S2F15）用的编号，常量之间不能重复">
               <NumberField value={numberField(item, 'id')} integer onCommit={(next) => mutate((target) => { target.id = next; })} />
             </SessionField>

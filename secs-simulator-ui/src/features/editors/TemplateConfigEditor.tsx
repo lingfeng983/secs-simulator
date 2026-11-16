@@ -52,12 +52,11 @@ export function TemplateConfigEditor({ text, onChange, page, onSelect, backend, 
                     if (!isJsonObject(draft.equipment)) draft.equipment = {};
                     (draft.equipment as JsonObject).name = name;
                   })} />
-              </SessionField>
+                </SessionField>
+              </div>
             </div>
-            <p className="hint">各页修改汇总到同一份模板，点底部「保存」后才生效；已创建的设备不会随模板改变。</p>
-          </div>
-        );
-      case 'connection': return <SessionForm root={root} edit={edit} />;
+          );
+        case 'connection': return <SessionForm root={root} edit={edit} />;
       case 'structure': return <EquipmentForm root={root} edit={edit} />;
       case 'constants': return isJsonObject(root.equipment)
         ? <ConstantsTable equipment={root.equipment} edit={edit} /> : <MissingEquipment edit={edit} />;

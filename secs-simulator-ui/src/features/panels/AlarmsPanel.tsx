@@ -118,11 +118,10 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
             maxLength={120}
             onChange={(event) => setAlarmText(event.target.value)}
             disabled={disabled}
-            title="SECS-II 的 A 类型只接受 US-ASCII"
+            title="置位/清除在面板右上角：会向主机发送 S5F1（带 W 位，等待 S5F2）。SECS-II 的 A 类型只接受 US-ASCII 字符。"
           />
         </label>
       </div>
-      <p className="hint">置位/清除在面板右上角：会向主机发送 S5F1（带 W 位，等待 S5F2）。文本只能包含 US-ASCII 字符。</p>
 
       <div className="toolbar">
         <label className="field">
@@ -143,12 +142,6 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
           {stormRunning ? '风暴中…' : '报警风暴'}
         </button>
       </div>
-
-      <p className="hint">
-        本页不保留活动报警与终端消息的历史（它们没有独立触发点，异步确认失败时会误导）。
-        要确认报警/终端是否真的到达主机，去设备「消息」页按「报警」或「终端」类别看
-        S5F1/S5F2、S10F3/S10F4。
-      </p>
     </Panel>
   );
 }

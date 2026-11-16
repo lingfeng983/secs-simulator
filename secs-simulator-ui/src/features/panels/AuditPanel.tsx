@@ -145,7 +145,7 @@ export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
                   type="button"
                   onClick={() => void loadAuditOlder()}
                   disabled={allEntries.length === 0}
-                  title="以当前最早一条为游标,向服务端要更早的一页审计"
+                  title={`最近 200 条操作记录${filterActive ? '（按动作/操作者过滤后）' : ''}；以当前最早一条为游标向服务端要更早的一页。完整历史在 --work-dir/logs/audit.jsonl（重启后仍保留最近 1000 条）；导入 CSV 可把导出的审计放在本页只读查看，不会写回服务端。`}
                 >
                   载入更早
                 </button>
@@ -160,11 +160,6 @@ export function AuditPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
               { header: '细节', value: (row) => row.detail },
             ]}
           />
-          <p className="hint">
-            最近 200 条操作记录{filterActive ? '（按动作/操作者过滤后）' : ''}，「载入更早」继续往前翻；
-            完整历史在 <code>--work-dir/logs/audit.jsonl</code>（重启后仍保留最近 1000 条）。
-            导入 CSV 可把导出的审计放在本页只读查看，不会写回服务端。
-          </p>
           {imported !== null && (
             <button type="button" onClick={() => setImported(null)}>退出导入视图</button>
           )}

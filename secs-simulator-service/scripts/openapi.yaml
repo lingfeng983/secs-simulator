@@ -1214,6 +1214,7 @@ paths:
                 port: { type: integer }
                 deviceId: { type: integer }
                 autoReconnect: { type: boolean }
+                connect: { type: boolean, default: true, description: 是否立即建链；false 时只建实例，停在断开态 }
       responses:
         '201': { description: 已创建（body 带 hostId，即本次请求创建的实例） }
         '400': { description: 请求体非法（空、超限、非对象、目标不合法） }

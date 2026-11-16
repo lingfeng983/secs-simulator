@@ -340,6 +340,7 @@ final class HostSimHandler extends HttpSupport {
         int port;
         int deviceId;
         boolean autoReconnect;
+        boolean connect;
         try {
             name = str(request, "name");
             host = str(request, "host");
@@ -348,6 +349,9 @@ final class HostSimHandler extends HttpSupport {
             /* optionalBoolean：字段存在但是字符串时 booleanValue() 会抛，最终变 500 */
             autoReconnect = request.containsKey("autoReconnect")
                     && request.get("autoReconnect").optionalBoolean().orElse(false);
+            /* 「立即连接」开关：缺省 true，保持旧客户端创建即连接的行为 */
+            connect = !request.containsKey("connect")
+                    || request.get("connect").optionalBoolean().orElse(true);
         } catch (RuntimeException e) {
             /* 字段存在但类型不对（{"name":[]}）同样是请求体非法 */
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
@@ -357,7 +361,7 @@ final class HostSimHandler extends HttpSupport {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
             return;
         }
-        ApiContext.HostOpenResult result = this.context.openHostV2(name, host, port, deviceId, autoReconnect);
+        ApiContext.HostOpenResult result = this.context.openHostV2(name, host, port, deviceId, autoReconnect, connect);
         audit(ex, "host-v2-open", host + ":" + port, "outcome=" + result.outcome());
         if (result.ok()) {
             respond(ex, 201, "{\"ok\":true,\"hostId\":\"" + json(result.hostId()) + "\"}");

@@ -572,7 +572,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
         className="primary"
         disabled={busy || selectedPlans.length === 0}
         onClick={() => void runBatch(true)}
-        title="对选中方案逐条下发 S2F23 开始采样（已采集中者跳过）"
+        title="对选中方案逐条下发 S2F23 开始采样（已采集中者跳过）。TOTSMP=0 可提前终止该 TRID；方案按主机落配置库（config.db），重启后端、换机器都不丢。"
       >
         批量启动
       </button>
@@ -612,7 +612,14 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
           busy={busy}
           /* 页面级动作下移到表格工具条右侧：一页只剩"一行操作 + 一张表" */
           toolbarEnd={readOnly
-            ? <button type="button" className="primary" onClick={openCreate}>新增方案</button>
+            ? <button
+                type="button"
+                className="primary"
+                title="TOTSMP=0 可提前终止该 TRID；方案按主机落配置库（config.db），重启后端、换机器都不丢。"
+                onClick={openCreate}
+              >
+                新增方案
+              </button>
             : batchBar}
         />
 
@@ -638,7 +645,6 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
             peerLabel="设备"
           />
         )}
-        <p className="hint">TOTSMP=0 可提前终止该 TRID。方案按主机落配置库（config.db），重启后端、换机器都不丢。</p>
       </Panel>
 
       {!readOnly && (

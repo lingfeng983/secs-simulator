@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import type { ParamTemplate } from '../../api/paramTemplates';
 import { SourceEditor } from './SourceEditor';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
+import { FieldLabel, HintTitle } from '../../shared/ui/FieldLabel';
 import { Collapsible } from '../../shared/ui/Collapsible';
 import {
   booleanField,
@@ -72,12 +73,12 @@ export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEd
   return (
     <div className="cfg-editor">
       <div className="template-head">
-        <h3>配置（结构化编辑）</h3>
+        <h3>
+          <HintTitle text="表单修改的是原文解析后的结构；保存前仍要「校验」。未知键会保留，但整份文件的缩进会统一成 2 空格。每个变量的值定义就在它自己的卡片里。">
+            配置（结构化编辑）
+          </HintTitle>
+        </h3>
       </div>
-      <p className="hint">
-        表单修改的是原文解析后的结构；保存前仍要「校验」。未知键会保留，
-        但整份文件的缩进会统一成 2 空格。每个变量的值定义就在它自己的卡片里。
-      </p>
       {error !== '' && <p className="problems">{error}</p>}
 
       <SessionForm root={root} edit={edit} />
@@ -166,14 +167,11 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
   );
 }
 
-/** 一行"属性 + 说明 + 控件"：说明保证在左侧，控件在右侧。 */
+/** 一行"标题 + 控件"：标题列对齐；说明默认不展示，悬浮/聚焦在标题上时出气泡。 */
 export function SessionField({ label, help, children }: { label: string; help: string; children: ReactNode }): JSX.Element {
   return (
-    <label className="field session-field">
-      <span className="session-field-text">
-        <span className="session-field-name">{label}</span>
-        <span className="session-field-help">{help}</span>
-      </span>
+    <label className="field modal-field">
+      <FieldLabel text={label} help={help} />
       {children}
     </label>
   );
@@ -313,7 +311,11 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
 
   return (
     <div className="cfg-section">
-      <Collapsible title={`事件编排（events · ${typeof plans === 'string' ? '结构错误' : plans.length + ' 个计划'}）`} badge="热生效">
+      <Collapsible
+        title={`事件编排（events · ${typeof plans === 'string' ? '结构错误' : plans.length + ' 个计划'}）`}
+        hint="切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。事件只上报、不改任何值；按片重复的事件写在「工艺周期」里。"
+        badge="热生效"
+      >
       <div className="form-row">
         <label className="field field-cell">
           <span className="field-cell-name">每秒事件上限</span>
@@ -556,9 +558,6 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
           );
         })
       )}
-      <p className="hint">
-        切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。事件只上报、不改任何值；按片重复的事件写在「工艺周期」里。
-      </p>
       </Collapsible>
     </div>
   );

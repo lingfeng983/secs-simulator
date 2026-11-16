@@ -506,6 +506,8 @@ export interface ApiClient {
     port: number;
     deviceId?: number;
     autoReconnect?: boolean;
+    /** 是否立即建链；缺省 true，false 时只建实例停在断开态。 */
+    connect?: boolean;
   }): Promise<string>;
   deleteHostV2(hostId: string): Promise<boolean>;
   saveHostV2(hostId: string, request: {

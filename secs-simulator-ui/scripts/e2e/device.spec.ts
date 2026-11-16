@@ -45,9 +45,10 @@ test('配置区·连接：13 个字段 + 校验 / 保存 / 重新载入', async 
 
   const panel = page.locator('#panel-connection');
   await expect(panel).toBeVisible();
-  await expect(panel.getByText('会话 id', { exact: true })).toBeVisible();
-  await expect(panel.getByText(/唯一标识/)).toBeVisible();
-  await expect(panel.locator('.session-field')).toHaveCount(13);
+  /* 3.2 起一行一个配置项用 .modal-field：标题列对齐，说明收进标题悬浮气泡（默认隐藏但要挂在 DOM 上） */
+  await expect(panel.locator('.modal-field-label', { hasText: '会话 id' })).toBeVisible();
+  await expect(panel.locator('.field-tip', { hasText: '唯一标识' })).toBeAttached();
+  await expect(panel.locator('.modal-field')).toHaveCount(13);
 
   await panel.getByRole('button', { name: '校验' }).click();
   await expect(panel.getByText('校验通过')).toBeVisible();

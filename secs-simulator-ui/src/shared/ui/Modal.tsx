@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Overlay } from './Overlay';
+import { HintTitle } from './FieldLabel';
 
 export interface ModalProps {
   open: boolean;
   title: string;
+  /** 弹框级说明：悬浮在标题上时展示，不默认占版面。 */
+  hint?: string;
   onClose: () => void;
   children: React.ReactNode;
   /** 底部按钮区。 */
@@ -28,7 +31,7 @@ const MIN_HEIGHT = 220;
  * <p>四边四角都可拖拽改变大小：配置/事件这类表单字段多，固定 82vh
  * 常常看不到底部，允许放大比塞滚动条更直接。</p>
  */
-export function Modal({ open, title, onClose, children, footer, width }: ModalProps): JSX.Element | null {
+export function Modal({ open, title, hint, onClose, children, footer, width }: ModalProps): JSX.Element | null {
   /** 手动拖出来的尺寸；null = 用 CSS 默认。关闭后重置。 */
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -105,7 +108,7 @@ export function Modal({ open, title, onClose, children, footer, width }: ModalPr
         aria-label={title}
       >
         <div className="modal-head">
-          <h2>{title}</h2>
+          <h2>{hint === undefined ? title : <HintTitle text={hint}>{title}</HintTitle>}</h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
             ×
           </button>

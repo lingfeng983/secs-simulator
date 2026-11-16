@@ -4,6 +4,7 @@ import { setPlansEnabled, type PlanBatchResult } from './eventBatch';
 import type { EventPlanView } from '../../api';
 import { Panel, PanelFootnote } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import { EventPreview } from '../charts/EventPreview';
 import { PlanExecutionTimeline } from './PlanExecutionTimeline';
 import type { PreviewData } from '../../api';
@@ -484,7 +485,11 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
       {planPreview !== null && (
         <section className="panel-section block">
           <div className="section-head">
-            <h2>计划预览 · <span className="mono">{planPreview.planId}</span></h2>
+            <h2>
+              <HintTitle text="只回放这一条计划：其它计划的效果不参与，曲线上每个跳变都由它带来。竖线的颜色按计划区分，与下方「事件周期预览」的全量视图一致。">
+                计划预览 · <span className="mono">{planPreview.planId}</span>
+              </HintTitle>
+            </h2>
             <div className="preview-controls">
               <label className="field">
                 时间窗
@@ -513,10 +518,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
               <button type="button" onClick={() => setPlanPreview(null)}>收起</button>
             </div>
           </div>
-          <p className="hint">
-            只回放<b>这一条计划</b>：其它计划的效果不参与，曲线上每个跳变都由它带来。
-            竖线的颜色按计划区分，与下方「事件周期预览」的全量视图一致。
-          </p>
           <EventPreview
             data={planPreview.data}
             height={92}
@@ -530,7 +531,11 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
       {cyclePreview !== null && (
         <section className="panel-section block">
           <div className="section-head">
-            <h2>事件周期预览</h2>
+            <h2>
+              <HintTitle text="一次确定性模拟的结果：横轴是时间，纵轴是各状态变量的值。不同颜色的竖线代表不同计划/CEID 的触发时刻，颜色与下方图例一一对应——竖线之后的曲线变化就是该事件的效果（set / pulse / shift / add 依次叠加）。只想看某一条计划时，用列表行的「预览」按钮。">
+                事件周期预览
+              </HintTitle>
+            </h2>
             <div className="preview-controls">
               <label className="field">
                 周期长度
@@ -550,12 +555,6 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
               <button type="button" onClick={() => setCyclePreview(null)}>收起</button>
             </div>
           </div>
-          <p className="hint">
-            一次确定性模拟的结果：横轴是时间，纵轴是各状态变量的值。
-            不同颜色的竖线代表不同计划/CEID 的触发时刻，颜色与下方图例一一对应——
-            竖线之后的曲线变化就是该事件的效果（set / pulse / shift / add 依次叠加）。
-            只想看某一条计划时，用列表行的「预览」按钮。
-          </p>
           <EventPreview
             data={cyclePreview}
             height={92}
