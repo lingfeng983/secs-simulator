@@ -80,7 +80,13 @@ public final class EventSimulator {
      */
     public static List<SimFire> simulate(EventSchedule schedule, ValueSource values, long seed,
                                          long fromMs, long toMs, int maxEvents) {
-        return simulateWithValues(schedule, values, seed, fromMs, toMs, maxEvents).fires();
+        return simulate(schedule, values, seed, fromMs, toMs, maxEvents, java.util.Map.of());
+    }
+
+    public static List<SimFire> simulate(EventSchedule schedule, ValueSource values, long seed,
+                                         long fromMs, long toMs, int maxEvents,
+                                         java.util.Map<String, Long> anchors) {
+        return simulateWithValues(schedule, values, seed, fromMs, toMs, maxEvents, anchors).fires();
     }
 
     /**
@@ -96,6 +102,12 @@ public final class EventSimulator {
      */
     public static SimResult simulateWithValues(EventSchedule schedule, ValueSource values, long seed,
                                                long fromMs, long toMs, int maxEvents) {
+        return simulateWithValues(schedule, values, seed, fromMs, toMs, maxEvents, java.util.Map.of());
+    }
+
+    public static SimResult simulateWithValues(EventSchedule schedule, ValueSource values, long seed,
+                                               long fromMs, long toMs, int maxEvents,
+                                               java.util.Map<String, Long> anchors) {
         List<SimFire> fires = new ArrayList<>();
         if (schedule.plans().isEmpty() || toMs <= fromMs) {
             return new SimResult(fires, values);
@@ -138,8 +150,8 @@ public final class EventSimulator {
                 }
             }
 
-            /* 2) 纯时间触发 */
-            for (Fire fire : schedule.between(windowFrom, windowTo, rng)) {
+            /* 2) 纯时间触发（带每计划锚点：预览标记与实跑同锚） */
+            for (Fire fire : schedule.between(windowFrom, windowTo, rng, anchors)) {
                 if (fires.size() >= maxEvents) {
                     break;
                 }

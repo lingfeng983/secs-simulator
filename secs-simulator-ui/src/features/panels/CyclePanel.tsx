@@ -51,10 +51,13 @@ function CycleRunCard({ backend, notifier, deviceId }: {
   const [cycle, setCycle] = useState<CycleRuntimeView | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const loadedRef = useRef(false);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     if (deviceId === '') {
       setLoaded(true);
+      loadedRef.current = true;
       return;
     }
     let cancelled = false;
@@ -64,16 +67,32 @@ function CycleRunCard({ backend, notifier, deviceId }: {
         if (!cancelled) {
           setCycle(view);
           setLoaded(true);
+          loadedRef.current = true;
         }
       } catch {
-        if (!cancelled) {
+        /* 评审 F2：单次轮询失败保留上一帧快照——一次超时不该把运行中的卡片
+           打回「设备未启动」；真正的未启动由 client 的 404→null 表达 */
+        if (!cancelled && !loadedRef.current) {
           setCycle(null);
           setLoaded(true);
+          loadedRef.current = true;
         }
       }
     };
-    void load();
-    const timer = window.setInterval(() => void load(), 1_500);
+    const guardedLoad = async () => {
+      /* 评审 F8：上一帧未返回时跳过本次轮询（8s 超时下避免并发叠加） */
+      if (loadingRef.current) {
+        return;
+      }
+      loadingRef.current = true;
+      try {
+        await load();
+      } finally {
+        loadingRef.current = false;
+      }
+    };
+    void guardedLoad();
+    const timer = window.setInterval(() => void guardedLoad(), 1_500);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -95,10 +114,14 @@ function CycleRunCard({ backend, notifier, deviceId }: {
       if (status === 200) {
         notifier.success('工艺周期已启动', '锚点 = 此刻：值与片内事件从第 0 片起跑');
       } else if (status === 409) {
-        notifier.warn('无法启动', '设备离线：先上线再启动');
+        /* 409 有两种成因：设备离线（not-online）或配置里没有 cycle 段（no-cycle） */
+        notifier.warn('无法启动', '设备离线（先上线再启动），或这份配置还没有 cycle 段');
       } else {
         notifier.error('启动失败', `HTTP ${status ?? '?'}`);
       }
+    } catch (error) {
+      /* 评审 F1：网络失败要有提示，不能静默 + unhandled rejection */
+      notifier.error('启动失败', (error as Error).message);
     } finally {
       setBusy(false);
     }
@@ -116,6 +139,8 @@ function CycleRunCard({ backend, notifier, deviceId }: {
       } else {
         notifier.error('停止失败', `HTTP ${status ?? '?'}`);
       }
+    } catch (error) {
+      notifier.error('停止失败', (error as Error).message);
     } finally {
       setBusy(false);
     }
@@ -139,7 +164,7 @@ function CycleRunCard({ backend, notifier, deviceId }: {
           <button
             type="button"
             className="primary"
-            disabled={busy || !started || !online}
+            disabled={busy || !started || !online || cycle?.state === 'RUNNING'}
             onClick={() => void start()}
             title={online
               ? '启动周期：锚点 = 此刻，值与片内事件从第 0 片起跑'

@@ -653,6 +653,11 @@ public final class Bootstrap {
 
             @Override
             public void recordFire(String planId, boolean succeeded, String error) {
+                /* D5（2026-11-16 设计）：cycle 不是计划——台账（plan_execution）照记，
+                   但不进 runtime_plan_state（它没有启停粒度，也不该出现在计划统计里） */
+                if ("cycle".equals(planId)) {
+                    return;
+                }
                 /* runtime_plan_state 的计数随台账同批 upsert，不在这里直接写盘 */
                 executions.appendFire(new PlanExecutionRepository.FireRecord(
                         deviceId, planId, succeeded, error == null ? "" : error));

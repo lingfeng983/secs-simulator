@@ -26,7 +26,6 @@ import type { Notifier } from './useToasts';
 import { createRequestSeq } from './requestSeq';
 import { useSessionCommands } from './useSessionCommands';
 import { useConfigCommands } from './useConfigCommands';
-import { useDataCommands } from './useDataCommands';
 import { useAuditFeed } from './useAuditFeed';
 import { useDeviceEdits } from './useDeviceEdits';
 import { useDeviceOps } from './useDeviceOps';
@@ -137,7 +136,6 @@ export interface BackendController {
   /** 只回放某一条编排计划的预览（事件及其效果）。 */
   previewPlan: (sessionId: string, planId: string, windowMs: number) => Promise<PreviewData | null>;
   /** 拉整台设备的曲线(全部 SVID + 事件标记),用于"事件串起来"的预览。 */
-  previewAll: (sessionId: string, windowMs: number) => Promise<PreviewData | null>;
   /** 手动发送一条 SML；返回发送结果。 */
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
   openHostSim: (sessionId: string, target?: HostSimTarget) => Promise<void>;
@@ -424,13 +422,10 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
   );
 
   const configCommands = useConfigCommands({ client, notifier, refreshConfigs, reloadSessionsUsing });
-  const dataCommands = useDataCommands({ client, notifier, setHealth });
-
   return useMemo<BackendController>(
     () => ({
       ...sessionCommands,
       ...configCommands,
-      ...dataCommands,
       ...edits,
       ...ops,
       client,
@@ -466,7 +461,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
     [
       sessionCommands,
       configCommands,
-      dataCommands,
       edits,
       ops,
       client,

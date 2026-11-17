@@ -82,8 +82,8 @@ class PlanExecutorTest {
         assertFalse(rec.ledger.get(0).dryRun());
         assertEquals(List.of("p|true|"), rec.fires, "SENT 才计成功 fire");
         assertEquals(List.of(Boolean.FALSE), rec.immediate, "SENT 走合并窗口，不立即推");
-        assertTrue(rec.notices.get(0).contains("\"executionId\":\"" + DEVICE + "|p|" + AT + "\""),
-                "SSE 摘要要带幂等键: " + rec.notices.get(0));
+        assertTrue(rec.notices.get(0).contains("\"executionId\":\"" + DEVICE + "|p|2001|" + AT + "\""),
+                "SSE 摘要要带幂等键（含 CEID）: " + rec.notices.get(0));
     }
 
     /* ------------------------------------------------------------------ */
@@ -104,7 +104,7 @@ class PlanExecutorTest {
 
         assertEquals(1, sends.size(), "重复触发不得重复发送");
         assertEquals(1, rec.ledger.size(), "重复触发不得重复记台账");
-        assertTrue(executor.lastReserveAt("p", AT).isPresent(), "幂等窗口要留下预留痕迹");
+        assertTrue(executor.lastReserveAt("p", 2001, AT).isPresent(), "幂等窗口要留下预留痕迹");
 
         /* 换一个调度锚点 = 新的一次触发 */
         executor.execute(plain(), "p", 2001, AT + 1, comm(sends, null), true,

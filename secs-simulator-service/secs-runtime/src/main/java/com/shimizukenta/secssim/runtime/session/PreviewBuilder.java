@@ -39,23 +39,28 @@ final class PreviewBuilder {
     /** 工艺周期运行时：片内事件标记的来源（null 安全——测试桩可能不接）。 */
     private final java.util.function.Supplier<CycleRunner> cycleRunner;
 
+    /** 实时启用锚点（planId → enabledAt）：预览标记与实跑同锚（评审：预览保真）。 */
+    private final java.util.function.Supplier<java.util.Map<String, Long>> anchors;
+
     PreviewBuilder(java.util.function.Supplier<ValueSource> values,
                    java.util.function.Supplier<ResolvedEquipment> model,
                    java.util.function.Supplier<EventSchedule> schedule,
                    long seed) {
-        this(values, model, schedule, seed, () -> null);
+        this(values, model, schedule, seed, () -> null, java.util.Map::of);
     }
 
     PreviewBuilder(java.util.function.Supplier<ValueSource> values,
                    java.util.function.Supplier<ResolvedEquipment> model,
                    java.util.function.Supplier<EventSchedule> schedule,
                    long seed,
-                   java.util.function.Supplier<CycleRunner> cycleRunner) {
+                   java.util.function.Supplier<CycleRunner> cycleRunner,
+                   java.util.function.Supplier<java.util.Map<String, Long>> anchors) {
         this.values = values;
         this.model = model;
         this.schedule = schedule;
         this.seed = seed;
         this.cycleRunner = cycleRunner;
+        this.anchors = anchors;
     }
 
     /**
@@ -94,7 +99,8 @@ final class PreviewBuilder {
             long simFrom = Math.max(0L, fromMs - MAX_HISTORY_MS);
             EventSimulator.SimResult sim = EventSimulator.simulateWithValues(
                     scheduleToRun, source, this.seed,
-                    simFrom, toMs, EventSimulator.DEFAULT_MAX_EVENTS);
+                    simFrom, toMs, EventSimulator.DEFAULT_MAX_EVENTS,
+                    this.anchors.get());
             List<PreviewSupport.PreviewEvent> marks = new ArrayList<>(sim.fires().stream()
                     .filter(fire -> fire.atMs() >= fromMs && fire.atMs() <= toMs)
                     .map(fire -> new PreviewSupport.PreviewEvent(fire.atMs(), fire.ceid(), fire.planId()))

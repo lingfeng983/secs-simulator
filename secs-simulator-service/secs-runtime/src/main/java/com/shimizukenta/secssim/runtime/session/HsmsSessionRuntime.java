@@ -409,13 +409,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
            （S2F37 / 台账 plan_id=cycle / SSE 都在那里）。 */
         this.cycleRunner = new CycleRunner(() -> this.clock.nowMs(), this.rateGate,
                 this::canSendUnsolicited,
-                (ceid, scheduledAtMs) -> {
-                    try {
-                        this.eventReporter.emit(ceid, "cycle", scheduledAtMs);
-                    } catch (IOException e) {
-                        this.recordError(e);
-                    }
-                });
+                /* IOException 上抛给 CycleRunner.fire：失败不计 firedCount（评审 LOW-8） */
+                (ceid, scheduledAtMs) -> this.eventReporter.emit(ceid, "cycle", scheduledAtMs));
         this.cycleRunner.errorSink(this::recordError);
         this.cycleRunner.sessionId(spec.id());
         this.cycleRunner.reconfigure(cycle, lifecycleClock != null
@@ -426,7 +421,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
         this.previewBuilder = new PreviewBuilder(
                 () -> this.values, () -> this.model, this.scheduler::previewSchedule, spec.seed(),
-                () -> this.cycleRunner);
+                () -> this.cycleRunner, this.scheduler::anchorsView);
 
         this.tailView = new SessionTailView(this);
     }
@@ -721,9 +716,13 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                          LifecycleCycleClock lifecycleClock) {
         ValueSource next = this.hotReloader.apply(schedule, maxEventsPerSec,
                 s6f11Wbit, s6f1Wbit, model, values, contextTable, ecidValues);
-        /* 热重载换掉值来源时，「设定」随旧配置一起失效：新来源没有设定层 */
-        this.pinnedValues = next instanceof PinnedValueSource pinned
-                ? pinned : new PinnedValueSource(next);
+        /* 热重载换掉值来源时，「设定」随旧配置一起失效：新来源没有设定层。
+           评审 HIGH-3：apply 内部已把裸来源 set 进读路径句柄——这里必须把
+           「设定」包装器重新 set 回去，否则热重载后钉值写进没人读的实例 */
+        PinnedValueSource pinned = next instanceof PinnedValueSource p
+                ? p : new PinnedValueSource(next);
+        this.pinnedValues = pinned;
+        this.values.set(pinned);
         /* cycle 配置与生命周期时钟一起换：装载即回 STOPPED，与"热重载全停"同构（D12） */
         this.cycleRunner.reconfigure(cycle, lifecycleClock != null
                 ? lifecycleClock

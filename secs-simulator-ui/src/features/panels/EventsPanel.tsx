@@ -76,14 +76,9 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
      运行态以后端为准；老后端不带 status 时按 enabled 兜底，别把界面弄空白。 */
   const running = eventPlans.filter((plan) => planStatusOf(plan) === 'running').length;
 
-  /* 执行台账：累计次数 / 下次触发（按周期估算）/ 单步试跑 */
+  /* 执行台账：累计次数 / 下次触发（3.3 起由后端 nextFireInMs 直出）/ 单步试跑 */
   const exec = usePlanExecutions(activeSession, liveEvents);
-  const [now, setNow] = useState(Date.now());
   const [stepping, setStepping] = useState('');
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const stats = useMemo(() => {
     const result = new Map<string, { count: number; lastAt: number; lastError: string; lastStatus: string }>();
@@ -457,7 +452,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         <section className="panel-section block">
           <div className="section-head">
             <h2>
-              <HintTitle text="只回放这一条计划：其它计划的效果不参与，曲线上每个跳变都由它带来。竖线的颜色按计划区分，与下方「事件周期预览」的全量视图一致。">
+              <HintTitle text="只回放这一条计划：其它计划的效果不参与，曲线上每个跳变都由它带来。竖线的颜色按计划区分；全量视图（含工艺周期的片内事件）在配置区「工艺周期」页。">
                 计划预览 · <span className="mono">{planPreview.planId}</span>
               </HintTitle>
             </h2>

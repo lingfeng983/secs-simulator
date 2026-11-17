@@ -556,10 +556,17 @@ final class RuntimeApi {
                    值曲线的草稿时间线也从窗口起点起算，预览与实跑同锚（M3 追加 3） */
                 com.shimizukenta.secssim.core.event.EventSchedule schedule = config.schedule();
                 if (withEvents) {
+                    /* 草稿没有真实锚点：计划统一按「窗口起点启动」求值（设计 §2.4） */
+                    java.util.Map<String, Long> previewAnchors = schedule.plans().stream()
+                            .collect(java.util.stream.Collectors.toMap(
+                                    com.shimizukenta.secssim.core.event.EventPlan::id,
+                                    plan -> fromMs,
+                                    (a, b) -> a));
                     java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> marks =
                             new java.util.ArrayList<>(com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
                                             schedule, values, config.spec().seed(), fromMs, toMs,
-                                            com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS)
+                                            com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS,
+                                            previewAnchors)
                                     .stream()
                                     .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
                                             fire.atMs(), fire.ceid(), fire.planId()))

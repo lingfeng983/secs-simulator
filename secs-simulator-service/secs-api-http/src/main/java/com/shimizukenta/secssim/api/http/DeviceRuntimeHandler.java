@@ -132,8 +132,8 @@ final class DeviceRuntimeHandler extends HttpSupport {
     }
 
     /**
-     * v2 工艺周期（2026-11-16 设计 §2.4/M3）：
-     * {@code GET /runtime/cycle} 运行态；{@code POST /runtime/cycle/start|stop} 启停。
+     * v2 工艺周期（2026-11-16 设计 §2.4/M3）——注意路径在 {@code /api/v2/devices/{id}/cycle}
+     * （无 runtime 段，与契约同形）；{@code GET} 运行态、{@code POST /cycle/start|stop} 启停。
      *
      * <p>启动有 ONLINE 门控（409 {@code not-online}，同计划启停）；
      * 配置里没有 cycle 段时启动回 409 {@code no-cycle}。</p>

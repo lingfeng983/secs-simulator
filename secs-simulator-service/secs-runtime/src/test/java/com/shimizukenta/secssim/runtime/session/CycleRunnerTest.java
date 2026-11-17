@@ -144,6 +144,61 @@ class CycleRunnerTest {
     }
 
     @Test
+    void tailEventAtCycleEndIsNotSwallowedByFinish() {
+        /* 评审 HIGH-1：末片最后 ~100ms 里的事件曾被 FINISHED 直接吞掉——
+           先发完「排定时刻 <= elapsed」的事件再转 FINISHED */
+        CycleConfig tailConfig = CycleConfig.parse(com.shimizukenta.jsonhub.JsonHub.fromJson("""
+                {"cycle":{"durationMs":2000,"jitterMs":0,"count":1,
+                 "events":[{"atMs":1999,"ceid":2001}]}}"""), "$");
+        LifecycleCycleClock clock = new LifecycleCycleClock(
+                com.shimizukenta.secssim.core.cycle.CycleClock.of(2_000L, 0L, 1, 7L),
+                LifecycleCycleClock.State.STOPPED);
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(0L);
+        List<long[]> fires = new ArrayList<>();
+        SessionRateGate gate = new SessionRateGate();
+        gate.configure(1_000);
+        CycleRunner runner = new CycleRunner(now::get, gate, () -> true,
+                (ceid, atMs) -> fires.add(new long[] { atMs, ceid }));
+        runner.reconfigure(tailConfig, clock);
+
+        runner.start(0L);
+        now.set(1_900L);
+        runner.pump();  // elapsed=1900：未到 1999
+        assertEquals(0, fires.size());
+
+        now.set(2_000L);
+        runner.pump();  // elapsed 已 >= endMs：先发尾巴事件，再转 FINISHED
+        assertEquals(1, fires.size(), "末片 1999ms 的事件必须发出");
+        assertEquals(2001, fires.get(0)[1]);
+        assertEquals(CycleRunner.State.FINISHED, runner.state());
+        assertEquals(2_000L, clock.phaseAt(999_999L), "冻结在末相位");
+    }
+
+    @Test
+    void noCyclePassthroughClockFreezesAfter24h() {
+        /* 评审 LOW-7（D12）：无 cycle 段的 passthrough 时钟 24h 后 FINISHED 冻结，
+           修掉相位无界——runner 停止态下 pump 也要推进这个检查 */
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(0L);
+        List<long[]> fires = new ArrayList<>();
+        CycleRunner runner = new CycleRunner(now::get, new SessionRateGate(), () -> true,
+                (ceid, atMs) -> fires.add(new long[] { atMs, ceid }));
+        LifecycleCycleClock clock = new LifecycleCycleClock(
+                com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
+                LifecycleCycleClock.State.RUNNING);
+        runner.reconfigure(null, clock);
+
+        runner.pump();  // t=0：仍在跑
+        assertEquals(LifecycleCycleClock.State.RUNNING, clock.state());
+        assertEquals(86_400_000L, clock.phaseAt(86_400_000L), "24h 内相位无界增长（3.1 行为）");
+
+        now.set(86_400_001L);
+        runner.pump();  // t 已过 24h：时钟冻结
+        assertEquals(LifecycleCycleClock.State.FINISHED, clock.state());
+        assertEquals(86_400_000L, clock.phaseAt(86_400_001L), "冻结在 24h（修掉相位无界）");
+        assertTrue(fires.isEmpty(), "没有 cycle 段：不产生片内事件");
+    }
+
+    @Test
     void offlineTickDropsSilentlyUntilStopAllArrives() {
         Rig rig = new Rig();
         rig.online.set(false);

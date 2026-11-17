@@ -202,8 +202,10 @@ final class EventScheduler {
      * @param schedule        编排表
      * @param maxEventsPerSec 设备级每秒最大上报数
      */
-    void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
-        this.schedule = schedule == null ? EventSchedule.empty() : schedule;
+    synchronized void enableSchedule(EventSchedule schedule, int maxEventsPerSec) {
+        /* 评审 MED-5：先重建禁用集/去抖器，最后换表——pump 与本方法互斥（同一监视器），
+           但把 schedule 的发布放到状态就绪之后，读路径任何时候看到的都是一致快照 */
+        EventSchedule next = schedule == null ? EventSchedule.empty() : schedule;
         this.gate.configure(maxEventsPerSec);
 
         /* 3.0 需求：所有计划默认禁用。
@@ -211,7 +213,7 @@ final class EventScheduler {
            按周期往主机灌 S6F11，现场看到的是"没人点过就开始发"。这里统一置为
            禁用，由操作员在事件编排页显式「启动」后才参与调度。 */
         this.disabledPlans.clear();
-        for (EventPlan plan : this.schedule.plans()) {
+        for (EventPlan plan : next.plans()) {
             this.disabledPlans.add(plan.id());
         }
 
@@ -221,11 +223,12 @@ final class EventScheduler {
         synchronized (this.pendingFires) {
             this.pendingFires.clear();
         }
-        for (EventPlan plan : this.schedule.plans()) {
+        for (EventPlan plan : next.plans()) {
             if (plan.trigger() instanceof Trigger.OnCondition condition) {
                 this.conditionDebouncers.put(plan.id(), new ConditionDebouncer(condition.debounceMs()));
             }
         }
+        this.schedule = next;
     }
 
     /**
@@ -235,7 +238,7 @@ final class EventScheduler {
      * 链路相位脱离 SELECTED、热重载（经 enableSchedule）、钉值 / S2F15 写常量 /
      * W 位与限流变化。工艺周期由调用方一并停掉。</p>
      */
-    void stopAll() {
+    synchronized void stopAll() {
         this.disabledPlans.clear();
         for (EventPlan plan : this.schedule.plans()) {
             this.disabledPlans.add(plan.id());
@@ -256,8 +259,17 @@ final class EventScheduler {
      * @return JSON 文本
      */
     String eventsJson(java.util.function.IntFunction<String> ceidOwner) {
+        /* v1 列表也带活倒计时：周期计划启动后界面「下次事件」列才有数（评审 HH） */
+        java.util.Map<String, PlanRuntimeStat> live = new java.util.LinkedHashMap<>();
+        for (EventPlan plan : this.schedule.plans()) {
+            Long next = this.nextFireAt(plan.id());
+            if (next != null) {
+                live.put(plan.id(), new PlanRuntimeStat(0L, 0L, 0L, next, "",
+                        Math.max(0L, next - this.clock.getAsLong())));
+            }
+        }
         return SessionJsonViews.eventsJson(this.schedule.plans(), this.disabledPlans, ceidOwner,
-                null, this::planStatus);
+                live, this::planStatus);
     }
 
     /**
@@ -331,7 +343,7 @@ final class EventScheduler {
      * @param enabled 是否启用
      * @return 计划存在返回 {@code true}
      */
-    boolean setEventEnabled(String planId, boolean enabled) {
+    synchronized boolean setEventEnabled(String planId, boolean enabled) {
         EventPlan target = null;
         for (EventPlan plan : this.schedule.plans()) {
             if (plan.id().equals(planId)) {
@@ -364,6 +376,11 @@ final class EventScheduler {
             }
         }
         return true;
+    }
+
+    /** 实时启用锚点快照（预览用：预览标记与实跑同锚）。 */
+    java.util.Map<String, Long> anchorsView() {
+        return java.util.Map.copyOf(this.enabledAnchors);
     }
 
     /**
@@ -446,6 +463,11 @@ final class EventScheduler {
         }
         plans.set(index, next);
         replaceSchedule(new EventSchedule(plans));
+        /* 评审 MED-6：旧规则排进延迟链的 AfterEvent 条目一并清除——
+           否则新计划会按旧 ceid/旧时刻被触发 */
+        synchronized (this.pendingFires) {
+            this.pendingFires.removeIf(fire -> fire.planId().equals(planId));
+        }
         /* 改的是启用中的计划：锚点重置为现在，新触发规则从改完这刻起算 */
         if (!this.disabledPlans.contains(planId)) {
             this.enabledAnchors.put(planId, this.clock.getAsLong());
@@ -468,6 +490,7 @@ final class EventScheduler {
         }
         replaceSchedule(new EventSchedule(plans));
         this.disabledPlans.remove(planId);
+        this.enabledAnchors.remove(planId);
         this.conditionDebouncers.remove(planId);
         this.conditionErrorLogged.remove(planId);
         synchronized (this.pendingFires) {
@@ -490,7 +513,7 @@ final class EventScheduler {
     }
 
 
-    void pumpEvents() {
+    synchronized void pumpEvents() {
         try {
             if (!this.canSend()) {
                 /* 没有主机在线时不要积压事件：上线后从当前时刻重新开始，避免一次涌出几百条 */

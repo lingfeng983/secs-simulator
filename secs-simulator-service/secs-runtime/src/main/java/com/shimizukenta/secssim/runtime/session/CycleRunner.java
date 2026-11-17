@@ -98,7 +98,7 @@ public final class CycleRunner {
      * @param config  cycle 段（{@code null} = 没有 cycle 段）
      * @param clock   生命周期时钟（与三套值对象共享）
      */
-    void reconfigure(CycleConfig config, LifecycleCycleClock clock) {
+    synchronized void reconfigure(CycleConfig config, LifecycleCycleClock clock) {
         this.config = config;
         this.lifecycleClock = clock;
         this.state = State.STOPPED;
@@ -135,7 +135,7 @@ public final class CycleRunner {
      * @param nowMs 当前时钟读数
      * @return {@code false} = 配置里没有 cycle 段，无从启动
      */
-    boolean start(long nowMs) {
+    synchronized boolean start(long nowMs) {
         CycleConfig cfg = this.config;
         if (cfg == null) {
             return false;
@@ -150,15 +150,30 @@ public final class CycleRunner {
     }
 
     /** 停止周期：值冻结在进入停止时的表现（D10）；回 STOPPED 待手动启动。 */
-    void stop() {
-        if (this.state == State.RUNNING) {
-            this.lifecycleClock.stop(this.clockNow.getAsLong());
-        }
+    synchronized void stop() {
+        /* FINISHED 时 stop 不改冻结读数（clock.stop 只在 RUNNING 时重算）：
+           已完成的周期停机仍冻结在末相位 */
+        this.lifecycleClock.stop(this.clockNow.getAsLong());
         this.state = State.STOPPED;
     }
 
-    /** 每 tick 推进：片边界、片内到期事件、跑满转 FINISHED。 */
-    void pump() {
+    /**
+     * 每 tick 推进：片边界、片内到期事件、跑满转 FINISHED。
+     *
+     * <p>与 start/stop/reconfigure 互斥（同一监视器）： pump 由事件心跳在
+     * pumpLock 下调用，start/stop 来自 API 线程——没有这层互斥时，
+     * 停机后仍会补发片内事件、FINISHED 会覆盖用户刚按的停止、
+     * startedAt/firedFlags 会被撕开。</p>
+     */
+    synchronized void pump() {
+        LifecycleCycleClock current = this.lifecycleClock;
+        /* D12：无 cycle 段的会话（runner 停止、时钟自动 RUNNING）也要在 24h 后
+           冻结——修掉 passthrough 相位无界（审计 P1-1 的无 cycle 面） */
+        if (this.config == null && current != null
+                && current.state() == LifecycleCycleClock.State.RUNNING
+                && this.clockNow.getAsLong() >= current.endMs()) {
+            current.finish(this.clockNow.getAsLong());
+        }
         if (this.state != State.RUNNING) {
             return;
         }
@@ -174,41 +189,43 @@ public final class CycleRunner {
 
         long now = this.clockNow.getAsLong();
         long elapsed = now - this.startedAt;
+
+        /* 先把「排定时刻 <= elapsed」的片内事件全部发掉（含末片尾巴），
+           再判跑满——否则末片最后 ~100ms 里的事件会被 FINISHED 直接吞掉
+           （评审 HIGH-1：确定性可复现的漏发）。 */
+        /* 片号按绝对时刻查（LifecycleCycleClock 内部减 startedAt）——
+           评审修复时曾误传相对 elapsed，导致永远算出第 0 片、跨片事件全部漏发 */
+        int wafer = clock.indexAt(Math.min(now, this.startedAt + clock.endMs() - 1L));
+        while (this.state == State.RUNNING && this.waferIndex < wafer) {
+            this.fireWaferDue(cfg, clock, this.waferIndex, now);
+            this.waferIndex += 1;
+            this.firedFlags = new boolean[cfg.events().size()];
+        }
+        this.fireWaferDue(cfg, clock, wafer, now);
+        this.waferIndex = wafer;
+
         if (elapsed >= clock.endMs()) {
             /* 跑满 count 片：FINISHED，值冻结在末相位（审计 P1-1） */
             clock.finish(now);
             this.state = State.FINISHED;
-            return;
         }
-
-        /* 逐片补齐：从当前片起把「排定时刻 <= now」的未发事件全部发掉。
-           tick 间隔跨片（或粗粒度测试时钟）时，上一片没发完的事件在这里补发，
-           不因换片重置而漏发。 */
-        int wafer = clock.indexAt(now);
-        while (this.state == State.RUNNING && this.waferIndex < wafer) {
-            this.fireWaferDue(cfg, clock, this.waferIndex, elapsed);
-            this.waferIndex += 1;
-            this.firedFlags = new boolean[cfg.events().size()];
-        }
-        this.fireWaferDue(cfg, clock, wafer, elapsed);
-        this.waferIndex = wafer;
     }
 
-    /** 发一片内「排定时刻 <= elapsed」的未发事件（跨片补漏共用）。 */
-    private void fireWaferDue(CycleConfig cfg, LifecycleCycleClock clock, int wafer, long elapsed) {
+    /** 发一片内「排定时刻（绝对） <= now」的未发事件（跨片补漏共用）。 */
+    private void fireWaferDue(CycleConfig cfg, LifecycleCycleClock clock, int wafer, long now) {
         List<CycleConfig.Event> events = cfg.events();
         boolean[] fired = this.firedFlags;
-        long waferStart = clock.startOf(wafer);
+        long waferStart = this.startedAt + clock.startOf(wafer);
         for (int i = 0; i < events.size(); i++) {
             if (fired[i]) {
                 continue;
             }
             long fireAt = waferStart + events.get(i).atMs();
-            if (fireAt > elapsed) {
+            if (fireAt > now) {
                 continue;
             }
             fired[i] = true;
-            this.fire(events.get(i).ceid(), this.startedAt + fireAt);
+            this.fire(events.get(i).ceid(), fireAt);
         }
     }
 
@@ -222,6 +239,7 @@ public final class CycleRunner {
             this.fireSink.fire(ceid, scheduledAtMs);
             this.firedCount++;
         } catch (Exception e) {
+            /* 发送失败不计 firedCount（评审 LOW-8）：FireSink 不再吞 IOException */
             this.errorSink.accept(e);
             Log.error("会话 " + this.sessionId + " 片内事件发送失败: ceid " + ceid, e);
         }
@@ -237,7 +255,7 @@ public final class CycleRunner {
      * @param toMs   窗口终点（含）
      * @return {@code [atMs, ceid]} 列表，升序
      */
-    List<long[]> markFires(long fromMs, long toMs) {
+    synchronized List<long[]> markFires(long fromMs, long toMs) {
         if (this.state != State.RUNNING || this.config == null || this.lifecycleClock == null) {
             return List.of();
         }

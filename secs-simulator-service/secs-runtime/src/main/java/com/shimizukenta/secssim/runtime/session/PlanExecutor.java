@@ -164,7 +164,10 @@ public final class PlanExecutor {
                                  Dependencies deps,
                                  boolean dryRun, String keySuffix,
                                  long buildAtMs) throws IOException {
-        String baseKey = this.deviceId + "|" + (planId == null ? "manual" : planId) + "|" + atMs;
+        /* 幂等键含 CEID（评审 MED-4）：cycle 同一片内两条同 atMs、不同 CEID 的事件
+           不得互相顶掉；manual 路径的 ledgerPlanId 已按 CEID 兜底，键里再显式带上 */
+        String baseKey = this.deviceId + "|" + (planId == null ? "manual" : planId)
+                + "|" + ceid + "|" + atMs;
         final String key = keySuffix == null ? baseKey : baseKey + "|" + keySuffix;
         final long now = System.currentTimeMillis();
         /* 幂等判定必须是原子的：先 put 再回读会出现"两个线程都看到窗口外的时间戳、
@@ -311,7 +314,7 @@ public final class PlanExecutor {
 
     /** W 位异步失败：补一条 FAILED 台账（幂等键 {@code |ack|seq}）+ fire 计数 / last_error。 */
     private void recordAckFailure(String ledgerPlanId, int ceid, long atMs, boolean dryRun, String error) {
-        String key = this.deviceId + "|" + ledgerPlanId + "|" + atMs
+        String key = this.deviceId + "|" + ledgerPlanId + "|" + ceid + "|" + atMs
                 + "|ack|" + this.ackSequence.incrementAndGet();
         /* 先落台账再报错：errorSink 的订阅方（测试 / 通知）看到失败时，证据已经在 */
         commit(key, ledgerPlanId, ceid, atMs, dryRun, Status.FAILED,
@@ -418,7 +421,8 @@ public final class PlanExecutor {
     }
 
     /** 查一台设备是否已有执行记录（幂等查询用）。 */
-    public Optional<Long> lastReserveAt(String planId, long atMs) {
-        return Optional.ofNullable(this.reserved.get(this.deviceId + "|" + planId + "|" + atMs));
+    public Optional<Long> lastReserveAt(String planId, int ceid, long atMs) {
+        return Optional.ofNullable(this.reserved.get(
+                this.deviceId + "|" + planId + "|" + ceid + "|" + atMs));
     }
 }
