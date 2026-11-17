@@ -4,9 +4,171 @@ import { categorizeMessage, MESSAGE_CATEGORIES } from '../../shared/lib/messageF
 import { formatClock } from '../../shared/lib/format';
 import { usePersistentState } from '../../state/usePersistentState';
 import { DEFAULT_REGION, type RegionsState } from '../../state/useRegions';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 
 /** 一次最多挂多少行 DOM；全量缓冲 5000 条，全渲染会掉帧。 */
 const MAX_ROWS = 400;
+
+/**
+ * 内联实时消息监控（2026-11-18 用户要求）：挂在消息收发页的最上方，
+ * 监控所有渠道的消息——设备与主机两侧、收发都可见，不做对象过滤。
+ *
+ * <p>与抽屉共用一套报文行渲染与过滤样式，但没有抽屉外壳/宽度调节/
+ * 对象选择器：它就是页面的一部分。</p>
+ */
+export function MessageMonitorInline({ messages, windowMin }: {
+  messages: readonly WireMessage[];
+  /** 只展示最近多少分钟以内的报文。 */
+  windowMin: number;
+}): JSX.Element {
+  const [direction, setDirection] = useState<'all' | 'recv' | 'sent'>('all');
+  const [sf, setSf] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [paused, setPaused] = useState(false);
+  const [clearAfter, setClearAfter] = useState(0);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const frozenRef = useRef<readonly WireMessage[]>([]);
+  const nowMs = Date.now();
+
+  useEffect(() => {
+    if (paused) {
+      frozenRef.current = messages;
+    }
+  }, [paused, messages]);
+
+  const source = paused ? frozenRef.current : messages;
+  const maxAt = source.length > 0 ? Math.max(...source.map((message) => message.at)) : 0;
+  const cutoff = nowMs - windowMin * 60_000;
+
+  const filtered = useMemo(() => source.filter((message) => {
+    if (message.at <= clearAfter || message.at < cutoff) {
+      return false;
+    }
+    const sent = message.perspective === 'host'
+      ? message.direction === 'in'
+      : message.direction === 'out';
+    if (direction === 'sent' && !sent) {
+      return false;
+    }
+    if (direction === 'recv' && sent) {
+      return false;
+    }
+    const sfKey = sf.trim().toLowerCase().replace(/\s+/g, '');
+    if (sfKey !== '' && !`s${message.stream}f${message.function}`.startsWith(sfKey)) {
+      return false;
+    }
+    if (keyword.trim() !== '' && !message.body.toLowerCase().includes(keyword.trim().toLowerCase())) {
+      return false;
+    }
+    return true;
+  }), [source, clearAfter, cutoff, direction, sf, keyword]);
+
+  const visible = filtered.length > MAX_ROWS ? filtered.slice(-MAX_ROWS) : filtered;
+  let recvCount = 0;
+  let sentCount = 0;
+  for (const message of filtered) {
+    const sent = message.perspective === 'host'
+      ? message.direction === 'in'
+      : message.direction === 'out';
+    if (sent) {
+      sentCount += 1;
+    } else {
+      recvCount += 1;
+    }
+  }
+
+  const rowKey = (message: WireMessage, index: number): string =>
+    `${message.seq ?? `${message.at}-${index}`}`;
+
+  const toggleRow = (key: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <section className="panel-section block monitor-inline" aria-label="实时消息监控（全部渠道）">
+      <div className="section-head">
+        <h2>
+          <HintTitle text="所有渠道的报文都在这里：设备侧与主机侧、发送与接收全部可见。工艺周期的片内事件（S6F11）、计划触发、报警与手动发送都会按时间序出现在这条流里。">实时消息监控（全部渠道）</HintTitle>
+        </h2>
+        <div className="monitor-actions">
+          <button type="button" onClick={() => setPaused((previous) => !previous)}>{paused ? '继续' : '暂停'}</button>
+          <button type="button" onClick={() => setClearAfter(maxAt)} title="清掉当前画面，只显示之后的新报文">清理</button>
+          <button type="button" onClick={() => { setDirection('all'); setSf(''); setKeyword(''); setClearAfter(0); }}>重置</button>
+        </div>
+      </div>
+      <div className="monitor-filters">
+        <label className="field">
+          方向
+          <select value={direction} onChange={(event) => setDirection(event.target.value as DirectionFilter)} aria-label="按方向过滤">
+            <option value="all">收发</option>
+            <option value="recv">接收</option>
+            <option value="sent">发送</option>
+          </select>
+        </label>
+        <label className="field">
+          SxFy
+          <input value={sf} data-draft-skip onChange={(event) => setSf(event.target.value)} placeholder="如 S6F1" aria-label="按 SxFy 过滤" />
+        </label>
+        <label className="field field-wide">
+          内容
+          <input value={keyword} data-draft-skip onChange={(event) => setKeyword(event.target.value)} placeholder="搜报文体" aria-label="按报文内容过滤" />
+        </label>
+      </div>
+      <div className="monitor-stats">
+        <span className="mm-chip recv">接收 {recvCount}</span>
+        <span className="mm-chip sent">发送 {sentCount}</span>
+        {paused && <span className="badge tone-warn">已暂停</span>}
+      </div>
+      <div className="monitor-list" role="log" aria-label="实时报文">
+        {visible.length === 0 && <p className="hint">当前条件下还没有报文。</p>}
+        {visible.slice().reverse().map((message, index) => {
+          const isHost = message.perspective === 'host';
+          const sent = isHost ? message.direction === 'in' : message.direction === 'out';
+          const key = `${message.seq ?? `${message.at}-${index}`}`;
+          const isOpen = expanded.has(key);
+          return (
+            <div
+              className={`mm-row ${sent ? 'sent' : 'recv'}${isOpen ? ' open' : ''}`}
+              key={key}
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+              title={isOpen ? '点击收起报文体' : '点击展开报文体'}
+              onClick={() => toggleRow(key)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  toggleRow(key);
+                }
+              }}
+            >
+              <div className="mm-row-top">
+                <span className="mm-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                <span className="mono mm-time">{formatClock(message.at)}</span>
+                <span className={`mm-chip ${sent ? 'sent' : 'recv'}`}>{sent ? '发送' : '接收'}</span>
+                <span className="mono mm-sf">S{message.stream}F{message.function}{message.wbit ? ' W' : ''}</span>
+                <span className="spacer" />
+                <span className="mm-cat hint-inline">{CATEGORY_LABEL[categorizeMessage(message.stream, message.function)]}</span>
+                {isHost && <span className="mm-chip host">主机</span>}
+              </div>
+              {isOpen && (
+                <pre className="mm-body">{message.body}</pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   MESSAGE_CATEGORIES.map((category) => [category.id, category.label]),
@@ -17,15 +179,24 @@ export interface MonitorScope {
   id: string;
 }
 
-/** 抽屉里可切换的监控对象：一台设备或一台主机。 */
+/** 抽屉里可切换的监控对象：全部渠道 / 一台设备 / 一台主机。 */
 export interface MonitorTarget {
-  kind: 'device' | 'host';
+  kind: 'all' | 'device' | 'host';
   id: string;
   /** 展示名（设备名 / 主机名）。 */
   label: string;
   /** 所属区域；缺省归到 Default。 */
   region?: string;
 }
+
+/** 「全部渠道」伪对象：不过滤对象，设备与主机两侧、收发全部可见。
+ *  放在查看对象的第一位且是默认选中——工艺周期的片内事件（device 视角）
+ *  和主机侧收到的副本都在这里可见（2026-11-18 用户要求）。 */
+export const ALL_TARGET: MonitorTarget = {
+  kind: 'all',
+  id: '__all__',
+  label: '全部渠道（收发）',
+};
 
 export interface MessageMonitorDrawerProps {
   open: boolean;
@@ -49,7 +220,7 @@ export interface MessageMonitorDrawerProps {
 
 type DirectionFilter = 'all' | 'recv' | 'sent';
 
-function targetKey(target: { kind: 'device' | 'host'; id: string }): string {
+function targetKey(target: { kind: 'all' | 'device' | 'host'; id: string }): string {
   return `${target.kind}:${target.id}`;
 }
 
@@ -111,7 +282,7 @@ export function MessageMonitorDrawer({
     : (currentRegion !== '' ? currentRegion : (regionNames[0] ?? DEFAULT_REGION));
 
   const scopedTargets = useMemo(
-    () => targets.filter((target) => regionOf(target) === activeRegion),
+    () => [ALL_TARGET, ...targets.filter((target) => regionOf(target) === activeRegion)],
     [targets, activeRegion],
   );
   const available = useMemo(
@@ -150,8 +321,8 @@ export function MessageMonitorDrawer({
     if (message.at < cutoff) {
       return false;
     }
-    /* 一次只看一个对象：设备报文按 sessionId 认，主机报文按 hostId 认 */
-    if (activeTarget !== null) {
+    /* 「全部渠道」：不过滤对象——设备与主机两侧的副本都可见（评审/用户要求） */
+    if (activeTarget !== null && activeTarget.kind !== 'all') {
       if (activeTarget.kind === 'host') {
         if (message.hostId !== activeTarget.id) {
           return false;
@@ -264,6 +435,9 @@ export function MessageMonitorDrawer({
               aria-label="选择要查看的设备或主机"
             >
               {scopedTargets.length === 0 && <option value="">（该区域暂无设备/主机）</option>}
+              {scopedTargets.some((target) => target.kind === 'all') && (
+                <option value={targetKey(ALL_TARGET)}>全部渠道（收发，含设备与主机两侧）</option>
+              )}
               {scopedTargets.some((target) => target.kind === 'device') && (
                 <optgroup label="设备">
                   {scopedTargets.filter((target) => target.kind === 'device').map((target) => (

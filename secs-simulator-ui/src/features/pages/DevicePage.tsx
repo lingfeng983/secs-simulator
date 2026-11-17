@@ -75,16 +75,24 @@ export function DevicePage({
     const action = isConfigOnly
       ? backend.createSession(configOnlyName)
       : backend.connectSession(sessionId);
-    void action.finally(() => setBusy(false));
+    /* 启动后立即刷新运行区（事件计划/周期运行卡/台账都按新会话取数），
+       不等 2s 轮询慢一拍（2026-11-18 用户反馈：运行区状态不即时刷新） */
+    void action
+      .then(() => backend.refreshAll())
+      .finally(() => setBusy(false));
   };
   const stopDevice = () => {
     setBusy(true);
-    void backend.closeSession(sessionId).finally(() => setBusy(false));
+    void backend.closeSession(sessionId)
+      .then(() => backend.refreshAll())
+      .finally(() => setBusy(false));
   };
   /* 上线/下线只动 GEM 控制状态，不动链路：等价于主机发 S1F17 / S1F15 */
   const setOnline = (online: boolean) => {
     setBusy(true);
-    void backend.setDeviceOnline(sessionId, online).finally(() => setBusy(false));
+    void backend.setDeviceOnline(sessionId, online)
+      .then(() => backend.refreshAll())
+      .finally(() => setBusy(false));
   };
 
   /* 进入设备页就把全局会话钉到这台设备：所有面板按 activeSession 取数。

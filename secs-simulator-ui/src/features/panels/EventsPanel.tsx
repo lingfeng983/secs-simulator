@@ -445,6 +445,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         deviceId={activeSession}
         liveEvents={liveEvents}
         notifier={notifier}
+        exceptCycle
       />
 
       {/* 单计划预览：只回放这一条计划，效果归属清楚 */}

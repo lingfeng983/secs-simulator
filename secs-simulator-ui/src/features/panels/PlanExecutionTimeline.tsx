@@ -34,8 +34,12 @@ const rowStyle: CSSProperties = {
 };
 
 /** 执行明细组件。 */
-export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId }: Props & { planId?: string }): JSX.Element {
-  const exec = usePlanExecutions(deviceId, liveEvents, planId);
+export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId, exceptCycle }: Props & { planId?: string; exceptCycle?: boolean }): JSX.Element {
+  const raw = usePlanExecutions(deviceId, liveEvents, planId);
+  /* 执行明细各展示各的（2026-11-18）：事件执行页排除工艺周期的行（cycle 行在工艺周期页看） */
+  const exec = exceptCycle
+    ? { ...raw, rows: raw.rows.filter((row) => row.planId !== 'cycle'), allRows: raw.allRows.filter((row) => row.planId !== 'cycle') }
+    : raw;
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
 

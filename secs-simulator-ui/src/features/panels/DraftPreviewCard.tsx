@@ -143,16 +143,47 @@ export function DraftPreviewCard({ backend, root, text, marks, title, hint, even
     ));
   };
 
+  const paramLabel = selected === null
+    ? `全部 ${svidChoices.length} 个`
+    : `已选 ${selected.size} / ${svidChoices.length} 个`;
+
   return (
-    <section className="panel-section block">
+    <section className="panel-section block draft-preview">
       <div className="section-head">
         <h3 style={{ margin: 0 }}>
           <HintTitle text={hint}>{title}</HintTitle>
         </h3>
         <div className="preview-controls">
-          <label className="check-inline">
-            <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} />
-            随草稿自动刷新
+          <details className="preview-picker">
+            <summary title="勾选要在图上展示的参数">参数：{paramLabel}</summary>
+            <div className="preview-picker-list">
+              {svidChoices.length === 0 && <p className="hint">这份配置还没有可展示的变量。</p>}
+              {svidChoices.map((choice) => {
+                const checked = selected === null || selected.has(choice.svid);
+                return (
+                  <label key={choice.svid} className="check-inline">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSvid(choice.svid)}
+                    />
+                    <span className="mono">{choice.svid}</span>
+                    {choice.slot}
+                  </label>
+                );
+              })}
+              <div className="preview-picker-actions">
+                <button type="button" onClick={() => setSelected(null)}>全选</button>
+                <button type="button" onClick={() => setSelected(new Set())}>清空</button>
+              </div>
+            </div>
+          </details>
+          <label className="field">
+            布局
+            <select value={layout} onChange={(event) => setLayout(event.target.value as PreviewLayout)} aria-label="图表布局">
+              <option value="combined">合并一图</option>
+              <option value="split">按参数分开</option>
+            </select>
           </label>
           <label className="field">
             时间窗
@@ -160,50 +191,14 @@ export function DraftPreviewCard({ backend, root, text, marks, title, hint, even
               {WINDOWS.map((item) => <option key={item.ms} value={item.ms}>{item.label}</option>)}
             </select>
           </label>
+          <label className="check-inline">
+            <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} />
+            自动刷新
+          </label>
           <button type="button" disabled={busy} onClick={() => void loadPreview(text)}>
             {busy ? '计算中…' : '重新预览'}
           </button>
         </div>
-      </div>
-
-      <div className="preview-controls" role="group" aria-label="预览参数与布局">
-        <span className="editor-tools-label">参数</span>
-        {svidChoices.length === 0 ? (
-          <span className="hint-inline">这份配置还没有可展示的变量</span>
-        ) : (
-          svidChoices.map((choice) => {
-            const checked = selected === null || selected.has(choice.svid);
-            return (
-              <label key={choice.svid} className="check-inline">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleSvid(choice.svid)}
-                />
-                {choice.slot}
-              </label>
-            );
-          })
-        )}
-        <span className="editor-tools-label">布局</span>
-        <label className="check-inline">
-          <input
-            type="radio"
-            name={`${marks}-layout`}
-            checked={layout === 'combined'}
-            onChange={() => setLayout('combined')}
-          />
-          合并一图
-        </label>
-        <label className="check-inline">
-          <input
-            type="radio"
-            name={`${marks}-layout`}
-            checked={layout === 'split'}
-            onChange={() => setLayout('split')}
-          />
-          按参数分开
-        </label>
       </div>
 
       {invalid ? (
@@ -211,9 +206,23 @@ export function DraftPreviewCard({ backend, root, text, marks, title, hint, even
       ) : scoped === null ? (
         <p className="hint">还没有预览。</p>
       ) : shownSvids.length === 0 ? (
-        <p className="hint">勾选至少一个参数后再看图。</p>
+        <p className="hint">在「参数」里勾选至少一个参数后再看图。</p>
+      ) : layout === 'combined' ? (
+        chart(scoped, selected === null ? undefined : [...selected], 'combined')
       ) : (
-        charts()
+        <div className="preview-split-grid">
+          {shownSvids.map((svid) => (
+            <div key={svid} className="preview-split-cell">
+              <div className="section-head">
+                <h4 style={{ margin: 0 }}>
+                  {svidLabels.get(svid) ?? `SVID ${svid}`}
+                  <span className="mono hint-inline"> {svid}</span>
+                </h4>
+              </div>
+              {chart(scoped, [svid], `svid-${svid}`)}
+            </div>
+          ))}
+        </div>
       )}
     </section>
   );
