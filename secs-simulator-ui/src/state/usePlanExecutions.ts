@@ -85,8 +85,8 @@ function normalize(row: WireRow): ExecutionRow {
   };
 }
 
-/** 台账轮询与导出。 */
-export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | undefined) {
+/** 台账轮询与导出；planId 给定时只看该计划的行（如工艺周期页的 cycle）。 */
+export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | undefined, planId?: string) {
   const [rows, setRows] = useState<ExecutionRow[]>([]);
   const [error, setError] = useState('');
   const [onlyFailures, setOnlyFailures] = useState(false);
@@ -99,6 +99,9 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
       return;
     }
     const query = new URLSearchParams({ limit: String(limit), dryRun: includeDryRun ? 'all' : '0' });
+    if (planId !== undefined && planId !== '') {
+      query.set('planId', planId);
+    }
     try {
       const body = await readJson<{ items?: WireRow[] }>(
         await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/runtime/executions?${query}`)),
@@ -108,7 +111,7 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
     } catch (cause) {
       setError((cause as Error).message);
     }
-  }, [deviceId, includeDryRun, limit]);
+  }, [deviceId, includeDryRun, limit, planId]);
 
   useEffect(() => {
     void refresh();

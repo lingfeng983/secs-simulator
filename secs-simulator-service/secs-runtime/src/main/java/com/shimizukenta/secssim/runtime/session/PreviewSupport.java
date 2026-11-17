@@ -43,12 +43,19 @@ public final class PreviewSupport {
 
     /** 一次预览的完整结果。 */
     public record PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
-                       int svidTotal, List<PreviewSeries> series, List<PreviewEvent> events) {
+                       int svidTotal, List<PreviewSeries> series, List<PreviewEvent> events,
+                       List<PreviewEvent> cycleEvents) {
 
         /** 兼容旧调用:不带事件标记。 */
         public PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
                            int svidTotal, List<PreviewSeries> series) {
-            this(fromMs, toMs, buckets, bucketMs, svidTotal, series, List.of());
+            this(fromMs, toMs, buckets, bucketMs, svidTotal, series, List.of(), List.of());
+        }
+
+        /** 兼容旧调用:只带事件计划标记（工艺周期标记走 cycleEvents）。 */
+        public PreviewData(long fromMs, long toMs, int buckets, long bucketMs,
+                           int svidTotal, List<PreviewSeries> series, List<PreviewEvent> events) {
+            this(fromMs, toMs, buckets, bucketMs, svidTotal, series, events, List.of());
         }
     }
 
@@ -164,6 +171,14 @@ public final class PreviewSupport {
                     b.pair("planId", event.planId())));
         }
 
+        List<JsonHub> cycleEvents = new ArrayList<>();
+        for (PreviewEvent event : data.cycleEvents()) {
+            cycleEvents.add(b.object(
+                    b.pair("at", event.atMs()),
+                    b.pair("ceid", event.ceid()),
+                    b.pair("planId", event.planId())));
+        }
+
         return b.object(
                 b.pair("from", data.fromMs()),
                 b.pair("to", data.toMs()),
@@ -172,7 +187,8 @@ public final class PreviewSupport {
                 b.pair("svidTotal", data.svidTotal()),
                 b.pair("truncated", data.svidTotal() > data.series().size()),
                 b.pair("series", b.array(series)),
-                b.pair("events", b.array(events))).toJson();
+                b.pair("events", b.array(events)),
+                b.pair("cycleEvents", b.array(cycleEvents))).toJson();
     }
 
     /**

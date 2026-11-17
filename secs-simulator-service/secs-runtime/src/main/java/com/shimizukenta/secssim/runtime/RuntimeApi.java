@@ -550,7 +550,9 @@ final class RuntimeApi {
                 com.shimizukenta.secssim.core.value.ValueSource values =
                         com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
                 java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> events =
-                        java.util.List.of();
+                java.util.List.of();
+                java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> cycleEvents =
+                java.util.List.of();
                 /* cycle 已从编排表拆出（M3）：草稿预览的事件时间线 = 手写计划模拟
                    ∪ CycleRunner.simulateFires（锚 = 窗口起点，"如果现在启动"）；
                    值曲线的草稿时间线也从窗口起点起算，预览与实跑同锚（M3 追加 3） */
@@ -562,29 +564,36 @@ final class RuntimeApi {
                                     com.shimizukenta.secssim.core.event.EventPlan::id,
                                     plan -> fromMs,
                                     (a, b) -> a));
-                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> marks =
-                            new java.util.ArrayList<>(com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
+                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> planMarks =
+                            com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
                                             schedule, values, config.spec().seed(), fromMs, toMs,
                                             com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS,
                                             previewAnchors)
                                     .stream()
                                     .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
                                             fire.atMs(), fire.ceid(), fire.planId()))
-                                    .toList());
+                                    .toList();
+                    /* 工艺周期标记独立一袋：周期预览与事件计划预览各算各的（2026-11-17 拆分） */
+                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> cycleMarks =
+                            new java.util.ArrayList<>();
                     if (config.cycle() != null) {
                         for (long[] mark : com.shimizukenta.secssim.runtime.session.CycleRunner.simulateFires(
                                 config.cycle(), config.spec().seed(), fromMs, fromMs, toMs)) {
-                            marks.add(new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
+                            cycleMarks.add(new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
                                     mark[0], (int) mark[1], "cycle"));
                         }
-                        marks.sort(java.util.Comparator.comparingLong(
-                                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent::atMs));
                     }
-                    events = java.util.List.copyOf(marks);
+                    events = java.util.List.copyOf(planMarks);
+                    cycleEvents = java.util.List.copyOf(cycleMarks);
                 }
-                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
+                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData computed =
                         com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(
                                 values, compiled.equipment(), fromMs, toMs, buckets, svids, events);
+                /* 曲线之外把两袋标记原样带回：周期预览用 cycleEvents、事件计划预览用 events */
+                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
+                        new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData(
+                                computed.fromMs(), computed.toMs(), computed.buckets(), computed.bucketMs(),
+                                computed.svidTotal(), computed.series(), events, cycleEvents);
                 return com.shimizukenta.secssim.runtime.session.PreviewSupport.toJson(data);
             } finally {
                 java.nio.file.Files.deleteIfExists(temp);

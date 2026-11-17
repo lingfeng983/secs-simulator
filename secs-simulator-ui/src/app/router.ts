@@ -36,6 +36,7 @@ export type DeviceConfigPage =
  *  定义类编辑已全部上收配置区，运行区只留"要动手"的页。 */
 export type DeviceRuntimePage =
   | 'plans'     // 事件执行：计划启停 + 本设备实时事件
+  | 'cycle'     // 工艺周期：运行态启停 + 片内事件台账（2026-11-17 运行区补齐）
   | 'manual';   // 手动与压测：SML 发送 + 压测 + 报警置位/清除
 
 export type DeviceZone = 'config' | 'runtime';
@@ -47,7 +48,7 @@ export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
 /* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
    报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */
 export const DEVICE_RUNTIME_PAGES: readonly DeviceRuntimePage[] = [
-  'plans', 'manual',
+  'plans', 'cycle', 'manual',
 ];
 
 /** 主机配置区子页（连接参数并入概览，不再单列一页）。 */
@@ -90,6 +91,7 @@ export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
 };
 export const DEVICE_RUNTIME_PAGE_LABELS: Record<DeviceRuntimePage, string> = {
   plans: '事件执行',
+  cycle: '工艺周期',
   manual: '手动与压测',
 };
 export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
@@ -120,6 +122,7 @@ export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
 };
 export const DEVICE_RUNTIME_PAGE_NOTES: Record<DeviceRuntimePage, string> = {
   plans: '计划启停等运行态设置；改动仅本次运行有效。',
+  cycle: '工艺周期运行态：启停、当前片号/相位/进度与片内事件的发送记录。',
   manual: '手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。',
 };
 export const HOST_CONFIG_PAGE_NOTES: Record<HostConfigPage, string> = {

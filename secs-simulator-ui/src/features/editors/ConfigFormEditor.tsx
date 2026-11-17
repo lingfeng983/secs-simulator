@@ -20,6 +20,7 @@ import {
   type JsonObject,
   type TriggerType,
 } from './templateConfig';
+import { ConfigItemModal } from './ConfigItemModal';
 import { SectionHead, type Edit } from './ConfigFormParts';
 import { EquipmentForm } from './EquipmentFormSections';
 
@@ -286,6 +287,7 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
 };
 
 export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+  const [editing, setEditing] = useState<{ index: number | null; draft: JsonObject } | undefined>(undefined);
   const events = isJsonObject(root.events) ? root.events : null;
   const ceidChoices = useMemo(() => collectCeids(root), [root]);
 
@@ -308,14 +310,183 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
   }
 
   const plans = readObjectArray(events, 'plans', 'events');
+  const ceidSet = new Set(ceidChoices.map((choice) => choice.svid));
+
+  const summaryOf = (plan: JsonObject): string => {
+    const trigger = objectField(plan, 'trigger');
+    const rawType = trigger.type;
+    const type = TRIGGER_TYPES.find((item) => item === rawType);
+    if (type === undefined) {
+      return `未知触发方式：${String(rawType ?? '(缺失)')}`;
+    }
+    switch (type) {
+      case 'at':
+        return `启动后 ${numberField(trigger, 'atMs') ?? 0} ms 触发一次`;
+      case 'periodic':
+        return `每 ${numberField(trigger, 'periodMs') ?? 0} ms ±${numberField(trigger, 'jitterMs') ?? 0}`;
+      case 'onCondition':
+        return `${stringField(trigger, 'expression')}（防抖 ${numberField(trigger, 'debounceMs') ?? 0} ms）`;
+      case 'afterEvent':
+        return `${stringField(trigger, 'sourcePlan')} 后延迟 ${numberField(trigger, 'delayMs') ?? 0} ms`;
+    }
+  };
+
+  const labelOf = (ceid: number): string => {
+    const choice = ceidChoices.find((item) => item.svid === ceid);
+    return choice === undefined ? String(ceid) : `${choice.owner}.${choice.slot}`;
+  };
+
+  /* 计划行的字段编辑（弹框里用）：id / CEID / 触发方式 + 各类型参数 */
+  const planFields = (item: JsonObject, mutate: (fn: (target: JsonObject) => void) => void) => {
+    const trigger = objectField(item, 'trigger');
+    const rawType = trigger.type;
+    const type = TRIGGER_TYPES.find((entry) => entry === rawType);
+    const mutateTrigger = (fn: (target: JsonObject) => void) => {
+      mutate((target) => {
+        fn(objectField(target, 'trigger'));
+      });
+    };
+    return (
+      <>
+        <label className="field field-cell">
+          <span className="field-cell-name">计划 id</span>
+          <TextField
+            value={stringField(item, 'id')}
+            onCommit={(next) => mutate((target) => {
+              target.id = next;
+            })}
+          />
+        </label>
+        <label className="field field-cell">
+          <span className="field-cell-name">CEID</span>
+          <NumberField
+            value={numberField(item, 'ceid')}
+            integer
+            list="cfg-ceid-options"
+            onCommit={(next) => mutate((target) => {
+              target.ceid = next;
+            })}
+          />
+        </label>
+        <label className="field field-cell">
+          <span className="field-cell-name">触发方式</span>
+          <select
+            value={type ?? ''}
+            onChange={(event) => {
+              const next = TRIGGER_TYPES.find((entry) => entry === event.target.value);
+              if (next !== undefined) {
+                mutate((target) => {
+                  target.trigger = defaultTrigger(next);
+                });
+              }
+            }}
+          >
+            {type === undefined && <option value="">未知：{String(rawType ?? '')}</option>}
+            {TRIGGER_TYPES.map((entry) => (
+              <option key={entry} value={entry}>
+                {TRIGGER_LABELS[entry]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {type === 'at' && (
+          <label className="field field-cell">
+            <span className="field-cell-name">atMs（启动后毫秒）</span>
+            <NumberField
+              value={numberField(trigger, 'atMs')}
+              integer
+              onCommit={(next) => mutateTrigger((target) => {
+                target.atMs = next;
+              })}
+            />
+          </label>
+        )}
+        {type === 'periodic' && (
+          <>
+            <label className="field field-cell">
+              <span className="field-cell-name">周期 ms</span>
+              <NumberField
+                value={numberField(trigger, 'periodMs')}
+                integer
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.periodMs = next;
+                })}
+              />
+            </label>
+            <label className="field field-cell">
+              <span className="field-cell-name">抖动 ms</span>
+              <NumberField
+                value={numberField(trigger, 'jitterMs')}
+                integer
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.jitterMs = next;
+                })}
+              />
+            </label>
+          </>
+        )}
+        {type === 'onCondition' && (
+          <>
+            <label className="field field-cell">
+              <span className="field-cell-name">条件表达式（t、svid.&lt;id&gt;）</span>
+              <TextField
+                wide
+                value={stringField(trigger, 'expression')}
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.expression = next;
+                })}
+              />
+            </label>
+            <label className="field field-cell">
+              <span className="field-cell-name">防抖 ms</span>
+              <NumberField
+                value={numberField(trigger, 'debounceMs')}
+                integer
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.debounceMs = next;
+                })}
+              />
+            </label>
+          </>
+        )}
+        {type === 'afterEvent' && (
+          <>
+            <label className="field field-cell">
+              <span className="field-cell-name">源计划 id</span>
+              <TextField
+                value={stringField(trigger, 'sourcePlan')}
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.sourcePlan = next;
+                })}
+              />
+            </label>
+            <label className="field field-cell">
+              <span className="field-cell-name">延迟 ms</span>
+              <NumberField
+                value={numberField(trigger, 'delayMs')}
+                integer
+                onCommit={(next) => mutateTrigger((target) => {
+                  target.delayMs = next;
+                })}
+              />
+            </label>
+          </>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="cfg-section">
-      <Collapsible
-        title={`事件编排（events · ${typeof plans === 'string' ? '结构错误' : plans.length + ' 个计划'}）`}
-        hint="切换触发方式会把该计划的 trigger 参数重置为该类型的默认值。事件只上报、不改任何值；按片重复的事件写在「工艺周期」里。"
-        badge="热生效"
-      >
+      <SectionHead title="事件编排">
+        <button
+          type="button"
+          onClick={() => setEditing({ index: null, draft: { id: '', ceid: ceidChoices[0]?.svid ?? 0, trigger: defaultTrigger('periodic') } })}
+        >
+          + 事件计划
+        </button>
+      </SectionHead>
+
       <div className="form-row">
         <label className="field field-cell">
           <span className="field-cell-name">每秒事件上限</span>
@@ -347,23 +518,6 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
           />
           S6F1 带 W 位
         </label>
-        {typeof plans !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'events');
-              const items = Array.isArray(target.plans) ? (target.plans as JsonObject[]) : [];
-              items.push({
-                id: uniqueId(items.map((item) => stringField(item, 'id')), 'plan'),
-                ceid: ceidChoices[0]?.svid ?? 0,
-                trigger: defaultTrigger('periodic'),
-              });
-              target.plans = items;
-            })}
-          >
-            + 事件计划
-          </button>
-        )}
       </div>
 
       <datalist id="cfg-ceid-options">
@@ -379,186 +533,101 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
       ) : plans.length === 0 ? (
         <p className="hint">还没有事件计划。</p>
       ) : (
-        plans.map((plan, index) => {
-          const trigger = objectField(plan, 'trigger');
-          const rawType = trigger.type;
-          const type = TRIGGER_TYPES.find((item) => item === rawType) ?? null;
-          const planId = stringField(plan, 'id');
-          const followers =
-            typeof plans === 'string'
-              ? 0
-              : plans.filter((item) => stringField(objectField(item, 'trigger'), 'sourcePlan') === planId).length;
+        <table className="effects-table" aria-label="事件计划列表">
+          <thead>
+            <tr>
+              <th>计划 id</th>
+              <th>CEID</th>
+              <th>触发方式</th>
+              <th>参数</th>
+              <th>跟随</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plans.map((plan, index) => {
+              const planId = stringField(plan, 'id');
+              const ceid = numberField(plan, 'ceid') ?? 0;
+              const followers = plans.filter(
+                (item) => stringField(objectField(item, 'trigger'), 'sourcePlan') === planId,
+              ).length;
+              return (
+                <tr key={planId === '' ? `plan-${index}` : planId}>
+                  <td className="mono">{planId}</td>
+                  <td className="mono">
+                    {ceid}
+                    <span className="hint-inline"> {labelOf(ceid)}</span>
+                  </td>
+                  <td>
+                    {(() => {
+                      const rawType = objectField(plan, 'trigger').type;
+                      const type = TRIGGER_TYPES.find((item) => item === rawType);
+                      return type === undefined ? String(rawType ?? '(缺失)') : TRIGGER_LABELS[type];
+                    })()}
+                  </td>
+                  <td>{summaryOf(plan)}</td>
+                  <td>{followers > 0 ? `${followers} 个跟随` : '—'}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ index, draft: structuredClone(plan) })}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => edit((draft) => {
+                          const target = objectField(draft, 'events').plans;
+                          if (Array.isArray(target)) {
+                            (target as unknown[]).splice(index, 1);
+                          }
+                        })}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
 
-          const mutatePlan = (mutate: (target: JsonObject) => void) => {
+      {editing !== undefined && (
+        <ConfigItemModal
+          title={editing.index === null ? '新建事件计划' : `编辑事件计划 · ${stringField(editing.draft, 'id')}`}
+          initial={editing.draft}
+          problemOf={(item) => {
+            if (stringField(item, 'id').trim() === '') {
+              return '计划 id 不能为空';
+            }
+            const ceid = numberField(item, 'ceid');
+            if (ceid === undefined || !ceidSet.has(ceid)) {
+              return `CEID ${ceid ?? ''} 在设备模型里不存在（先在「事件与报告」页定义）`;
+            }
+            return '';
+          }}
+          onClose={() => setEditing(undefined)}
+          onSubmit={(item) => {
             edit((draft) => {
               const target = objectField(draft, 'events').plans;
-              if (Array.isArray(target) && isJsonObject(target[index])) {
-                mutate(target[index]);
+              if (!Array.isArray(target)) {
+                return;
+              }
+              if (editing.index === null) {
+                (target as JsonObject[]).push(item);
+              } else if (isJsonObject(target[editing.index])) {
+                target[editing.index] = item;
               }
             });
-          };
-
-          const mutateTrigger = (mutate: (trigger: JsonObject) => void) => {
-            mutatePlan((target) => {
-              mutate(objectField(target, 'trigger'));
-            });
-          };
-
-          return (
-            /* 计划有稳定 id 就用它：删除中间一条时后面的卡片不会跟着重挂；
-               刚新建还没填 id 时退回位置 key。 */
-            <div className="template-card" key={planId === '' ? `plan-${index}` : planId}>
-              <div className="template-card-head">
-                <label className="field field-cell">
-                  <span className="field-cell-name">计划 id</span>
-                  <TextField
-                    value={stringField(plan, 'id')}
-                    onCommit={(next) => mutatePlan((target) => {
-                      target.id = next;
-                    })}
-                  />
-                </label>
-                <label className="field field-cell">
-                  <span className="field-cell-name">CEID</span>
-                  <NumberField
-                    value={numberField(plan, 'ceid')}
-                    integer
-                    list="cfg-ceid-options"
-                    onCommit={(next) => mutatePlan((target) => {
-                      target.ceid = next;
-                    })}
-                  />
-                </label>
-                <label className="field field-cell">
-                  <span className="field-cell-name">触发方式</span>
-                  <select
-                    value={type ?? ''}
-                    onChange={(event) => {
-                      const next = TRIGGER_TYPES.find((item) => item === event.target.value);
-                      if (next !== undefined) {
-                        mutatePlan((target) => {
-                          target.trigger = defaultTrigger(next);
-                        });
-                      }
-                    }}
-                  >
-                    {type === null && <option value="">未知：{String(rawType ?? '')}</option>}
-                    {TRIGGER_TYPES.map((item) => (
-                      <option key={item} value={item}>
-                        {TRIGGER_LABELS[item]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="template-badge">{followers > 0 ? `${followers} 个计划跟随` : ''}</span>
-                <button
-                  type="button"
-                  onClick={() => edit((draft) => {
-                    const target = objectField(draft, 'events').plans;
-                    if (Array.isArray(target)) {
-                      (target as unknown[]).splice(index, 1);
-                    }
-                  })}
-                >
-                  删除计划
-                </button>
-              </div>
-
-              {type === null ? (
-                <p className="problems">未知触发类型：{String(rawType ?? '(缺失)')}</p>
-              ) : (
-                <div className="form-row">
-                  {type === 'at' && (
-                    <label className="field field-cell">
-                      <span className="field-cell-name">atMs（启动后毫秒）</span>
-                      <NumberField
-                        value={numberField(trigger, 'atMs')}
-                        integer
-                        onCommit={(next) => mutateTrigger((target) => {
-                          target.atMs = next;
-                        })}
-                      />
-                    </label>
-                  )}
-                  {type === 'periodic' && (
-                    <>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">周期 ms</span>
-                        <NumberField
-                          value={numberField(trigger, 'periodMs')}
-                          integer
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.periodMs = next;
-                          })}
-                        />
-                      </label>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">抖动 ms</span>
-                        <NumberField
-                          value={numberField(trigger, 'jitterMs')}
-                          integer
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.jitterMs = next;
-                          })}
-                        />
-                      </label>
-                    </>
-                  )}
-                  {type === 'onCondition' && (
-                    <>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">条件表达式（t、svid.&lt;id&gt;）</span>
-                        <TextField
-                          wide
-                          value={stringField(trigger, 'expression')}
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.expression = next;
-                          })}
-                        />
-                      </label>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">防抖 ms</span>
-                        <NumberField
-                          value={numberField(trigger, 'debounceMs')}
-                          integer
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.debounceMs = next;
-                          })}
-                        />
-                      </label>
-                    </>
-                  )}
-                  {type === 'afterEvent' && (
-                    <>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">源计划 id</span>
-                        <TextField
-                          value={stringField(trigger, 'sourcePlan')}
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.sourcePlan = next;
-                          })}
-                        />
-                      </label>
-                      <label className="field field-cell">
-                        <span className="field-cell-name">延迟 ms</span>
-                        <NumberField
-                          value={numberField(trigger, 'delayMs')}
-                          integer
-                          onCommit={(next) => mutateTrigger((target) => {
-                            target.delayMs = next;
-                          })}
-                        />
-                      </label>
-                    </>
-                  )}
-                </div>
-              )}
-
-            </div>
-          );
-        })
+            setEditing(undefined);
+          }}
+        >
+          {(item, mutate) => planFields(item, mutate)}
+        </ConfigItemModal>
       )}
-      </Collapsible>
     </div>
   );
 }

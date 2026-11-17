@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { deviceStatus } from '../../shared/lib/deviceStatus';
 import { EventsPanel } from '../panels/EventsPanel';
+import { CycleRuntimePanel } from '../panels/CycleRuntimePanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
 import { ConfigPanel } from '../panels/ConfigPanel';
 import { ConnectionPanel } from '../panels/ConnectionPanel';
@@ -261,6 +262,10 @@ export function DevicePage({
         )}
         {zone === 'runtime' && !isConfigOnly && page === 'plans' && (
           <EventsPanel key={sessionId} {...baseProps} />
+        )}
+
+        {zone === 'runtime' && !isConfigOnly && page === 'cycle' && (
+          <CycleRuntimePanel key={sessionId} {...baseProps} />
         )}
         {zone === 'runtime' && !isConfigOnly && page === 'manual' && (
           <div className="panel-stack">

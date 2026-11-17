@@ -17,6 +17,8 @@ interface Props {
   deviceId: string;
   liveEvents?: NoticeWire[];
   notifier: Notifier;
+  /** 只看该计划的行（如工艺周期页传 cycle）。 */
+  planId?: string;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -32,8 +34,8 @@ const rowStyle: CSSProperties = {
 };
 
 /** 执行明细组件。 */
-export function PlanExecutionTimeline({ deviceId, liveEvents, notifier }: Props): JSX.Element {
-  const exec = usePlanExecutions(deviceId, liveEvents);
+export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId }: Props & { planId?: string }): JSX.Element {
+  const exec = usePlanExecutions(deviceId, liveEvents, planId);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
 

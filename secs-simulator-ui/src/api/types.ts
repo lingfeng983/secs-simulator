@@ -223,6 +223,8 @@ export interface PreviewData {
   truncated?: boolean;
   /** 窗口内的事件标记；老后端没有该字段。 */
   events?: PreviewEventMark[];
+  /** 工艺周期片内事件标记（与 events 分袋：周期预览/事件计划预览各取一袋）。 */
+  cycleEvents?: PreviewEventMark[];
 }
 
 /** 工作台聚合里的一台设备（schema v6 overview 端点）。 */

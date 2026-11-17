@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { Panel } from '../../shared/ui/Panel';
 import { ConfigEditShell } from './ConfigEditShell';
+import { DraftPreviewCard } from './DraftPreviewCard';
 import { CycleForm } from '../editors/CycleForm';
 import { collectSvids, type JsonObject } from '../editors/templateConfig';
-import { EventPreview } from '../charts/EventPreview';
 import { HintTitle } from '../../shared/ui/FieldLabel';
-import type { CycleRuntimeView, PreviewData } from '../../api';
+import type { CycleRuntimeView } from '../../api';
 
 /** 预览时间窗候选（草稿是确定性重放，右端点相对模拟时钟 0）。 */
 const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
@@ -43,7 +43,7 @@ export function CyclePanel(props: PanelBaseProps & { sessionId?: string; configN
 }
 
 /** 运行卡：轮询 /api/v2/devices/{id}/cycle，启动/停止走 ONLINE 门控（§2.2）。 */
-function CycleRunCard({ backend, notifier, deviceId }: {
+export function CycleRunCard({ backend, notifier, deviceId }: {
   backend: PanelBaseProps['backend'];
   notifier: PanelBaseProps['notifier'];
   deviceId: string;
@@ -206,98 +206,25 @@ function CycleRunCard({ backend, notifier, deviceId }: {
   );
 }
 
-/** 周期参数 + 片内事件（编辑走配置草稿）+ 周期预览（按草稿确定性重放）。 */
+/** 周期参数 + 片内事件（编辑走配置草稿）；周期预览在 DraftPreviewCard 里（只取片内事件标记）。 */
 function CycleEditor({ root, edit, text, backend }: {
   root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
   text: string;
   backend: PanelBaseProps['backend'];
 }): JSX.Element {
-  const [windowMs, setWindowMs] = useState(120_000);
-  const [preview, setPreview] = useState<PreviewData | null>(null);
-  const [invalid, setInvalid] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [auto, setAuto] = useState(true);
-  const seqRef = useRef(0);
-
-  const loadPreview = async (draftText: string) => {
-    const token = ++seqRef.current;
-    setBusy(true);
-    try {
-      const data = backend.client === null
-        ? null
-        : await backend.client.previewConfigDraft(draftText, 0, windowMs, 120, true);
-      /* 过期响应丢弃：草稿又变了或窗口已切 */
-      if (seqRef.current === token) {
-        setPreview(data);
-        setInvalid(data === null);
-      }
-    } catch {
-      if (seqRef.current === token) {
-        setPreview(null);
-        setInvalid(true);
-      }
-    } finally {
-      if (seqRef.current === token) {
-        setBusy(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (!auto || backend.client === null) {
-      return;
-    }
-    const timer = window.setTimeout(() => void loadPreview(text), 600);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, windowMs, auto, backend.client]);
-
-  const svidLabels = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const choice of collectSvids(root)) {
-      map.set(choice.svid, choice.slot);
-    }
-    return map;
-  }, [root]);
-
   return (
     <>
       <CycleForm root={root} edit={edit} />
-
-      <section className="panel-section block" id="cycle-draft-preview">
-        <div className="section-head">
-          <h3 style={{ margin: 0 }}>
-            <HintTitle text="不需要保存或启动设备：按当前草稿（含未保存改动）做一次确定性重放。横轴是模拟时间，竖线是各片按「如果现在启动」会发送片内事件的时刻——曲线与实跑同锚（M3 预览对齐）。">
-              周期预览（按草稿）
-            </HintTitle>
-          </h3>
-          <div className="preview-controls">
-            <label className="check-inline">
-              <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} />
-              随草稿自动刷新
-            </label>
-            <label className="field">
-              时间窗
-              <select value={windowMs} onChange={(event) => setWindowMs(Number(event.target.value))} aria-label="预览时间窗">
-                {WINDOWS.map((item) => <option key={item.ms} value={item.ms}>{item.label}</option>)}
-              </select>
-            </label>
-            <button type="button" disabled={busy} onClick={() => void loadPreview(text)}>
-              {busy ? '计算中…' : '重新预览'}
-            </button>
-          </div>
-        </div>
-        {preview === null ? (
-          <p className="hint">
-            {invalid
-              ? '草稿暂时编译不过（配置有错或还没写完），修好后预览会自动出现。'
-              : '还没有预览。'}
-          </p>
-        ) : (
-          <EventPreview data={preview} height={110} labels={svidLabels} eventLabel="片内事件" />
-        )}
-      </section>
+      <DraftPreviewCard
+        backend={backend}
+        root={root}
+        text={text}
+        marks="cycle"
+        title="周期预览（按草稿）"
+        hint="不需要保存或启动设备：按当前草稿（含未保存改动）做一次确定性重放。横轴是模拟时间，竖线是各片按「如果现在启动」会发送片内事件的时刻——曲线与实跑同锚（M3 预览对齐）。只显示工艺周期的片内事件。"
+        eventLabel="片内事件"
+      />
     </>
   );
 }
