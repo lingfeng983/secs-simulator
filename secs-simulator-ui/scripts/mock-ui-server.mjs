@@ -251,6 +251,10 @@ http.createServer(async (req, res) => {
     const limit = Number(url.searchParams.get('limit') ?? '100');
     return json(res, { items: items.slice(0, Number.isFinite(limit) ? limit : 100), count: items.length });
   }
+  /* v2 活动报警快照：信封 {"alarms":[…]}；条数与 overview 的 activeAlarms 计数（1）对齐 */
+  if (/^\/api\/v2\/devices\/[^/]+\/runtime\/alarms$/.test(path) && req.method === 'GET') {
+    return json(res, { alarms: [{ alid: 1001, text: 'TEMP HIGH', category: 1, atMillis: Date.now() - 30000 }] });
+  }
   if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/step$/.test(path)) {
     return json(res, { ok: true, planId: 'beat' });
   }

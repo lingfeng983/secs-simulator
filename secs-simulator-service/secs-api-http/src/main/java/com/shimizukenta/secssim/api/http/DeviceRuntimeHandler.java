@@ -162,6 +162,7 @@ final class DeviceRuntimeHandler extends HttpSupport {
             case "svids" -> this.catalogs.handleSvidPinV2(ex, deviceId, method, parts);
             case "message" -> this.handleDeviceMessageV2(ex, deviceId, method);
             case "alarm" -> this.handleDeviceAlarmV2(ex, deviceId, method, parts);
+            case "alarms" -> this.handleDeviceAlarmsV2(ex, deviceId, method);
             case "ceid" -> this.handleDeviceCeidV2(ex, deviceId, method, parts);
             default -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
         }
@@ -383,6 +384,30 @@ final class DeviceRuntimeHandler extends HttpSupport {
         audit(ex, "alarm", deviceId, "alid=" + alid + " set=" + set
                 + " category=" + category + " outcome=" + outcome);
         respondTrigger(ex, outcome);
+    }
+
+    /**
+     * {@code GET /runtime/alarms}：设备当前的活动报警快照。
+     *
+     * <p>与 {@code POST|DELETE /runtime/alarm/{alid}} 的分工：alarm 是「发一条
+     * S5F1」的动作，alarms 是读会话内置位状态的查询。只读不记审计：
+     * 界面切一次设备就拉一次快照，记下来只会淹没真正的操作。</p>
+     */
+    private void handleDeviceAlarmsV2(HttpExchange ex, String deviceId, String method)
+            throws IOException {
+        if (!requireRole(ex, ApiRole.VIEWER)) {
+            return;
+        }
+        if (!"GET".equals(method)) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        String json = this.context.alarmsJsonV2(deviceId);
+        if (json == null) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
+            return;
+        }
+        respond(ex, 200, json);
     }
 
     /** {@code POST /runtime/ceid/{ceid}}：手动触发一次采集事件上报。 */

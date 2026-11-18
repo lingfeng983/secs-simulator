@@ -297,7 +297,7 @@ test('运行区·手动操作：发送 SML / 压测 / 报警置位清除 / 报�
   const alarms = page.locator('#panel-alarms');
   await expect(alarms).toBeVisible();
 
-  /* 活动报警明细来自 GET /sessions/{id}/alarms（不是 S5F1 重放）：
+  /* 活动报警明细来自 GET /api/v2/devices/{id}/runtime/alarms（不是 S5F1 重放）：
      夹具里那条 1001 必须直接出现在表里 */
   const activeAlarms = page.locator('#panel-active-alarms');
   await expect(activeAlarms.getByRole('cell', { name: '1001', exact: true })).toBeVisible();

@@ -352,6 +352,10 @@ final class SessionHandler extends HttpSupport {
 
     /**
      * GET /api/v1/sessions/{id}/alarms、/terminal 或 /catalog。
+     *
+     * <p>alarms 与 terminal 已废弃（响应带 Deprecation/Sunset）：alarms 的替代端点是
+     * {@code GET /api/v2/devices/{id}/runtime/alarms}；terminal 没有 v2 替代，
+     * 废弃只为声明形状冻结、不再演进。</p>
      */
     void handleSessionQuery(HttpExchange ex) throws IOException {
         if (this.hostSimRoutes.handleQuery(ex)) {
@@ -402,6 +406,21 @@ final class SessionHandler extends HttpSupport {
 
         if (body == null) {
             respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+        if ("alarms".equals(parts[1]) || "terminal".equals(parts[1])) {
+            /* 这两个查询已挂 Deprecation（3.x 周期后移除，同 closeSession）：
+               只在 200 上挂头——404 是"没找到"，不是废弃声明。
+               catalog / events 还有自己的迁移节奏，不在这里顺手动。 */
+            ex.getResponseHeaders().set("Deprecation", "true");
+            ex.getResponseHeaders().set("Sunset", DEPRECATION_SUNSET);
+        }
+        if ("alarms".equals(parts[1])) {
+            /* 借废弃期把形状收敛成 envelope：与 v2 /runtime/alarms 的 {"alarms":[…]}
+               同形，加 hint 省得调用方翻变更日志。形状变了是刻意为之（前端已同步），
+               脚本从 body.alarms 取值即可过渡。 */
+            respond(ex, 200, "{\"alarms\":" + body
+                    + ",\"hint\":\"use GET /api/v2/devices/{id}/runtime/alarms\"}");
             return;
         }
         respond(ex, 200, body);
