@@ -42,6 +42,27 @@ final class EventScheduler {
                 .toList());
     }
 
+    /**
+     * 在<b>完整</b>编排表里按 id 找一条计划（含被禁用的计划）。
+     *
+     * <p>与 {@link #previewSchedule()} 的区别：预览表过滤掉了禁用计划，供
+     * "实际触发 / 预览"用；而单步试跑（dry-run）要能试跑界面列表里出现的
+     * 任意一条计划——列表来自完整表，默认所有计划都处于禁用态。若沿用预览表，
+     * 试跑任何一条默认计划都会报 "plan not found"。启停 {@link #setEventEnabled}
+     * 同样按完整表查找，这里保持一致。</p>
+     *
+     * @param planId 计划标识
+     * @return 命中的计划；不存在返回 {@code null}
+     */
+    EventPlan findPlan(String planId) {
+        for (EventPlan plan : this.schedule.plans()) {
+            if (plan.id().equals(planId)) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
     /** 事件随机源（抖动与运行时同源）。 */
     private final Rng eventRng;
 

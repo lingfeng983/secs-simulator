@@ -394,8 +394,10 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.eventReporter = new EventReporter(() -> this.assembler,
                 () -> this.communicator,
                 () -> this.ackSender,
-                /* 实时表：含运行时增删改，且已排除禁用计划 */
+                /* 实时表：含运行时增删改，且已排除禁用计划（实际触发用） */
                 this.scheduler::previewSchedule,
+                /* 完整表按 id 查（含禁用计划）：单步试跑要能跑列表里任意一条 */
+                this.scheduler::findPlan,
                 ceid -> this.hostReports.isEnabled(ceid),
                 this.scheduler::recordSkipped,
                 this.diagnostics::recordEventFired,

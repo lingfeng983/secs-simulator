@@ -118,6 +118,12 @@ export function DevicePage({
     }
   }, [activeSession, setActiveSession, session]);
 
+  /* 配置区各页哪些还有未保存改动：切走之后也要看得出来（页签上点小圆点）。
+     必须在下面的空态 early-return 之前调用：数据异步加载时 sessionKnown 会从
+     false 变 true，若 hook 落在 return 之后，前后两次渲染的 hook 数量不一致，
+     React 抛 #300 并卸载整棵树——"设备不存在"空态反而永远出不来。 */
+  const dirtyPages = useDirtyPages(zone === 'config' ? configName : '');
+
   const baseProps: PanelBaseProps = {
     backend,
     notifier,
@@ -147,8 +153,6 @@ export function DevicePage({
     );
   }
 
-  /* 配置区各页哪些还有未保存改动：切走之后也要看得出来（页签上点小圆点） */
-  const dirtyPages = useDirtyPages(zone === 'config' ? configName : '');
   const pages = zone === 'config'
     ? DEVICE_CONFIG_PAGES.map((id) => ({
       id, label: DEVICE_CONFIG_PAGE_LABELS[id], note: DEVICE_CONFIG_PAGE_NOTES[id], dirty: dirtyPages.has(id),

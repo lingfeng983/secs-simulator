@@ -54,7 +54,8 @@ final class PlanExecutionsHandler extends HttpSupport {
                     respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
                     return;
                 }
-                audit(ex, "plan-list", deviceId, "");
+                /* 只读查询不记审计：界面会轮询此端点，记下来只会刷屏淹没真正的操作。
+                   审计只记"人改了什么"（写操作）。 */
                 respond(ex, 200, body);
                 return;
             }
@@ -138,7 +139,8 @@ final class PlanExecutionsHandler extends HttpSupport {
             respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-found\"}");
             return;
         }
-        audit(ex, "plan-executions", deviceId, "limit=" + limit);
+        /* 只读查询不记审计：执行台账被前端 3 秒轮询，记下来约每 3 秒一条，
+           会淹没建设备/连接/上下线这些真正的运维操作。清空台账(DELETE)仍记审计。 */
         respond(ex, 200, json);
     }
 

@@ -53,6 +53,14 @@ final class EventReporter {
      */
     private final java.util.function.Supplier<EventSchedule> schedule;
 
+    /**
+     * 按 id 在<b>完整</b>编排表查计划（含被禁用的），专供单步试跑。
+     *
+     * <p>与 {@link #schedule} 指向的预览表分开：试跑是调试能力，要能跑列表里
+     * 任意一条计划（默认全是禁用态）；实际触发仍走排除禁用计划的预览表。</p>
+     */
+    private final java.util.function.Function<String, EventPlan> planLookup;
+
     /** 该 CEID 是否被主机侧禁用（S2F37）。 */
     private final java.util.function.IntPredicate ceidEnabled;
 
@@ -87,6 +95,7 @@ final class EventReporter {
                   java.util.function.Supplier<SecsCommunicator> communicator,
                   java.util.function.Supplier<ExecutorService> ackSender,
                   java.util.function.Supplier<EventSchedule> schedule,
+                  java.util.function.Function<String, EventPlan> planLookup,
                   java.util.function.IntPredicate ceidEnabled,
                   Runnable recordSkipped,
                   Runnable recordFire,
@@ -99,6 +108,7 @@ final class EventReporter {
         this.communicator = communicator;
         this.ackSender = ackSender;
         this.schedule = schedule;
+        this.planLookup = planLookup;
         this.ceidEnabled = ceidEnabled;
         this.recordSkipped = recordSkipped;
         this.recordFire = recordFire;
@@ -244,13 +254,9 @@ final class EventReporter {
      * @throws IOException 计划不存在、执行器未接线或 S2F37 已禁用该 CEID
      */
     void step(String planId) throws IOException {
-        EventPlan plan = null;
-        for (EventPlan candidate : this.schedule.get().plans()) {
-            if (candidate.id().equals(planId)) {
-                plan = candidate;
-                break;
-            }
-        }
+        /* 查完整编排表（含禁用计划）：列表里显示的计划默认都是禁用态，
+           若查预览表会一律 "plan not found"，试跑这个调试能力就形同虚设。 */
+        EventPlan plan = this.planLookup.apply(planId);
         if (plan == null) {
             throw new IOException("plan not found: " + planId);
         }

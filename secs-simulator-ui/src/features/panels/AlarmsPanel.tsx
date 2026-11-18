@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Panel } from '../../shared/ui/Panel';
+import { ApiError } from '../../api/base';
 import type { PanelBaseProps } from './types';
 
 /** 报警文本会进 SECS-II 的 A 类型，只接受 US-ASCII。 */
@@ -46,7 +47,13 @@ export function AlarmsPanel({ backend, notifier }: PanelBaseProps): JSX.Element 
       });
       notifier.info(`报警风暴完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
     } catch (error) {
-      notifier.error(`报警风暴失败: ${(error as Error).message}`);
+      /* 409 = 后端互斥保护：同一设备已有一轮压测/风暴在跑，不是失败。
+         译成可操作的提示，而不是抛 "409 Conflict" 这种资源加载错误。 */
+      if (error instanceof ApiError && error.status === 409) {
+        notifier.info('已有压测正在进行', '请等当前这一轮结束后再点「报警风暴」');
+      } else {
+        notifier.error(`报警风暴失败: ${(error as Error).message}`);
+      }
     } finally {
       setStormRunning(false);
     }

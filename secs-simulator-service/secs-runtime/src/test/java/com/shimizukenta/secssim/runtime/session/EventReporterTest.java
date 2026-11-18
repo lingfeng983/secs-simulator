@@ -81,6 +81,14 @@ class EventReporterTest {
                                           java.util.function.Supplier<EventSchedule> schedule) {
         return new EventReporter(NO_ASSEMBLER, () -> STUB_COMMUNICATOR, () -> null,
                 schedule,
+                id -> {
+                    for (EventPlan plan : schedule.get().plans()) {
+                        if (plan.id().equals(id)) {
+                            return plan;
+                        }
+                    }
+                    return null;
+                },
                 ceid -> true, () -> { }, () -> { }, (type, payload) -> notices.add(payload),
                 () -> NOW, () -> false, "s1", e -> { });
     }
