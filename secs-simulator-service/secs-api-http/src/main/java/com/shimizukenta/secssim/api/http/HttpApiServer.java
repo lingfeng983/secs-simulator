@@ -44,6 +44,13 @@ import com.sun.net.httpserver.HttpsServer;
  */
 public final class HttpApiServer {
 
+    /** 访问日志的来源标识：所有 handler 的请求都从这里出，便于 grep 出一次会话的全貌。 */
+    private static final com.shimizukenta.secssim.app.log.Log.Facade ACCESS =
+            com.shimizukenta.secssim.app.log.Log.of(HttpApiServer.class);
+
+    /** 超过这个耗时就升 WARN。与"慢请求专用池"的判定口径保持一致。 */
+    private static final long SLOW_REQUEST_MS = 1_000L;
+
     /**
      * 写入停滞判定：连续这么久没有任何一帧写成功，就认为客户端已经不读了。
      *
@@ -617,15 +624,42 @@ public final class HttpApiServer {
             if (isSlowRequest(ex)) {
                 /* 慢路由交给专用池：请求线程立刻返回，health/轮询/取票不再排在它们后面。 */
                 try {
-                    this.slowExecutor.execute(() -> invokeHandler(handler, ex));
+                    this.slowExecutor.execute(() -> invokeLogged(handler, ex));
                 } catch (java.util.concurrent.RejectedExecutionException e) {
                     respond(ex, 503, "{\"ok\":false,\"error\":\"busy\"}");
                 }
                 return;
             }
 
-            invokeHandler(handler, ex);
+            invokeLogged(handler, ex);
         };
+    }
+
+    /**
+     * 执行处理器并写一行访问日志。
+     *
+     * <p>挂在 {@link #withCors} 这个唯一入口上，所有 handler 自动覆盖，不需要
+     * 每个 handler 自己记。慢请求（≥1s）升 WARN，与"慢请求专用池"的判定口径一致。</p>
+     *
+     * <p>这一条同时解决两件事：正常请求第一次有了记录（出安全事件能取证），
+     * 以及慢请求第一次可见。</p>
+     */
+    private void invokeLogged(HttpHandler handler, HttpExchange ex) {
+        long startNanos = System.nanoTime();
+        String method = ex.getRequestMethod();
+        String path = ex.getRequestURI().getPath();
+        try {
+            HttpSupport.clearLastStatus();
+            invokeHandler(handler, ex);
+        } finally {
+            long millis = (System.nanoTime() - startNanos) / 1_000_000L;
+            int status = HttpSupport.lastStatus();
+            if (millis >= SLOW_REQUEST_MS) {
+                ACCESS.warn("{} {} {} {}ms", method, path, status, millis);
+            } else {
+                ACCESS.info("{} {} {} {}ms", method, path, status, millis);
+            }
+        }
     }
 
     /**

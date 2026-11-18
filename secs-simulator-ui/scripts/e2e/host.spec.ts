@@ -69,22 +69,22 @@ test('主机列表：连接 / 断开 / 详情 / 删除', async ({ page }) => {
   await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-2');
 });
 
-test('主机清单：表头全选 + 批量链接 / 断开 / 删除', async ({ page }) => {
+test('主机清单：表头全选 + 批量连接 / 断开 / 删除', async ({ page }) => {
   const state = await mockApi(page);
   await openHosts(page);
   const panel = page.locator('#panel-hosts-v2');
   const batch = panel.locator('.table-toolbar');
 
   /* 没勾选时批量按钮全不可用 */
-  await expect(batch.getByRole('button', { name: '批量链接' })).toBeDisabled();
+  await expect(batch.getByRole('button', { name: '批量连接' })).toBeDisabled();
   await expect(batch.getByRole('button', { name: '批量删除' })).toBeDisabled();
 
   const selectAll = panel.locator('thead').getByLabel('全选 / 清空');
   await selectAll.check();
   await expect(batch).toContainText('已选 2 台');
 
-  /* 只有 host-2 没连上，批量链接只处理它 */
-  await batch.getByRole('button', { name: '批量链接' }).click();
+  /* 只有 host-2 没连上，批量连接只处理它 */
+  await batch.getByRole('button', { name: '批量连接' }).click();
   await expect.poll(() => state.hosts.find((host) => host.id === 'host-2')?.open).toBe(true);
   /* 批量跑完勾选被清空，再勾一次之前先等它落定 */
   await expect(batch).not.toContainText('已选');
@@ -139,7 +139,7 @@ test('操作栏带目标端点；新建主机可从已启动设备快速填入',
   await page.locator('#panel-hosts-v2').getByRole('button', { name: '＋ 新建主机' }).click();
   const dialog = page.getByRole('dialog');
   const form = dialog.locator('.session-form');
-  const picker = dialog.getByLabel('快速链接设备');
+  const picker = dialog.getByLabel('快速连接设备');
   /* 只列已启动的设备（line1 在线、line2 端口在监听），加上一条"手动填写" */
   await expect(picker.locator('option')).toHaveCount(3);
 

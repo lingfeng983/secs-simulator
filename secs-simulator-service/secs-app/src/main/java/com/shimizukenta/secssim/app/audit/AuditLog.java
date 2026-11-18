@@ -29,6 +29,8 @@ import com.shimizukenta.secssim.app.log.Log;
  */
 public final class AuditLog implements AutoCloseable {
 
+    private static final Log.Facade LOG = Log.of(AuditLog.class);
+
     /** 内存中保留的最近条数，也是 HTTP 审计接口的默认上限。 */
     public static final int DEFAULT_RECENT = 1_000;
 
@@ -114,7 +116,7 @@ public final class AuditLog implements AutoCloseable {
         } catch (IOException e) {
             if (!this.writeFailed) {
                 this.writeFailed = true;
-                Log.error("写审计日志失败（后续仍继续运行）: " + this.file, e);
+                LOG.warn("写审计日志失败（后续仍继续运行）: {}", this.file, e);
             }
         }
     }
@@ -140,7 +142,7 @@ public final class AuditLog implements AutoCloseable {
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             this.bytes = 0L;
         } catch ( IOException e ) {
-            Log.error("审计日志轮转失败（继续追加当前文件）: " + this.file, e);
+            LOG.warn("审计日志轮转失败（继续追加当前文件）: {}", this.file, e);
             /* 轮转失败后仍要有可写的 writer：重新打开失败也只能记录，不能抛出 */
             try {
                 this.writer = Files.newBufferedWriter(this.file, StandardCharsets.UTF_8,
@@ -239,7 +241,7 @@ public final class AuditLog implements AutoCloseable {
         try {
             this.writer.close();
         } catch (IOException e) {
-            Log.error("关闭审计日志失败: " + this.file, e);
+            LOG.error("关闭审计日志失败: {}", this.file, e);
         }
     }
 
@@ -280,7 +282,7 @@ public final class AuditLog implements AutoCloseable {
                 parse(line);
             }
         } catch (IOException | RuntimeException e) {
-            Log.error("读取审计历史失败（继续运行）: " + this.file, e);
+            LOG.warn("读取审计历史失败（继续运行）: {}", this.file, e);
         }
     }
 

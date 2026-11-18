@@ -222,7 +222,7 @@ export function useSessionCommands({ client, notifier, refreshSessions, refreshS
             online ? '按计划规则上报事件（等价于主机发 S1F17）' : '主动上报立即停止（等价于主机发 S1F15）',
           );
         } else if (status === 409) {
-          notifierRef.current.error('设备还没连上主机', '先「启动」端口并等主机建立 HSMS 链接，才能上线');
+          notifierRef.current.error('设备还没连上主机', '先「启动」端口并等主机建立 HSMS 连接，才能上线');
         } else {
           notifierRef.current.error(lifecycleMessage(status, `${online ? '上线' : '下线'}设备 ${deviceId}`));
         }

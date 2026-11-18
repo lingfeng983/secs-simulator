@@ -6,9 +6,9 @@ import java.util.List;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
+import com.shimizukenta.secssim.api.http.SessionCreated;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
 import com.shimizukenta.secssim.app.audit.AuditLog;
@@ -30,7 +30,7 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  *   <li>{@link RuntimeApi}——会话/配置/报文/审计的接口落地（无状态，只查对象调方法）</li>
  *   <li>{@link HostSimRegistry}——主机模拟器的注册、查找、重连与关闭</li>
  *   <li>{@link BurstRunner}——压测线程池、预算与取消</li>
- *   <li>{@link DeviceIdResolver}——设备 id 归一与「按设备找会话」</li>
+ *   <li>{@link DeviceSessions}——设备实体与会话实例之间的映射</li>
  *   <li>{@link DeviceV2Delegates}——设备运行时编辑、执行台账与链路相位</li>
  *   <li>{@link HostV2Delegates}——主机命名空间、配置区方案库与主机报文</li>
  *   <li>本类——健康信息、停机编排与 {@code ApiContext} 委托</li>
@@ -42,7 +42,14 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     private final String mode;
     private final String version;
-    private final String extraHealthJson;
+    /**
+     * 健康附加字段的<b>求值函数</b>而不是字符串。
+     *
+     * <p>原先这里存的是启动时算好的字符串，于是 {@code /health} 的 sessions 永远
+     * 是启动那一刻的值——3 个会话跑着，健康检查还报 0。改成 Supplier 后每次请求
+     * 重新求值。</p>
+     */
+    private final java.util.function.Supplier<String> extraHealthJson;
     private final Runnable shutdown;
     private final RuntimeApi api;
     private final HostSimRegistry hosts;
@@ -53,14 +60,14 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     private final RuntimePersister persister;
     /** 状态通知（SSE 的第二条数据源：设备/主机链路相位、配置变更）。 */
     private final com.shimizukenta.secssim.app.event.NoticeBus notices;
-    /** 设备 id 归一与「按设备找会话」的查询。 */
-    private final DeviceIdResolver ids;
+    /** 设备实体与会话实例之间的映射（会话只记配置名，设备 id 经配置名反查）。 */
+    private final DeviceSessions devices;
     /** v2 设备域（运行时编辑/台账/链路）的委托。 */
     private final DeviceV2Delegates deviceV2;
     /** v2 主机命名空间的委托。 */
     private final HostV2Delegates hostV2;
 
-    RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
+    RuntimeContext(String mode, String version, java.util.function.Supplier<String> extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, ParamTemplateStore paramTemplates, MessageLog messages,
             AuditLog audit,
@@ -84,11 +91,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
         this.configs = configs;
         this.bursts = new BurstRunner(sessions, this.hosts);
-        this.ids = new DeviceIdResolver(sessions, configRepository);
-        this.persister = new RuntimePersister(linkState, this.ids::canonical);
+        this.devices = new DeviceSessions(sessions, launcher, configs);
+        this.persister = new RuntimePersister(linkState, this.devices::deviceIdOf);
         this.api = new RuntimeApi(sessions, launcher, configs, templates, paramTemplates, messages, audit,
-                this.hosts, this.bursts, this.persister);
-        this.deviceV2 = new DeviceV2Delegates(this.api, this.ids, linkState, planExecutions,
+                this.hosts, this.bursts, this.persister, this.devices);
+        this.deviceV2 = new DeviceV2Delegates(this.api, this.devices, linkState, planExecutions,
                 this.persister, configRepository);
         this.hostV2 = new HostV2Delegates(this.hosts, hostRepository, this.bursts, messages);
     }
@@ -118,7 +125,7 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public String extraHealthJson() {
-        return this.extraHealthJson;
+        return this.extraHealthJson.get();
     }
 
     @Override
@@ -187,11 +194,6 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.api.eventsJson(sessionId);
     }
 
-    @Override
-    public EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-        return this.api.setEventEnabled(sessionId, planId, enabled);
-    }
-
     /* ---------- 报文与审计 ---------- */
 
     @Override
@@ -231,78 +233,6 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.api.auditJson(limit, action, actor, beforeMs);
     }
 
-    /* ---------- 运行时编辑(设备页·事件/报告/状态变量) ---------- */
-
-    @Override
-    public int addEventPlan(String sessionId, String planJson) {
-        return this.api.addEventPlan(sessionId, planJson);
-    }
-
-    @Override
-    public int updateEventPlan(String sessionId, String planId, String planJson) {
-        return this.api.updateEventPlan(sessionId, planId, planJson);
-    }
-
-    @Override
-    public int removeEventPlan(String sessionId, String planId) {
-        return this.api.removeEventPlan(sessionId, planId);
-    }
-
-    @Override
-    public int addReport(String sessionId, String reportJson) {
-        return this.api.addReport(sessionId, reportJson);
-    }
-
-    @Override
-    public int updateReport(String sessionId, int rptid, String reportJson) {
-        return this.api.updateReport(sessionId, rptid, reportJson);
-    }
-
-    @Override
-    public int addCeid(String sessionId, String ceidJson) {
-        return this.api.addCeid(sessionId, ceidJson);
-    }
-
-    @Override
-    public int updateCeid(String sessionId, int ceid, String ceidJson) {
-        return this.api.updateCeid(sessionId, ceid, ceidJson);
-    }
-
-    @Override
-    public int removeCeid(String sessionId, int ceid) {
-        return this.api.removeCeid(sessionId, ceid);
-    }
-
-    @Override
-    public int removeReport(String sessionId, int rptid) {
-        return this.api.removeReport(sessionId, rptid);
-    }
-
-    @Override
-    public int addSvid(String sessionId, String svidJson) {
-        return this.api.addSvid(sessionId, svidJson);
-    }
-
-    @Override
-    public int updateSvid(String sessionId, int svid, String svidJson) {
-        return this.api.updateSvid(sessionId, svid, svidJson);
-    }
-
-    @Override
-    public int removeSvid(String sessionId, int svid) {
-        return this.api.removeSvid(sessionId, svid);
-    }
-
-    @Override
-    public int pinSvidValue(String sessionId, int svid, String valueJson) {
-        return this.api.pinSvidValue(sessionId, svid, valueJson);
-    }
-
-    @Override
-    public int unpinSvidValue(String sessionId, int svid) {
-        return this.api.unpinSvidValue(sessionId, svid);
-    }
-
     @Override
     public String sendSml(String sessionId, String sml) throws IOException {
         return this.api.sendSml(sessionId, sml);
@@ -311,7 +241,7 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     /* ---------- 会话生命周期 ---------- */
 
     @Override
-    public SessionOutcome createSession(SessionCreateRequest request) {
+    public SessionCreated createSession(SessionCreateRequest request) {
         return this.api.createSession(request);
     }
 
@@ -563,6 +493,14 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public SessionOutcome deviceReloadV2(String deviceId) {
         return this.deviceV2.deviceReloadV2(deviceId);
+    }
+
+    @Override
+    public SessionOutcome destroyDeviceV2(String deviceId) {
+        /* 销毁 = 释放端口、移出注册表、清运行态；设备实体与配置正文保留 */
+        return this.devices.sessionIdOf(deviceId)
+                .map(this.api::closeSession)
+                .orElse(SessionOutcome.UNKNOWN_SESSION);
     }
 
     /* ---------- 3.0 v2：主机独立命名空间（设计 §2.5） ---------- */

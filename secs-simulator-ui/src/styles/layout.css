@@ -145,7 +145,7 @@ body.sidenav-resizing .app-body {
 .nav-group-title {
   padding: 0.45rem 0.6rem 0.3rem;
   color: var(--chrome-muted);
-  font-size: calc(10px * var(--font-scale));
+  font-size: var(--fs-aux);
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -164,7 +164,7 @@ body.sidenav-resizing .app-body {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--chrome-fg);
-  font-size: calc(12.8px * var(--font-scale));
+  font-size: var(--fs-body);
   font-weight: 450;
   text-align: left;
   justify-content: flex-start;
@@ -221,7 +221,7 @@ body.sidenav-resizing .app-body {
   margin: 0;
   padding: 0.15rem 0.6rem;
   color: var(--chrome-muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 /* 折叠态的设备徽标:首字母 + 状态色,替代"只有一个小圆点" */
@@ -235,7 +235,7 @@ body.sidenav-resizing .app-body {
   border: 1px solid var(--line);
   background: var(--chrome-badge);
   color: var(--chrome-fg);
-  font: 600 calc(9.5px * var(--font-scale))/1 var(--font-mono);
+  font: 600 var(--fs-aux)/1 var(--font-mono);
   letter-spacing: 0.02em;
 }
 
@@ -281,7 +281,7 @@ body.sidenav-resizing .app-body {
 .nav-item .nav-state {
   flex: 0 0 auto;
   color: var(--chrome-muted);
-  font-size: calc(10.5px * var(--font-scale));
+  font-size: var(--fs-aux);
   letter-spacing: 0.02em;
 }
 
@@ -299,6 +299,29 @@ body.sidenav-resizing .app-body {
 
 .nav-item .nav-state.tone-danger {
   color: var(--danger);
+}
+
+/* 「停止 / 未连接 / 连接中」是稳态，不是故障：侧栏里也用中性灰。
+   状态字来自 DEVICE_STATUS_TONE / hostPhaseTone（共享层），这里按 title 精确命中；
+   「重连中」(FAILED) 保持上面的红色，作为故障提示。 */
+.nav-item[title*='端口未监听'] .nav-state.tone-danger,
+.nav-item[title*='（未连接）'] .nav-state.tone-danger,
+.nav-item[title*='（连接中）'] .nav-state.tone-danger {
+  color: var(--status-stop);
+}
+.nav-item[title*='端口未监听'] .nav-monogram.danger,
+.nav-item[title*='（未连接）'] .nav-monogram.danger,
+.nav-item[title*='（连接中）'] .nav-monogram.danger {
+  border-color: color-mix(in srgb, var(--status-stop) 32%, transparent);
+  background: var(--status-stop-soft);
+  color: var(--status-stop);
+}
+
+.nav-item[title*='端口未监听'] .conn-dot.danger,
+.nav-item[title*='（未连接）'] .conn-dot.danger,
+.nav-item[title*='（连接中）'] .conn-dot.danger {
+  background: var(--status-stop);
+  box-shadow: 0 0 0 3px var(--status-stop-soft);
 }
 
 .sidenav-foot {
@@ -497,11 +520,11 @@ body.sidenav-resizing .app-body {
 .section-head h2,
 .section-head h3,
 .section-head h4 {
-  font-size: 0.94rem;
+  font-size: var(--fs-strong);
 }
 
 .sub-title {
-  font-size: 0.94rem;
+  font-size: var(--fs-strong);
   font-weight: 650;
   margin: 1.1rem 0 0.55rem;
 }
@@ -532,7 +555,7 @@ body.sidenav-resizing .app-body {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: calc(10px * var(--font-scale));
+  font-size: var(--fs-aux);
   cursor: pointer;
 }
 
@@ -559,7 +582,7 @@ body.sidenav-resizing .app-body {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: calc(10.8px * var(--font-scale));
+  font-size: var(--fs-aux);
   text-align: left;
   cursor: pointer;
 }

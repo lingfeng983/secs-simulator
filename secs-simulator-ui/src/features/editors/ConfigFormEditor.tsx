@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ParamTemplate } from '../../api/paramTemplates';
 import { SourceEditor } from './SourceEditor';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
@@ -91,6 +91,14 @@ export function ConfigFormEditor({ text, onChange, onPreviewSvid }: ConfigFormEd
 
 /* ---------- 会话 ---------- */
 
+/** 两列栅格：短数字字段紧凑成对，长文本（会话 id / 绑定地址）跨两列。 */
+const TWO_COL_GRID: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: '0.5rem 0.75rem',
+  alignItems: 'center',
+};
+
 export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
   const session = isJsonObject(root.session) ? root.session : null;
 
@@ -118,11 +126,20 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
 
   return (
     <div className="cfg-section session-form">
-      <div className="session-fields">
-        <SessionField label="会话 id" help="唯一标识，用于 URL、日志、主机选择；改动会重建连接。">
+      {/* 两列栅格：短数字字段成对占一格，会话 id / 绑定地址这种长文本跨满一行，
+          右边不再空着一大片；一屏就能看完全部常用参数。 */}
+      <div className="session-fields" style={TWO_COL_GRID}>
+        <SessionField
+          label="会话 id"
+          span={2}
+          help="唯一标识，用于 URL、日志、主机选择；默认值见设备模板，改动会重建连接。"
+        >
           <TextField value={stringField(session, 'id')} onCommit={(next) => set('id', next)} />
         </SessionField>
-        <SessionField label="HSMS 端口" help="必填（1–65535）：被动监听端口，必须与主机连接的目标端口一致，且不能与其他会话冲突。">
+        <SessionField
+          label="HSMS 端口"
+          help="必填 TCP 端口（1–65535，模板常用 5010）：被动监听端口，必须与主机连接的目标端口一致，且不能与其他会话冲突。"
+        >
           <NumberField
             value={numberField(session, 'port')}
             integer
@@ -134,20 +151,24 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
             }}
           />
         </SessionField>
-        <SessionField label="绑定地址" help="默认 127.0.0.1（只允许本机连接）；填 0.0.0.0 监听所有网卡。">
+        <SessionField label="deviceId" help="HSMS Device ID（整数，0–32767；模板常用 10），主机按它区分设备，两侧必须一致。">
+          <NumberField value={numberField(session, 'deviceId')} integer onCommit={(next) => set('deviceId', next)} />
+        </SessionField>
+        <SessionField
+          label="绑定地址"
+          span={2}
+          help="IP 地址，默认 127.0.0.1（只允许本机连接）；填 0.0.0.0 监听所有网卡。改完保存会重建监听。"
+        >
           <TextField
             allowBlank
             value={stringField(session, 'bindHost', '127.0.0.1')}
             onCommit={(next) => set('bindHost', next.trim() === '' ? '127.0.0.1' : next)}
           />
         </SessionField>
-        <SessionField label="deviceId" help="HSMS Device ID（0–32767），主机按它区分设备，两侧必须一致。">
-          <NumberField value={numberField(session, 'deviceId')} integer onCommit={(next) => set('deviceId', next)} />
-        </SessionField>
-        <SessionField label="随机种子" help="决定曲线与事件抖动的随机序列；固定种子便于复现同一条曲线。">
+        <SessionField label="随机种子" help="整数，固定种子便于复现同一条曲线与事件抖动；留空由运行时按会话派生。">
           <NumberField value={numberField(session, 'seed')} integer onCommit={(next) => set('seed', next)} />
         </SessionField>
-        <SessionField label="被动监听" help="勾选 = 设备开端口等主机连；取消 = 设备主动连接主机。">
+        <SessionField label="被动监听" help="默认勾选：设备开端口等主机连；取消则设备主动连接主机，填的是主机地址与端口。">
           <label className="check-inline">
             <input
               type="checkbox"
@@ -159,25 +180,45 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
         </SessionField>
       </div>
 
-      <h3 className="session-subhead">HSMS 超时（秒，留空用协议默认）</h3>
-      <TimeoutFields session={session} set={set} />
-
-      <h3 className="session-subhead">Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）</h3>
-      <TraceFields session={session} set={set} />
+      {/* 高级项默认收起：超时与 Trace 容量是"真机调优"才动的旋钮，
+          不跟常用参数抢一屏。两组之间用一条分隔线区分。 */}
+      <Collapsible
+        title="高级：HSMS 超时与 Trace 容量"
+        hint="超时单位是秒，留空走协议层默认值；Trace 留空时默认同时 1 条、每条最多 10 个 SVID。改动只进本页草稿，保存后生效。"
+        defaultOpen={false}
+      >
+        <h3 className="session-subhead" style={{ marginTop: 0 }}>HSMS 超时（秒，留空用协议默认）</h3>
+        <TimeoutFields session={session} set={set} />
+        <div style={{ borderTop: '1px solid var(--line)', marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+          <h3 className="session-subhead" style={{ marginTop: 0 }}>Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）</h3>
+          <TraceFields session={session} set={set} />
+        </div>
+      </Collapsible>
     </div>
   );
 }
 
 /** 一行"标题 + 控件"：标题列对齐；说明默认不展示，悬浮/聚焦在标题上时出气泡。 */
-export function SessionField({ label, help, required = false, children }: {
+export function SessionField({ label, help, required = false, span, compact = false, children }: {
   label: string;
   help: string;
   /** 必填项：标题后加红色星号（比"点了确定才弹一条横幅"更好用）。 */
   required?: boolean;
+  /** 在栅格容器里横跨的列数；普通表单里忽略。 */
+  span?: 1 | 2 | 3;
+  /** 短数字字段：连标题一起限制宽度，别在 500px 弹窗里拉成一条长条。 */
+  compact?: boolean;
   children: ReactNode;
 }): JSX.Element {
+  const style: CSSProperties = {};
+  if (span !== undefined) {
+    style.gridColumn = `span ${span}`;
+  }
+  if (compact) {
+    style.maxWidth = '22rem';
+  }
   return (
-    <label className="field modal-field">
+    <label className="field modal-field" style={style}>
       <FieldLabel text={label} help={help} required={required} />
       {children}
     </label>
@@ -188,11 +229,11 @@ export function SessionField({ label, help, required = false, children }: {
 function TimeoutFields({ session, set }: { session: JsonObject; set: (key: string, value: unknown) => void }): JSX.Element {
   const timeouts = isJsonObject(session.timeouts) ? session.timeouts : {};
   const fields: ReadonlyArray<{ key: string; label: string; help: string }> = [
-    { key: 't3', label: 'T3 回复', help: '发出 W 位报文后等回复的上限；超时记为失败。' },
-    { key: 't5', label: 'T5 重连', help: '连接断开后再次尝试建连的间隔。' },
-    { key: 't6', label: 'T6 多段交互', help: '一次多段交互（Sx+Fy 带多个数据块）从第一块到收尾的整体上限。' },
-    { key: 't7', label: 'T7 选择', help: '连接建立后等待 Select/控制状态切换的超时。' },
-    { key: 't8', label: 'T8 字符间', help: '单条报文内相邻字节允许的最大间隔。' },
+    { key: 't3', label: 'T3 回复', help: '单位秒；发出 W 位报文后等回复的上限，默认用协议层值；超时记为失败。' },
+    { key: 't5', label: 'T5 重连', help: '单位秒；连接断开后再次尝试建连的间隔，留空用协议默认，过小会刷屏重连。' },
+    { key: 't6', label: 'T6 多段交互', help: '单位秒；一次多段交互（Sx+Fy 带多个数据块）从第一块到收尾的整体上限，留空用协议默认。' },
+    { key: 't7', label: 'T7 选择', help: '单位秒；连接建立后等待 Select/控制状态切换的超时，留空用协议默认。' },
+    { key: 't8', label: 'T8 字符间', help: '单位秒；单条报文内相邻字节允许的最大间隔，留空用协议默认，过小会误判断帧。' },
   ];
 
   const commit = (key: string, value: number | undefined) => {
@@ -200,9 +241,9 @@ function TimeoutFields({ session, set }: { session: JsonObject; set: (key: strin
   };
 
   return (
-    <div className="session-fields">
+    <div className="session-fields" style={TWO_COL_GRID}>
       {fields.map((field) => (
-        <SessionField key={field.key} label={field.label} help={field.help}>
+        <SessionField key={field.key} label={field.label} help={field.help} compact>
           <NumberField
             value={numberField(timeouts, field.key)}
             onCommit={(next) => commit(field.key, next)}
@@ -232,8 +273,8 @@ function editTimeout(
 function TraceFields({ session, set }: { session: JsonObject; set: (key: string, value: unknown) => void }): JSX.Element {
   const trace = isJsonObject(session.trace) ? session.trace : {};
   const fields: ReadonlyArray<{ key: string; label: string; help: string }> = [
-    { key: 'maxTraces', label: '同时 Trace 条数', help: '同一时刻允许多少条 S2F23 周期采样；真机通常是 1。' },
-    { key: 'maxSvidCount', label: '单条 SVID 上限', help: '一条 Trace 最多携带多少个状态变量；真机通常是 10。' },
+    { key: 'maxTraces', label: '同时 Trace 条数', help: '整数，默认 1；同一时刻允许多少条 S2F23 周期采样，调大增加设备负载。' },
+    { key: 'maxSvidCount', label: '单条 SVID 上限', help: '整数，默认 10；一条 Trace 最多携带多少个状态变量，超出的会被拒。' },
   ];
 
   const commit = (key: string, value: number | undefined) => {
@@ -241,9 +282,9 @@ function TraceFields({ session, set }: { session: JsonObject; set: (key: string,
   };
 
   return (
-    <div className="session-fields">
+    <div className="session-fields" style={TWO_COL_GRID}>
       {fields.map((field) => (
-        <SessionField key={field.key} label={field.label} help={field.help}>
+        <SessionField key={field.key} label={field.label} help={field.help} compact>
           <NumberField
             value={numberField(trace, field.key)}
             integer
@@ -516,9 +557,10 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
       <SectionHead title="事件计划列表">
         <button
           type="button"
+          className="primary"
           onClick={() => setEditing({ index: null, draft: { id: '', ceid: ceidChoices[0]?.svid ?? 0, trigger: defaultTrigger('periodic') } })}
         >
-          + 事件计划
+          ＋ 新建事件计划
         </button>
       </SectionHead>
 

@@ -33,6 +33,8 @@ import com.sun.net.httpserver.HttpExchange;
  */
 final class StreamHandler extends HttpSupport {
 
+    private static final Log.Facade LOG = Log.of(StreamHandler.class);
+
     /** 票据有效期：够浏览器建连即可，短到即使泄漏也基本无用。 */
     private static final Duration TICKET_TTL = Duration.ofSeconds(30L);
 
@@ -163,13 +165,14 @@ final class StreamHandler extends HttpSupport {
             return;
         }
         /* 报文流能看到全部会话的收发，谁在看要留痕：这是排障时最常问的一句话 */
-        Log.info("SSE 订阅者 " + redeemed.principal().name()
-                + "（" + redeemed.principal().role().name().toLowerCase(Locale.ROOT) + "）已连接");
+        LOG.info("SSE 订阅者 {}（{}）已连接",
+                redeemed.principal().name(),
+                redeemed.principal().role().name().toLowerCase(Locale.ROOT));
 
         try {
             this.sseExecutor.execute(() -> this.streamEvents(ex));
         } catch (RejectedExecutionException e) {
-            Log.error("SSE 连接数已达上限 " + SSE_THREADS_MAX + "，拒绝新连接", null);
+            LOG.warn("SSE 连接数已达上限 {}，拒绝新连接", SSE_THREADS_MAX);
             respond(ex, 503, "{\"ok\":false,\"error\":\"too-many-streams\"}");
         }
     }
@@ -184,7 +187,7 @@ final class StreamHandler extends HttpSupport {
                 continue;
             }
             if (this.subscribers.remove(subscriber)) {
-                Log.error("SSE 连接 " + this.stallTimeoutMs / 1000 + " 秒无写入进展，主动断开", null);
+                LOG.warn("SSE 连接 {} 秒无写入进展，主动断开", this.stallTimeoutMs / 1000);
                 subscriber.abort();
             }
         }

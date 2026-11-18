@@ -312,7 +312,7 @@ test('单行「重启」直接打后端，「停止」先确认再改状态，�
   await expect.poll(() => state.calls.some((call) => call.endsWith('/link/connect'))).toBe(true);
 });
 
-test('新增设备弹框：填链接信息 + 选模板，建出配置与会话', async ({ page }) => {
+test('新增设备弹框：填写连接信息 + 选模板，建出配置与会话', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
 
@@ -334,7 +334,10 @@ test('新增设备弹框：填链接信息 + 选模板，建出配置与会话',
   await expect.poll(() => state.calls.filter((call) => call === 'POST /api/v1/configs').length).toBe(1);
   await expect.poll(() => state.calls.filter((call) => call === 'POST /api/v1/sessions').length).toBe(1);
   await expect(page.locator('.toast', { hasText: '已新建设备' }).first()).toBeVisible();
-  await expect.poll(() => state.sessions.some((item) => item.id === 'etch-a')).toBe(true);
+  /* B1：会话 id 由服务端生成（ses_ 前缀），配置名只记在 config 字段 */
+  await expect.poll(() => state.sessions.some(
+    (item) => item.id.startsWith('ses_') && item.config.startsWith('etch-a'),
+  )).toBe(true);
 });
 
 test('新增设备：关掉「立即启动」只保存设备，不启动会话', async ({ page }) => {

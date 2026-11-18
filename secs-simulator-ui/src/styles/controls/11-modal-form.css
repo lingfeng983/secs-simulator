@@ -119,3 +119,118 @@
     text-align: left;
   }
 }
+
+/* ===== 参数模板弹窗：基本 / 曲线 / 高级 分段栅格 =====
+   原先三行控件宽度各异、标签各说各话；这里每段一个卡片，
+   行内用「固定宽标签列 + 吃满剩余空间的控件列」两列栅格，跨段对齐。 */
+.template-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.template-form-section {
+  padding: 0.7rem 0.85rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.template-form-section-title {
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.template-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.template-form-field {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.template-form-field > input,
+.template-form-field > select {
+  width: 100%;
+  min-width: 0;
+}
+
+.template-form-label {
+  justify-self: stretch;
+  text-align: right;
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.35;
+}
+
+.template-form-readonly {
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.5;
+}
+
+/* 曲线段下的实时预览：固定 160px 高，宽度收到 viewBox 比例附近，
+   避免 SVG 按 preserveAspectRatio 留白成一条细线。 */
+.template-form-preview {
+  margin-top: 0.7rem;
+}
+
+.template-form-preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.template-form-preview-shape {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.template-form-preview-chart {
+  height: 160px;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.template-form-preview-chart .param-curve-chart {
+  width: 100%;
+  height: 160px;
+}
+
+/* 列表「形式」列：短名 + 悬浮显示完整描述 */
+.template-form-kind {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: calc(11px * var(--font-scale));
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .template-form-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .template-form-label {
+    text-align: left;
+  }
+}

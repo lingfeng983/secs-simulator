@@ -41,8 +41,7 @@ class TemplateStoreTest {
     /** 库支撑的模板门面（内置模板先播种，与生产一致）。 */
     private TemplateStore store() {
         var db = com.shimizukenta.secssim.store.Db.open(this.temp);
-        var repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        var repo = new com.shimizukenta.secssim.store.ConfigRepository(db);
         var templates = new com.shimizukenta.secssim.store.TemplateRepository(db);
         for (DeviceTemplates.Entry entry : DeviceTemplates.catalog()) {
             templates.seed(entry.id(), entry.label(), entry.description(), true,

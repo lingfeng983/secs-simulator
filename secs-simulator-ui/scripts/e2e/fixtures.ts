@@ -42,7 +42,7 @@ export interface MockState {
   deviceOnline: boolean;
   hostConnected: boolean;
   eventEnabled: boolean;
-  sessions: Array<{ id: string; device: string; controlState: string; state: string; port: number }>;
+  sessions: Array<{ id: string; config: string; device: string; controlState: string; state: string; port: number }>;
   cycle: { state: 'STOPPED' | 'RUNNING' | 'FINISHED'; startedAt: number; waferIndex: number; phaseMs: number; totalWafers: number; firedCount: number; hasCycle: boolean };
   hosts: Array<{
     id: string; name: string; phase: string; open: boolean; target: string; port: number;
@@ -68,8 +68,8 @@ function initialState(): MockState {
     cycle: { state: 'STOPPED', startedAt: 0, waferIndex: 0, phaseMs: 0, totalWafers: 25, firedCount: 0, hasCycle: true },
       eventEnabled: false,
     sessions: [
-      { id: 'line1', device: 'LINE1', controlState: 'ONLINE', state: 'OPEN', port: 5000 },
-      { id: 'line2', device: 'LINE2', controlState: 'OFFLINE', state: 'OPEN', port: 5001 },
+      { id: 'line1', config: 'line1.json', device: 'LINE1', controlState: 'ONLINE', state: 'OPEN', port: 5000 },
+      { id: 'line2', config: 'line2.json', device: 'LINE2', controlState: 'OFFLINE', state: 'OPEN', port: 5001 },
     ],
     hosts: [
       {
@@ -113,7 +113,7 @@ const sessionJson = (item: MockState['sessions'][number]) => ({
   device: item.device,
   units: 1,
   lastError: '',
-  config: `${item.id}.json`,
+  config: item.config,
   counters: {},
 });
 
@@ -233,12 +233,18 @@ export async function mockApi(page: Page): Promise<MockState> {
     }
     if (path === '/api/v1/sessions' && method === 'POST') {
       const body = request.postDataJSON() as { config?: string } | null;
-      const id = (body?.config ?? 'new.json').replace(/\.json$/i, '');
-      state.sessions.push({ id, device: id.toUpperCase(), controlState: 'OFFLINE', state: 'OPEN', port: 5100 });
-      return ok({ ok: true }, 201);
+      /* B1：会话 id 由服务端生成（ses_ ULID），配置名只记在 config 字段 */
+      const configName = body?.config ?? 'new.json';
+      const stem = configName.replace(/\.json$/i, '');
+      const id = `ses_e2e${state.sessions.length + 1}`;
+      state.sessions.push({
+        id, config: configName, device: stem.toUpperCase(),
+        controlState: 'OFFLINE', state: 'OPEN', port: 5100,
+      });
+      return ok({ ok: true, id }, 201);
     }
     if (path === '/api/v1/sessions/bulk' && method === 'POST') {
-      return ok({ created: ['dev-1'], failed: [] }, 201);
+      return ok({ created: ['ses_bulk1'], failed: [] }, 201);
     }
     if (/^\/api\/v1\/sessions\/[^/]+$/.test(path) && method === 'DELETE') {
       /* 3.0：DELETE 的语义是断开链路，设备留在列表里（列表行不能消失） */
@@ -288,7 +294,7 @@ export async function mockApi(page: Page): Promise<MockState> {
           device: item.device,
           units: 1,
           port: item.port,
-          counters: { emitted: 3, activeAlarms: item.id === 'line1' ? 1 : 0 },
+          counters: { emitted: 3, activeAlarms: item.config === 'line1.json' ? 1 : 0 },
           msgsPerMin: item.controlState === 'ONLINE' ? 6 : 0,
           s6f11PerMin: item.controlState === 'ONLINE' ? 2 : 0,
           lastEventAt: 0,
@@ -338,28 +344,12 @@ export async function mockApi(page: Page): Promise<MockState> {
         }],
       });
     }
-    if (/^\/api\/v1\/sessions\/[^/]+\/events(\/[^/]+)?$/.test(path)) {
-      /* POST /events/{id}?enabled= 是启停；PUT/DELETE 是编辑与删除 */
-      if (url.searchParams.has('enabled')) {
-        state.eventEnabled = url.searchParams.get('enabled') === 'true';
-        return ok({ ok: true });
-      }
-      if (method === 'PUT' || method === 'DELETE') {
-        return ok({ ok: true });
-      }
-      return ok({ ok: true }, 201);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/reports(\/\d+)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/svids(\/\d+)?(\/value)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/ceids(\/\d+)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
     if (/^\/api\/v1\/sessions\/[^/]+\/ceid\/\d+$/.test(path)) {
       return ok({ ok: true, outcome: 'OK' });
+    }
+    /* 活动报警清单：后端回裸数组（按 ALID 升序），面板靠它打底 */
+    if (/^\/api\/v1\/sessions\/[^/]+\/alarms$/.test(path) && method === 'GET') {
+      return ok([{ alid: 1001, text: 'TEMP HIGH', category: 1, atMillis: Date.now() - 3_000 }]);
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/alarm\/\d+$/.test(path)) {
       return ok({ ok: true });
@@ -628,6 +618,10 @@ export async function mockApi(page: Page): Promise<MockState> {
     }
     if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/step$/.test(path)) {
       return ok({ ok: true, planId: 'beat' });
+    }
+    if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/enabled$/.test(path)) {
+      state.eventEnabled = url.searchParams.get('enabled') === 'true';
+      return ok({ ok: true });
     }
 
     return ok({});

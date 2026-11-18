@@ -1,6 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
 
-let process;
 /**
  * 真实后端 E2E：页面由 Java 进程同源托管，API 不做拦截。
  *

@@ -1,5 +1,6 @@
 package com.shimizukenta.secssim.runtime;
 
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import com.shimizukenta.secssim.app.log.Log;
@@ -14,15 +15,29 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  * 按设备回填。写库是辅助动作：runtime.db 掉了、磁盘满了都不该让正在处理的
  * HTTP 请求 500——异常只记日志。</p>
  *
- * <p>设备键统一用 config.db 的 ULID（v1 的 legacy stem 由调用方归一），
+ * <p>设备键统一用 config.db 的 ULID（会话 id / 配置名由调用方归一），
  * 与台账、{@code device_link} 的归属保持一致。</p>
  */
 final class RuntimePersister {
 
+    private static final Log.Facade LOG = Log.of(RuntimePersister.class);
+
+    /** 运行态写库累计失败次数：业务已生效但没落库，重启后可能丢。 */
+    private static final AtomicLong PERSIST_FAILURES = new AtomicLong();
+
     private final RuntimeStateRepository state;
 
-    /** 会话 id / v1 legacy stem → config.db ULID。 */
+    /** 会话 id / 配置名 → config.db ULID。 */
     private final Function<String, String> deviceKey;
+
+    /**
+     * 运行态写库累计失败次数（{@code /health} 用来判断"重启会不会丢数据"）。
+     *
+     * @return 自进程启动以来的失败次数
+     */
+    public static long persistFailures() {
+        return PERSIST_FAILURES.get();
+    }
 
     RuntimePersister(RuntimeStateRepository state, Function<String, String> deviceKey) {
         this.state = state;
@@ -37,12 +52,6 @@ final class RuntimePersister {
     /** 取消钉值（原本没钉住也照样删，幂等）。 */
     void unpin(String sessionId, long svid) {
         this.guard("取消钉值", () -> this.state.unpinSvid(this.key(sessionId), svid));
-    }
-
-    /** 计划启停 + 下次触发时刻（周期计划 = enabledAt + k×period 的下一次；§2.1）。 */
-    void planState(String sessionId, String planId, boolean enabled, java.lang.Long nextFireAt) {
-        this.guard("计划启用态",
-                () -> this.state.savePlanState(this.key(sessionId), planId, enabled, nextFireAt, ""));
     }
 
     /** 运行时计划正文覆盖（add / update / remove）。 */
@@ -97,7 +106,7 @@ final class RuntimePersister {
                     this.state.planOverrides(key),
                     this.state.catalogEdits(key));
         } catch (RuntimeException e) {
-            Log.error("读运行态编辑失败（重载失败时将无法回滚）: " + key + " " + e.getMessage(), e);
+            LOG.error("读运行态编辑失败（重载失败时将无法回滚）: {} {}", key, e.getMessage(), e);
             return null;
         }
     }
@@ -175,8 +184,9 @@ final class RuntimePersister {
         try {
             action.run();
         } catch (RuntimeException e) {
-            Log.error("写 " + what + " 到 runtime.db 失败（业务已生效，重启后可能丢失）: "
-                    + e.getMessage(), e);
+            PERSIST_FAILURES.incrementAndGet();
+            LOG.warn("写 {} 到 runtime.db 失败（业务已生效，重启后可能丢失）: {}",
+                    what, e.getMessage(), e);
         }
     }
 }

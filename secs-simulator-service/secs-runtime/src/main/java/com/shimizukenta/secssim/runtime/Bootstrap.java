@@ -18,7 +18,6 @@ import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.AuditSink;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
@@ -34,9 +33,7 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.PlanExecutor;
 import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
-import com.shimizukenta.secssim.runtime.store.ConfigProjector;
 import com.shimizukenta.secssim.app.session.SessionState;
-import com.shimizukenta.secssim.store.ConfigMigrator;
 import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.Db;
 import com.shimizukenta.secssim.store.HostRepository;
@@ -140,25 +137,21 @@ public final class Bootstrap {
         launcher.noticeBus(notices);
 
         /*
-         * 3.0 存储（ADR 0017）：打开双库、按需迁移、播种，然后建门面。
-         * config.db 是权威配置；work-dir 下的 JSON 在迁移后归档进 legacy/。
-         * 运行态编辑表随库建立，M2 起写入。
+         * 3.0 存储（ADR 0017）：打开双库、播种，然后建门面。
+         * config.db 是权威配置；运行态编辑表随库建立。
          */
         if (options.resetRuntime()) {
             deleteRuntimeDb(options.workDir());
         }
-        Db db = Db.open(options.workDir());
-        ConfigRepository configRepo = new ConfigRepository(db, new ConfigProjector());
+        Db db = Db.open(options.workDir(), options.allowSchemaReset());
+        for (Path backup : db.schemaBackups()) {
+            Log.of(Bootstrap.class).warn(
+                    "schema 版本不匹配，已备份旧库并重建：{}（旧库内容不再读取，需要时手工恢复）", backup);
+        }
+        ConfigRepository configRepo = new ConfigRepository(db);
         TemplateRepository templateRepo = new TemplateRepository(db);
         PlanExecutionRepository planExecutions = new PlanExecutionRepository(db);
-        ConfigMigrator migrator = new ConfigMigrator(db, configRepo, templateRepo);
 
-        if (options.migrateConfig() || migrator.needed(options.workDir())) {
-            ConfigMigrator.Report report = migrator.migrate(options.workDir(), builtinTemplateBodies());
-            Log.info("配置迁移完成: devices=" + report.devices() + " templates=" + report.templates()
-                    + (report.archived() ? "（原文件已归档到 legacy/）" : "")
-                    + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
-        }
         /*
          * 内置模板正文全部来自 classpath 的 seed/*.json。资源缺失或解析失败必须
          * 让启动直接失败：静默跳过留给用户的是一套"看着能开、其实没有模板"的空库。
@@ -192,8 +185,12 @@ public final class Bootstrap {
             if (!(runtime instanceof HsmsSessionRuntime hsms)) {
                 return;
             }
-            /* 台账归属用 config.db 的 ULID，不是 v1 的 legacy stem（设计 §2.5） */
-            ConfigRepository.DeviceView device = configRepo.findDevice(runtime.id()).orElse(null);
+            /* 台账归属用 config.db 的 ULID：会话 id 是 ses_ ULID，得先经配置来源
+               换算成设备（设计 §2.5）。演示会话没有来源，退回会话 id。 */
+            ConfigRepository.DeviceView device = launcher.sourceOf(runtime.id())
+                    .flatMap(configStore::deviceIdOf)
+                    .flatMap(configRepo::findDevice)
+                    .orElse(null);
             String deviceId = device == null ? runtime.id() : device.id();
             hsms.planExecutor(new PlanExecutor(deviceId,
                     planSink(deviceId, planExecutions, planFired)));
@@ -217,7 +214,7 @@ public final class Bootstrap {
         });
 
         if (options.exportConfig() != null) {
-            int exported = migrator.exportTo(options.exportConfig());
+            int exported = configRepo.exportTo(options.exportConfig());
             Log.info("已导出 " + exported + " 台设备到 " + options.exportConfig());
             System.out.println("EXPORT ok devices=" + exported + " dir=" + options.exportConfig().toAbsolutePath());
             planFired.close();
@@ -254,16 +251,27 @@ public final class Bootstrap {
             probe = SecsProbe.open(options.hsmsPort());
         }
 
-        StringBuilder extra = new StringBuilder();
-        extra.append(",\"vm\":\"").append(vmKind()).append('"')
-                .append(",\"utf8\":").append(utf8Ok)
-                .append(",\"sessions\":").append(sessions.list().size());
-        if (probe != null) {
-            extra.append(",\"hsmsPort\":").append(options.hsmsPort());
-        }
+        /*
+         * 健康附加字段必须每次请求重新算：sessions 是会变的，persistFailures 更是
+         * 只在出问题时才涨。原先这里拼成字符串传给 RuntimeContext，于是 /health
+         * 永远报启动那一刻的会话数。
+         */
+        /* probe 在分支里被赋值，lambda 里要用就得先取一份 final 快照 */
+        final SecsProbe probeForHealth = probe;
+        java.util.function.Supplier<String> extraHealth = () -> {
+            StringBuilder extra = new StringBuilder();
+            extra.append(",\"vm\":\"").append(vmKind()).append('"')
+                    .append(",\"utf8\":").append(utf8Ok)
+                    .append(",\"sessions\":").append(sessions.list().size())
+                    .append(",\"persistFailures\":").append(RuntimePersister.persistFailures());
+            if (probeForHealth != null) {
+                extra.append(",\"hsmsPort\":").append(options.hsmsPort());
+            }
+            return extra.toString();
+        };
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
+                extraHealth, stopped::countDown, sessions, launcher, configStore, templates,
                 paramTemplates, messageLog, auditLog, bus, notices, hostRepo, linkState,
                 planExecutions, configRepo);
 
@@ -321,6 +329,21 @@ public final class Bootstrap {
 
         /* 握手文件给部署脚本读：stdout 经常被 systemd/包装脚本吞掉 */
         writeReadyFile(options.workDir().resolve("ready.txt"), options, api.port());
+
+        /*
+         * 启动横幅：端口、两个库的路径、程序版本、日志落点、生效级别。
+         * 这七行专门用来回答"为什么连不上"——在此之前，启动期只打了报文/审计
+         * 日志的路径，恰好缺了排查最需要的三条（监听地址、库、版本）。
+         */
+        Log.banner(
+                BuildInfo.VERSION,
+                options.workDir(),
+                options.workDir().resolve("config.db"),
+                options.workDir().resolve("runtime.db"),
+                options.bindHost(),
+                api.port(),
+                options.workDir().resolve("logs").resolve("app.log"),
+                options.logLevel());
 
         System.out.println("READY mode=" + options.mode().id()
                 + " http=" + api.port()
@@ -512,7 +535,7 @@ public final class Bootstrap {
         }
     }
 
-    /** 内置模板 id → 正文（迁移播种与模板表播种共用）。 */
+    /** 内置模板 id → 正文（模板表播种用）。 */
     private static java.util.Map<String, String> builtinTemplateBodies() {
         java.util.Map<String, String> bodies = new java.util.LinkedHashMap<>();
         for (DeviceTemplates.Entry entry : DeviceTemplates.catalog()) {

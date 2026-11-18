@@ -70,7 +70,17 @@ export function CycleRuntimePanel({ backend, notifier, liveEvents }: PanelBasePr
           fetch: (windowMs) => (deviceId === '' ? Promise.resolve(null) : backend.previewSession(deviceId, windowMs)),
         }}
       />
-      <PlanExecutionTimeline deviceId={deviceId} liveEvents={liveEvents} notifier={notifier} planId="cycle" />
+      {/* 执行明细只在「事件执行」页出全量；这一页只留片内事件这一子集 */}
+      <PlanExecutionTimeline
+        deviceId={deviceId}
+        liveEvents={liveEvents}
+        notifier={notifier}
+        planId="cycle"
+        title="片内事件发送记录"
+        sectionId="cycle-executions"
+        emptyText="这片还没有片内事件发送记录。启动设备并在线后，周期按配置里的片内事件逐片发送。"
+        readOnly
+      />
     </div>
   );
 }

@@ -23,6 +23,19 @@
     grid-column: 2;
     margin-top: -0.15rem;
   }
+
+  /* 表格工具条：1280 下设备清单的「新建 + 批量」整组放不进第一行，
+     旧的 spacer(flex:1) 会和动作组一起掉到第二行，把按钮顶到中间悬空。
+     窄屏去掉 spacer，让动作组整块贴右换行、组内按钮仍可折行；主按钮始终在最右。 */
+  .table-toolbar .spacer {
+    display: none;
+  }
+
+  .table-toolbar .toolbar-tail {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
 }
 
 @media (max-width: 1180px) {

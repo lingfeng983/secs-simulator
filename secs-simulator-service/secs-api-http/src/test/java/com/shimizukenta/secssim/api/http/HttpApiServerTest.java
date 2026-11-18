@@ -44,7 +44,6 @@ class HttpApiServerTest {
     private final List<String> reloaded = new ArrayList<>();
     private final List<String> messageQueries = new ArrayList<>();
     private final List<String> sentSml = new ArrayList<>();
-    private final List<String> eventToggles = new ArrayList<>();
     private final List<String> auditEntries = new ArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
     private boolean messagesAvailable = true;
@@ -209,18 +208,6 @@ class HttpApiServerTest {
             }
 
             @Override
-            public EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-                if ("missing".equals(sessionId)) {
-                    return EventOutcome.UNKNOWN_SESSION;
-                }
-                if ("nope".equals(planId)) {
-                    return EventOutcome.UNKNOWN_PLAN;
-                }
-                HttpApiServerTest.this.eventToggles.add(sessionId + ":" + planId + ":" + enabled);
-                return EventOutcome.OK;
-            }
-
-            @Override
             public String sendSml(String sessionId, String sml) {
                 if ("missing".equals(sessionId)) {
                     return null;
@@ -326,8 +313,17 @@ class HttpApiServerTest {
     @Test
     void malformedCommandPathIs400() throws Exception {
         assertEquals(400, post("/api/v1/sessions/s1/ceid/not-a-number", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/other/2001", null).statusCode());
         assertEquals(400, post("/api/v1/sessions//ceid/2001", null).statusCode());
+    }
+
+    @Test
+    void unknownSubResourceIs404Not400() throws Exception {
+        /* 已删的 v1 实体端点（svids/reports/ceids/events）与任何未知子资源都按「端点不存在」
+           回 404；只有 ceid/alarm 参数写错才是 400。 */
+        assertEquals(404, post("/api/v1/sessions/s1/other/2001", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/svids", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/reports", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/ceids", null).statusCode());
     }
 
     @Test
@@ -651,18 +647,12 @@ class HttpApiServerTest {
     }
 
     @Test
-    void eventsListAndToggleMapUnknowns() throws Exception {
+    void eventsListMapsUnknowns() throws Exception {
         HttpResponse<String> list = get("/api/v1/sessions/s1/events", null);
         assertEquals(200, list.statusCode(), list.body());
         assertTrue(list.body().contains("\"id\":\"beat\""), list.body());
         assertTrue(list.body().contains("\"triggerType\":\"periodic\""), list.body());
         assertEquals(404, get("/api/v1/sessions/missing/events", null).statusCode());
-
-        assertEquals(200, post("/api/v1/sessions/s1/events/beat?enabled=false", null).statusCode());
-        assertEquals(List.of("s1:beat:false"), this.eventToggles);
-        assertEquals(404, post("/api/v1/sessions/missing/events/beat", null).statusCode());
-        assertEquals(404, post("/api/v1/sessions/s1/events/nope", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/events/beat?enabled=maybe", null).statusCode());
     }
 
     @Test
@@ -845,10 +835,10 @@ class HttpApiServerTest {
     void runtimeEditPutAndDeleteSubpathsReachTheCommandDispatcher() throws Exception {
         String body = "{\"id\":\"p\",\"ceid\":1,\"trigger\":{\"type\":\"periodic\",\"periodMs\":1000}}";
         /* PUT 更新计划/变量值:到达 context(桩回 404)而不是 405 */
-        assertEquals(404, putJson("/api/v1/sessions/s1/events/p", null, body).statusCode());
-        assertEquals(404, putJson("/api/v1/sessions/s1/svids/1001/value", null, "{\"value\":1}").statusCode());
+        assertEquals(404, putJson("/api/v2/devices/s1/runtime/plans/p", null, body).statusCode());
+        assertEquals(404, putJson("/api/v2/devices/s1/runtime/svids/1001/pin", null, "{\"value\":1}").statusCode());
         /* DELETE 删除计划:到达 context 而不是被当关会话 */
-        assertEquals(404, delete("/api/v1/sessions/s1/events/p", null).statusCode());
+        assertEquals(404, delete("/api/v2/devices/s1/runtime/plans/p", null).statusCode());
         /* DELETE 根路径仍是关会话(已有用例覆盖 404 未知会话) */
         assertEquals(404, delete("/api/v1/sessions/missing", null).statusCode());
     }

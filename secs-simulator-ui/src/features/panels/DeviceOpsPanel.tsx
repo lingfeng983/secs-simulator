@@ -26,7 +26,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   const [stateFilter, setStateFilter] = useState<DeviceStatus | ''>('');
   /** 区域筛选：空串看全部，其余只看该区域的设备。 */
   const [regionFilter, setRegionFilter] = useState('');
-  /** 新增设备弹框：链接信息 + 模板 + 区域都在这一个框里填。 */
+  /** 新增设备弹框：连接信息 + 模板 + 区域都在这一个框里填。 */
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createDraft, setCreateDraft] = useState<CreateDeviceDraft>({
@@ -244,7 +244,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   /**
    * 批量新建设备：按模板建（或复用）一份基础配置，再走 /sessions/bulk 逐台递增开多台。
    *
-   * <p>第 i 台的会话 id/端口/Device ID 是运行期覆盖，不写回配置文件——
+   * <p>第 i 台的端口/Device ID 是运行期覆盖，会话 id 由服务端生成，都不写回配置文件——
    * 一批设备共用一份配置本体（单元、变量、事件都一致）。基础配置名带模板 id，
    * 同「前缀+模板」的批次复用同一份，不同模板互不覆盖。</p>
    */
@@ -263,7 +263,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       return;
     }
     if (prefix === '' || /[/\\"\s]/.test(prefix)) {
-      setCreateError('会话 id 前缀不能为空，且不能含空白、斜杠或引号');
+      setCreateError('批次前缀不能为空，且不能含空白、斜杠或引号');
       return;
     }
     if (portBase < 1 || portBase + count - 1 > 65535) {
@@ -278,16 +278,8 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       setCreateError('请选择设备模板');
       return;
     }
-    /* 会话 id 冲突预检：这是批量重建最常见的坑，提前算比逐台失败友好 */
-    const takenIds = new Set(sessions.map((item) => item.id));
-    const conflicts = Array.from({ length: count }, (_, i) => `${prefix}${i + 1}`)
-      .filter((id) => takenIds.has(id));
-    if (conflicts.length > 0) {
-      setCreateError(
-        `会话 id 已存在：${conflicts.slice(0, 5).join('、')}${conflicts.length > 5 ? ` 等 ${conflicts.length} 个` : ''}；换个前缀，或先删除同名设备`,
-      );
-      return;
-    }
+    /* 会话 id 由服务端生成（ses_ ULID），批量重建不再有"同名 id"冲突；
+       真正要避的是基础配置名撞车，下面按模板 id 拼名即可 */
     /* 基础配置名带模板 id：同模板+同前缀的批次复用同一份，不同模板互不覆盖 */
     const stem = prefix.replace(/[^\w.-]+/g, '-').replace(/[._-]+$/, '');
     const baseName = `${stem === '' ? 'batch' : stem}-${draft.templateId}-base.json`;
@@ -325,7 +317,6 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       const result = await backend.bulkCreateSessions({
         config: baseName,
         count,
-        sessionIdPrefix: prefix,
         portBase,
         deviceIdBase,
         bindHost,
@@ -338,15 +329,14 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       const region = draft.newRegion.trim() === '' ? draft.region : draft.newRegion.trim();
       if (region !== '') {
         regions?.addRegion(region);
-        for (const id of result.created) {
-          regions?.setDeviceRegion(id, region);
-        }
+        /* 区域按配置名归属：一批设备共用一份基础配置，逐台 id 在这里没有意义 */
+        regions?.setDeviceRegion(baseName, region);
       }
       setCreateOpen(false);
       const failedNote = result.failed.length > 0 ? `，${result.failed.length} 台失败` : '';
       notifier.success(
         `已批量新建设备 ${result.created.length} 台${failedNote}`,
-        `会话 id ${prefix}1 起，配置 ${baseName}`,
+        `配置 ${baseName}`,
       );
     } finally {
       setBatchBusy(false);
@@ -354,7 +344,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
     }
   };
 
-  /** 按弹框里填的链接信息 + 模板建设备：配置文件名取设备名，其余写进 session 段；批量模式走批量路径。 */
+  /** 按弹框里填的连接信息 + 模板建设备：配置文件名取设备名，其余写进 session 段；批量模式走批量路径。 */
   const createFromTemplate = async (draft: CreateDeviceDraft) => {
     if (draft.batch) {
       await createBatchDevices(draft);
@@ -579,7 +569,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
               className="primary"
               onClick={openCreate}
               disabled={batchBusy}
-              title="新增设备：填写链接信息并选择设备模板"
+              title="新增设备：填写连接信息并选择设备模板"
             >
               新建设备
             </button>

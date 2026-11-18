@@ -31,9 +31,8 @@ export function ShortcutHelp({ open, onClose, hints }: { open: boolean; onClose:
               {hints.map((hint) => (
                 <tr key={hint.keys}>
                   <td className="shortcut-keys">
-                    {hint.keys.split('+').map((key, index) => (
-                      <kbd key={`${key}-${index}`}>{key}</kbd>
-                    ))}
+                    {/* 组合键是"一个键位串"：拆成多个 kbd 会让 1..9 / 0 断成三截 */}
+                    <kbd>{hint.keys}</kbd>
                   </td>
                   <td>{hint.description}</td>
                 </tr>

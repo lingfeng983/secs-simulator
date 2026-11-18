@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { ConfigEditShell, MissingEquipment } from './ConfigEditShell';
 import { nextId, SessionField } from '../editors/ConfigFormEditor';
+import { SourceEditorLegend } from '../editors/ConfigFormParts';
 import { ConfigItemModal } from '../editors/ConfigItemModal';
 import { SourceEditor } from '../editors/SourceEditor';
 import { SourcePreview } from '../editors/SourcePreview';
@@ -397,6 +398,7 @@ function SvidEditModal({ equipment, scope: initialScope, index, initial, library
                 <>
                   <SessionField
                     label="offset"
+                    compact
                     help={`本单元从 ${unitBase} 起，绝对 id = ${unitBase} + offset = ${unitBase + (numberField(item, 'offset') ?? 0)}`}
                   >
                     <NumberField value={numberField(item, 'offset')} integer onCommit={setNumber('offset')} />
@@ -426,20 +428,20 @@ function SvidEditModal({ equipment, scope: initialScope, index, initial, library
                       })}
                     />
                   </SessionField>
-                  <SessionField label="小数位" help="显示用的小数位数；留空 = 0">
+                  <SessionField label="小数位" compact help="显示用的小数位数，整数 0–6；留空 = 0">
                     <NumberField value={numberField(item, 'decimals')} integer onCommit={setNumber('decimals')} onClear={clear('decimals')} />
                   </SessionField>
                 </>
               )}
-              <SessionField label="min" help="取值下限；没配值定义时内置默认曲线在 min~max 内变化。留空 = 不限">
+              <SessionField label="min" compact help="取值下限；没配值定义时内置默认曲线在 min~max 内变化。留空 = 不限">
                 <NumberField value={numberField(item, 'min')} onCommit={setNumber('min')} onClear={clear('min')} />
               </SessionField>
-              <SessionField label="max" help="取值上限，不能小于 min。留空 = 不限">
+              <SessionField label="max" compact help="取值上限，不能小于 min。留空 = 不限">
                 <NumberField value={numberField(item, 'max')} onCommit={setNumber('max')} onClear={clear('max')} />
               </SessionField>
             </div>
 
-            <p className="sub-title">值定义</p>
+            <SourceEditorLegend />
             <SourceEditor def={item} mutate={mutate} library={library} onPreview={() => setPreviewing(true)} />
 
             {previewing && (

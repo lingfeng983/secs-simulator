@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { ConfigEditShell } from './ConfigEditShell';
 import { SessionField } from '../editors/ConfigFormEditor';
+import { SourceEditorLegend } from '../editors/ConfigFormParts';
 import { ConfigItemModal } from '../editors/ConfigItemModal';
 import { SourceEditor } from '../editors/SourceEditor';
 import { SourcePreview } from '../editors/SourcePreview';
@@ -244,7 +245,7 @@ function ContextEditModal({ creating, initial, others, onClose, onSubmit }: {
               </SessionField>
             </div>
 
-            <p className="sub-title">值定义</p>
+            <SourceEditorLegend text />
             <SourceEditor
               def={item}
               text={type === 'ASCII'}

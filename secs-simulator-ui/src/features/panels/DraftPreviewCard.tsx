@@ -13,7 +13,7 @@ import { PreviewCard, cyclePreviewWindows } from './PreviewCard';
  * <p>口径按页分开：工艺周期页只画片内事件（{@code cycleEvents}），
  * 事件计划页只画计划触发（{@code events}）。</p>
  */
-export function DraftPreviewCard({ backend, root, text, marks, title, hint, eventLabel }: {
+export function DraftPreviewCard({ backend, root, text, marks, title, hint, eventLabel, planIds }: {
   backend: PanelBaseProps['backend'];
   root: JsonObject;
   text: string;
@@ -22,6 +22,8 @@ export function DraftPreviewCard({ backend, root, text, marks, title, hint, even
   title: string;
   hint: string;
   eventLabel: string;
+  /** plans 专用：只画草稿里确实存在的计划标记（空数组 = 不画任何触发线）。 */
+  planIds?: readonly string[];
 }): JSX.Element {
   const params = useMemo(() => collectSvids(root), [root]);
 
@@ -44,10 +46,23 @@ export function DraftPreviewCard({ backend, root, text, marks, title, hint, even
       defaultWindowMs={cycleWindow.defaultWindowMs}
       emptyParamsText="这份配置还没有可展示的变量：先到「变量配置」页定义 SVID。"
       source={{
-        key: text,
-        fetch: async (windowMs) => (client === null
-          ? null
-          : client.previewConfigDraft(text, 0, windowMs, 120, true)),
+        key: `${text}|${(planIds ?? []).join(',')}`,
+        fetch: async (windowMs) => {
+          if (client === null) {
+            return null;
+          }
+          const data = await client.previewConfigDraft(text, 0, windowMs, 120, true);
+          if (data === null || planIds === undefined) {
+            return data;
+          }
+          /* 后端预览可能带回不属于这份草稿的标记（旧计划 / 周期事件）：
+             只保留草稿里确实存在的计划，空态就不画任何触发线。 */
+          const allowed = new Set(planIds);
+          return {
+            ...data,
+            events: (data.events ?? []).filter((event) => allowed.has(event.planId ?? '')),
+          };
+        },
       }}
     />
   );

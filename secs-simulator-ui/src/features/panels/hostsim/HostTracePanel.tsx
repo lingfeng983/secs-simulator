@@ -3,6 +3,8 @@ import { Panel } from '../../../shared/ui/Panel';
 import { DataTable, type Column } from '../../../shared/ui/DataTable';
 import { SmlResult } from '../../../shared/ui/SmlResult';
 import { Modal } from '../../../shared/ui/Modal';
+import { MultiSelect } from '../../../shared/ui/MultiSelect';
+import { EmptyState } from '../../../shared/ui/EmptyState';
 import { VariableChart } from '../../charts/VariableChart';
 import type { ApiClient, Catalog, CatalogSvid, HostV2, SentMessageResult } from '../../../api';
 import {
@@ -226,39 +228,18 @@ function TracePlanTable({
   );
 }
 
-/** 本机设备目录里的 SVID 下拉多选；选择结果仍写回逗号分隔的 SVID 文本。 */
-function SvidMultiSelect({ choices, value, onChange }: {
-  choices: readonly CatalogSvid[];
-  value: string;
-  onChange: (next: string) => void;
-}): JSX.Element {
-  const picked = new Set(parseIdList(value));
-  return (
-    <select
-      multiple
-      size={Math.min(10, Math.max(4, choices.length))}
-      style={{ minWidth: '18rem' }}
-      value={choices.filter((item) => picked.has(item.svid)).map((item) => String(item.svid))}
-      onChange={(event) => {
-        const next = Array.from(event.target.selectedOptions).map((option) => Number(option.value));
-        onChange(next.join(', '));
-      }}
-    >
-      {choices.map((item) => (
-        <option key={item.svid} value={item.svid}>{item.svid} · {item.slot}</option>
-      ))}
-    </select>
-  );
-}
-
 /** Trace 方案参数字段（新增/编辑弹窗共用）。 */
-function TracePlanFields({ form, update, svidChoices, catalogError }: {
+function TracePlanFields({ form, update, svidChoices, catalogError, manual, onToggleManual }: {
   form: TraceDraft;
   update: (patch: Partial<TraceDraft>) => void;
   /** 本机设备目录可用时的 SVID 选项；null = 回退手动输入。 */
   svidChoices: readonly CatalogSvid[] | null;
   catalogError: string;
+  /** 目录可用时仍可切到「高级：手输」；目录不可用时强制手输。 */
+  manual: boolean;
+  onToggleManual: (next: boolean) => void;
 }): JSX.Element {
+  const useCatalog = svidChoices !== null && !manual;
   return (
     <>
       <div className="form-row">
@@ -275,23 +256,40 @@ function TracePlanFields({ form, update, svidChoices, catalogError }: {
           <input type="number" min={1} value={form.repgsz} onChange={(event) => update({ repgsz: event.target.value })} />
         </label>
       </div>
-      {svidChoices === null
+      {useCatalog
         ? (
-          <label className="field field-wide">
-            采集变量(逗号/空格分隔)
-            <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />
+          <label className="field-block">
+            采集变量（从设备目录多选）
+            <MultiSelect<number>
+              label="SVID"
+              ariaLabel="采集变量 SVID 多选"
+              options={svidChoices.map((item) => ({
+                value: item.svid,
+                name: item.slot || item.owner,
+                meta: String(item.svid),
+              }))}
+              value={parseIdList(form.svids)}
+              onChange={(next) => update({ svids: next.join(', ') })}
+              emptyText="设备目录里还没有 SVID"
+            />
           </label>
         )
         : (
-          <label className="field-block">
-            采集变量（可多选，来自本机设备目录）
-            <SvidMultiSelect
-              choices={svidChoices}
-              value={form.svids}
-              onChange={(next) => update({ svids: next })}
-            />
+          <label className="field field-wide">
+            采集变量(SVID，逗号/空格分隔)
+            <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />
           </label>
         )}
+      {svidChoices !== null && (
+        <label className="check-inline">
+          <input
+            type="checkbox"
+            checked={manual}
+            onChange={(event) => onToggleManual(event.target.checked)}
+          />
+          高级：手动输入 SVID
+        </label>
+      )}
       {svidChoices === null && catalogError !== '' && (
         <p className="inline-note danger">{catalogError}</p>
       )}
@@ -326,6 +324,8 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
   const [progress, setProgress] = useState('');
   const [batch, setBatch] = useState<BatchSummary | null>(null);
   const [lookup, setLookup] = useState<LocalCatalog | null>(null);
+  /** 目录可用时是否走「高级：手输」；默认目录多选，目录不可用则强制手输。 */
+  const [manualSvid, setManualSvid] = useState(false);
   /**
    * 用户亲手点过的启停（TRID → 启动时刻 / 停止时刻）。
    *
@@ -365,6 +365,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
 
   const openCreate = () => {
     setForm({ trid: '1', dsper: '1000', totsmp: '100', repgsz: '1', svids: '1001, 1003', name: '' });
+    setManualSvid(false);
     setEditingId(null);
     setModalOpen(true);
     loadCatalog();
@@ -375,6 +376,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
       trid: String(plan.trid), dsper: String(plan.dsper), totsmp: String(plan.totsmp),
       repgsz: String(plan.repgsz), svids: plan.svids, name: plan.name,
     });
+    setManualSvid(false);
     setEditingId(plan.id);
     setModalOpen(true);
     loadCatalog();
@@ -587,14 +589,35 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
     </span>
   );
 
+  /* 运行页没方案时只留一张空态卡：表格空行 + 曲线空行 + 提示行合成一句 */
+  const runtimeEmpty = !readOnly && plans.length === 0;
+
   return (
     <div className="panel-stack">
+      {error !== '' && <p className="inline-note danger">{error}</p>}
+      {runtimeEmpty ? (
+        <Panel id="panel-host-trace" title="Trace 采集（S2F23 → S6F1）" headless>
+          <EmptyState
+            text="还没有 Trace 方案"
+            hint="到配置区新增方案后，回到这里一键下发 S2F23、查看 S6F1 参数曲线。"
+            action={
+              <button
+                type="button"
+                className="primary"
+                onClick={() => goTo?.(`host-page:${hostId}:config:trace`)}
+              >
+                去配置区新增
+              </button>
+            }
+          />
+        </Panel>
+      ) : (
+        <>
       <Panel
         id="panel-host-trace"
         title={readOnly ? 'Trace 设置（S2F23 方案库）' : 'Trace 采集（S2F23 → S6F1）'}
         headless
       >
-        {error !== '' && <p className="inline-note danger">{error}</p>}
         {/* 配置区只管方案库：保存不下发，开始采样在运行区——说清楚，省得"保存了怎么没数据" */}
         {readOnly && (
           <p className="hint">
@@ -664,7 +687,6 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
 
       {!readOnly && (
         <Panel id="panel-host-trace-charts" title="S6F1 参数趋势" headless>
-          {plans.length === 0 && <p className="hint">还没有 Trace 方案；到配置区新增后这里按方案看趋势。</p>}
           {plans.map((plan) => {
             const open = viewingTrid === plan.trid;
             const group = groups.find((item) => item.trid === plan.trid);
@@ -706,6 +728,8 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
           })}
         </Panel>
       )}
+        </>
+      )}
 
       <Modal
         open={modalOpen}
@@ -733,8 +757,13 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
           update={updateForm}
           svidChoices={svidChoices}
           catalogError={lookup?.error ?? ''}
+          manual={manualSvid}
+          onToggleManual={setManualSvid}
         />
-        <p className="hint">DSPER 是 hhmmss 六位数字（整秒）；TOTSMP=0 表示提前终止该 TRID。</p>
+        <p className="hint">
+          采样周期按毫秒填写；下发 S2F23 时转成 DSPER 的 hhmmss 六位整秒格式（不足 1 秒按 1 秒）。
+          总样本数填 0 = 不限；停止时该 TRID 下发 TOTSMP=0 提前终止。
+        </p>
       </Modal>
     </div>
   );

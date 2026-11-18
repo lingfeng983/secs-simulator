@@ -54,7 +54,7 @@
   background: var(--surface-2);
   box-shadow: var(--shadow-2);
   color: var(--muted);
-  font-size: calc(11.8px * var(--font-scale));
+  font-size: var(--fs-body);
   line-height: 1.6;
   white-space: pre-line;
   opacity: 0;
@@ -83,7 +83,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.96rem;
+  font-size: var(--fs-section);
   font-weight: 650;
   letter-spacing: -0.008em;
 }
@@ -98,13 +98,13 @@
   border: 1px solid var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent);
-  font: 600 calc(10.5px * var(--font-scale))/1 var(--font-mono);
+  font: 600 var(--fs-aux)/1 var(--font-mono);
 }
 
 .panel-desc {
   margin-top: 0.22rem;
   color: var(--muted);
-  font-size: calc(11.8px * var(--font-scale));
+  font-size: var(--fs-body);
   line-height: 1.6;
   max-width: 90ch;
 }
@@ -134,7 +134,7 @@
   min-height: 30px;
   padding: 0 11px;
   border-radius: 8px;
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   font-weight: 560;
 }
 
@@ -198,7 +198,7 @@
 
 .panel-foot-status {
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 /* 工具条里的下拉/输入与按钮同高，避免一行里三种高度 */
@@ -207,13 +207,13 @@
   height: 30px;
   min-height: 30px;
   border-radius: 8px;
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 .panel-actions label.field {
   gap: 6px;
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 /* 编辑器上方的"快速填入"：预设是填内容，不是面板动作 */
@@ -226,7 +226,7 @@
 
 .editor-tools-label {
   color: var(--muted);
-  font-size: calc(11px * var(--font-scale));
+  font-size: var(--fs-aux);
   letter-spacing: 0.02em;
 }
 
@@ -234,8 +234,56 @@
   min-height: 26px;
   height: 26px;
   padding: 0 9px;
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
+
+/* 编辑器正下方的发送操作行：按钮 + 一句提示，结果紧跟其后 */
+.send-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.8rem;
+}
+
+/* ===== 空状态：图标 + 一句原因 + 一个 CTA ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty-state .empty-icon {
+  display: inline-flex;
+  color: var(--faint);
+  opacity: 0.75;
+}
+
+.empty-text {
+  color: var(--fg);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+}
+
+.empty-hint {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  max-width: 46rem;
+  line-height: 1.6;
+}
+
+.empty-action {
+  margin-top: 0.7rem;
+}
+
+/* 停机 / 未连接的灰色由状态映射函数直接使用 tone-muted（见 deviceStatus.ts
+   与 useHostsV2.ts），红色只留给故障 / 报警 / 危险操作。 */
 
 .panel-stats {
   display: grid;
@@ -267,7 +315,7 @@
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 /* 顶上已有操作行时，内容与它之间不必再留一整块面板内边距 */
@@ -290,7 +338,7 @@
   background: var(--surface-2);
   border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 .panel-footnote span {
@@ -306,7 +354,7 @@
 /* 面板内的统计条:一行等宽小格,像仪表刻度 */
 .stat-label {
   color: var(--muted);
-  font-size: calc(10.5px * var(--font-scale));
+  font-size: var(--fs-aux);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -314,7 +362,7 @@
 
 .stat-value {
   color: var(--ink);
-  font: 600 1.05rem/1.3 var(--font-mono);
+  font: 600 var(--fs-section)/1.3 var(--font-mono);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -322,7 +370,7 @@
 
 .stat-hint {
   color: var(--faint);
-  font-size: calc(11px * var(--font-scale));
+  font-size: var(--fs-aux);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,7 +434,7 @@
 .table-toolbar .table-count {
   padding: 0 0.3rem;
   color: var(--faint);
-  font: calc(11.5px * var(--font-scale))/1.4 var(--font-mono);
+  font: var(--fs-body)/1.4 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -394,7 +442,7 @@
 .table-toolbar .table-selection {
   padding: 0 0.3rem;
   color: var(--accent);
-  font: calc(11.5px * var(--font-scale))/1.4 var(--font-mono);
+  font: var(--fs-body)/1.4 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -411,7 +459,7 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: calc(12.5px * var(--font-scale));
+  font-size: var(--fs-body);
   /* 表头与单元格一律左对齐；数字仍用等宽数字，竖着比列时不会左右跳 */
   font-variant-numeric: tabular-nums;
 }
@@ -436,7 +484,7 @@
   /* 表头带一层极淡的主色：换主色时整片表格会跟着偏色，不再是死灰 */
   background: var(--accent-wash);
   color: var(--muted);
-  font-size: calc(10.5px * var(--font-scale));
+  font-size: var(--fs-aux);
   font-weight: 650;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -486,10 +534,16 @@
 
 .sort-mark {
   margin-left: 0.15rem;
-  font-size: calc(8px * var(--font-scale));
-  opacity: 0.55;
+  font-size: var(--fs-aux);
+  /* 整表每列常显 ⇅ 太吵：默认藏起来，hover / 键盘聚焦才露出。
+     已经排序的那一列（▲/▼）始终显示，让用户知道当前按哪列排。 */
+  opacity: 0;
+  transition: opacity var(--fast);
 }
 
+.data-table th.sortable:hover .sort-mark,
+.data-table th.sortable:focus-visible .sort-mark,
+.data-table th.sortable:focus-within .sort-mark,
 .data-table th.sorted .sort-mark {
   opacity: 1;
 }
@@ -515,7 +569,7 @@
   flex-wrap: wrap;
   gap: 0.4rem;
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 .table-pager span {
@@ -524,7 +578,7 @@
 
 .table-caption {
   color: var(--muted);
-  font-size: calc(11.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 /* 引用下拉多选：报告字段 / 事件引用报告的勾选区。
@@ -574,7 +628,7 @@
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
-  font: 600 calc(10.5px * var(--font-scale))/1.6 var(--font-mono);
+  font: 600 var(--fs-aux)/1.6 var(--font-mono);
   text-align: center;
 }
 
@@ -613,7 +667,7 @@
   padding: 0.28rem 0.4rem;
   border-radius: var(--radius-sm);
   color: var(--fg);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -642,7 +696,7 @@
   padding-left: 0.8rem;
   color: var(--faint);
   font-family: var(--font-mono);
-  font-size: calc(10.5px * var(--font-scale));
+  font-size: var(--fs-aux);
 }
 
 .ref-dropdown-item.is-missing .mono {

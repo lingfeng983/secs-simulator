@@ -1,6 +1,10 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
-import { deviceStatus } from '../../shared/lib/deviceStatus';
+import type { BackendController } from '../../state/useBackend';
+import { deviceStatus, DEVICE_STATUS_LABEL } from '../../shared/lib/deviceStatus';
+import { diffLines, foldUnchanged } from '../../shared/lib/textDiff';
+import { isJsonObject, numberField, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
+import { useDraftSnapshot } from '../../state/configDraftStore';
 import { EventsPanel } from '../panels/EventsPanel';
 import { CycleRuntimePanel } from '../panels/CycleRuntimePanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
@@ -301,7 +305,114 @@ export function DevicePage({
   );
 }
 
-/** 配置区·概览:与其它配置子页一样用 Panel 外壳，只放这台设备的定义摘要。 */
+/** 一份配置里与会话无关的静态事实（连接 / 结构 / 周期）。 */
+interface ConfigFacts {
+  mode: string;
+  listen: string;
+  deviceId: string;
+  units: number;
+  svids: number;
+  ceids: number;
+  reports: number;
+  cycle: string;
+  cycleConfigured: boolean;
+  plans: number;
+}
+
+/** 逐单元累计某个数组字段的长度（svids / ceids / reports 各有一份）。 */
+function countPerUnit(units: readonly JsonObject[], key: string): number {
+  return units.reduce((sum, unit) => {
+    const list = unit[key];
+    return sum + (Array.isArray(list) ? list.length : 0);
+  }, 0);
+}
+
+function summarizeConfig(root: JsonObject): ConfigFacts {
+  const session = isJsonObject(root.session) ? root.session : null;
+  const equipment = isJsonObject(root.equipment) ? root.equipment : null;
+  const units = Array.isArray(equipment?.units) ? equipment.units.filter(isJsonObject) : [];
+  const globalSvids = Array.isArray(equipment?.globalSvids) ? equipment.globalSvids.length : 0;
+  const cycle = isJsonObject(root.cycle) ? root.cycle : null;
+  const durationMs = cycle === null ? 0 : (numberField(cycle, 'durationMs') ?? 0);
+  const cycleConfigured = cycle !== null && durationMs > 0;
+  const cycleEvents = cycle !== null && Array.isArray(cycle.events) ? cycle.events.length : 0;
+  const events = isJsonObject(root.events) ? root.events : null;
+  const plans = events !== null && Array.isArray(events.plans) ? events.plans.length : 0;
+  const passive = session === null ? undefined : session.passive;
+  const host = typeof session?.bindHost === 'string' && session.bindHost !== '' ? session.bindHost : '—';
+  const port = numberField(session ?? {}, 'port') ?? 0;
+  const deviceId = numberField(session ?? {}, 'deviceId') ?? 0;
+  return {
+    mode: passive === undefined ? '—' : (passive === true ? '被动' : '主动'),
+    listen: `${host}:${port > 0 ? port : '—'}`,
+    deviceId: deviceId > 0 ? String(deviceId) : '—',
+    units: units.length,
+    svids: countPerUnit(units, 'svids') + globalSvids,
+    ceids: countPerUnit(units, 'ceids'),
+    reports: countPerUnit(units, 'reports'),
+    cycle: cycleConfigured
+      ? `片长 ${(durationMs / 1000).toFixed(1)} s · ${numberField(cycle, 'count') ?? 0} 片 · ${cycleEvents} 条片内事件`
+      : '未配置',
+    cycleConfigured,
+    plans,
+  };
+}
+
+/** 读配置原文算静态事实；读不到就返回 null（面板显示「—」，不猜）。 */
+function useConfigFacts(backend: BackendController, configName: string): ConfigFacts | null {
+  const [facts, setFacts] = useState<ConfigFacts | null>(null);
+  /* backend 每两秒换一个对象；只把读盘函数放进 ref，避免每次轮询都重读文件 */
+  const readRef = useRef(backend.readConfig);
+  readRef.current = backend.readConfig;
+  useEffect(() => {
+    if (configName === '' || typeof readRef.current !== 'function') {
+      setFacts(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const snapshot = await readRef.current(configName);
+        if (cancelled || snapshot === null) {
+          return;
+        }
+        const parsed = parseConfigDocument(snapshot.text);
+        setFacts(parsed.ok ? summarizeConfig(parsed.config.root) : null);
+      } catch {
+        if (!cancelled) {
+          setFacts(null);
+        }
+      }
+    };
+    void load();
+    /* 配置区保存后这里要跟上，和周期运行卡同一节奏 */
+    const timer = window.setInterval(() => void load(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [configName]);
+  return facts;
+}
+
+function agoText(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 5) {
+    return '刚刚';
+  }
+  if (seconds < 60) {
+    return `${seconds} 秒前`;
+  }
+  if (seconds < 3_600) {
+    return `${Math.floor(seconds / 60)} 分钟前`;
+  }
+  if (seconds < 86_400) {
+    return `${Math.floor(seconds / 3_600)} 小时前`;
+  }
+  return new Date(at).toLocaleString();
+}
+
+/** 配置区·概览：四张摘要卡（静态事实读配置）+ 身份信息表（运行时另标注）。 */
 function DeviceOverviewPanel({
   sessionId,
   configName,
@@ -309,27 +420,100 @@ function DeviceOverviewPanel({
 }: PanelBaseProps & { sessionId: string; configName: string }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
   const config = backend.configList.find((entry) => entry.name === configName);
+  const facts = useConfigFacts(backend, configName);
   /* 未启动的库内设备没有会话行：设备名退回配置文件名（去 .json） */
   const deviceLabel = summary?.device ?? configName.replace(/\.json$/i, '');
+  const runtimeStatus = deviceStatus(summary ?? { state: 'CLOSED' });
+  /* 最近事件 / 报警是运行时数据：停止态拿不到就明写「—」，不拿配置冒充 */
+  const lastEventAt = backend.overview.find((row) => row.id === sessionId)?.lastEventAt ?? 0;
+  const lastEvent = lastEventAt > 0 ? agoText(lastEventAt) : '—';
+  const activeAlarms = summary?.counters.activeAlarms ?? 0;
+  const alarmsSent = summary?.counters.alarmsSent ?? 0;
   return (
     <Panel id="panel-overview" title="概览" headless>
+      <div className="overview-grid">
+        <div className="overview-card">
+          <h3>连接 <span className="badge tone-muted">配置</span></h3>
+          <span className="overview-value">{facts === null ? '—' : `${facts.mode} ${facts.listen}`}</span>
+          <ul>
+            <li>模式：{facts?.mode ?? '—'}（被动 = 等主机连入）</li>
+            <li>监听：{facts?.listen ?? '—'}</li>
+            <li>Device ID：{facts?.deviceId ?? '—'}</li>
+            <li><b>运行时：</b>{DEVICE_STATUS_LABEL[runtimeStatus]}（来自会话{summary === undefined ? '，当前未启动' : ''}）</li>
+          </ul>
+        </div>
+        <div className="overview-card">
+          <h3>结构 <span className="badge tone-muted">配置</span></h3>
+          <span className="overview-value">{facts === null ? '—' : `${facts.units} 单元`}</span>
+          <ul>
+            <li>{facts?.svids ?? '—'} SVID · {facts?.ceids ?? '—'} CEID · {facts?.reports ?? '—'} RPT</li>
+            <li>取自配置的 equipment 段：设备没启动也是这个数</li>
+          </ul>
+        </div>
+        <div className="overview-card">
+          <h3>周期 <span className="badge tone-muted">配置</span></h3>
+          <span className="overview-value" style={{ color: facts?.cycleConfigured === true ? 'var(--ok)' : undefined }}>
+            {facts === null ? '—' : (facts.cycleConfigured ? '已配置' : '未配置')}
+          </span>
+          <ul>
+            <li>{facts?.cycle ?? '—'}</li>
+            <li>事件计划：{facts?.plans ?? '—'} 条（草稿）</li>
+          </ul>
+        </div>
+        <div className="overview-card">
+          <h3>最近活动 <span className="badge tone-warn">运行时</span></h3>
+          <span className="overview-value">
+            {summary === undefined ? '—' : (activeAlarms > 0 ? `${activeAlarms} 条活动报警` : lastEvent)}
+          </span>
+          <ul>
+            <li>最近事件：{lastEvent}（工作台聚合）</li>
+            <li>报警：活动 {activeAlarms} · 已发 {alarmsSent}</li>
+            <li>设备停止后没有运行时数据，显示「—」是正常的</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 className="sub-title">身份信息</h3>
       <table className="effects-table">
         <tbody>
           <tr><th>会话 id</th><td className="mono">{summary?.id ?? '—（未启动）'}</td></tr>
           <tr><th>设备名</th><td>{deviceLabel}</td></tr>
           <tr><th>配置文件</th><td className="mono">{configName || '—'}</td></tr>
           <tr><th>模板</th><td>{config?.template ?? '—'}</td></tr>
-          <tr><th>单元数</th><td>{summary?.units ?? '—'}</td></tr>
           <tr><th>大小 / 修改时间</th><td className="mono">
             {config ? `${config.sizeBytes} B` : '—'}{config ? ` · ${new Date(config.modifiedMs).toLocaleString()}` : ''}
           </td></tr>
+          <tr>
+            <th>自动连接</th>
+            <td>
+              <span className="badge tone-muted">后端未提供</span>
+              {' '}设备侧后端没有自动连接开关；连接参数在「连接」页修改，保存后需重启设备。
+            </td>
+          </tr>
         </tbody>
       </table>
+      <p className="hint">
+        连接 / 结构 / 周期三张卡读的是配置原文与配置目录，与设备是否启动无关；标「运行时」的卡才读当前会话。
+      </p>
     </Panel>
   );
 }
 
-/** 配置区·版本历史:config_revision 快照(v2 端点)。 */
+interface ConfigRevision {
+  revision: number;
+  sha256: string;
+  createdAt: number;
+  createdBy: string;
+  note: string;
+}
+
+/**
+ * 配置区·版本历史：元数据新→旧，点版本展开变更摘要，可对比当前草稿。
+ *
+ * <p>后端只返回 revision / sha256 / 时间 / 操作者 / 备注，<b>不返回历史原文、
+ * 也没有回滚端点</b>。所以这里不假装有逐版本 diff 或一键回滚：相邻版本用校验值
+ * 判断是否逐字节一致，真正能逐行比对的是「草稿 vs 当前已保存版本」。</p>
+ */
 function DeviceRevisionsPanel({
   sessionId,
   configName,
@@ -338,10 +522,11 @@ function DeviceRevisionsPanel({
 }: PanelBaseProps & { sessionId: string; configName?: string }): JSX.Element {
   const summary = backend.sessions.find((session) => session.id === sessionId);
   const name = summary?.config ?? configName ?? '';
-  const [revisions, setRevisions] = useState<ReadonlyArray<{
-    revision: number; sha256: string; createdAt: number; createdBy: string; note: string;
-  }>>([]);
+  const [revisions, setRevisions] = useState<ConfigRevision[]>([]);
   const [error, setError] = useState('');
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [showDraftDiff, setShowDraftDiff] = useState(false);
+  const draft = useDraftSnapshot(name);
 
   useEffect(() => {
     if (name === '' || backend.client === null) {
@@ -366,12 +551,57 @@ function DeviceRevisionsPanel({
     };
   }, [name, backend.client, notifier]);
 
+  /* 草稿 vs 磁盘基线：唯一拿得到双方原文的逐行 diff（草稿编译不过时为空）。 */
+  const draftDiff = useMemo(() => {
+    if (draft.status !== 'ready' || draft.text === draft.baselineText) {
+      return [];
+    }
+    return foldUnchanged(diffLines(draft.baselineText, draft.text), 2);
+  }, [draft.status, draft.text, draft.baselineText]);
+  const draftChanged = draft.status === 'ready' && draft.text !== draft.baselineText;
+
   return (
-    <section className="panel-section">
+    <section className="panel-section" id="panel-revisions">
       <div className="section-head">
         <h2>配置版本历史</h2>
+        <div className="preview-controls">
+          <button
+            type="button"
+            disabled={draft.status !== 'ready'}
+            onClick={() => setShowDraftDiff((previous) => !previous)}
+            title="逐行比较当前草稿与磁盘上已保存的版本（含其它配置页的未保存改动）"
+          >
+            {showDraftDiff ? '收起草稿对比' : '对比当前草稿'}
+          </button>
+        </div>
       </div>
       {error !== '' && <p className="inline-note danger">{error}</p>}
+      {showDraftDiff && (
+        <div className="inline-note">
+          <p className="hint">草稿（正在编辑）vs 当前已保存版本（磁盘基线）：标 + 是新增、标 − 是删掉。</p>
+          {draft.status !== 'ready' ? (
+            <p className="hint">草稿尚未载入；到任一配置页打开后再看。</p>
+          ) : !draftChanged ? (
+            <p className="hint">草稿与已保存版本一致，没有差异。</p>
+          ) : (
+            <div className="mono" style={{ maxHeight: 240, overflowY: 'auto' }}>
+              {draftDiff.map((line, index) => (
+                <div
+                  key={index}
+                  style={{
+                    color: line.op === 'added' ? 'var(--ok)'
+                      : line.op === 'removed' ? 'var(--danger)' : undefined,
+                  }}
+                >
+                  {line.op === 'skip'
+                    ? `··· ${line.count} 行未改动`
+                    : `${line.op === 'added' ? '+' : line.op === 'removed' ? '-' : ' '} ${line.text}`}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {revisions.length === 0 && error === '' ? (
         <p className="hint">还没有版本记录;在「配置原文」保存一次就会留一个版本(每设备保留最近 200 版)。</p>
       ) : (
@@ -383,18 +613,55 @@ function DeviceRevisionsPanel({
             </tr>
           </thead>
           <tbody>
-            {revisions.map((revision) => (
-              <tr key={revision.revision}>
-                <td className="mono">v{revision.revision}</td>
-                <td className="mono">{new Date(revision.createdAt).toLocaleString()}</td>
-                <td>{revision.createdBy}</td>
-                <td>{revision.note || '—'}</td>
-                <td className="mono hint-inline">{revision.sha256.slice(0, 12)}…</td>
-              </tr>
-            ))}
+            {revisions.map((revision, index) => {
+              const older = revisions[index + 1];
+              return (
+                <Fragment key={revision.revision}>
+                  <tr>
+                    <td className="mono">
+                      <button
+                        type="button"
+                        className="link"
+                        aria-expanded={expanded === revision.revision}
+                        onClick={() => setExpanded(expanded === revision.revision ? null : revision.revision)}
+                        title="展开变更摘要与可比对的信息"
+                      >
+                        v{revision.revision}
+                      </button>
+                    </td>
+                    <td className="mono">{new Date(revision.createdAt).toLocaleString()}</td>
+                    <td>{revision.createdBy}</td>
+                    <td>{revision.note || '—'}</td>
+                    <td className="mono hint-inline">{revision.sha256.slice(0, 12)}…</td>
+                  </tr>
+                  {expanded === revision.revision && (
+                    <tr>
+                      <td colSpan={5}>
+                        <div className="inline-note">
+                          <p><b>变更摘要：</b>{revision.note || '（这一版没有填备注）'}</p>
+                          <p>
+                            <b>相邻版本对比：</b>
+                            {older === undefined
+                              ? '最早版本，没有更早记录可比。'
+                              : older.sha256 === revision.sha256
+                                ? `与 v${older.revision} 校验值相同：内容逐字节一致（可能只改了备注）。`
+                                : `与 v${older.revision} 校验值不同：内容有变化。后端只返回版本元数据，不返回历史原文，因此无法逐行 diff。`}
+                          </p>
+                          <p>
+                            <b>回滚限制：</b>后端没有提供版本回滚或历史原文端点。要恢复旧内容，
+                            需从部署侧导出该版本原文，在「配置原文」页粘贴后保存。
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}
+      <p className="hint">版本历史来自后端 config_revision 快照（新→旧）；点版本号看变更摘要，用「对比当前草稿」看逐行差异。</p>
     </section>
   );
 }

@@ -430,19 +430,32 @@ abstract class HttpSupport {
         return Integer.valueOf(value.getAsInt());
     }
 
-    /** 从路径片段里取整数；非法返回 {@code -1}。 */
-    protected static int pathInt(String raw) {
-        try {
-            return Integer.parseInt(raw);
-        } catch (NumberFormatException e) {
-            return -1;
-        }
+    /* ===== 响应 ===== */
+
+    /**
+     * 最近一次响应的状态码，供访问日志读取。
+     *
+     * <p>{@link HttpExchange} 不暴露已发送的状态码，而访问日志又必须记它——
+     * 没有状态码的访问日志只能证明"有人来过"，不能证明"他拿到了什么"。
+     * 这里在 {@link #respond} 里记一份，同一个请求线程上读回来即可。
+     * 慢请求虽然换了线程执行，但写入与读取都在那个线程内，所以照样成立。</p>
+     */
+    private static final ThreadLocal<Integer> LAST_STATUS = new ThreadLocal<>();
+
+    /** 当前线程最近一次响应的状态码；尚未响应时返回 {@code 0}。 */
+    protected static int lastStatus() {
+        Integer value = LAST_STATUS.get();
+        return value == null ? 0 : value;
     }
 
-    /* ===== 响应 ===== */
+    /** 清掉状态记录，避免线程池复用时串到下一个请求上。 */
+    protected static void clearLastStatus() {
+        LAST_STATUS.remove();
+    }
 
     /** 回 JSON 正文。 */
     protected static void respond(HttpExchange ex, int status, String body) throws IOException {
+        LAST_STATUS.set(status);
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         ex.sendResponseHeaders(status, bytes.length);
@@ -451,58 +464,6 @@ abstract class HttpSupport {
         }
     }
 
-    /**
-     * 只回状态码，但正文仍是合法 JSON。
-     *
-     * <p>以前这里发 0 字节正文却带 {@code application/json} 头，客户端
-     * {@code JSON.parse} 必抛。现在成功类回 {@code {"ok":true}}；
-     * 204 按规范不能有正文，客户端需要自己判状态码。</p>
-     *
-     * @param ex     交换
-     * @param status 状态码
-     * @throws IOException 写失败
-     */
-    protected static void respondStatus(HttpExchange ex, int status) throws IOException {
-        respondStatus(ex, status, null);
-    }
-
-    /**
-     * 只回状态码，并显式指定错误码。
-     *
-     * @param ex        交换
-     * @param status    状态码
-     * @param errorCode 错误码；只在错误类状态（≥400）使用，{@code null} 按状态码推导
-     * @throws IOException 写失败
-     */
-    protected static void respondStatus(HttpExchange ex, int status, String errorCode) throws IOException {
-        if (status == 204) {
-            /* 204 不允许正文：不能为了统一包络硬塞一个 {} */
-            ex.sendResponseHeaders(204, -1);
-            ex.close();
-            return;
-        }
-        if (status >= 200 && status < 300) {
-            respond(ex, status, "{\"ok\":true}");
-            return;
-        }
-        String code = errorCode != null ? errorCode : statusErrorCode(status);
-        respond(ex, status, "{\"ok\":false,\"error\":\"" + json(code) + "\"}");
-    }
-
-    /** 状态码对应的默认错误码。 */
-    private static String statusErrorCode(int status) {
-        return switch (status) {
-            case 400 -> "bad-request";
-            case 401 -> "unauthorized";
-            case 403 -> "forbidden";
-            case 404 -> "not-found";
-            case 405 -> "method-not-allowed";
-            case 409 -> "conflict";
-            case 412 -> "precondition-failed";
-            case 422 -> "invalid";
-            default -> status >= 500 ? "internal-error" : "request-failed";
-        };
-    }
 
     /** 回二进制正文；用于曲线预览等不适合 JSON 的负载。 */
     protected static void respondBinary(HttpExchange ex, String contentType,

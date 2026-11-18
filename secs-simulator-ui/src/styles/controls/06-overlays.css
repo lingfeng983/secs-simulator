@@ -1,4 +1,7 @@
-/* ===== 浮层 ===== */
+/* ===== 浮层 =====
+   层级阶梯（全站只在这里定义一次）：
+   抽屉 45 < 遮罩 80 < 弹窗/面板 90 < toast 100。
+   Overlay 已 portal 到 body，所以这几层是平级的，z-index 才真正说了算。 */
 .overlay {
   position: fixed;
   inset: 0;
@@ -18,6 +21,12 @@
   to { opacity: 1; }
 }
 
+/* toast 归 05-toasts.css 所有；这里只把它的层级抬到阶梯顶部，
+   让通知浮在弹窗之上。不要去改 toasts.css。 */
+.toast-host {
+  z-index: 100;
+}
+
 .overlay-panel {
   display: flex;
   justify-content: center;
@@ -31,6 +40,9 @@
   display: flex;
   flex-direction: column;
   max-height: 82vh;
+  /* 遮罩 80 的层叠上下文里抬到 90：toast（100）压在浮层之上，抽屉（45）在其下 */
+  position: relative;
+  z-index: 90;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--surface);
@@ -117,6 +129,14 @@
   white-space: nowrap;
 }
 
-.shortcut-keys kbd + kbd {
-  margin-left: 2px;
+/* 整串组合键是一个键帽：不再把 Ctrl+K 拆成两个、1..9 / 0 拆成三个。 */
+.shortcut-keys kbd {
+  min-width: 0;
+  padding: 0.18em 0.5em;
+  border-color: var(--line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-3);
+  color: var(--ink);
+  font: calc(11.5px * var(--font-scale))/1.5 var(--font-mono);
+  letter-spacing: 0.02em;
 }

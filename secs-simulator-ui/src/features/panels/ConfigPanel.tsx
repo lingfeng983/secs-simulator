@@ -3,7 +3,7 @@ import { diffLines, foldUnchanged } from '../../shared/lib/textDiff';
 import { saveHint, saveTextFile } from '../../shared/lib/saveFile';
 import { JsonEditor } from '../../shared/ui/JsonEditor';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
-import { Panel, PanelFootnote } from '../../shared/ui/Panel';
+import { Panel } from '../../shared/ui/Panel';
 import { Icon } from '../../shared/ui/Icon';
 import type { ConfigTemplateEntry } from '../../api';
 import type { PanelBaseProps } from './types';
@@ -264,12 +264,16 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
       id="panel-config"
       title={configName === '' ? '配置编辑器' : configName}
       headless
+      /* 与「连接」「结构」等结构化编辑页一致：重新载入/校验/保存固定在卡片右上，
+         不埋到长编辑器底部；「目录内配置」也收进这条工具栏，不再单独悬在底部。 */
+      actionsAt="top"
       status={
-        configName === ''
-          ? <span className="state-pill" data-tone="muted">未打开</span>
-          : dirty
-            ? <span className="state-pill" data-tone="warn">有未保存改动</span>
-            : undefined
+        <>
+          <span className="state-pill" data-tone="muted">目录内配置 {configList.length}</span>
+          {configName === ''
+            ? <span className="state-pill" data-tone="muted">未打开</span>
+            : dirty ? <span className="state-pill" data-tone="warn">有未保存改动</span> : undefined}
+        </>
       }
       actions={
         <>
@@ -512,7 +516,6 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
           void createNewConfig();
         }}
       />
-      <PanelFootnote items={[{ label: '目录内配置', value: configList.length }]} />
     </Panel>
   );
 }

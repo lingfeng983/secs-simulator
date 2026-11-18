@@ -79,6 +79,29 @@ export function useHostsV2(client: ApiClient | null) {
     [hosts],
   );
 
+  /**
+   * SSE {@code host-link} 的即时相位更新：只改这一台主机，不发请求。
+   *
+   * <p>相位是后端直出的枚举（{@code phase.name()}），payload 里给的就是它；
+   * 自动重连会反复 CONNECTING→FAILED，每次收到都重拉整个列表既慢又会闪，
+   * 所以就地改。{@code open}（实例是否打开）不随相位变，不用碰。</p>
+   */
+  const applyPhase = useCallback((hostId: string, phase: unknown) => {
+    if (!isHostPhase(phase)) {
+      return;
+    }
+    setHosts((previous) => {
+      const index = previous.findIndex((host) => host.id === hostId);
+      /* 找不到或相位没变：返回原数组，避免无谓重渲染 */
+      if (index < 0 || previous[index].phase === phase) {
+        return previous;
+      }
+      const next = [...previous];
+      next[index] = { ...next[index], phase };
+      return next;
+    });
+  }, []);
+
   /** 把模板里的方案逐条复制进某台主机的方案库（换 id，互不覆盖）。 */
   const applyTemplate = useCallback(
     async (hostId: string, template: HostTemplate) => {
@@ -218,24 +241,50 @@ export function useHostsV2(client: ApiClient | null) {
 
   return {
     hosts, templates, loading, find, refresh, create, remove, connect, disconnect,
-    apply, saveSettings, send, applyTemplate, saveTemplate, deleteTemplate,
+    apply, saveSettings, send, applyTemplate, saveTemplate, deleteTemplate, applyPhase,
   };
 }
 
 export type HostsV2State = ReturnType<typeof useHostsV2>;
 
-/** 主机相位 → 徽标色调：界面只区分「链接」（绿）与「停止」（红）。 */
-export function hostPhaseTone(phase: HostV2['phase']): 'ok' | 'danger' {
-  return phase === 'CONNECTED' ? 'ok' : 'danger';
+/** 主机的四个链路相位（与后端 {@code HostSimulator.Phase} 同值域）。 */
+const HOST_PHASES: readonly HostV2['phase'][] = ['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'FAILED'];
+
+/**
+ * SSE payload 里来的相位是不是已知相位。
+ *
+ * <p>通知的 payload 是外部输入（JSON 解析结果），不校验就直接塞进状态，
+ * 会让界面渲染出 `phase=undefined` 的徽标。</p>
+ */
+export function isHostPhase(value: unknown): value is HostV2['phase'] {
+  return typeof value === 'string' && (HOST_PHASES as readonly string[]).includes(value);
 }
 
 /**
- * 主机相位 → 中文。
+ * 主机相位 → 徽标色调：只有「已连接」是绿，其余都是中性灰。
  *
- * <p>主机只有两种可操作状态：链路通（链接）与没通（停止）。
- * CONNECTING / FAILED 这类中间态在实例头的动作按钮与错误行里已经能看出来，
- * 状态徽标再拆成四种只会让"现在到底能不能发报文"更难判断。</p>
+ * <p>CONNECTING / DISCONNECTED / FAILED 是连接过程的稳态或故障态，
+ * 不该和报警红抢同一个视觉信号；故障信息由实例头动作按钮与错误行承担。
+ * 调用方把返回值直接拼成 `tone-${tone}` / `conn-dot ${tone}`。</p>
+ */
+export function hostPhaseTone(phase: HostV2['phase']): 'ok' | 'muted' {
+  return phase === 'CONNECTED' ? 'ok' : 'muted';
+}
+
+const HOST_PHASE_LABELS: Record<HostV2['phase'], string> = {
+  CONNECTED: '已连接',
+  CONNECTING: '连接中',
+  DISCONNECTED: '未连接',
+  FAILED: '重连中',
+};
+
+/**
+ * 主机相位 → 中文（四态，各自对应一个真实相位，不把中间态塞进「停止」）。
+ *
+ * <p>CONNECTED=已连接、CONNECTING=连接中、DISCONNECTED=未连接、FAILED=重连中
+ * （失败后由自动重连继续尝试）。"能不能发报文"看徽标色调与实例头动作按钮，
+ * 这里只负责把当前相位说准。</p>
  */
 export function hostPhaseLabel(phase: HostV2['phase']): string {
-  return phase === 'CONNECTED' ? '链接' : '停止';
+  return HOST_PHASE_LABELS[phase];
 }

@@ -1,5 +1,11 @@
 package com.shimizukenta.secssim.store;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -11,52 +17,32 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 配置仓储：device 实体 + config_document（权威正文）+ config_revision（版本快照）
- * + 投影表（结构化 UI 读的形状）。
+ * 配置仓储：device 实体 + config_document（权威正文）+ config_revision（版本快照）。
  *
  * <p><b>唯一写口</b>（设计 §2.3.2）：所有正文写入都走 {@link #saveDocument} /
  * {@link #createDevice} / {@link #updateConstants}——先比 revision（乐观锁），
- * 再升版本、留快照、整体重投影，任何一步失败整事务回滚。投影表只由
- * {@link DocumentProjector} 从正文重算，禁止单表写入。</p>
+ * 再升版本、留快照，任何一步失败整事务回滚。正文之外不维护任何结构化副本：
+ * 查询与展示一律解析正文，避免「一份配置两处写、迟早不一致」。</p>
  *
  * <p>本模块不解析配置正文：编译校验由调用方（secs-runtime 的 ConfigStore.validate）
- * 在进入本类之前完成；投影由上层注入 {@link DocumentProjector} 实现——
- * 这是「secs-store 不依赖 secs-app」唯一可行的拆法。</p>
+ * 在进入本类之前完成。</p>
  */
 public final class ConfigRepository {
 
     /** 每设备保留的版本快照数（超出按时间裁剪，设计 §2.2.1）。 */
     public static final int REVISION_RETENTION = 200;
 
-    /**
-     * 正文 → 投影表。实现由上层给出（用现有的配置解析器写连接规格 / 单元 /
-     * SVID / 报告 / 事件 / 模板 / 常量等投影行）；在写事务内被调用。
-     */
-    public interface DocumentProjector {
-        void project(Connection connection, String deviceId, String body) throws SQLException;
-    }
-
-    /** 重投影前要清空的投影表（由投影实现负责填业务行）。 */
-    private static final String[] PROJECTION_TABLES = {
-        "connection_spec", "equipment_spec", "unit_def", "svid_def", "equipment_constant",
-        "report_def", "report_svid", "ceid_def", "ceid_report",
-        "event_plan", "plan_action",
-    };
-
     private final Db db;
-    private final DocumentProjector projector;
 
     /**
-     * @param db        双库门面
-     * @param projector 正文 → 投影表（上层注入）
+     * @param db 双库门面
      */
-    public ConfigRepository(Db db, DocumentProjector projector) {
-        this.db = db;
-        this.projector = Objects.requireNonNull(projector, "projector");
+    public ConfigRepository(Db db) {
+        this.db = Objects.requireNonNull(db, "db");
     }
 
     /** 设备实体视图（配置与文档 JOIN 后的只读形状）。 */
-    public record DeviceView(String id, String legacyId, String name, String templateId,
+    public record DeviceView(String id, String name, String templateId,
                              boolean autoStart, String note, long revision,
                              long createdAt, long updatedAt) {
     }
@@ -72,10 +58,12 @@ public final class ConfigRepository {
     }
 
     /**
-     * 新建设备：插入实体 + revision 1 的正文与快照 + 首次投影。
+     * 新建设备：插入实体 + revision 1 的正文与快照。
      *
-     * @param name       设备名（v1 语义下同时充当 legacy_id = 文件名 stem）
-     * @param legacyId   v1 兼容 id；null 表示没有（v2 新建设备）
+     * <p>设备名同时是配置文件的 stem（{@code <name>.json}），也是 v1 路径里
+     * 用来定位设备的自然键；实体 id 是独立的 {@code dev_} ULID，两者不再互为别名。</p>
+     *
+     * @param name       设备名（= 配置文件名去掉 {@code .json}）
      * @param templateId 来源模板（仅分组用）；可空
      * @param body       配置正文（调用方已校验）
      * @param autoStart  启动对账时是否自动连接
@@ -83,7 +71,7 @@ public final class ConfigRepository {
      * @return 新设备 id
      * @throws StoreException 名字冲突（未删除行内唯一）或写库失败
      */
-    public String createDevice(String name, String legacyId, String templateId,
+    public String createDevice(String name, String templateId,
                                String body, boolean autoStart, String actor) {
         Objects.requireNonNull(name, "name");
         String id = Ids.nextDevice();
@@ -91,34 +79,32 @@ public final class ConfigRepository {
         String sha = ContentHash.sha256Hex(body);
         return this.db.writeConfig(unchecked(connection -> {
             try (PreparedStatement st = connection.prepareStatement(
-                    "INSERT INTO device(id, legacy_id, name, template_id, auto_start, note, created_at, updated_at) "
-                            + "VALUES(?,?,?,?,?,?,?,?)")) {
+                    "INSERT INTO device(id, name, template_id, auto_start, note, created_at, updated_at) "
+                            + "VALUES(?,?,?,?,?,?,?)")) {
                 st.setString(1, id);
-                st.setString(2, legacyId);
-                st.setString(3, name);
-                st.setString(4, templateId);
-                st.setInt(5, autoStart ? 1 : 0);
-                st.setString(6, "");
+                st.setString(2, name);
+                st.setString(3, templateId);
+                st.setInt(4, autoStart ? 1 : 0);
+                st.setString(5, "");
+                st.setLong(6, now);
                 st.setLong(7, now);
-                st.setLong(8, now);
                 st.executeUpdate();
             } catch (SQLException e) {
                 if (isUniqueViolation(e)) {
-                    throw StoreException.conflict("设备名或 legacy id 冲突: " + name + " / " + legacyId);
+                    throw StoreException.conflict("设备名冲突: " + name);
                 }
                 throw new StoreException("建设备失败: " + e.getMessage(), e);
             }
             insertDocument(connection, id, body, sha, 1, actor, "created");
             insertRevisionSnapshot(connection, id, 1, body, sha, actor, "created");
-            this.projector.project(connection, id, body);
             return id;
         }));
     }
 
     /**
-     * 保存正文（唯一写口）：乐观锁 → 升版本 → 快照 → 重投影 → 裁剪。
+     * 保存正文（唯一写口）：乐观锁 → 升版本 → 快照 → 裁剪。
      *
-     * @param key              设备 key（legacy_id 或 id）
+     * @param key              设备 key（设备名或设备 id）
      * @param body             新正文（调用方已校验）
      * @param expectedRevision 期望的当前版本；null 表示不检查
      * @param actor            操作者
@@ -188,7 +174,6 @@ public final class ConfigRepository {
                 st.executeUpdate();
             }
             insertRevisionSnapshot(connection, device.id(), next, body, sha, actor, note);
-            reproject(connection, device.id(), body);
             trimRevisions(connection, device.id());
             touchDevice(connection, device.id());
             return next;
@@ -196,7 +181,7 @@ public final class ConfigRepository {
     }
 
     /**
-     * S2F15 常量回写的专用写口：升版本 + 重投影，但<b>不写快照</b>，提交后把
+     * S2F15 常量回写的专用写口：升版本，但<b>不写快照</b>，提交后把
      * runtime.db 的 device_link.config_revision 追平——运行版本本来就等于最新版本，
      * 若走 saveDocument 的语义会出现永久「配置待生效」（设计 §2.3.2）。
      *
@@ -236,7 +221,6 @@ public final class ConfigRepository {
                 st.setString(7, device.id());
                 st.executeUpdate();
             }
-            reproject(connection, device.id(), newBody);
             touchDevice(connection, device.id());
             return device.id() + "|" + next;
         }));
@@ -257,7 +241,7 @@ public final class ConfigRepository {
         return revision;
     }
 
-    /** 按 key（legacy_id 优先，其次 id）找未删除设备。 */
+    /** 按 key（设备名或设备 id）找未删除设备。 */
     public Optional<DeviceView> findDevice(String key) {
         try (Connection connection = this.db.readConfig()) {
             DeviceRow row = findLiveDevice(connection, key);
@@ -277,7 +261,7 @@ public final class ConfigRepository {
         try (Connection connection = this.db.readConfig();
              Statement st = connection.createStatement();
              ResultSet rs = st.executeQuery(
-                     "SELECT id, legacy_id FROM device WHERE deleted_at IS NULL ORDER BY created_at, id")) {
+                     "SELECT id, name FROM device WHERE deleted_at IS NULL ORDER BY created_at, id")) {
             List<DeviceView> result = new ArrayList<>();
             while (rs.next()) {
                 result.add(toView(connection, new DeviceRow(rs.getString(1), rs.getString(2))));
@@ -293,11 +277,10 @@ public final class ConfigRepository {
      *
      * <p>不物理删除：配置正文、版本历史与运行台账都是排障时要翻的东西，
      * 一台设备从清单里删掉之后，"它上周为什么报警"仍然要查得到。
-     * {@code deleted_at} 一落，它就从设备列表消失；{@code legacy_id} 同时置空——
-     * 配置文件名（= legacy_id）的唯一索引不看 {@code deleted_at}，
-     * 不置空的话同名设备再也建不回来。</p>
+     * 名字唯一索引只看未删除行（{@code WHERE deleted_at IS NULL}），
+     * 所以软删之后同名设备可以直接建回来。</p>
      *
-     * @param key 设备 key（legacy_id 优先，其次 id）
+     * @param key 设备 key（设备名或设备 id）
      * @return 是否真的删掉了一台在用的设备（不存在或已删返回 {@code false}）
      */
     public boolean deleteDevice(String key) {
@@ -305,8 +288,8 @@ public final class ConfigRepository {
         return this.db.writeConfig(connection -> {
             long now = System.currentTimeMillis();
             try (PreparedStatement st = connection.prepareStatement(
-                    "UPDATE device SET deleted_at=?, updated_at=?, legacy_id=NULL "
-                            + "WHERE deleted_at IS NULL AND (legacy_id=? OR id=?)")) {
+                    "UPDATE device SET deleted_at=?, updated_at=? "
+                            + "WHERE deleted_at IS NULL AND (name=? OR id=?)")) {
                 st.setLong(1, now);
                 st.setLong(2, now);
                 st.setString(3, key);
@@ -384,17 +367,44 @@ public final class ConfigRepository {
         }
     }
 
-    /** 直接重投影（迁移 / 校验自检用）：整体重建该设备的投影表。 */
-    public void reproject(String key) {
-        this.db.writeConfig(unchecked(connection -> {
-            DeviceRow device = findLiveDevice(connection, key);
-            Optional<DocumentView> doc = readDocumentInTx(connection, device.id());
+    /**
+     * 全量导出（备份通道）：每台设备写 {@code <name>.json}。
+     *
+     * @param dir 目标目录（自动创建；已存在的同名文件覆盖）
+     * @return 导出的设备数
+     */
+    public int exportTo(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new StoreException("导出目录不可用: " + dir + ": " + e.getMessage(), e);
+        }
+        int count = 0;
+        for (DeviceView device : this.listDevices()) {
+            Optional<DocumentView> doc = readDocument(device.name());
             if (doc.isEmpty()) {
-                throw StoreException.notFound("设备没有配置正文: " + key);
+                continue;
             }
-            reproject(connection, device.id(), doc.get().body());
-            return null;
-        }));
+            String fileName = device.name() + ".json";
+            try {
+                Path target = dir.resolve(fileName);
+                Path tmp = dir.resolve(fileName + ".tmp");
+                Files.writeString(tmp, doc.get().body(), StandardCharsets.UTF_8);
+                move(tmp, target);
+                count++;
+            } catch (IOException e) {
+                throw new StoreException("导出 " + fileName + " 失败: " + e.getMessage(), e);
+            }
+        }
+        return count;
+    }
+
+    private static void move(Path from, Path to) throws IOException {
+        try {
+            Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     /* ---------- 内部 ---------- */
@@ -442,32 +452,32 @@ public final class ConfigRepository {
         };
     }
 
-    private record DeviceRow(String id, String legacyId) {
+    private record DeviceRow(String id, String name) {
     }
 
-    /** key 解析：先按 legacy_id 精确命中，再按 id；都未命中抛 notFound。 */
+    /** key 解析：先按设备名精确命中，再按 id；都未命中抛 notFound。 */
     private static DeviceRow findLiveDevice(Connection connection, String key) throws SQLException {
         String trimmed = key == null ? "" : key.trim();
         try (PreparedStatement st = connection.prepareStatement(
-                "SELECT id, legacy_id FROM device WHERE deleted_at IS NULL AND (legacy_id=? OR id=?) LIMIT 2")) {
+                "SELECT id, name FROM device WHERE deleted_at IS NULL AND (name=? OR id=?) LIMIT 2")) {
             st.setString(1, trimmed);
             st.setString(2, trimmed);
             try (ResultSet rs = st.executeQuery()) {
                 String id = null;
-                String legacy = null;
+                String name = null;
                 while (rs.next()) {
                     String rowId = rs.getString(1);
-                    String rowLegacy = rs.getString(2);
-                    if (trimmed.equals(rowLegacy)) {
-                        return new DeviceRow(rowId, rowLegacy);
+                    String rowName = rs.getString(2);
+                    if (trimmed.equals(rowName)) {
+                        return new DeviceRow(rowId, rowName);
                     }
                     if (id == null) {
                         id = rowId;
-                        legacy = rowLegacy;
+                        name = rowName;
                     }
                 }
                 if (id != null) {
-                    return new DeviceRow(id, legacy);
+                    return new DeviceRow(id, name);
                 }
             }
         }
@@ -492,7 +502,7 @@ public final class ConfigRepository {
                         }
                     }
                 }
-                return new DeviceView(row.id(), row.legacyId(), rs.getString(1), rs.getString(2),
+                return new DeviceView(row.id(), rs.getString(1), rs.getString(2),
                         rs.getInt(3) == 1, rs.getString(4), revision, rs.getLong(5), rs.getLong(6));
             }
         }
@@ -531,21 +541,6 @@ public final class ConfigRepository {
         }
     }
 
-    private void reproject(Connection connection, String deviceId, String body) throws SQLException {
-        clearProjections(connection, deviceId);
-        this.projector.project(connection, deviceId, body);
-    }
-
-    private static void clearProjections(Connection connection, String deviceId) throws SQLException {
-        for (String table : PROJECTION_TABLES) {
-            try (PreparedStatement st = connection.prepareStatement(
-                    "DELETE FROM " + table + " WHERE device_id=?")) {
-                st.setString(1, deviceId);
-                st.executeUpdate();
-            }
-        }
-    }
-
     /** 快照保留策略：每设备只留最近 REVISION_RETENTION 版，超出删最旧。 */
     private static void trimRevisions(Connection connection, String deviceId) throws SQLException {
         try (PreparedStatement st = connection.prepareStatement(
@@ -565,22 +560,6 @@ public final class ConfigRepository {
             st.setLong(1, System.currentTimeMillis());
             st.setString(2, deviceId);
             st.executeUpdate();
-        }
-    }
-
-    private static Optional<DocumentView> readDocumentInTx(Connection connection, String deviceId) throws SQLException {
-        try (PreparedStatement st = connection.prepareStatement(
-                "SELECT device_id, body, revision, content_sha256, updated_at, updated_by, change_note "
-                        + "FROM config_document WHERE device_id=?")) {
-            st.setString(1, deviceId);
-            try (ResultSet rs = st.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of(new DocumentView(rs.getString(1), rs.getString(2),
-                        rs.getLong(3), rs.getString(4), rs.getLong(5), rs.getString(6),
-                        rs.getString(7)));
-            }
         }
     }
 }

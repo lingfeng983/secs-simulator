@@ -366,7 +366,7 @@ export function DataTable<T>({
                     >
                       {column.headerContent ?? column.header}
                       {sortable && (
-                        <span className="sort-mark" aria-hidden="true">
+                        <span className={`sort-mark${active ? ' is-active' : ''}`} aria-hidden="true">
                           {active ? (sort?.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
                         </span>
                       )}

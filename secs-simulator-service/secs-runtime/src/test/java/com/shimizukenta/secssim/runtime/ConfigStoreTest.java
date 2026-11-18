@@ -45,8 +45,7 @@ class ConfigStoreTest {
     @BeforeEach
     void setUp() {
         this.db = com.shimizukenta.secssim.store.Db.open(this.workDir);
-        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                this.db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(this.db);
         this.store = new ConfigStore(this.repo,
                 new com.shimizukenta.secssim.store.TemplateRepository(this.db), this.workDir);
     }
@@ -62,7 +61,7 @@ class ConfigStoreTest {
         if (this.repo.findDevice(stem).isPresent()) {
             this.repo.saveDocument(stem, body, null, "test", "");
         } else {
-            this.repo.createDevice(stem, stem, null, body, true, "test");
+            this.repo.createDevice(stem, null, body, true, "test");
         }
     }
 

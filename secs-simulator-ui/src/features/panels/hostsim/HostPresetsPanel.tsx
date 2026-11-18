@@ -287,7 +287,7 @@ export function HostPresetsPanel({ hostId }: PanelArgs): JSX.Element {
         }
       >
         {form !== null && (
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
             <div className="form-row">
               <label className="field grow">
                 名称
@@ -299,16 +299,16 @@ export function HostPresetsPanel({ hostId }: PanelArgs): JSX.Element {
               </label>
               <label className="field">
                 分组
-                <input
-                  list="host-preset-groups"
+                <select
                   value={form.group}
                   onChange={(event) => setForm({ ...form, group: event.target.value })}
-                />
-                <datalist id="host-preset-groups">
+                  aria-label="分组"
+                >
+                  {!groupOptions.includes(form.group) && <option value={form.group}>{form.group}</option>}
                   {groupOptions.map((item) => (
-                    <option key={item} value={item} />
+                    <option key={item} value={item}>{item}</option>
                   ))}
-                </datalist>
+                </select>
               </label>
               <label className="field">
                 回复
@@ -322,7 +322,8 @@ export function HostPresetsPanel({ hostId }: PanelArgs): JSX.Element {
             <label className="field">
               描述
               <textarea
-                rows={2}
+                rows={3}
+                style={{ width: '100%', resize: 'vertical' }}
                 value={form.desc}
                 onChange={(event) => setForm({ ...form, desc: event.target.value })}
                 placeholder="一句话说明这条报文干什么"

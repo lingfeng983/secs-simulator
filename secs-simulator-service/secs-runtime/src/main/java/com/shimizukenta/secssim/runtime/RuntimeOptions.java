@@ -27,9 +27,9 @@ import java.util.Set;
  * @param logLevel       日志级别（error/info/debug）
  * @param messagesRecent 报文日志内存保留条数（HTTP 历史回看窗口）
  * @param auditRecent    审计日志内存保留条数
- * @param migrateConfig  显式执行 JSON → config.db 迁移（不传则按需自动）
- * @param exportConfig   导出目录；非空时导出后直接退出（回滚通道）
+ * @param exportConfig   导出目录；非空时导出后直接退出（备份通道）
  * @param resetRuntime   启动前删除 runtime.db
+ * @param allowSchemaReset 库版本与程序不匹配时，备份后自动重建（默认拒绝启动）
  */
 public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                              int hsmsPort, int deviceId,
@@ -37,7 +37,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                              Path tlsKeystore, String tlsPassword, boolean help,
                              com.shimizukenta.secssim.app.log.Log.Level logLevel,
                              int messagesRecent, int auditRecent,
-                             boolean migrateConfig, Path exportConfig, boolean resetRuntime) {
+                             Path exportConfig, boolean resetRuntime, boolean allowSchemaReset) {
 
     /** 报文日志内存保留条数默认值（与 MessageLog.DEFAULT_RECENT 对齐）。 */
     public static final int DEFAULT_MESSAGES_RECENT = 5_000;
@@ -116,7 +116,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                 "device-id", "config", "web-root", "work-dir",
                 "tls-keystore", "tls-password", "help", "log-level",
                 "messages-recent", "audit-recent",
-                "migrate-config", "export-config", "reset-runtime");
+                "export-config", "reset-runtime", "allow-schema-reset");
         for (String key : values.keySet()) {
             if (!known.contains(key)) {
                 throw new IllegalArgumentException("未知参数 --" + key);
@@ -143,9 +143,9 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                         values.getOrDefault("log-level", "INFO")),
                 intValue(values, "messages-recent", DEFAULT_MESSAGES_RECENT),
                 intValue(values, "audit-recent", DEFAULT_AUDIT_RECENT),
-                Boolean.parseBoolean(values.getOrDefault("migrate-config", "false")),
                 values.containsKey("export-config") ? Path.of(values.get("export-config")) : null,
-                Boolean.parseBoolean(values.getOrDefault("reset-runtime", "false")));
+                Boolean.parseBoolean(values.getOrDefault("reset-runtime", "false")),
+                Boolean.parseBoolean(values.getOrDefault("allow-schema-reset", "false")));
     }
 
     /**
@@ -165,17 +165,15 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                                                   （设备会话的 SECS 口以各自配置为准，无兜底）
                   --device-id <n>                   SECS device-id，默认 10
                   --config <path>                   把一份设备配置导入数据库并立即启动（显式动作）
-                  --config <path>                   从 Schema v5 JSON 装载设备与会话配置（v4 兼容）
                   --web-root <dir>                  托管静态前端（与 API 同源，浏览器直接打开）
                   --work-dir <path>                 工作目录
                   --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
                   --tls-password <s>                keystore 密码（默认空）
                   --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
                   --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
-                  --migrate-config                  把 work-dir 下的 JSON 配置导入 config.db（不传时检测到
-                                                    "有 JSON 且库里没设备"也会自动执行一次）
-                  --export-config <dir>             把库里的全部设备导出为 <dir>/<legacy>.json 后退出（回滚通道）
+                  --export-config <dir>             把库里的全部设备导出为 <dir>/<设备名>.json 后退出（备份通道）
                   --reset-runtime                   启动前删除 runtime.db（运行态可随时丢弃重建）
+                  --allow-schema-reset              库结构版本与程序不一致时，备份后自动重建；默认拒绝启动
                   --help                            打印本帮助
 
                 访问：内部工具，不做鉴权——浏览器/脚本直连地址即可，没有令牌或账号。

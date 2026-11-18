@@ -11,7 +11,6 @@ export type ApiRole = 'viewer' | 'operator' | 'admin';
 
 /** 部署期覆盖：多台设备复用一份设备配置时，逐台不同的连接标识。 */
 export interface SessionOverrides {
-  sessionId?: string;
   bindHost?: string;
   port?: number;
   deviceId?: number;
@@ -22,8 +21,6 @@ export interface SessionBulkParams extends SessionOverrides {
   config: string;
   /** 1..100 */
   count: number;
-  /** 会话 id 前缀，第 i 台为 `${前缀}i`。 */
-  sessionIdPrefix: string;
   /** 第 i 台端口 = portBase + i - 1；0 表示都用配置里的端口（会冲突，仅供 demo 会话）。 */
   portBase: number;
   /** 第 i 台 device-id = deviceIdBase + i - 1。 */
@@ -92,6 +89,19 @@ export interface WireMessage {
   wbit: boolean;
   body: string;
   at: number;
+}
+
+/**
+ * 一条活动报警（{@code GET /sessions/{id}/alarms} 的元素）。
+ *
+ * <p>只含<b>当前置位中</b>的报警：清除掉的不会出现在列表里，所以前端不用再
+ * 靠 S5F1 通知重放来猜"现在有哪些报警"。{@code atMillis} 是置位时刻。</p>
+ */
+export interface ActiveAlarm {
+  alid: number;
+  text: string;
+  category: number;
+  atMillis: number;
 }
 
 /** 审计记录。 */
@@ -495,6 +505,13 @@ export interface ApiClient {
   reloadSession(sessionId: string): Promise<number>;
   trigger(sessionId: string, ceid: number): Promise<number>;
   alarm(sessionId: string, alid: number, set: boolean, text: string, category: number): Promise<number>;
+  /**
+   * 当前活动报警清单（服务端权威快照，按 ALID 升序）。
+   *
+   * <p>页面刷新/换设备时拉一次打底，之后用 SSE 的 {@code alarm} 通知做增量：
+   * 置位就往列表里加，清除就删——不依赖"本会话收到过哪些通知"。</p>
+   */
+  activeAlarms(sessionId: string): Promise<ActiveAlarm[]>;
   /** SVID / RPTID / CEID 目录。 */
   catalog(sessionId: string): Promise<Catalog>;
   preview(sessionId: string, fromMs: number, toMs: number, buckets: number, svids?: number[], withEvents?: boolean, planId?: string): Promise<PreviewData>;

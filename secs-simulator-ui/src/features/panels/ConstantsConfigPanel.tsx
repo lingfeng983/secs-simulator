@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { ConfigEditShell, MissingEquipment } from './ConfigEditShell';
 import { nextId, SessionField } from '../editors/ConfigFormEditor';
+import { SourceEditorLegend } from '../editors/ConfigFormParts';
 import { ConfigItemModal } from '../editors/ConfigItemModal';
 import { SourceEditor } from '../editors/SourceEditor';
 import { SourcePreview } from '../editors/SourcePreview';
@@ -254,8 +255,8 @@ function ConstantEditModal({ creating, initial, others, onClose, onSubmit }: {
             </SessionField>
           </div>
 
-          <p className="sub-title">值定义（可选）</p>
-          <SourceEditor
+            <SourceEditorLegend />
+            <SourceEditor
             def={item}
             mutate={mutate}
             onPreview={sourceModeOf(item) === '' ? undefined : () => setPreviewing(true)}

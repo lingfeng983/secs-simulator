@@ -119,6 +119,7 @@ function UnitReportsForm({ unit, unitIndex, root, edit }: {
         {typeof list !== 'string' && (
           <button
             type="button"
+            className="primary"
             onClick={() => mutateUnit((target) => {
               const items = Array.isArray(target.reports) ? (target.reports as JsonObject[]) : [];
               items.push({
@@ -129,7 +130,7 @@ function UnitReportsForm({ unit, unitIndex, root, edit }: {
               target.reports = items;
             })}
           >
-            + 报告
+            ＋ 新建报告
           </button>
         )}
       </div>
@@ -231,6 +232,7 @@ function UnitCeidsForm({ unit, unitIndex, edit }: {
         {typeof list !== 'string' && (
           <button
             type="button"
+            className="primary"
             onClick={() => mutateUnit((target) => {
               const items = Array.isArray(target.ceids) ? (target.ceids as JsonObject[]) : [];
               items.push({
@@ -241,7 +243,7 @@ function UnitCeidsForm({ unit, unitIndex, edit }: {
               target.ceids = items;
             })}
           >
-            + 事件
+            ＋ 新建事件
           </button>
         )}
       </div>

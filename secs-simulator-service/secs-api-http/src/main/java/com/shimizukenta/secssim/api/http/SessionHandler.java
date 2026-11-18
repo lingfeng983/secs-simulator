@@ -3,18 +3,19 @@ package com.shimizukenta.secssim.api.http;
 import java.io.IOException;
 import java.util.Map;
 import com.shimizukenta.secssim.app.log.Log;
-import java.util.Locale;
 
 import com.shimizukenta.jsonhub.JsonHub;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
- * 会话域：会话列表、新建、批量新建，以及单个会话下的查询、命令与运行时编辑。
+ * 会话域：会话列表、新建、批量新建，以及单个会话下的查询与命令。
  *
  * <p>原先这些路由散在 {@code HttpApiServer} 里两千多行的一坨；按资源域拆开后，
  * 一个域一个文件，读某个路由不用翻整台服务器。</p>
  */
 final class SessionHandler extends HttpSupport {
+
+    private static final Log.Facade LOG = Log.of(SessionHandler.class);
 
     /**
      * 查询压测状态的哨兵请求体。
@@ -85,10 +86,7 @@ final class SessionHandler extends HttpSupport {
         try {
             request = sessionCreateRequestFrom(body);
         } catch (IllegalArgumentException e) {
-            /* sessionId 的问题单独给 bad-session-id，客户端不用去解析 message */
-            String error = e.getMessage() != null && e.getMessage().startsWith("sessionId")
-                    ? "bad-session-id" : "bad-request";
-            respond(ex, 400, "{\"ok\":false,\"error\":\"" + error + "\",\"message\":" + json(e.getMessage()) + "}");
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":" + json(e.getMessage()) + "}");
             return;
         }
         if (request == null) {
@@ -96,10 +94,12 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
-        SessionOutcome outcome = this.context.createSession(request);
-        audit(ex, "session-create", request.config(), "outcome=" + outcome);
-        switch (outcome) {
-            case OK -> respond(ex, 201, "{\"ok\":true}");
+        SessionCreated created = this.context.createSession(request);
+        audit(ex, "session-create", request.config(), "outcome=" + created.outcome()
+                + " id=" + created.sessionId());
+        switch (created.outcome()) {
+            /* 会话 id 由服务端生成，必须回给调用方：配置名不再等于 id */
+            case OK -> respond(ex, 201, "{\"ok\":true,\"id\":\"" + json(created.sessionId()) + "\"}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-exists\"}");
             default -> respond(ex, 400, "{\"ok\":false,\"error\":\"create-failed\"}");
         }
@@ -109,8 +109,9 @@ final class SessionHandler extends HttpSupport {
     /**
      * 从请求体解析"新建会话"请求：config 必填，其余是可选的部署期覆盖。
      *
-     * <p>覆盖字段（sessionId / bindHost / port / deviceId）缺省就用配置原文里的——
-     * 多台设备复用一份设备配置时只有这几项逐台不同。</p>
+     * <p>覆盖字段（bindHost / port / deviceId）缺省就用配置原文里的——
+     * 多台设备复用一份设备配置时只有这几项逐台不同。会话 id 不接受指定：
+     * 服务端生成 {@code ses_} + ULID 并随 201 响应返回。</p>
      *
      * @return 请求；体不是对象或缺 config 时返回 {@code null}
      */
@@ -124,17 +125,6 @@ final class SessionHandler extends HttpSupport {
             String config = optionalString(root, "config");
             if (config == null) {
                 return null;
-            }
-            String sessionId = optionalString(root, "sessionId");
-            if (sessionId != null && sessionId.isBlank()) {
-                /* 空/空白 id 会生成一个既不可寻址也不可关闭的会话 */
-                throw new IllegalArgumentException("sessionId 不能为空");
-            }
-            if (sessionId != null
-                    && (sessionId.contains("/") || sessionId.contains("\\")
-                        || sessionId.chars().anyMatch(Character::isWhitespace))) {
-                /* 会话 id 会进 URL 路径：带分隔符或空白会让这个会话不可寻址 */
-                throw new IllegalArgumentException("sessionId 不能包含路径分隔符或空白: " + sessionId);
             }
             Integer port = null;
             if (root.containsKey("port")) {
@@ -151,7 +141,7 @@ final class SessionHandler extends HttpSupport {
                     throw new IllegalArgumentException("deviceId 必须是 0..32767 的整数");
                 }
             }
-            return new SessionCreateRequest(config, sessionId,
+            return new SessionCreateRequest(config,
                     optionalString(root, "bindHost"), port, deviceId);
         } catch (IllegalArgumentException e) {
             throw e;
@@ -164,11 +154,11 @@ final class SessionHandler extends HttpSupport {
     /**
      * POST /api/v1/sessions/bulk：从一份设备配置批量开多台设备。
      *
-     * <p>体形如 {@code {"config":"tpl.json","count":5,"sessionIdPrefix":"dev-",
+     * <p>体形如 {@code {"config":"tpl.json","count":5,
      * "portBase":5100,"deviceIdBase":100,"bindHost":"127.0.0.1"}}。
-     * 第 i 台（从 1 起）的会话 id 是 {@code prefix+i}、端口 {@code portBase+i-1}、
-     * device-id {@code deviceIdBase+i-1}。逐台独立创建：一台起不来不影响其余，
-     * 全部成功回 201，部分失败回 207 并逐台给原因。</p>
+     * 第 i 台（从 1 起）的端口 {@code portBase+i-1}、device-id {@code deviceIdBase+i-1}；
+     * 会话 id 由服务端生成（{@code ses_} + ULID），响应里逐台回真实 id。逐台独立创建：
+     * 一台起不来不影响其余，全部成功回 201，部分失败回 207 并逐台给原因。</p>
      */
     void handleBulkSessions(HttpExchange ex) throws IOException {
         if (!ApiPaths.SESSIONS_BULK.equals(ex.getRequestURI().getPath())) {
@@ -206,24 +196,12 @@ final class SessionHandler extends HttpSupport {
         }
         String config = optionalString(root, "config");
         int count = num(root, "count");
-        String prefix = optionalString(root, "sessionIdPrefix");
         int portBase = num(root, "portBase");
         int deviceIdBase = num(root, "deviceIdBase");
         String bindHost = optionalString(root, "bindHost");
 
         if (config == null || count < 1 || count > 100) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"count 必须在 1..100，且 config 必填\"}");
-            return;
-        }
-        /* 前缀缺省用 dev-：null + i 会拼出 "null1" 这种会话 id。
-           斜杠会破坏会话 id 在 URL 路径里的可寻址性，在入口拒绝。 */
-        if (prefix == null || prefix.isBlank()) {
-            prefix = "dev-";
-        }
-        if (prefix.contains("/") || prefix.contains("\\") || prefix.contains("\"")
-                || prefix.chars().anyMatch(Character::isWhitespace)) {
-            /* 引号/空白会破坏拼出来的 JSON 与会话 id 的可寻址性 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"sessionIdPrefix 不能包含路径分隔符、引号或空白\"}");
             return;
         }
 
@@ -233,21 +211,22 @@ final class SessionHandler extends HttpSupport {
         for (int i = 1; i <= count; i++) {
             Integer port = portBase > 0 ? portBase + i - 1 : null;
             Integer deviceId = deviceIdBase >= 0 ? deviceIdBase + i - 1 : null;
-            SessionCreateRequest request = new SessionCreateRequest(config, prefix + i, bindHost, port, deviceId);
-            SessionOutcome outcome = this.context.createSession(request);
-            audit(ex, "session-create", config + "#" + i, "outcome=" + outcome);
-            if (outcome == SessionOutcome.OK) {
+            SessionCreateRequest request = new SessionCreateRequest(config, bindHost, port, deviceId);
+            SessionCreated result = this.context.createSession(request);
+            audit(ex, "session-create", config + "#" + i, "outcome=" + result.outcome()
+                    + " id=" + result.sessionId());
+            if (result.outcome() == SessionOutcome.OK) {
                 if (okCount > 0) {
                     created.append(',');
                 }
-                created.append("\"").append(json(prefix + i)).append('"');
+                created.append("\"").append(json(result.sessionId())).append('"');
                 okCount++;
             } else {
                 if (failed.length() > 0) {
                     failed.append(',');
                 }
                 failed.append("{\"index\":").append(i)
-                        .append(",\"error\":\"").append(outcome.name().toLowerCase()).append("\"}");
+                        .append(",\"error\":\"").append(result.outcome().name().toLowerCase()).append("\"}");
             }
         }
 
@@ -260,7 +239,7 @@ final class SessionHandler extends HttpSupport {
 
 
     /**
-     * 会话命令：目前有"手动触发采集事件"、"置位/清除报警"、"按配置重载"。
+     * 会话子路径入口：GET 查询、POST 命令、DELETE 断链。
      *
      * <p>用 POST 是因为它们会改变设备状态（主机会看到一条 S6F11 / S5F1），
      * 不是幂等查询，因此最低角色是 {@link ApiRole#OPERATOR}。
@@ -281,30 +260,21 @@ final class SessionHandler extends HttpSupport {
             this.handleSessionCommand(ex);
             return;
         }
-        if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
-            /* 运行时编辑(计划/报告/事件/变量)的更新走 PUT 子路径 */
-            if (!requireRole(ex, ApiRole.OPERATOR)) {
-                return;
-            }
-            this.handleSessionCommand(ex);
-            return;
-        }
         if ("DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;
             }
-            /* DELETE /sessions/{id} 是关会话;/host-sim 是断开;其余子路径是运行时编辑的删除 */
+            /* DELETE /sessions/{id} 是关会话;/host-sim 是断开;其余子路径已随 v1 实体编辑下线 */
             String rest = ex.getRequestURI().getPath().substring(ApiPaths.SESSION_PREFIX.length());
             /* 末尾多一个斜杠不该改变语义：`DELETE /api/v1/sessions/s1/` 以前因为
-               indexOf('/') >= 0 被当成"子资源"丢给 handleSessionCommand，回 404，
-               而 `DELETE /sessions/s1` 是能断开的。 */
+               indexOf('/') >= 0 被当成"子资源"，回 404，而 `DELETE /sessions/s1` 是能断开的。 */
             if (rest.endsWith("/")) {
                 rest = rest.substring(0, rest.length() - 1);
             }
             if (rest.indexOf('/') < 0 || rest.endsWith("/host-sim")) {
                 this.closeSession(ex);
             } else {
-                this.handleSessionCommand(ex);
+                respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             }
             return;
         }
@@ -439,12 +409,6 @@ final class SessionHandler extends HttpSupport {
 
 
     void handleSessionCommand(HttpExchange ex) throws IOException {
-        String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
-        if (!"POST".equals(method) && !"PUT".equals(method) && !"DELETE".equals(method)) {
-            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-            return;
-        }
-
         String rest = ex.getRequestURI().getPath().substring(ApiPaths.SESSION_PREFIX.length());
         String[] parts = rest.split("/");
         if (parts.length == 0 || parts[0].isBlank()) {
@@ -471,20 +435,6 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
-        /* 运行时编辑:编排计划 / 报告 / 状态变量的增删改与值设定(设备页)。
-           POST events/{planId} 是既有的启停切换,仍走后面的老分支。 */
-        /* parts[1] 之前必须先判长度：POST /sessions/{id} 没有子路径，
-           直接取下标会 AIOOBE，被 500 兜住（正确语义是 405）。 */
-        boolean editSub = parts.length >= 2
-                && ("events".equals(parts[1]) || "reports".equals(parts[1])
-                    || "svids".equals(parts[1]) || "ceids".equals(parts[1]));
-        if (parts.length >= 2 && editSub
-                && ("PUT".equals(method) || "DELETE".equals(method)
-                    || (parts.length == 2 && "POST".equals(method)))) {
-            handleSessionEdit(ex, method, parts);
-            return;
-        }
-
         /* v6:服务端压测 */
         if (parts.length == 2 && "burst".equals(parts[1])) {
             String body = readBody(ex);
@@ -508,6 +458,14 @@ final class SessionHandler extends HttpSupport {
 
         if (parts.length == 2 && "message".equals(parts[1])) {
             this.sendSml(ex, parts[0]);
+            return;
+        }
+
+        /* 只剩 ceid / alarm 两个 POST 子资源。已删掉的 v1 实体编辑端点（svids、reports、
+           ceids、events、plans…）不能再落到下面的「段数不对 → 400 bad-path」：
+           接口本身不存在，回 404 才让调用方知道是端点没了，而不是自己参数写错。 */
+        if (parts.length < 2 || (!"ceid".equals(parts[1]) && !"alarm".equals(parts[1]))) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
 
@@ -571,32 +529,9 @@ final class SessionHandler extends HttpSupport {
             outcome = this.context.triggerAlarm(parts[0], alid, set, text, category);
             audit(ex, "alarm", parts[0], "alid=" + alid + " set=" + set
                     + " category=" + category + " outcome=" + outcome);
-        } else if ("events".equals(parts[1])) {
-            Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-            String enabledParam = query.getOrDefault("enabled", "true");
-            boolean enabled;
-            if ("true".equalsIgnoreCase(enabledParam)) {
-                enabled = true;
-            } else if ("false".equalsIgnoreCase(enabledParam)) {
-                enabled = false;
-            } else {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-enabled\"}");
-                return;
-            }
-
-            EventOutcome eventOutcome = this.context.setEventEnabled(
-                    parts[0], parts[2], enabled);
-            audit(ex, "event-toggle", parts[0],
-                    "plan=" + parts[2] + " enabled=" + enabled + " outcome=" + eventOutcome);
-            switch (eventOutcome) {
-                case OK -> respond(ex, 200, "{\"ok\":true}");
-                case NOT_ONLINE -> respond(ex, 409, "{\"ok\":false,\"error\":\"not-online\"}");
-                case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-                case UNKNOWN_PLAN -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-plan\"}");
-            }
-            return;
         } else {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            /* 白名单已挡住其它子资源；这里只剩「ceid/alarm 但参数残缺」之外的兜底 */
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
 
@@ -645,25 +580,21 @@ final class SessionHandler extends HttpSupport {
             respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
         } catch (IOException e) {
             audit(ex, "send-sml", sessionId, "outcome=failed bytes=" + sml.length());
-            Log.error("手动发送 SML 失败", e);
+            LOG.error("手动发送 SML 失败（会话 {}，SML: {}）", sessionId, head(sml), e);
             /* 与 v2 手动发送（POST /devices/{id}/runtime/message）统一：502 */
             respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 
 
-    /**
-     * SECS ID 是否合法：CEID / SVID / RPTID 都是 1..65535 的无符号值。
-     *
-     * <p>{@link HttpSupport#pathInt(String)} 对非数字路径段返回 {@code -1}，
-     * 旧实现直接拿这个哨兵去查表：客户端拼错 URL（{@code /svids/abc}）拿到的是
-     * 404「没有这个 SVID」，看起来像数据丢失，其实是请求本身非法。</p>
-     *
-     * @param id 路径段解析出的整数
-     * @return {@code true} 表示可继续处理
-     */
-    private static boolean validSecsId(int id) {
-        return id >= 1 && id <= 65535;
+    /** 日志里只放 SML 首行：整段 SML 可能有几十行，进了日志就没人看得懂。 */
+    private static String head(String sml) {
+        if (sml == null) {
+            return "";
+        }
+        int newline = sml.indexOf('\n');
+        String first = (newline >= 0 ? sml.substring(0, newline) : sml).strip();
+        return first.length() <= 120 ? first : first.substring(0, 120) + "…";
     }
 
     /** 压测响应里的 accepted 标志（解析失败按 false 处理）。 */
@@ -703,188 +634,6 @@ final class SessionHandler extends HttpSupport {
         return 200;
     }
 
-
-    /**
-     * 会话子路径上的运行时编辑：events / reports / svids 的增删改与值设定。
-     *
-     * <p>写角色要求 operator;解析失败(请求体不合法)统一 400 并带回原因。</p>
-     *
-     * @param ex     交换
-     * @param method 大写方法名
-     * @param parts  路径段(已去掉 /api/v1/sessions 前缀)
-     */
-    void handleSessionEdit(HttpExchange ex, String method, String[] parts) throws IOException {
-        if (!requireRole(ex, ApiRole.OPERATOR)) {
-            return;
-        }
-        String sessionId = parts[0];
-        String sub = parts[1];
-
-        try {
-            /* ---- 编排计划 ---- */
-            if ("events".equals(sub)) {
-                if (parts.length == 2 && "POST".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int status = this.context.addEventPlan(sessionId, body);
-                    audit(ex, "event-add", sessionId, "status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "PUT".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int status = this.context.updateEventPlan(sessionId, parts[2], body);
-                    audit(ex, "event-update", sessionId, "plan=" + parts[2] + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "DELETE".equals(method)) {
-                    int status = this.context.removeEventPlan(sessionId, parts[2]);
-                    audit(ex, "event-delete", sessionId, "plan=" + parts[2] + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-            }
-
-            /* ---- 报告 ---- */
-            if ("reports".equals(sub)) {
-                if (parts.length == 2 && "POST".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int status = this.context.addReport(sessionId, body);
-                    audit(ex, "report-add", sessionId, "status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "PUT".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int rptid = pathInt(parts[2]);
-                    if (!validSecsId(rptid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.updateReport(sessionId, rptid, body);
-                    audit(ex, "report-update", sessionId, "rptid=" + rptid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "DELETE".equals(method)) {
-                    int rptid = pathInt(parts[2]);
-                    if (!validSecsId(rptid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.removeReport(sessionId, rptid);
-                    audit(ex, "report-delete", sessionId, "rptid=" + rptid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-            }
-
-            /* ---- 采集事件(事件设置页) ---- */
-            if ("ceids".equals(sub)) {
-                if (parts.length == 2 && "POST".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int status = this.context.addCeid(sessionId, body);
-                    audit(ex, "ceid-add", sessionId, "status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "PUT".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int ceid = pathInt(parts[2]);
-                    if (!validSecsId(ceid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.updateCeid(sessionId, ceid, body);
-                    audit(ex, "ceid-update", sessionId, "ceid=" + ceid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "DELETE".equals(method)) {
-                    int ceid = pathInt(parts[2]);
-                    if (!validSecsId(ceid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.removeCeid(sessionId, ceid);
-                    audit(ex, "ceid-delete", sessionId, "ceid=" + ceid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-            }
-
-            /* ---- 状态变量 ---- */
-            if ("svids".equals(sub)) {
-                if (parts.length == 2 && "POST".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int status = this.context.addSvid(sessionId, body);
-                    audit(ex, "svid-add", sessionId, "status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "PUT".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int svid = pathInt(parts[2]);
-                    if (!validSecsId(svid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.updateSvid(sessionId, svid, body);
-                    audit(ex, "svid-update", sessionId, "svid=" + svid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 3 && "DELETE".equals(method)) {
-                    int svid = pathInt(parts[2]);
-                    if (!validSecsId(svid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.removeSvid(sessionId, svid);
-                    audit(ex, "svid-delete", sessionId, "svid=" + svid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 4 && "value".equals(parts[3]) && "PUT".equals(method)) {
-                    String body = requireBody(ex, MAX_CONFIG_BYTES);
-                    int svid = pathInt(parts[2]);
-                    if (!validSecsId(svid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.pinSvidValue(sessionId, svid, body);
-                    audit(ex, "svid-pin", sessionId, "svid=" + svid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-                if (parts.length == 4 && "value".equals(parts[3]) && "DELETE".equals(method)) {
-                    int svid = pathInt(parts[2]);
-                    if (!validSecsId(svid)) {
-                        respond(ex, 400, "{\"ok\":false,\"error\":\"bad-id\"}");
-                        return;
-                    }
-                    int status = this.context.unpinSvidValue(sessionId, svid);
-                    audit(ex, "svid-unpin", sessionId, "svid=" + svid + " status=" + status);
-                    respondStatus(ex, status);
-                    return;
-                }
-            }
-
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
-        } catch (com.shimizukenta.jsonhub.JsonHubParseException
-                | com.shimizukenta.jsonhub.JsonHubUnsupportedOperationException
-                | com.shimizukenta.jsonhub.JsonHubBuildException
-                | com.shimizukenta.jsonhub.JsonHubIndexOutOfBoundsException e) {
-            /* jsonhub 的解析/取值异常都是"请求体不合法"，不能漏到最外层变成 500 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\",\"message\":\""
-                    + json(e.getMessage()) + "\"}");
-        } catch (IllegalArgumentException e) {
-            /* 错误码与消息分开：以前把 message 直接塞进 error 字段且没加引号，
-               一旦 message 为 null（json(null) 返回空串）就拼出非法 JSON */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":\""
-                    + json(e.getMessage()) + "\"}");
-        }
-    }
 
     /** SECS-II 的 A 类型只允许 US-ASCII（ALTX 含中文时编码会失败）。 */
     private static boolean isAscii(String text) {

@@ -27,6 +27,20 @@ import {
 import { useParamTemplates } from '../../state/useParamTemplates';
 import type { ParamTemplate } from '../../api/paramTemplates';
 
+/** 列表/编辑框里用的简短形态名；detail（完整描述）放到 title 里，不占列宽。 */
+const FORM_KIND: Record<string, string> = {
+  const: '常量',
+  curve: '曲线',
+  expr: '表达式',
+  cycle: '按片',
+};
+
+function formKindOf(entry: ParamTemplate): string {
+  const raw = entry.body?.source;
+  const mode = isJsonObject(raw) && typeof raw.mode === 'string' ? raw.mode : '';
+  return FORM_KIND[mode] ?? '未配置';
+}
+
 /**
  * 独立工具 · 参数模板（参数变化逻辑库）。
  *
@@ -91,8 +105,15 @@ export function SvidTemplatePage({ backend, notifier }: PanelBaseProps): JSX.Ele
     {
       key: 'kind',
       header: '形式',
-      sortValue: (row) => templateShapeOf(row),
-      render: (row) => templateShapeOf(row) || '—',
+      sortValue: (row) => formKindOf(row),
+      render: (row) => {
+        const detail = templateShapeOf(row);
+        return (
+          <span className="template-form-kind" title={detail === '' ? undefined : detail}>
+            {formKindOf(row)}
+          </span>
+        );
+      },
     },
     { key: 'description', header: '说明', sortValue: (row) => row.description },
     {
@@ -362,7 +383,7 @@ function ParamTemplatePreview({
               </div>
               <div className="session-field">
                 <span className="session-field-name">形式</span>
-                <span>{templateShapeOf(entry) || '—'}</span>
+                <span>{templateShapeOf(entry) || formKindOf(entry)}</span>
               </div>
               <div className="session-field">
                 <span className="session-field-name">说明</span>
@@ -420,6 +441,18 @@ function ParamTemplateForm({
       ? '还没有值定义：先选一种形态'
       : '';
 
+  /* 编辑时的实时预览：跟着 wrapper 重算，用较少的采样点就够看出形态。
+     和只读预览共用同一套 simulateSource + ParamCurveChart，不另起一套渲染。 */
+  const previewSimulation = useMemo(
+    () => root === null || !isJsonObject(root.source)
+      ? null
+      : simulateSource(root.source, { samples: 181 }),
+    [root],
+  );
+  const formKind = root !== null && isJsonObject(root.source) && typeof root.source.mode === 'string'
+    ? FORM_KIND[root.source.mode] ?? '未配置'
+    : '未配置';
+
   const mutate = (fn: (target: JsonObject) => void) => {
     const edited = editDocument(wrapper, (draft) => {
       if (!isJsonObject(draft.source)) {
@@ -468,24 +501,64 @@ function ParamTemplateForm({
         </>
       }
     >
-      <div className="session-form">
-        <div className="session-field">
-          <span className="session-field-name">名称</span>
-          <TextField value={name} onCommit={setName} placeholder="例如 炉温三段程序" />
-        </div>
-        <div className="session-field">
-          <span className="session-field-name">说明</span>
-          <TextField allowBlank value={description} onCommit={setDescription} placeholder="一句话说明变化逻辑与量纲参考" />
-        </div>
-      </div>
+      <div className="template-form-grid">
+        {/* 基本：名称 / 说明两列，标签列固定宽，左右完全对齐 */}
+        <section className="template-form-section">
+          <h3 className="template-form-section-title">基本</h3>
+          <div className="template-form-fields">
+            <label className="template-form-field">
+              <span className="template-form-label">名称</span>
+              <TextField value={name} onCommit={setName} placeholder="例如 炉温三段程序" />
+            </label>
+            <label className="template-form-field">
+              <span className="template-form-label">说明</span>
+              <TextField allowBlank value={description} onCommit={setDescription} placeholder="一句话说明变化逻辑与量纲参考" />
+            </label>
+          </div>
+        </section>
 
-      {root !== null && (
-        <SourceEditor
-          def={root}
-          mutate={mutate}
-          library={libraryChoices.filter((item) => item.id !== editing?.id)}
-        />
-      )}
+        {/* 曲线：编辑器占满宽，下面挂一条 160px 高的实时预览 */}
+        <section className="template-form-section">
+          <h3 className="template-form-section-title">曲线</h3>
+          {root !== null && (
+            <>
+              <SourceEditor
+                def={root}
+                mutate={mutate}
+                library={libraryChoices.filter((item) => item.id !== editing?.id)}
+              />
+              <div className="template-form-preview">
+                <div className="template-form-preview-head">
+                  <span>实时曲线预览</span>
+                  <span className="template-form-preview-shape">{previewSimulation?.shape ?? '—'}</span>
+                </div>
+                <div className="template-form-preview-chart">
+                  <ParamCurveChart
+                    samples={previewSimulation?.samples ?? []}
+                    durationMs={previewSimulation?.durationMs ?? 60_000}
+                    cursorMs={null}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* 高级：只读说明，避免和下面的曲线编辑器混在一行里 */}
+        <section className="template-form-section">
+          <h3 className="template-form-section-title">高级</h3>
+          <div className="template-form-fields">
+            <div className="template-form-field">
+              <span className="template-form-label">形态</span>
+              <span className="template-form-readonly">{formKind}</span>
+            </div>
+            <div className="template-form-field">
+              <span className="template-form-label">复制语义</span>
+              <span className="template-form-readonly">设备选中时深拷贝一份，之后改库不影响已配置的设备。</span>
+            </div>
+          </div>
+        </section>
+      </div>
 
       {errorText !== '' && <p className="problems">{errorText}</p>}
     </Modal>

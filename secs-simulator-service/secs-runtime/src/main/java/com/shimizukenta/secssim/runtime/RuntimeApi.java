@@ -12,9 +12,9 @@ import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
+import com.shimizukenta.secssim.api.http.SessionCreated;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;
 import com.shimizukenta.secssim.api.http.TriggerOutcome;
@@ -51,9 +51,13 @@ final class RuntimeApi {
     /** 运行态改动写穿到 runtime.db；失败只记日志，不影响请求结果。 */
     private final RuntimePersister persister;
 
+    /** 设备实体 ↔ 会话实例的映射（运行态按设备 id 归属）。 */
+    private final DeviceSessions devices;
+
     RuntimeApi(SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, ParamTemplateStore paramTemplates, MessageLog messages,
-            AuditLog audit, HostSimRegistry hosts, BurstRunner bursts, RuntimePersister persister) {
+            AuditLog audit, HostSimRegistry hosts, BurstRunner bursts, RuntimePersister persister,
+            DeviceSessions devices) {
         this.sessions = sessions;
         this.launcher = launcher;
         this.configs = configs;
@@ -64,6 +68,7 @@ final class RuntimeApi {
         this.hosts = hosts;
         this.bursts = bursts;
         this.persister = persister;
+        this.devices = devices;
     }
 
     /* ---------- 会话查询 ---------- */
@@ -183,26 +188,6 @@ final class RuntimeApi {
 
     String eventsJson(String sessionId) {
         return this.sessions.find(sessionId).map(SessionRuntime::eventsJson).orElse(null);
-    }
-
-    EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
-        if (session == null) {
-            return EventOutcome.UNKNOWN_SESSION;
-        }
-        com.shimizukenta.secssim.app.session.PlanEnableOutcome outcome =
-                session.setEventEnabled(planId, enabled);
-        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.UNKNOWN_PLAN) {
-            return EventOutcome.UNKNOWN_PLAN;
-        }
-        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.NOT_ONLINE) {
-            /* 2026-11-16 设计 §2.2：离线时拒绝启动（409 not-online），界面禁用按钮 */
-            return EventOutcome.NOT_ONLINE;
-        }
-        /* next_fire_at 开始写入：周期计划 = enabledAt + k×period 的下一次（§2.1）；
-           启用态不再跨重启回放（D4），本行只承载统计与倒计时初值 */
-        this.persister.planState(sessionId, planId, enabled, session.nextFireAtOf(planId));
-        return EventOutcome.OK;
     }
 
     /* ---------- 报文与审计 ---------- */
@@ -426,35 +411,39 @@ final class RuntimeApi {
 
     /* ---------- 会话生命周期 ---------- */
 
-    SessionOutcome createSession(SessionCreateRequest request) {
+    SessionCreated createSession(SessionCreateRequest request) {
         try {
             SessionOverrides overrides = new SessionOverrides(
-                    request.sessionId(), request.bindHost(), request.port(), request.deviceId());
+                    request.bindHost(), request.port(), request.deviceId());
             String id = this.launcher.create(request.config(),
                     overrides.isEmpty() ? SessionOverrides.NONE : overrides);
             Log.info("新建会话 " + id + "（配置 " + request.config() + "）");
             /* 会话一注册就有 device_link 行（Bootstrap 的注册观察者写的），
-               这里补一次相位：刚建好可能已经 bind 成功（LISTENING）或失败（FAILED）。 */
+               这里补一次相位：刚建好可能已经 bind 成功（LISTENING）或失败（FAILED）。
+               运行态按设备 id 归属，不能用会话 id。 */
+            String deviceId = this.devices.deviceIdOf(id);
             this.sessions.find(id).ifPresent(session ->
-                    this.persister.devicePhase(id, phaseName(session.linkPhase()), session.lastError()));
-            return SessionOutcome.OK;
+                    this.persister.devicePhase(deviceId, phaseName(session.linkPhase()), session.lastError()));
+            return new SessionCreated(SessionOutcome.OK, id);
         } catch (ConfigException e) {
             /* 配置名非法、文件读不了、内容编译不过——都是"这台设备起不来" */
             Log.error("新建会话失败（配置）: " + e.getMessage(), null);
-            return SessionOutcome.FAILED;
+            return SessionCreated.failed(SessionOutcome.FAILED);
         } catch (IOException e) {
             /* 到这一步配置已经是好的，只剩端口没绑上 */
             Log.error("新建会话失败（端口绑定）: " + e.getMessage(), null);
-            return SessionOutcome.FAILED;
+            return SessionCreated.failed(SessionOutcome.FAILED);
         } catch (IllegalArgumentException e) {
             Log.error("新建会话失败（标识冲突）: " + e.getMessage(), null);
-            return SessionOutcome.CONFLICT;
+            return SessionCreated.failed(SessionOutcome.CONFLICT);
         }
     }
 
     SessionOutcome closeSession(String sessionId) {
         /* 会话没了，压测状态也没有查询入口；一并清掉，避免 map 随会话增删无限增长 */
         this.bursts.cancel(sessionId);
+        /* 运行态按设备 id 归属：会话 id 只用于注册表与压测表 */
+        String deviceId = this.devices.deviceIdOf(sessionId);
         /* 先收掉这台设备的主机模拟器：会话都删了，主机实例不该继续挂在列表里、
            占着一条已经死掉的连接。 */
         this.hosts.closeAllOf(sessionId);
@@ -464,8 +453,8 @@ final class RuntimeApi {
         if (closed) {
             /* 关闭 = 销毁（v1 语义）：按设计 §2.4「destroy 才清」把运行态编辑一起清掉。
                行本身留着并标 STOPPED，界面据此显示「已断开」而不是凭空消失。 */
-            this.persister.clearEdits(sessionId);
-            this.persister.devicePhase(sessionId, phaseName(SessionRuntime.LinkPhase.STOPPED), lastError);
+            this.persister.clearEdits(deviceId);
+            this.persister.devicePhase(deviceId, phaseName(SessionRuntime.LinkPhase.STOPPED), lastError);
         }
         return closed ? SessionOutcome.OK : SessionOutcome.UNKNOWN_SESSION;
     }
@@ -483,22 +472,23 @@ final class RuntimeApi {
                否则注册观察者会把刚清掉的钉值/计划覆盖又装回来。
                清之前先抓快照：重建可能因配置非法/端口被占失败，失败时旧会话会被
                launcher 拉回来，但编辑已经删了——不回滚等于"重载失败一次，钉值全丢"。 */
-            RuntimePersister.Edits before = this.persister.snapshot(sessionId);
-            this.persister.clearEdits(sessionId);
+            String deviceId = this.devices.deviceIdOf(sessionId);
+            RuntimePersister.Edits before = this.persister.snapshot(deviceId);
+            this.persister.clearEdits(deviceId);
             try {
                 this.launcher.reload(sessionId);
             } catch (ConfigException | IOException failure) {
-                this.persister.restore(sessionId, before);
+                this.persister.restore(deviceId, before);
                 this.sessions.find(sessionId).ifPresent(session -> {
                     if (session instanceof HsmsSessionRuntime hsms) {
-                        this.persister.replay(hsms, sessionId);
+                        this.persister.replay(hsms, deviceId);
                     }
                 });
                 throw failure;
             }
             Log.info("会话 " + sessionId + " 已按配置重载");
             this.sessions.find(sessionId).ifPresent(session ->
-                    this.persister.devicePhase(sessionId, phaseName(session.linkPhase()), session.lastError()));
+                    this.persister.devicePhase(deviceId, phaseName(session.linkPhase()), session.lastError()));
             return SessionOutcome.OK;
         } catch (ConfigException e) {
             /* 配置有问题时旧会话原样跑着，这里只是如实报告失败 */

@@ -46,8 +46,7 @@ class SessionLauncherTest {
         this.launcher = new SessionLauncher(this.sessions, new EventBus(), this.workDir);
         /* 3.0：配置正文在 config.db，launcher 经门面读写 */
         var db = com.shimizukenta.secssim.store.Db.open(this.workDir.resolve("db").normalize());
-        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(db);
         this.launcher.configStore(new ConfigStore(this.repo,
                 new com.shimizukenta.secssim.store.TemplateRepository(db), this.workDir));
     }
@@ -56,8 +55,9 @@ class SessionLauncherTest {
     void createsSessionFromWorkDirConfig() throws Exception {
         write("line1.json", config("line1", "V1"));
 
-        assertEquals("line1", this.launcher.create("line1.json"));
-        assertTrue(this.launcher.sourceOf("line1").isPresent(), "建完必须记住配置来源，否则不能重载");
+        String id = this.launcher.create("line1.json");
+        assertTrue(id.startsWith("ses_"), "会话 id 必须是 ses_ ULID: " + id);
+        assertTrue(this.launcher.sourceOf(id).isPresent(), "建完必须记住配置来源，否则不能重载");
     }
 
     @Test
@@ -101,12 +101,12 @@ class SessionLauncherTest {
         int port = freePort();
         write("a.json", configWithPort("a", "A", port));
         write("b.json", configWithPort("b", "B", port));
-        this.launcher.create("a.json");
+        String first = this.launcher.create("a.json");
 
         IOException error = assertThrows(IOException.class, () -> this.launcher.create("b.json"));
         assertTrue(error.getMessage().contains("占用"), error.getMessage());
-        assertFalse(this.sessions.find("b").isPresent(), "端口冲突时不能留下半个会话");
-        assertTrue(this.sessions.find("a").isPresent(), "先建的会话要原样跑着");
+        assertEquals(1, this.sessions.list().size(), "端口冲突时不能留下半个会话");
+        assertTrue(this.sessions.find(first).isPresent(), "先建的会话要原样跑着");
     }
 
     /**
@@ -127,7 +127,7 @@ class SessionLauncherTest {
 
             IOException error = assertThrows(IOException.class, () -> this.launcher.create("ext.json"));
             assertTrue(error.getMessage().contains("不可绑定"), error.getMessage());
-            assertFalse(this.sessions.find("ext").isPresent(), "创建失败不能留下半个会话");
+            assertTrue(this.sessions.list().isEmpty(), "创建失败不能留下半个会话");
         }
     }
 
@@ -141,13 +141,13 @@ class SessionLauncherTest {
     void reloadSamePortRebuildsAndKeepsListening() throws Exception {
         int port = freePort();
         write("same.json", configWithPort("same", "V1", port));
-        this.launcher.create("same.json");
+        String id = this.launcher.create("same.json");
 
         write("same.json", configWithPort("same", "V2", port)
                 .replace("\"deviceId\": 61", "\"deviceId\": 62"));
 
-        assertTrue(this.launcher.reload("same"), "同端口重建必须成功");
-        assertEquals(SessionState.OPEN, this.sessions.find("same").orElseThrow().state());
+        assertTrue(this.launcher.reload(id), "同端口重建必须成功");
+        assertEquals(SessionState.OPEN, this.sessions.find(id).orElseThrow().state());
 
         try (java.net.Socket probe = new java.net.Socket()) {
             probe.connect(new java.net.InetSocketAddress("127.0.0.1", port), 2_000);
@@ -158,41 +158,41 @@ class SessionLauncherTest {
     @Test
     void closeRemovesSessionAndItsSource() throws Exception {
         write("line1.json", config("line1", "V1"));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
-        assertTrue(this.launcher.close("line1"));
-        assertFalse(this.sessions.find("line1").isPresent());
-        assertFalse(this.launcher.sourceOf("line1").isPresent());
-        assertFalse(this.launcher.close("line1"), "重复关闭应如实返回 false");
+        assertTrue(this.launcher.close(id));
+        assertFalse(this.sessions.find(id).isPresent());
+        assertFalse(this.launcher.sourceOf(id).isPresent());
+        assertFalse(this.launcher.close(id), "重复关闭应如实返回 false");
     }
 
     @Test
     void reloadPicksUpEditedConfig() throws Exception {
         write("line1.json", config("line1", "BEFORE"));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
-        assertTrue(this.sessions.find("line1").orElseThrow().deviceName().contains("BEFORE"));
+        assertTrue(this.sessions.find(id).orElseThrow().deviceName().contains("BEFORE"));
 
         write("line1.json", config("line1", "AFTER"));
-        assertTrue(this.launcher.reload("line1"));
+        assertTrue(this.launcher.reload(id));
 
-        assertTrue(this.sessions.find("line1").orElseThrow().deviceName().contains("AFTER"));
+        assertTrue(this.sessions.find(id).orElseThrow().deviceName().contains("AFTER"));
     }
 
     /** 只动事件编排：热生效，会话实例不变、主机连接不断。 */
     @Test
     void reloadWithOnlyEventChangeKeepsSameSessionInstance() throws Exception {
         write("line1.json", config("line1", "V1"));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
         com.shimizukenta.secssim.app.session.SessionRuntime before =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
 
         write("line1.json", configWithPlan("line1", "V1", "beat", 9000));
-        assertTrue(this.launcher.reload("line1"));
+        assertTrue(this.launcher.reload(id));
 
         com.shimizukenta.secssim.app.session.SessionRuntime after =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
         assertSame(before, after, "结构与连接标识都没变：必须原地热生效而不是重建");
         String events = ((com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime) after).eventsJson();
         assertTrue(events.contains("9000"), "新编排要可见: " + events);
@@ -202,17 +202,17 @@ class SessionLauncherTest {
     @Test
     void reloadWithEquipmentChangeKeepsSameSessionInstance() throws Exception {
         write("line1.json", config("line1", "BEFORE"));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
         com.shimizukenta.secssim.app.session.SessionRuntime before =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
         assertTrue(before.deviceName().contains("BEFORE"));
 
         write("line1.json", config("line1", "AFTER"));
-        assertTrue(this.launcher.reload("line1"));
+        assertTrue(this.launcher.reload(id));
 
         com.shimizukenta.secssim.app.session.SessionRuntime after =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
         assertSame(before, after, "只有连接标识变化才重建；设备结构变化热生效");
         assertTrue(after.deviceName().contains("AFTER"), "新设备模型要立即可见");
     }
@@ -221,16 +221,16 @@ class SessionLauncherTest {
     @Test
     void reloadWithSessionChangeReplacesSession() throws Exception {
         write("line1.json", configWithPort("line1", "V1", 4701));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
         com.shimizukenta.secssim.app.session.SessionRuntime before =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
 
         write("line1.json", configWithPort("line1", "V1", 4702));
-        assertTrue(this.launcher.reload("line1"));
+        assertTrue(this.launcher.reload(id));
 
         com.shimizukenta.secssim.app.session.SessionRuntime after =
-                this.sessions.find("line1").orElseThrow();
+                this.sessions.find(id).orElseThrow();
         assertNotSame(before, after, "连接标识变了：必须关旧开新");
     }
 
@@ -238,15 +238,15 @@ class SessionLauncherTest {
     @Test
     void brokenConfigLeavesOldSessionRunning() throws Exception {
         write("line1.json", config("line1", "V1"));
-        this.launcher.create("line1.json");
+        String id = this.launcher.create("line1.json");
 
         /* 存一份 JSON 合法但配置非法的正文（仓库保证入库正文可解析，
            所以"写坏"的现代形态是语义非法：版本号越界） */
         this.repo.saveDocument("line1", "{\"schemaVersion\": 99}", null, "test", "");
 
-        assertThrows(ConfigException.class, () -> this.launcher.reload("line1"));
-        assertTrue(this.sessions.find("line1").isPresent(), "配置坏了旧会话必须还在");
-        assertEquals(SessionState.OPEN, this.sessions.find("line1").orElseThrow().state());
+        assertThrows(ConfigException.class, () -> this.launcher.reload(id));
+        assertTrue(this.sessions.find(id).isPresent(), "配置坏了旧会话必须还在");
+        assertEquals(SessionState.OPEN, this.sessions.find(id).orElseThrow().state());
     }
 
     /**
@@ -269,7 +269,7 @@ class SessionLauncherTest {
         String before = Files.readString(file, StandardCharsets.UTF_8);
 
         var session = this.launcher.startFromFile(file,
-                new SessionOverrides(null, null, overridePort, 62));
+                new SessionOverrides(null, overridePort, 62));
         try {
             assertEquals(SessionState.OPEN, session.state());
 
@@ -303,7 +303,7 @@ class SessionLauncherTest {
             if (this.repo.findDevice(stem).isPresent()) {
                 this.repo.saveDocument(stem, content, null, "test", "");
             } else {
-                this.repo.createDevice(stem, stem, null, content, true, "test");
+                this.repo.createDevice(stem, null, content, true, "test");
             }
         } catch (RuntimeException e) {
             throw new IOException(e.getMessage(), e);

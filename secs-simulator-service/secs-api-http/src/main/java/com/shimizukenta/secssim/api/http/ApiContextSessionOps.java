@@ -3,8 +3,7 @@ package com.shimizukenta.secssim.api.http;
 import java.io.IOException;
 
 /**
- * {@link ApiContext} 的会话域：会话生命周期、事件/报警触发、目录（计划/报告/CEID/SVID）编辑
- * 与设备运行时（v2）操作。
+ * {@link ApiContext} 的会话域：会话生命周期、事件/报警触发与设备运行时（v2）操作。
  *
  * <p>从 {@code ApiContext} 按职责拆出，方法集合与默认语义保持不变。</p>
  */
@@ -88,93 +87,6 @@ public interface ApiContextSessionOps {
     }
 
     /**
-     * 运行时启用/禁用一个编排计划。
-     *
-     * @param sessionId 会话标识
-     * @param planId    计划标识
-     * @param enabled   是否启用
-     * @return 结果
-     */
-    default EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-        return EventOutcome.UNKNOWN_SESSION;
-    }
-
-    /* ==================================================================
-     * 运行时编辑(设备页·事件/报告/状态变量)。返回 HTTP 状态码:
-     * 200/201 成功、400 请求不合法(解析失败)、404 会话或目标不存在、409 冲突。
-     * ================================================================== */
-
-    /** 新增编排计划;planJson 形如 {"id","ceid","trigger":{...},"actions":[...]}。 */
-    default int addEventPlan(String sessionId, String planJson) {
-        return 404;
-    }
-
-    /** 更新编排计划。 */
-    default int updateEventPlan(String sessionId, String planId, String planJson) {
-        return 404;
-    }
-
-    /** 删除编排计划。 */
-    default int removeEventPlan(String sessionId, String planId) {
-        return 404;
-    }
-
-    /** 新增报告;reportJson 形如 {"id","slot","svids":[...]}。 */
-    default int addReport(String sessionId, String reportJson) {
-        return 404;
-    }
-
-    /** 更新报告。 */
-    default int updateReport(String sessionId, int rptid, String reportJson) {
-        return 404;
-    }
-
-    /** 删除报告。 */
-    default int removeReport(String sessionId, int rptid) {
-        return 404;
-    }
-
-    /** 新增采集事件;ceidJson 形如 {"id","slot","reports":[...]}。 */
-    default int addCeid(String sessionId, String ceidJson) {
-        return 404;
-    }
-
-    /** 更新采集事件(符号名/绑定报告)。 */
-    default int updateCeid(String sessionId, int ceid, String ceidJson) {
-        return 404;
-    }
-
-    /** 删除采集事件。 */
-    default int removeCeid(String sessionId, int ceid) {
-        return 404;
-    }
-
-    /** 新增状态变量;svidJson 形如 {"id","slot","type","owner"?,"unit"?}。 */
-    default int addSvid(String sessionId, String svidJson) {
-        return 404;
-    }
-
-    /** 更新状态变量。 */
-    default int updateSvid(String sessionId, int svid, String svidJson) {
-        return 404;
-    }
-
-    /** 删除状态变量。 */
-    default int removeSvid(String sessionId, int svid) {
-        return 404;
-    }
-
-    /** 「设定」状态变量的值(valueJson 形如 {"value":1.25})。 */
-    default int pinSvidValue(String sessionId, int svid, String valueJson) {
-        return 404;
-    }
-
-    /** 取消「设定」。 */
-    default int unpinSvidValue(String sessionId, int svid) {
-        return 404;
-    }
-
-    /**
      * 手动发送一条 SML 报文。
      *
      * @param sessionId 会话标识
@@ -195,24 +107,24 @@ public interface ApiContextSessionOps {
      * @return 结果
      */
     default SessionOutcome createSession(String configName) {
-        return createSession(SessionCreateRequest.of(configName));
+        return createSession(SessionCreateRequest.of(configName)).outcome();
     }
 
     /**
      * 新建一个会话，允许用部署期覆盖替换配置里的连接标识。
      *
-     * <p>默认实现忽略覆盖、按配置原文建——不支持覆盖的形态（如 CLI 演示）自然退化。</p>
+     * <p>默认实现忽略覆盖、按配置原文建——不支持覆盖的形态（如 CLI 演示）自然退化。
+     * 会话 id 由运行时生成，随结果一起返回。</p>
      *
      * @param request 配置名 + 部署期覆盖
-     * @return 结果
+     * @return 结果（含新会话 id）
      */
-    default SessionOutcome createSession(SessionCreateRequest request) {
+    default SessionCreated createSession(SessionCreateRequest request) {
         /* 不带覆盖时委托给旧的 String 重载：已有实现（含测试桩）不用跟着改 */
-        if (request.sessionId() == null && request.bindHost() == null
-                && request.port() == null && request.deviceId() == null) {
-            return createSession(request.config());
+        if (request.bindHost() == null && request.port() == null && request.deviceId() == null) {
+            return new SessionCreated(createSession(request.config()), "");
         }
-        return SessionOutcome.FAILED;
+        return SessionCreated.failed(SessionOutcome.FAILED);
     }
 
     /**
@@ -245,7 +157,7 @@ public interface ApiContextSessionOps {
     /**
      * v2：执行台账查询。
      *
-     * @param deviceId 设备 id（ULID 或 legacy stem）
+     * @param deviceId 设备 id（{@code dev_} ULID）或配置名 stem
      * @param limit    条数上限
      * @param planId   计划过滤；null = 全部
      * @param status   状态过滤；null = 全部
@@ -480,7 +392,7 @@ public interface ApiContextSessionOps {
     /**
      * v2：设备链路相位（device_link 行 + 内存相位）。
      *
-     * @param deviceId 设备 id（ULID 或 v1 legacy stem，两者等价）
+     * @param deviceId 设备 id（{@code dev_} ULID）或配置名 stem
      * @return JSON；设备不存在返回 {@code null}
      */
     default String deviceLinkV2Json(String deviceId) {
@@ -532,6 +444,20 @@ public interface ApiContextSessionOps {
      * @return 结果
      */
     default SessionOutcome deviceReloadV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：销毁设备会话（{@code DELETE /api/v2/devices/{id}}）。
+     *
+     * <p>与 {@link #deviceDisconnectV2} 的区别：断开只放链路，销毁要释放端口、
+     * 把会话从注册表移除，并清掉钉值 / 计划覆盖 / 目录编辑等运行态。
+     * 设备实体与配置正文保留（那是 {@code DELETE /api/v1/configs/{name}} 的事）。</p>
+     *
+     * @param deviceId 设备 id
+     * @return 结果
+     */
+    default SessionOutcome destroyDeviceV2(String deviceId) {
         return SessionOutcome.UNKNOWN_SESSION;
     }
 }

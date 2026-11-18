@@ -201,12 +201,15 @@ class NativeRuntimeIT {
                             .timeout(Duration.ofSeconds(10)).GET().build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             assertEquals(200, sessions.statusCode(), sessions.body());
-            assertTrue(sessions.body().contains("\"id\":\"etch-01\""), sessions.body());
+            /* B1：会话 id 是服务端生成的 ses_ ULID，配置名只记在 config 字段 */
+            String sessionId = sessionIdOf(sessions.body());
+            assertTrue(sessionId != null && sessionId.startsWith("ses_"), sessions.body());
+            assertTrue(sessions.body().contains("\"config\":\"etch-01.json\""), sessions.body());
             assertTrue(sessions.body().contains("\"state\":\"OPEN\""), sessions.body());
             assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
 
             /* 没有主机在线时触发应得到 409（设备状态），而不是 500（服务器错误） */
-            assertEquals(409, trigger(hsnsBase(httpPort)).statusCode(),
+            assertEquals(409, trigger(hsnsBase(httpPort, sessionId)).statusCode(),
                     "无主机会话时触发 S6F11 应返回 409");
 
             HsmsSsCommunicatorConfig config = new HsmsSsCommunicatorConfig();
@@ -232,7 +235,7 @@ class NativeRuntimeIT {
                 assertEquals(1, unitId, "UNIT_ID 应为 CH1");
 
                 /* 主机在线时，API 触发的 S6F11 才能真正发出去 */
-                assertEquals(202, trigger(hsnsBase(httpPort)).statusCode(),
+                assertEquals(202, trigger(hsnsBase(httpPort, sessionId)).statusCode(),
                         "主机在线时触发 S6F11 应为 202");
             }
 
@@ -248,9 +251,20 @@ class NativeRuntimeIT {
         }
     }
 
-    private static String hsnsBase(int httpPort) {
+    /** 从会话列表正文里取第一个会话 id（B1：id 是 ses_ ULID，不是配置名）。 */
+    private static String sessionIdOf(String body) {
+        int at = body.indexOf("\"id\":\"ses_");
+        if (at < 0) {
+            return null;
+        }
+        int start = at + 6;
+        int end = body.indexOf('"', start);
+        return end < 0 ? null : body.substring(start, end);
+    }
+
+    private static String hsnsBase(int httpPort, String sessionId) {
         /* etch-01 是第一个演示会话，监听 --hsms-port 指定的端口 */
-        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/etch-01/ceid/2001";
+        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/" + sessionId + "/ceid/2001";
     }
 
     private static HttpResponse<String> trigger(String url) throws Exception {
