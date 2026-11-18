@@ -387,6 +387,16 @@ public interface ApiContextSessionOps {
         return TriggerOutcome.UNKNOWN_SESSION;
     }
 
+    /**
+     * v2：设备的活动报警清单（信封 {@code {"alarms":[…]}}，对齐 v2 查询端点的对象形状）。
+     *
+     * @param deviceId 设备 id（{@code dev_} ULID）或配置名 stem
+     * @return JSON 文本；设备不存在返回 {@code null}
+     */
+    default String alarmsJsonV2(String deviceId) {
+        return null;
+    }
+
     /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
 
     /**

@@ -251,22 +251,38 @@ paths:
     get:
       tags: [sessions]
       summary: 当前活动报警
+      deprecated: true
+      description: |
+        已废弃：响应带 Deprecation/Sunset 头，3.x 周期后移除。
+        替代端点 GET /api/v2/devices/{id}/runtime/alarms（接受设备 id / 配置名 / 会话 id）。
+        200 形状借废弃期从裸数组收敛成 {"alarms":[…],"hint":…} 信封，与 v2 同形。
       parameters:
         - $ref: '#/components/parameters/SessionId'
       responses:
         '200':
-          description: 报警数组
+          description: 报警信封（alarms 数组 + 指向 v2 替代端点的 hint）
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Alarm' }
+                type: object
+                required: [alarms, hint]
+                properties:
+                  alarms:
+                    type: array
+                    items: { $ref: '#/components/schemas/Alarm' }
+                  hint:
+                    type: string
+                    description: 迁移提示，固定指向 v2 替代端点
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/sessions/{id}/terminal:
     get:
       tags: [sessions]
       summary: 最近终端消息（S10F3）
+      deprecated: true
+      description: |
+        已废弃：响应带 Deprecation/Sunset 头，3.x 周期后移除。
+        没有 v2 替代端点——废弃只为声明形状冻结（仍是裸数组、无 hint），不再演进。
       parameters:
         - $ref: '#/components/parameters/SessionId'
       responses:
@@ -313,77 +329,6 @@ paths:
                     items: { $ref: '#/components/schemas/EventPlan' }
         '404':
           $ref: '#/components/responses/NotFound'
-    post:
-      tags: [control]
-      summary: 新增编排计划（运行时,不写回配置）
-      description: |
-        计划 JSON:{"id","ceid","trigger":{"type":"at|periodic|onCondition|afterEvent",...},"actions":[...]}。事件只上报、不改值。
-        trigger 字段随 type:at→atMs;periodic→periodMs/jitterMs;
-        onCondition→expression/debounceMs;afterEvent→sourcePlan/delayMs。
-        效果元素 {"svid","op":"set|add|pulse|shift|resume",...}。
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: string }
-      responses:
-        '201': { description: 已新增 }
-        '400': { description: 计划不合法(原因在 error) }
-        '404': { description: 会话不存在 }
-        '409': { description: 计划 id 已存在 }
-  /api/v1/sessions/{id}/events/{planId}:
-    post:
-      tags: [control]
-      summary: 运行时启用/禁用一个编排计划
-      description: 只影响当前进程；重载会恢复配置里的状态。禁用期间的事件不补发。
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-        - name: planId
-          in: path
-          required: true
-          schema: { type: string }
-        - name: enabled
-          in: query
-          schema: { type: boolean, default: true }
-      responses:
-        '200':
-          description: 已切换
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          description: unknown-session 或 unknown-plan
-    put:
-      tags: [control]
-      summary: 更新编排计划（运行时）
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-        - name: planId
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: string }
-      responses:
-        '200': { description: 已更新 }
-        '400': { description: 计划不合法 }
-        '404': { description: 会话或计划不存在 }
-    delete:
-      tags: [control]
-      summary: 删除编排计划（连同待触发队列与去抖状态）
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-        - name: planId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200': { description: 已删除 }
-        '404': { description: 会话或计划不存在 }
   /api/v1/sessions/{id}/message:
     post:
       tags: [control]
@@ -547,189 +492,6 @@ paths:
         '404':
           description: unknown-session
         '409': { description: 该会话已有压测在跑（burst-running）或执行器队列满（burst-busy） }
-  /api/v1/sessions/{id}/ceids:
-    post:
-      tags: [control]
-      summary: 新增采集事件（运行时;CEID 重复回 409）
-      description: '事件 JSON:{"id","slot","reports":[RPTID...],"owner"?}。绑定报告属于事件设置页。'
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: string }
-      responses:
-        '201': { description: 已新增 }
-        '400': { description: 定义不合法(原因在 error) }
-        '404': { description: 会话不存在 }
-        '409': { description: CEID 已存在 }
-  /api/v1/sessions/{id}/ceids/{ceid}:
-    put:
-      tags: [control]
-      summary: 更新采集事件（事件名/绑定报告）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: ceid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已更新 }
-        '404': { description: 会话或事件不存在 }
-    delete:
-      tags: [control]
-      summary: 删除采集事件
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: ceid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已删除 }
-        '404': { description: 会话或事件不存在 }
-  /api/v1/sessions/{id}/reports:
-    post:
-      tags: [control]
-      summary: 新增报告（运行时;RPTID 重复回 409）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: string }
-      responses:
-        '201': { description: 已新增 }
-        '400': { description: 报告不合法 }
-        '404': { description: 会话不存在 }
-        '409': { description: RPTID 已存在 }
-  /api/v1/sessions/{id}/reports/{rptid}:
-    put:
-      tags: [control]
-      summary: 更新报告（变量列表等）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: rptid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已更新 }
-        '404': { description: 会话或报告不存在 }
-    delete:
-      tags: [control]
-      summary: 删除报告
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: rptid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已删除 }
-        '404': { description: 会话或报告不存在 }
-  /api/v1/sessions/{id}/svids:
-    post:
-      tags: [control]
-      summary: 新增状态变量（运行时;默认绑定恒 0 曲线,可用值设定钉住）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: string }
-      responses:
-        '201': { description: 已新增 }
-        '400': { description: 变量不合法 }
-        '404': { description: 会话不存在 }
-        '409': { description: SVID 已存在 }
-  /api/v1/sessions/{id}/svids/{svid}:
-    put:
-      tags: [control]
-      summary: 更新状态变量（符号名/归属/类型/单位）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: svid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已更新 }
-        '404': { description: 会话或变量不存在 }
-    delete:
-      tags: [control]
-      summary: 删除状态变量（连同其值绑定）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: svid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已删除 }
-        '404': { description: 会话或变量不存在 }
-  /api/v1/sessions/{id}/svids/{svid}/value:
-    put:
-      tags: [control]
-      summary: 「设定」状态变量的值（钉住,覆盖曲线与事件效果）
-      description: '请求体 {"value": <number>}。钉住直到取消设定或会话重载。'
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: svid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已设定 }
-        '404': { description: 会话或变量不存在 }
-    delete:
-      tags: [control]
-      summary: 取消「设定」
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: svid
-          in: path
-          required: true
-          schema: { type: integer }
-      responses:
-        '200': { description: 已取消 }
-        '404': { description: 会话不存在 }
   /api/v1/sessions/{id}/host-sim:
     get:
       tags: [control]
@@ -1076,6 +838,30 @@ paths:
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
         '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
+  /api/v2/devices/{id}/runtime/alarms:
+    get:
+      tags: [devices]
+      summary: 当前活动报警快照
+      description: |
+        设备侧（S5F1 置位且未清除）的活动报警。{"alarms":[…]} 信封与 v2 查询端点的
+        对象形状一致；id 接受设备 id / 配置名 stem / 会话 id。替代已废弃的
+        v1 GET /api/v1/sessions/{id}/alarms。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 活动报警信封（按 ALID 升序）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alarms]
+                properties:
+                  alarms:
+                    type: array
+                    items: { $ref: '#/components/schemas/Alarm' }
+        '404': { description: 设备不存在（device-not-found） }
+        '405': { description: GET 以外的方法 }
   /api/v2/devices/{id}/runtime/ceid/{ceid}:
     post:
       tags: [devices]

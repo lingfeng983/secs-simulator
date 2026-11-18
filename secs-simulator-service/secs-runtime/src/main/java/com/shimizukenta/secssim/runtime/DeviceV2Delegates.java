@@ -271,6 +271,21 @@ final class DeviceV2Delegates {
                 : this.api.triggerAlarm(session.id(), alid, set, text, category);
     }
 
+    /**
+     * 设备的活动报警快照（{@code GET /runtime/alarms}）。
+     *
+     * <p>回 {@code {"alarms":[…]}} 信封而不是裸数组：v2 查询端点统一对象形状
+     * （对齐 {@code executions} 的 {@code items}），前端不再按端点猜形状。
+     * 会话 id（{@code ses_}）也能寻址——{@link DeviceSessions#sessionOf} 经配置名
+     * 反查设备，前端拿会话 id 调 v2 设备端点是既有用法。</p>
+     */
+    String alarmsJsonV2(String deviceId) {
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
+        /* session.alarmsJson() 是裸数组，信封在这层包：上下文方法回完整响应体，
+           与 cycleJsonV2 / deviceLinkV2Json 同约定 */
+        return session == null ? null : "{\"alarms\":" + session.alarmsJson() + "}";
+    }
+
     /* ---------- 链路 ---------- */
 
     String deviceLinkV2Json(String deviceId) {

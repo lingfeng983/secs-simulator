@@ -13,7 +13,7 @@ function hasNonAscii(text: string): boolean {
 /**
  * 报警面板：当前活动报警 + 编辑报警并发送 / 压测。
  *
- * <p>活动报警清单以服务端为准（{@code GET /sessions/{id}/alarms}）：
+ * <p>活动报警清单以服务端为准（{@code GET /api/v2/devices/{id}/runtime/alarms}）：
  * 进面板或切设备时拉一次快照，之后用本会话的 S5F1 通知做增量——置位加一行、
  * 清除删一行。刷新页面不会丢状态，也不存在"计数比明细多"这种事。
  * 历史报文去右侧消息监控看 S5F1/S5F2 更直接。</p>

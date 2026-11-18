@@ -48,13 +48,13 @@ type SessionApi = Pick<
 >;
 
 /**
- * 活动报警清单的地址。
+ * 活动报警清单的地址（v2 设备运行时端点）。
  *
- * <p>后端目前挂在 v1 会话命名空间下；后续批次会迁到
- * {@code /api/v2/devices/{id}/runtime/alarms}，届时只改这一行。</p>
+ * <p>传的是会话 id，与其它 v2 设备调用（setDeviceOnline 等）同源；
+ * 后端 sessionOf 对会话 id / 设备 id / 配置名 stem 三种写法都能解析。</p>
  */
 function activeAlarmsUrl(sessionId: string): string {
-  return apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`);
+  return apiUrl(`/api/v2/devices/${encodeURIComponent(sessionId)}/runtime/alarms`);
 }
 
 export const sessionApi: SessionApi = {
@@ -151,12 +151,11 @@ export const sessionApi: SessionApi = {
     );
   },
   async activeAlarms(sessionId) {
-    /* 后端回的是裸数组（按 ALID 升序）。夹具/老后端没有这个端点时可能回对象，
-       这里兜底成空清单，面板不至于整块崩掉。 */
-    const body = await readJson<ActiveAlarm[] | { alarms?: ActiveAlarm[] }>(
+    /* v2 统一对象形状：{"alarms":[…]}（按 ALID 升序），不再兼容裸数组 */
+    const body = await readJson<{ alarms: ActiveAlarm[] }>(
       await request(activeAlarmsUrl(sessionId)),
     );
-    return Array.isArray(body) ? body : body.alarms ?? [];
+    return body.alarms ?? [];
   },
   async catalog(sessionId) {
     const body = await readJson<Partial<Catalog>>(

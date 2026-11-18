@@ -468,6 +468,11 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.deviceV2.triggerAlarmV2(deviceId, alid, set, text, category);
     }
 
+    @Override
+    public String alarmsJsonV2(String deviceId) {
+        return this.deviceV2.alarmsJsonV2(deviceId);
+    }
+
     /* ---------- 3.0 v2：设备链路（设计 §2.5） ---------- */
 
     @Override

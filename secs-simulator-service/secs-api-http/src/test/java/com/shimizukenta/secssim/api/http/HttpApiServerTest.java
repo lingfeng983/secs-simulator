@@ -137,6 +137,12 @@ class HttpApiServerTest {
             }
 
             @Override
+            public String alarmsJsonV2(String deviceId) {
+                /* v2 约定上下文方法回完整信封（{"alarms":[…]}），HTTP 层只转发 */
+                return "missing".equals(deviceId) ? null : "{\"alarms\":[{\"alid\":1001}]}";
+            }
+
+            @Override
             public String terminalMessagesJson(String sessionId) {
                 return "missing".equals(sessionId) ? null : "[{\"tid\":1,\"text\":\"LINE READY\"}]";
             }
@@ -330,14 +336,49 @@ class HttpApiServerTest {
     void alarmsAndTerminalQueriesReturnJson() throws Exception {
         HttpResponse<String> alarms = get("/api/v1/sessions/s1/alarms", null);
         assertEquals(200, alarms.statusCode());
-        assertTrue(alarms.body().contains("\"alid\":1001"), alarms.body());
+        /* v1 alarms 的 200 已从裸数组收敛成 {"alarms":[…],"hint":…} 信封（借废弃期换形状，
+           与 v2 /runtime/alarms 同形）。断言有意按新形状写，别"修"回裸数组。 */
+        assertTrue(alarms.body().startsWith("{\"alarms\":[{\"alid\":1001}]"), alarms.body());
+        assertTrue(alarms.body().contains("\"hint\":\"use GET /api/v2/devices/{id}/runtime/alarms\""),
+                alarms.body());
+        assertEquals("true", alarms.headers().firstValue("Deprecation").orElse(""),
+                "v1 alarms 要能被客户端识别为已废弃");
+        assertTrue(alarms.headers().firstValue("Sunset").isPresent(),
+                "Sunset 缺失：客户端排不出迁移日期");
 
         HttpResponse<String> terminal = get("/api/v1/sessions/s1/terminal", null);
         assertEquals(200, terminal.statusCode());
         assertTrue(terminal.body().contains("LINE READY"), terminal.body());
+        /* terminal 没有 v2 替代端点：只挂废弃头，响应形状与 hint 都不动 */
+        assertEquals("true", terminal.headers().firstValue("Deprecation").orElse(""));
+        assertTrue(terminal.headers().firstValue("Sunset").isPresent());
 
         assertEquals(404, get("/api/v1/sessions/missing/alarms", null).statusCode());
         assertEquals(404, get("/api/v1/sessions/s1/unknown", null).statusCode());
+    }
+
+    /**
+     * v2 活动报警查询：信封形状、设备不在 404 的文案与 GET-only 门。
+     *
+     * <p>404 用 v2 的 device-not-found 而不是 v1 的 not-found——v2 设备域
+     * 统一用设备语义说话。</p>
+     */
+    @Test
+    void deviceAlarmsV2ReturnsEnvelopeAndMapsUnknownDevice() throws Exception {
+        HttpResponse<String> ok = get("/api/v2/devices/s1/runtime/alarms", null);
+        assertEquals(200, ok.statusCode(), ok.body());
+        assertTrue(ok.body().startsWith("{\"alarms\":[{\"alid\":1001}]"), ok.body());
+        assertFalse(ok.body().contains("hint"), "v2 不带迁移 hint：那是 v1 废弃响应的事");
+
+        HttpResponse<String> missing = get("/api/v2/devices/missing/runtime/alarms", null);
+        assertEquals(404, missing.statusCode());
+        assertTrue(missing.body().contains("device-not-found"), missing.body());
+    }
+
+    @Test
+    void deviceAlarmsV2IsGetOnly() throws Exception {
+        assertEquals(405, post("/api/v2/devices/s1/runtime/alarms", null).statusCode());
+        assertEquals(405, delete("/api/v2/devices/s1/runtime/alarms", null).statusCode());
     }
 
     @Test
