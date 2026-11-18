@@ -22,7 +22,6 @@ public final class RuntimeStateRepository {
     /** 链路相位（设备 / 主机各有一套枚举值，这里以字符串存取）。 */
     public record LinkRow(String entityId, String phase, long configRevision,
                           String controlState, String lastError,
-                          String overridesJson, String lastGoodJson,
                           Long connectedAt, Long disconnectedAt) {
     }
 
@@ -118,7 +117,7 @@ public final class RuntimeStateRepository {
         try (Connection connection = this.db.readRuntime();
              PreparedStatement st = connection.prepareStatement(
                      "SELECT device_id, phase, config_revision, control_state, last_error, "
-                             + "overrides_json, last_good_json, connected_at, disconnected_at "
+                             + "connected_at, disconnected_at "
                              + "FROM device_link WHERE device_id=?")) {
             st.setString(1, deviceId);
             try (ResultSet rs = st.executeQuery()) {
@@ -126,8 +125,8 @@ public final class RuntimeStateRepository {
                     return Optional.empty();
                 }
                 return Optional.of(new LinkRow(rs.getString(1), rs.getString(2), rs.getLong(3),
-                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                        longOrNull(rs, 8), longOrNull(rs, 9)));
+                        rs.getString(4), rs.getString(5),
+                        longOrNull(rs, 6), longOrNull(rs, 7)));
             }
         } catch (SQLException e) {
             throw new StoreException("读 device_link 失败: " + e.getMessage(), e);
@@ -194,7 +193,7 @@ public final class RuntimeStateRepository {
     public Optional<LinkRow> hostLink(String hostId) {
         try (Connection connection = this.db.readRuntime();
              PreparedStatement st = connection.prepareStatement(
-                     "SELECT host_id, phase, applied_revision, '', last_error, '', '', connected_at, disconnected_at "
+                     "SELECT host_id, phase, applied_revision, '', last_error, connected_at, disconnected_at "
                              + "FROM host_link WHERE host_id=?")) {
             st.setString(1, hostId);
             try (ResultSet rs = st.executeQuery()) {
@@ -202,8 +201,8 @@ public final class RuntimeStateRepository {
                     return Optional.empty();
                 }
                 return Optional.of(new LinkRow(rs.getString(1), rs.getString(2), rs.getLong(3),
-                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                        longOrNull(rs, 8), longOrNull(rs, 9)));
+                        rs.getString(4), rs.getString(5),
+                        longOrNull(rs, 6), longOrNull(rs, 7)));
             }
         } catch (SQLException e) {
             throw new StoreException("读 host_link 失败: " + e.getMessage(), e);
@@ -474,6 +473,11 @@ public final class RuntimeStateRepository {
 
     /**
      * 清掉不属于任何存活设备的运行态残留（软删 / 迁移后消失的设备）。
+     *
+     * <p><b>过渡期逻辑</b>：按 device_id 白名单删除时，分不清「设备真被删了」
+     * 与「行是旧版本用 legacy 文件名当键写出来的」——两者都只是不在白名单里。
+     * 身份统一（运行态只用 config.db 的 ULID 作键）落地后，这类孤儿应由外键
+     * 约束挡在写入侧，本方法整体移除。</p>
      *
      * @param liveDeviceIds 存活设备 id 集合
      * @return 清理的行数

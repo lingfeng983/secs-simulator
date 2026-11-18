@@ -58,4 +58,19 @@ class RuntimeOptionsTest {
         assertThrows(IllegalArgumentException.class,
                 () -> RuntimeOptions.parse(new String[] {"--allow-open"}));
     }
+
+    /**
+     * schema 重置默认关闭：只有显式 {@code --allow-schema-reset} 才允许备份后重建。
+     * 迁移入口已随 ConfigMigrator 一起移除，残留 {@code --migrate-config} 应报未知参数。
+     */
+    @Test
+    void schemaResetIsOptInAndMigrationFlagIsGone() {
+        assertEquals(false, RuntimeOptions.parse(new String[] {"--mode=integrated"}).allowSchemaReset());
+        assertEquals(true,
+                RuntimeOptions.parse(new String[] {"--allow-schema-reset"}).allowSchemaReset());
+        assertEquals(false,
+                RuntimeOptions.parse(new String[] {"--allow-schema-reset=false"}).allowSchemaReset());
+        assertThrows(IllegalArgumentException.class,
+                () -> RuntimeOptions.parse(new String[] {"--migrate-config"}));
+    }
 }
