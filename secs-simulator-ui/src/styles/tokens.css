@@ -67,6 +67,10 @@
   --danger-soft: rgba(194, 38, 38, 0.09);
   --info: #1d4ed8;
   --info-soft: rgba(29, 78, 216, 0.09);
+  /* 停机 / 未连接是稳态（端口没开），不是故障：用中性灰，
+     红色只留给故障、活动报警与危险操作，两者不再抢同一个语义。 */
+  --status-stop: #64748b;
+  --status-stop-soft: rgba(100, 116, 139, 0.12);
 
   /* —— 页签域色：设备 / 主机 / 其他（独立工具）。
      和区域色一致：设备走靛蓝、主机走青绿，其余走中性灰；
@@ -136,6 +140,13 @@
      否则调字号时只有用 rem 的那十几个地方会变。 */
   --font-scale: 1;
   --font: calc(var(--font-base) * var(--font-scale))/1.55 var(--font-sans);
+  /* 字号收敛到五档：11 辅助 / 12 正文 / 13 强调 / 16 区块 / 20 页面。
+     显式字号只从这五档取，且都乘 --font-scale，调字号时整站跟随。 */
+  --fs-aux: calc(11px * var(--font-scale));
+  --fs-body: calc(12px * var(--font-scale));
+  --fs-strong: calc(13px * var(--font-scale));
+  --fs-section: calc(16px * var(--font-scale));
+  --fs-page: calc(20px * var(--font-scale));
 
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --fast: 120ms var(--ease);
@@ -190,6 +201,9 @@
   --danger-soft: rgba(248, 113, 113, 0.12);
   --info: #7aa2f7;
   --info-soft: rgba(122, 162, 247, 0.12);
+  /* 深色下的停机灰：比 --muted 略亮，深底上仍看得清 */
+  --status-stop: #94a3b8;
+  --status-stop-soft: rgba(148, 163, 184, 0.14);
 
   /* —— 页签域色（深色）：同色相提亮，深底上才看得清 —— */
   --tab-device: #9aa8f7;

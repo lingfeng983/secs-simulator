@@ -13,6 +13,11 @@ import { DEFAULT_REGION } from '../../state/useRegions';
 import { deviceStatus } from '../../shared/lib/deviceStatus';
 import { readDeviceEndpoint } from '../../state/deviceEndpoint';
 
+/** 列表里的实例 ID：30 位 ULID 没有扫读价值，缩成可辨认的首尾，完整值留在 title。 */
+function shortHostId(id: string): string {
+  return id.length > 18 ? `${id.slice(0, 12)}…${id.slice(-2)}` : id;
+}
+
 /**
  * 主机清单页（设计 §3.4）：与设备清单同构——区域筛选 + 表格 + 新建。
  * 新建只填「名称 + 目标地址 + 端口 + Device ID」（都是实例自己的设置）；
@@ -35,7 +40,7 @@ export function HostListPage({
   /** 待确认的删除目标：删主机不可撤销，一律先问一次。 */
   const [deleteTarget, setDeleteTarget] = useState<{ ids: readonly string[]; label: string } | null>(null);
 
-  /* 「快速链接设备」的可选项：已经启动的设备（端口在监听）。
+  /* 「快速连接设备」的可选项：已经启动的设备（端口在监听）。
      选一台就能把它的地址/端口/Device ID 一次填好，名称用 host-设备名。 */
   const quickDevices = useMemo(
     () => backend.sessions
@@ -163,8 +168,8 @@ export function HostListPage({
       header: '实例',
       sortValue: (row) => row.id,
       render: (row) => (
-        <button type="button" className="link" onClick={() => goTo?.(`host-open:${row.id}`)}>
-          <span className="mono">{row.id}</span>
+        <button type="button" className="link" onClick={() => goTo?.(`host-open:${row.id}`)} title={row.id}>
+          <span className="mono">{shortHostId(row.id)}</span>
         </button>
       ),
     },
@@ -208,7 +213,7 @@ export function HostListPage({
     { key: 'deviceId', header: 'Device ID', sortValue: (row) => row.deviceId },
     {
       key: 'revision',
-      header: '设置 / 生效',
+      header: '设置版本 / 生效版本',
       sortValue: (row) => row.settingRevision,
       render: (row) => (
         <span className="mono">
@@ -257,7 +262,7 @@ export function HostListPage({
             type="button"
             className="danger"
             disabled={busy}
-            title={row.open ? '删除会先断开链接' : '删除主机实例'}
+            title={row.open ? '删除会先断开连接' : '删除主机实例'}
             onClick={() => setDeleteTarget({ ids: [row.id], label: `主机「${row.name}」` })}
           >
             删除
@@ -311,16 +316,16 @@ export function HostListPage({
               <button
                 type="button"
                 disabled={selectedRows.length === 0 || busy}
-                title="对选中的主机逐台建立链接（已经连上的跳过）"
-                onClick={() => void runBatch('链接', selectedRows.filter((row) => !row.open),
+                title="对选中的主机逐台建立连接（已经连上的跳过）"
+                onClick={() => void runBatch('连接', selectedRows.filter((row) => !row.open),
                   (row) => hosts.connect(row.id))}
               >
-                批量链接
+                批量连接
               </button>
               <button
                 type="button"
                 disabled={selectedRows.length === 0 || busy}
-                title="对选中的主机逐台断开链接（没连上的跳过）"
+                title="对选中的主机逐台断开连接（没连上的跳过）"
                 onClick={() => void runBatch('断开', selectedRows.filter((row) => row.open),
                   (row) => hosts.disconnect(row.id))}
               >
@@ -416,7 +421,7 @@ export function HostListPage({
   );
 }
 
-/** 新建主机弹窗：实例目标信息 + 快速链接设备 + 可选的主机模板方案包。 */
+/** 新建主机弹窗：实例目标信息 + 快速连接设备 + 可选的主机模板方案包。 */
 function CreateHostModal({
   open,
   templates,
@@ -518,13 +523,13 @@ function CreateHostModal({
         {/* 一线操作：已经启动的设备直接拿来当目标，省掉抄地址/端口/Device ID */}
         <label className="field modal-field">
           <FieldLabel
-            text="快速链接设备"
+            text="快速连接设备"
             help="选一台已经启动的设备：目标地址、端口、Device ID 按它的配置填好，名称用 host-设备名；填完仍可手改。"
           />
           <select
             value={quickId}
             disabled={picking}
-            aria-label="快速链接设备"
+            aria-label="快速连接设备"
             onChange={(event) => void applyQuickDevice(event.target.value)}
           >
             <option value="">

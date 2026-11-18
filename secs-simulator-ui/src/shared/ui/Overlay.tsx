@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 /** 打开中的浮层（先开在前）；Esc/Tab 只由最上层处理，嵌套弹窗按 Esc 不会把外层一起关掉。 */
 const openOverlays: object[] = [];
@@ -9,6 +10,11 @@ const openOverlays: object[] = [];
  * <p>所有浮层（对话框、命令面板、快捷键表）都套这一层：
  * 打开时把焦点移进来、Tab 只在浮层里循环、关闭时还给原来的元素。
  * 每次手写都会漏掉一条，收在这里就统一了。</p>
+ *
+ * <p>整层 portal 到 body：调用方经常在带层叠上下文的容器里（例如右侧消息
+ * 监控抽屉 z-index 45），浮层挂在那种容器里会连同按钮一起被压住——
+ * 无论浮层自己写多大的 z-index 都救不回来。挂到 body 后才和抽屉平级，
+ * 由全局的层级阶梯（抽屉 45 &lt; 遮罩 80 &lt; 弹窗 90 &lt; toast 100）决定先后。</p>
  */
 export function Overlay({
   onClose,
@@ -75,7 +81,7 @@ export function Overlay({
     };
   }, []);
 
-  return (
+  return createPortal(
     <div className="overlay" onMouseDown={onClose}>
       <div
         ref={panelRef}
@@ -86,6 +92,7 @@ export function Overlay({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

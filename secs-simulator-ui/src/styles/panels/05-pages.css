@@ -44,13 +44,13 @@
 
 .session-field-name {
   color: var(--fg);
-  font-size: calc(12.5px * var(--font-scale));
+  font-size: var(--fs-body);
   font-weight: 500;
 }
 
 .session-field-help {
   color: var(--muted);
-  font-size: calc(11px * var(--font-scale));
+  font-size: var(--fs-aux);
   line-height: 1.55;
 }
 
@@ -63,7 +63,7 @@
 .session-subhead {
   margin: 1rem 0 0.5rem;
   color: var(--muted);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   font-weight: 500;
 }
 
@@ -87,14 +87,14 @@
   border-radius: var(--radius);
   background: var(--surface-2);
   color: var(--muted);
-  font-size: calc(11.8px * var(--font-scale));
+  font-size: var(--fs-body);
   line-height: 1.7;
 }
 
 .template-guide h3 {
   margin: 0.75rem 0 0.3rem;
   color: var(--fg);
-  font-size: calc(12.5px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 .template-guide h3:first-child {
@@ -148,7 +148,7 @@
 .svid-check-name {
   overflow: hidden;
   color: var(--muted);
-  font-size: calc(10.5px * var(--font-scale));
+  font-size: var(--fs-aux);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -192,7 +192,7 @@
   align-items: center;
   gap: 0.4rem;
   color: var(--muted);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   white-space: nowrap;
 }
 
@@ -221,13 +221,13 @@
 .param-preview-stat > span {
   overflow: hidden;
   color: var(--muted);
-  font-size: calc(11px * var(--font-scale));
+  font-size: var(--fs-aux);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .param-preview-stat > strong {
-  font: 600 calc(15px * var(--font-scale))/1.35 var(--font-mono);
+  font: 600 var(--fs-section)/1.35 var(--font-mono);
   color: var(--fg);
 }
 
@@ -258,7 +258,7 @@
 .param-curve-chart .param-curve-tick,
 .param-curve-chart .param-curve-empty {
   fill: var(--muted);
-  font: 400 calc(10.5px * var(--font-scale)) var(--font-mono);
+  font: 400 var(--fs-aux) var(--font-mono);
 }
 .param-curve-chart .param-curve-line {
   fill: none;
@@ -294,11 +294,11 @@
 }
 .param-curve-chart .param-curve-tip-time {
   fill: var(--muted);
-  font: 400 calc(10.5px * var(--font-scale)) var(--font-mono);
+  font: 400 var(--fs-aux) var(--font-mono);
 }
 .param-curve-chart .param-curve-tip-value {
   fill: var(--accent);
-  font: 600 calc(13px * var(--font-scale)) var(--font-mono);
+  font: 600 var(--fs-strong) var(--font-mono);
 }
 
 .param-preview-details {
@@ -310,7 +310,7 @@
 .param-preview-details > summary {
   padding: 0.45rem 0.75rem;
   color: var(--fg);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 

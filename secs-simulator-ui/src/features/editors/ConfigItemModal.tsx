@@ -15,6 +15,11 @@ export type ItemEdit = (fn: (target: JsonObject) => void) => void;
  * <p>{@code problemBanner} 关掉时，问题只体现在「确定」按钮的禁用与悬浮说明上——
  * "必填"这类一眼就能看出来的约束，用标题上的星号说就够了，不必在弹框里
  * 常驻一条红条（用户还没动手就先看到一片红）。</p>
+ *
+ * <p>全配置区的编辑模型统一为「行内快改 + 弹窗精修」：表格行内只留 offset、
+ * 名称这类单字段快改；曲线 / 表达式 / 值定义、引用勾选、跨字段联动这些复杂值
+ * 定义统一进本弹窗精修。新增入口统一叫「＋ 新建X」，逐条编辑入口统一叫
+ * 「编辑」，弹窗标题统一为「新建X」/「编辑X · &lt;名字&gt;」，避免各页各写一套。</p>
  */
 export function ConfigItemModal({ title, initial, problemOf, problemBanner = true, onClose, onSubmit, children }: {
   title: string;

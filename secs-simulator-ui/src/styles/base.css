@@ -89,7 +89,7 @@ kbd {
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--muted);
-  font: 500 calc(10.5px * var(--font-scale))/1.5 var(--font-mono);
+  font: 500 var(--fs-aux)/1.5 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -139,17 +139,17 @@ kbd {
 /* —— 工具类 —— */
 .hint {
   color: var(--muted);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
   line-height: 1.65;
 }
 
 .hint code {
-  font-size: calc(11px * var(--font-scale));
+  font-size: var(--fs-aux);
 }
 
 .hint-inline {
   color: var(--muted);
-  font-size: calc(12px * var(--font-scale));
+  font-size: var(--fs-body);
 }
 
 .mono {

@@ -1,0 +1,453 @@
+
+===== 13-line2-config-overview (#/device/line2.json/config/overview) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+会话 ID	—（未启动）
+设备名	line2
+配置文件	line2.json
+模板	—
+单元数	—
+大小 / 修改时间	260 B · 1970/1/1 08:00:00
+
+===== 13-line2-config-connection (#/device/line2.json/config/connection) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+
+这段是 HSMS 连接参数。保存后会按新参数重启会话：端口重新监听、当前连接断开， 钉值 / 计划启用态 / 周期进度这些运行状态全部清空（设备启动着保存会先问一句）。
+
+会话 id
+HSMS 端口
+绑定地址
+deviceId
+随机种子
+被动监听
+设备监听
+HSMS 超时（秒，留空用协议默认）
+T3 回复
+T5 重连
+T6 多段交互
+T7 选择
+T8 字符间
+Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）
+同时 Trace 条数
+单条 SVID 上限
+
+===== 13-line2-config-structure (#/device/line2.json/config/structure) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+设备全局
+号段规划（idSpace）
+SVID 起点
+CEID 起点
+RPTID 起点
+SVID 步长
+CEID 步长
+RPTID 步长
+单元
++ 单元
+
+单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）；单元里的变量、报告、事件 到「变量配置」「事件与报告」页维护，避免同一份数据在几个地方填。
+
+unitId
+单元名
+报告自动带 UNIT_ID
+删除单元
+
+===== 13-line2-config-constants (#/device/line2.json/config/constants) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+＋ 新建常量
+2 条
+ECID ⇅
+	名称 ⇅
+	类型 ⇅
+	初始值 ⇅
+	单位 ⇅
+	值定义 ⇅
+	操作
+
+501	TEMP_SP	F4	180	C	固定为初始值（可被 S2F15 改写）	
+编辑
+预览
+删除
+
+502	RAMP_RATE	F4	8	C/s	固定为初始值（可被 S2F15 改写）	
+编辑
+预览
+删除
+
+===== 13-line2-config-context (#/device/line2.json/config/context) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+＋ 新建属性
+2 条
+名称 ⇅
+	报告里的写法
+	类型 ⇅
+	值定义 ⇅
+	操作
+
+LOTID	ctx.LOTID	ASCII	按片 · LOT{03}	
+编辑
+预览
+删除
+
+WAFERID	ctx.WAFERID	ASCII	按片 · W{03}	
+编辑
+预览
+删除
+
+===== 13-line2-config-svids (#/device/line2.json/config/svids) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+＋ 新建变量
+3 条
+绝对 ID ⇅
+	所属 ⇅
+	名称 ⇅
+	类型 ⇅
+	单位 ⇅
+	范围
+	值定义 ⇅
+	操作
+
+1001	单元 CH1	TEMP	F4	C	不限	曲线 · sequence · 片内相位	
+编辑
+预览
+删除
+
+1002	单元 CH1	PRESS	F4	Pa	不限	未配置（按默认值）	
+编辑
+预览
+删除
+
+1003	单元 CH1	FLOW	F4	sccm	不限	未配置（按默认值）	
+编辑
+预览
+删除
+
+没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。 单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。
+
+===== 13-line2-config-events (#/device/line2.json/config/events) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+全局 CEID（跨单元报告要写「单元名.报告名」）
++ 全局 CEID
+绝对 id
+名称
+引用（勾选引用）
+绝对 id
+名称
+CH1.RPT_TEMP
+1
+删除
+单元 CH1 · 报告（RPT）
++ 报告
+offset
+报告名
+SVID
+设备常量
+晶圆属性
+offset
+报告名
+TEMP
+1
+ecid.501（TEMP_SP）
+1
+ctx.LOTID
+1
+删除
+offset
+报告名
+TEMP、PRESS、FLOW
+3
+未选择
+未选择
+删除
+
+上报顺序：先 SVID，再设备常量，最后晶圆属性；列内按勾选先后，下拉里可全选。
+
+单元 CH1 · 事件（CEID）
++ 事件
+offset
+事件名
+引用报告（勾选引用）
+offset
+事件名
+RPT_TEMP
+1
+删除
+offset
+事件名
+未选择
+删除
+
+===== 13-line2-config-cycle (#/device/line2.json/config/cycle) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+
+本页改的是定义（片长、片数、片内事件）。周期什么时候启停、跑到第几片、 已发了哪些片内事件，都在运行区「工艺周期」页看和操作。
+
+工艺周期（cycle）
+插入 cycle 段
+
+没有周期段：设备按绝对时间跑一次，曲线时间参数就是启动后的秒数。插入后，曲线默认按片内相位每片重放，事件按片内偏移重复。
+
+周期预览（按草稿）
+参数：
+TEMP
+▾
+时间窗
+30 秒
+60 秒
+2 分钟
+5 分钟
+10 分钟
+30 分钟
+1 小时
+自动刷新
+重新预览
+＋
+－
+复位
+拖动框选放大 · 双击复位 · 点图例可隐藏/显示
+横轴：时间　纵轴：参数值　竖虚线：事件发送时刻
+1001
+TEMP
+(C)
+片内事件（1）
+CEID 2001
+
+===== 13-line2-config-plans (#/device/line2.json/config/plans) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+重新载入
+校验
+保存
+事件计划列表
+插入 events 段
+
+这份配置还没有 events 段（S6F11 的 W 位、事件计划）。
+
+事件计划预览（按草稿）
+参数：
+TEMP
+▾
+时间窗
+30 秒
+60 秒
+2 分钟
+5 分钟
+10 分钟
+30 分钟
+1 小时
+自动刷新
+重新预览
+＋
+－
+复位
+拖动框选放大 · 双击复位 · 点图例可隐藏/显示
+横轴：时间　纵轴：参数值　竖虚线：事件发送时刻
+1001
+TEMP
+(C)
+计划触发（1）
+beat
+
+===== 13-line2-config-document (#/device/line2.json/config/document) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+只编辑原文；连接 / 设备结构 / 模板请到左侧「连接」「结构」子页。
+查看差异
+JSON · 1 行
+格式化
+{"schemaVersion":5,"session":{"id":"line2","passive":true,"port":5010,"bindHost":"127.0.0.1","deviceId":1},"context":[{"id":"LOTID","type":"ASCII","source":{"mode":"cycle","pattern":"LOT{03}","start":1,"every":25}},{"id":"WAFERID","type":"ASCII","source":{"mode":"cycle","pattern":"W{03}","start":1,"every":1}}],"equipment":{"name":"LINE2","idSpace":{"svidBase":1000,"ceidBase":2000,"reportBase":3000,"svidStride":100,"ceidStride":100,"reportStride":100},"constants":[{"id":501,"name":"TEMP_SP","type":"F4","value":180,"unit":"C"},{"id":502,"name":"RAMP_RATE","type":"F4","value":8,"unit":"C/s"}],"globalCeids":[{"id":1001,"name":"GLOBAL_READY","reports":["CH1.RPT_TEMP"]}],"units":[{"unitId":1,"name":"CH1","injectUnitId":false,"svids":[{"offset":1,"slot":"TEMP","type":"F4","unit":"C","source":{"mode":"curve","clock":"phase","curve":{"type":"sequence","cyclic":false,"segments":[{"durationMs":20000,"curve":{"type":"ramp","from":20,"to":180,"durationMs":20000}},{"durationMs":10000,"curve":{"type":"constant","value":180}},{"durationMs":20000,"curve":{"type":"sine","min":175,"max":185,"periodMs":5000,"phaseMs":0}}]}}},{"offset":2,"slot":"PRESS","type":"F4","unit":"Pa"},{"offset":3,"slot":"FLOW","type":"F4","unit":"sccm"}],"reports":[{"offset":1,"slot":"RPT_TEMP","svids":["TEMP","ecid.501","ctx.LOTID"]},{"offset":2,"slot":"RPT_ALL","svids":["TEMP","PRESS","FLOW"]}],"ceids":[{"offset":1,"slot":"EVENT_TEMP","reports":["RPT_TEMP"]},{"offset":2,"slot":"EVENT_DONE","reports":[]}]}]}}
+
+目录内配置 2
+
+重新载入
+校验
+保存
+
+===== 13-line2-config-revisions (#/device/line2.json/config/revisions) =====
+▣ 配置区
+◉ 运行区
+监听
+127.0.0.1:5010 | 1
+启动设备
+概览
+连接
+结构
+设备常量
+晶圆属性
+变量配置
+事件与报告
+工艺周期
+事件计划
+配置原文
+版本历史
+配置版本历史
+版本	时间	操作者	备注	校验值
+v2	2026/11/18 20:31:58	ui	修改超时	aabbccddeeff…
+v1	2026/11/18 19:41:58	migrate	created	112233445566…

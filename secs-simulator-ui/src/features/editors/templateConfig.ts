@@ -198,13 +198,17 @@ export function describeSource(def: JsonObject): string {
     case 'expr':
       return `表达式 · ${Object.keys(objectField(source, 'vars')).length} 条私有曲线`;
     case 'cycle': {
+      /* every 是"每几片进一档"，缺省按 1（每片）。摘要必须带上它，
+         否则 every=25 的 LOT{03} 会被读成"每片换批号"——真机一整天会换错几百次。 */
+      const every = Math.max(1, numberField(source, 'every') ?? 1);
+      const prefix = every === 1 ? '每片' : `每 ${every} 片`;
       if (source.pattern !== undefined) {
-        return `按片 · ${stringField(source, 'pattern')}`;
+        return `${prefix} · ${stringField(source, 'pattern')}`;
       }
       if (Array.isArray(source.list)) {
-        return `按片 · 轮换 ${(source.list as unknown[]).length} 条`;
+        return `${prefix} · 轮换 ${(source.list as unknown[]).length} 条`;
       }
-      return `按片 · ${String(source.value ?? '')} 起`;
+      return `${prefix} · ${String(source.value ?? '')} 起`;
     }
   }
 }

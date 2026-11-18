@@ -45,21 +45,34 @@ test('配置区·连接：13 个字段 + 校验 / 保存 / 重新载入', async 
 
   const panel = page.locator('#panel-connection');
   await expect(panel).toBeVisible();
-  /* 3.2 起一行一个配置项用 .modal-field：标题列对齐，说明收进标题悬浮气泡（默认隐藏但要挂在 DOM 上） */
+  /* 3.2 起一行一个配置项用 .modal-field：标题列对齐，说明收进标题悬浮气泡（默认隐藏但要挂在 DOM 上）。
+     3.3 起 T3–T8 与 Trace 容量收进「高级」，默认折叠；展开后才核对全部 13 个字段。 */
   await expect(panel.locator('.modal-field-label', { hasText: '会话 id' })).toBeVisible();
   await expect(panel.locator('.field-tip', { hasText: '唯一标识' })).toBeAttached();
+  await panel.getByText('高级：HSMS 超时与 Trace 容量').click();
   await expect(panel.locator('.modal-field')).toHaveCount(13);
+  /* 先做一处真实改动：空改动点保存只会提示「本页没有改动」，验证不到保存链路。 */
+  const port = panel.locator('.modal-field').filter({ hasText: 'HSMS 端口' }).locator('input');
+  await port.fill('5011');
+  await port.press('Enter');
+  await expect(panel).toContainText('有未保存改动');
 
   await panel.getByRole('button', { name: '校验' }).click();
   await expect(panel.getByText('校验通过')).toBeVisible();
   await expect.poll(() => state.calls.some((call) => call.endsWith('/validate'))).toBe(true);
 
   await panel.getByRole('button', { name: '保存' }).click();
+  /* 设备正跑着，保存连接参数会重建会话，必须先确认再期望成功提示。 */
+  await expect(page.getByRole('dialog')).toContainText('保存连接参数并重启会话');
+  await page.getByRole('dialog').getByRole('button', { name: '保存并重启会话' }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
   await expect.poll(() => state.calls.some((call) => call.startsWith('PUT /api/v1/configs/'))).toBe(true);
 
+  /* mock 的配置原文是静态的，保存后重新载入会拿回磁盘旧值：确认丢弃并重读，再断言字段回滚。 */
   await panel.getByRole('button', { name: '重新载入' }).click();
-  await expect(panel.getByText('有未保存改动')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toContainText('放弃未保存的改动');
+  await page.getByRole('dialog').getByRole('button', { name: '放弃并重新载入' }).click();
+  await expect(port).not.toHaveValue('5011');
 });
 
 test('配置区·配置原文：JSON 高亮、格式化、校验、保存、导入导出', async ({ page }) => {
@@ -181,18 +194,21 @@ test('运行区·事件计划：离线禁用启动（§2.2 门控），上线后
   await expect(rowAfter.locator('.badge', { hasText: '运行中' })).toBeVisible();
 });
 
-test('配置区·工艺周期：运行卡轮询 + 启动/停止（§2.4 M4）', async ({ page }) => {
+test('运行区·工艺周期：运行卡轮询 + 启动/停止（§2.4 M4）', async ({ page }) => {
   const state = await mockApi(page);
-  await page.goto('/#/device/line1/config/cycle');
+  /* 运行卡从配置区移到运行区「工艺周期」页：配置区只改定义，免得改配置时顺手停了周期。 */
+  await page.goto('/#/device/line1/runtime/cycle');
   const run = page.locator('#panel-cycle-run');
   await expect(run).toBeVisible();
   await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();
-  await expect(run).toContainText('进度 1/25 片');
+  /* 停机时没有「进度」：显示 1/25 会让人以为已经出过片，只在 RUNNING 时给进度。 */
+  await expect(run).toContainText('已发片内事件 0 条');
 
   await run.getByRole('button', { name: '启动周期' }).click();
   await expect.poll(() => state.cycle.state, { timeout: 5_000 }).toBe('RUNNING');
   await expect(run.locator('.state-pill', { hasText: '运行中' })).toBeVisible();
   await expect(run).toContainText('第 1 片');
+  await expect(run).toContainText('进度 1/25 片');
 
   await run.getByRole('button', { name: '停止周期' }).click();
   await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();

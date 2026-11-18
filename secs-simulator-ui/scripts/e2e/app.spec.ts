@@ -312,7 +312,7 @@ test('单行「重启」直接打后端，「停止」先确认再改状态，�
   await expect.poll(() => state.calls.some((call) => call.endsWith('/link/connect'))).toBe(true);
 });
 
-test('新增设备弹框：填链接信息 + 选模板，建出配置与会话', async ({ page }) => {
+test('新增设备弹框：填写连接信息 + 选模板，建出配置与会话', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
 

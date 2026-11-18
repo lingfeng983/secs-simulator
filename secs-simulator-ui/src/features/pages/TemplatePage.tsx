@@ -12,6 +12,48 @@ import { TemplateConfigEditor, type TemplateConfigPage } from '../editors/Templa
 import { saveTemplateDraft } from '../editors/templateSave';
 import { useParamTemplates } from '../../state/useParamTemplates';
 
+/**
+ * 从空白创建用的最小可编译骨架（等价于后端 DeviceTemplates 的 bare）。
+ *
+ * <p>真实后端的模板目录第一项是内置 bare，mock 环境没有；把骨架放在前端，
+ * mock / 无源模板时「新建模板」也能走通，而不是只弹「没有可复制的源模板」。
+ * 内容保持最小：一份能编译的配置，剩下的留给各页签去配。</p>
+ */
+const BLANK_TEMPLATE_TEXT = `{
+  "schemaVersion": 7,
+  "session": {
+    "id": "line1",
+    "passive": true,
+    "bindHost": "127.0.0.1",
+    "port": 5010,
+    "deviceId": 0,
+    "seed": 3
+  },
+  "context": [
+    { "id": "LOTID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "LOT{02}", "start": 1, "every": 25 } },
+    { "id": "WAFERID", "type": "ASCII", "source": { "mode": "cycle", "pattern": "W{03}", "start": 1 } }
+  ],
+  "equipment": {
+    "name": "LINE1",
+    "idSpace": {},
+    "units": [
+      {
+        "unitId": 1,
+        "name": "CH1",
+        "injectUnitId": false,
+        "svids": [
+          { "offset": 1, "slot": "TEMP", "type": "F4", "unit": "C",
+            "source": { "mode": "curve", "clock": "phase",
+                        "curve": { "type": "sine", "min": 150, "max": 350, "periodMs": 60000 } } }
+        ],
+        "reports": [ { "offset": 1, "slot": "STATUS", "svids": ["TEMP"] } ],
+        "ceids": [ { "offset": 1, "slot": "STATUS_REPORT", "reports": ["STATUS"] } ]
+      }
+    ]
+  },
+  "events": { "maxPerSec": 5, "plans": [] }
+}`;
+
 interface TemplateEditorState {
   id: string;
   source: 'new' | 'builtin' | 'custom';
@@ -56,7 +98,15 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
     if (client === null || busyRef.current) return;
     const sourceId = row?.id ?? (templates.find((item) => item.id === 'bare') ?? templates[0])?.id;
     if (sourceId === undefined) {
-      notifier.error('没有可复制的源模板');
+      /* 没有可复制的源模板（mock 环境常见）：从空白骨架创建，而不是只报错。
+         骨架自带合法 session / equipment，切到各页签就能直接改，保存时仍需填写模板 id。 */
+      setEditor({
+        id: '', source: 'new', sourceId: 'bare',
+        text: BLANK_TEMPLATE_TEXT, baseline: BLANK_TEMPLATE_TEXT, saveAsId: 'my-template',
+      });
+      setPage('overview');
+      setProblems([]);
+      setNotice('当前没有可复制的模板，已从空白骨架开始；填好模板 id 后保存即可创建。');
       return;
     }
     busyRef.current = true;
@@ -188,9 +238,27 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
 
   return (
     <Panel id="panel-templates" title="设备模板" headless>
-      <DataTable tableKey="templates" columns={columns} rows={templates} rowKey={(row) => row.id}
-        searchPlaceholder="搜索模板 id / 名称 / 说明" emptyText="还没有模板"
-        toolbarEnd={<button type="button" className="primary" disabled={busy || client === null} onClick={() => void openEditor()}>新建模板</button>} />
+      {templates.length === 0 ? (
+        /* 空态也要给下一步：直接放「新建模板」CTA，而不是只有一行"还没有模板"。
+           无源模板时 openEditor() 会从空白骨架开始。 */
+        <div className="empty-state">
+          <p className="empty-text">还没有设备模板。</p>
+          <p className="empty-hint">
+            从空白骨架新建一份最小可编译配置；也可以在编辑器里导入 JSON，
+            改完填写模板 id 后保存。
+          </p>
+          <div className="empty-action">
+            <button type="button" className="primary" disabled={busy || client === null}
+              onClick={() => void openEditor()}>
+              ＋ 新建模板（从空白）
+            </button>
+          </div>
+        </div>
+      ) : (
+        <DataTable tableKey="templates" columns={columns} rows={templates} rowKey={(row) => row.id}
+          searchPlaceholder="搜索模板 id / 名称 / 说明" emptyText="还没有模板"
+          toolbarEnd={<button type="button" className="primary" disabled={busy || client === null} onClick={() => void openEditor()}>＋ 新建模板</button>} />
+      )}
 
       <Modal open={editor !== null} title={creating ? '新建设备模板' : `编辑设备模板 · ${editor?.id ?? ''}`}
         hint="各页修改汇总到同一份模板，点底部「保存」后才生效；已创建的设备不会随模板改变。"
@@ -225,7 +293,7 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
                         placeholder="如 my-etch" aria-label={builtin ? '另存为模板 id' : '模板 id'} />
                     </SessionField>
                     {duplicate && <p className="problems">模板 id 已存在，请换一个。</p>}
-                    {creating && (
+                    {creating && templates.length > 0 && (
                       <SessionField label="从哪个模板复制" help="复制连接、单元、变量和事件定义；在其它页签修改后统一保存。">
                         <select value={editor.sourceId} aria-label="从哪个模板复制" onChange={(event) => {
                           if (dirty) setPendingSource(event.target.value);
@@ -234,6 +302,9 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
                           {templates.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.label}</option>)}
                         </select>
                       </SessionField>
+                    )}
+                    {creating && templates.length === 0 && (
+                      <p className="hint">当前没有可复制的模板，已从空白骨架开始；在「配置原文」页可导入 JSON，其它页签可直接改。填好模板 id 后保存即可创建。</p>
                     )}
                     {builtin && <p className="hint">内置模板不能覆盖，修改后会另存为自定义模板。</p>}
                   </>

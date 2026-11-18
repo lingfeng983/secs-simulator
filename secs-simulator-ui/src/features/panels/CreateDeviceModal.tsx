@@ -191,7 +191,7 @@ export function CreateDeviceModal({
           </>
         )}
 
-        <div className="section-head"><h3>链接信息</h3></div>
+        <div className="section-head"><h3>连接信息</h3></div>
         <label className="field modal-field">
           <FieldLabel text="监听地址" help="被动模式是本机监听地址（0.0.0.0 表示所有网卡）；主动模式是目标主机地址。" />
           <input

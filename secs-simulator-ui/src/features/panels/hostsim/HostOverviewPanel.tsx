@@ -72,29 +72,35 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
   const pendingApply = host.settingRevision > host.appliedRevision;
 
   /**
-   * 保存一段。名称段只提交名称（目标原样带回），目标段只提交目标（名称原样带回）——
-   * 这样点「保存名称」绝不会顺手把目标也改了。
+   * 一次保存名称 + 目标：后端按实际改动返回 changed / needsReconnect，
+   * 页面据此提示「立即生效」还是「待使设置生效」，不再拆成两个保存按钮。
    */
-  const save = (part: 'name' | 'target') => {
+  const save = () => {
     setBusy(true);
     setError('');
     setNotice('');
-    const request = part === 'name'
-      ? { name: name.trim(), host: currentHost, port: host.port, deviceId: host.deviceId }
-      : { name: host.name, host: host_.trim(), port: Number(port), deviceId: Number(deviceId) || 0 };
-    hosts.saveSettings(hostId, request)
+    hosts.saveSettings(hostId, {
+      name: name.trim() === '' ? host.name : name.trim(),
+      host: host_.trim(),
+      port: Number(port),
+      deviceId: Number(deviceId) || 0,
+    })
       .then((result) => {
-        if (part === 'name') {
+        if (result.changed.length === 0) {
+          setNotice('没有需要保存的改动');
+        } else if (result.changed.includes('target')) {
+          setNotice(result.needsReconnect
+            ? '已保存；点「使设置生效」按新目标重建链路'
+            : '已保存；新目标下次连接时生效');
+        } else {
           setNotice('名称已保存（立即生效，连接未中断）');
-          return;
         }
-        setNotice(result.needsReconnect
-          ? '目标已保存，尚未生效：点「使设置生效」重建链路'
-          : '目标已保存，下次连接时生效');
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false));
   };
+
+  const dirty = nameDirty || targetDirty;
 
   const applySettings = () => {
     setBusy(true);
@@ -108,108 +114,7 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
 
   return (
     <div className="panel-stack">
-      {/* 子页签已经说明"这是哪一页"：面板不再单独占一行标题，直接从表单开始 */}
-      <Panel id="panel-host-overview" title="主机概览" headless>
-        {error !== '' && <p className="inline-note danger">{error}</p>}
-        {notice !== '' && <p className="inline-note">{notice}</p>}
-
-        {/* ---- 名称：热生效 ---- */}
-        <div className="cfg-section">
-          <div className="template-head">
-            <h3>名称</h3>
-            <span className="hint">不参与建链：保存后立即生效，不会中断连接</span>
-          </div>
-          <div className="form-row">
-            <label className="field">
-              名称
-              <input value={name} disabled={readOnly}
-                onChange={(event) => setName(event.target.value)} />
-            </label>
-          </div>
-          {!readOnly && (
-            <div className="editor-foot">
-              <span className="hint">当前名称：{host.name}</span>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || !nameDirty}
-                onClick={() => save('name')}
-              >
-                保存名称
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* ---- 连接目标：保存 + 手动使设置生效（两步） ---- */}
-        <div className="cfg-section">
-          <div className="template-head">
-            <h3>连接目标</h3>
-            <span className="hint">改目标要重建链路：正在跑的 Trace / 采集会中断</span>
-          </div>
-
-          {pendingApply && (
-            <div className="pending-banner settings">
-              <span className="pending-tag">待生效</span>
-              <span>
-                设置 v{host.settingRevision} 已保存，当前生效的是 v{host.appliedRevision}。
-                {host.open
-                  ? '点「使设置生效」按新目标重建链路。'
-                  : '主机未连接：下次连接会直接用新目标。'}
-              </span>
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busy || !host.open}
-                  title={host.open ? '断开并按新目标重连（Trace/采集会中断，计数保留）' : '主机未连接，无需重建'}
-                  onClick={applySettings}
-                >
-                  使设置生效
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="form-row">
-            <label className="field">
-              目标地址
-              <input value={host_} disabled={readOnly}
-                onChange={(event) => setHost_(event.target.value)} />
-            </label>
-            <label className="field">
-              端口
-              <input type="number" min={1} max={65535} value={port} disabled={readOnly}
-                onChange={(event) => setPort(event.target.value)} />
-            </label>
-          </div>
-          <div className="form-row">
-            <label className="field">
-              Device ID
-              <input type="number" min={0} value={deviceId} disabled={readOnly}
-                onChange={(event) => setDeviceId(event.target.value)} />
-            </label>
-          </div>
-          {!readOnly && (
-            <div className="editor-foot">
-              <span className="hint">
-                当前设置 v{host.settingRevision} · {host.open ? `生效 v${host.appliedRevision}` : '离线'}
-                {host.autoReconnect ? ' · 自动重连开' : ''}
-              </span>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || !targetDirty || host_.trim() === '' || !(Number(port) >= 1 && Number(port) <= 65535)}
-                onClick={() => save('target')}
-              >
-                保存目标
-              </button>
-            </div>
-          )}
-        </div>
-      </Panel>
-
-      {/* 需求：概览页能一眼看到后面 Trace 采集 / S1F3 采集的配置与运行状态 */}
+      {/* 摘要卡前置：先一眼看到配置与运行状态，再往下改设置 */}
       <Panel id="panel-host-overview-collect" title="采集概览" headless>
         <div className="overview-grid">
           <div className="overview-card">
@@ -255,6 +160,86 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
               <li>采集变量：{totalSvids} 个</li>
             </ul>
           </div>
+        </div>
+      </Panel>
+
+      <Panel id="panel-host-overview" title="主机概览" headless>
+        {error !== '' && <p className="inline-note danger">{error}</p>}
+        {notice !== '' && <p className="inline-note">{notice}</p>}
+
+        {pendingApply && (
+          <div className="pending-banner settings">
+            <span className="pending-tag">待生效</span>
+            <span>
+              设置 v{host.settingRevision} 已保存，当前生效的是 v{host.appliedRevision}。
+              {host.open
+                ? '点「使设置生效」按新目标重建链路。'
+                : '主机未连接：下次连接会直接用新目标。'}
+            </span>
+            {!readOnly && (
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !host.open}
+                title={host.open ? '断开并按新目标重连（Trace/采集会中断，计数保留）' : '主机未连接，无需重建'}
+                onClick={applySettings}
+              >
+                使设置生效
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="cfg-section">
+          <div className="form-row">
+            <label className="field field-wide">
+              名称
+              <input value={name} disabled={readOnly}
+                onChange={(event) => setName(event.target.value)} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label className="field">
+              目标地址
+              <input value={host_} disabled={readOnly}
+                onChange={(event) => setHost_(event.target.value)} />
+            </label>
+            <label className="field">
+              端口
+              <input type="number" min={1} max={65535} value={port} disabled={readOnly}
+                onChange={(event) => setPort(event.target.value)} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label className="field">
+              Device ID
+              <input type="number" min={0} value={deviceId} disabled={readOnly}
+                onChange={(event) => setDeviceId(event.target.value)} />
+            </label>
+          </div>
+
+          {/* 说明贴在字段下方：名称热生效、目标要重建；不再横在卡片标题右侧撑宽视线 */}
+          <p className="hint">
+            名称不参与建链，保存后立即生效、不会中断连接；目标地址 / 端口 / Device ID 改动需要重建链路，
+            保存后点「使设置生效」才生效（正在跑的 Trace / 采集会中断）。
+          </p>
+
+          {!readOnly && (
+            <div className="editor-foot">
+              <span className="hint">
+                当前设置 v{host.settingRevision} · {host.open ? `生效 v${host.appliedRevision}` : '离线'}
+                {host.autoReconnect ? ' · 自动重连开' : ''}
+              </span>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !dirty || host_.trim() === '' || !(Number(port) >= 1 && Number(port) <= 65535)}
+                onClick={save}
+              >
+                保存
+              </button>
+            </div>
+          )}
         </div>
       </Panel>
     </div>

@@ -19,6 +19,14 @@ interface Props {
   notifier: Notifier;
   /** 只看该计划的行（如工艺周期页传 cycle）。 */
   planId?: string;
+  /** 事件执行页排除工艺周期的行（cycle 行在工艺周期页看）。 */
+  exceptCycle?: boolean;
+  /** 两页各展示一份，标题/口径必须分开：全量 = 执行明细；周期页 = 片内事件发送记录。 */
+  title?: string;
+  sectionId?: string;
+  emptyText?: string;
+  /** 只读子集：不显示筛选 / 导出 / 清理，只看记录。 */
+  readOnly?: boolean;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -34,7 +42,17 @@ const rowStyle: CSSProperties = {
 };
 
 /** 执行明细组件。 */
-export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId, exceptCycle }: Props & { planId?: string; exceptCycle?: boolean }): JSX.Element {
+export function PlanExecutionTimeline({
+  deviceId,
+  liveEvents,
+  notifier,
+  planId,
+  exceptCycle,
+  title = '执行明细',
+  sectionId = 'plan-executions',
+  emptyText = '暂无执行记录。启用计划并等待触发，或点列表里的「单步试跑」。',
+  readOnly = false,
+}: Props): JSX.Element {
   const raw = usePlanExecutions(deviceId, liveEvents, planId);
   /* 执行明细各展示各的（2026-11-18）：事件执行页排除工艺周期的行（cycle 行在工艺周期页看） */
   const exec = exceptCycle
@@ -68,11 +86,14 @@ export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId, 
   };
 
   return (
-    <section className="panel-section block" id="plan-executions">
+    <section className="panel-section block" id={sectionId}>
       <div className="section-head">
-        <h2 style={{ margin: 0 }}>执行明细</h2>
-        <div className="preview-controls">
-          <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <h2 style={{ margin: 0 }}>{title}</h2>
+        {readOnly ? (
+          <span className="hint-inline">只看片内事件这一子集；完整执行明细在「事件执行」页。</span>
+        ) : (
+          <div className="preview-controls">
+            <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <input
               type="checkbox"
               checked={exec.onlyFailures}
@@ -113,23 +134,26 @@ export function PlanExecutionTimeline({ deviceId, liveEvents, notifier, planId, 
           >
             清理历史
           </button>
-        </div>
+          </div>
+        )}
       </div>
 
-      <ConfirmModal
-        open={clearOpen}
-        title="清理历史事件"
-        danger
-        confirmLabel="清理"
-        message={deviceId === '' ? '' : `确定清理设备「${deviceId}」的全部历史执行记录？只删运行记录，配置与计划不受影响，且不可恢复。`}
-        onClose={() => setClearOpen(false)}
-        onConfirm={() => void runClear()}
-      />
+      {!readOnly && (
+        <ConfirmModal
+          open={clearOpen}
+          title="清理历史事件"
+          danger
+          confirmLabel="清理"
+          message={deviceId === '' ? '' : `确定清理设备「${deviceId}」的全部历史执行记录？只删运行记录，配置与计划不受影响，且不可恢复。`}
+          onClose={() => setClearOpen(false)}
+          onConfirm={() => void runClear()}
+        />
+      )}
 
       {exec.error !== '' && <p className="hint" style={{ color: '#b42318' }}>执行记录读取失败：{exec.error}</p>}
 
       <div style={{ marginTop: 10, maxHeight: 320, overflowY: 'auto' }}>
-        {exec.rows.length === 0 && <p className="hint">暂无执行记录。启用计划并等待触发，或点列表里的「单步试跑」。</p>}
+        {exec.rows.length === 0 && <p className="hint">{emptyText}</p>}
         {exec.rows.map((row) => (
           <div
             key={row.id}

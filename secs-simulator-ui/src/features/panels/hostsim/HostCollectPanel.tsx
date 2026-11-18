@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
 import { DataTable, type Column } from '../../../shared/ui/DataTable';
 import { Modal } from '../../../shared/ui/Modal';
+import { MultiSelect } from '../../../shared/ui/MultiSelect';
+import { EmptyState } from '../../../shared/ui/EmptyState';
 import { VariableChart } from '../../charts/VariableChart';
 import type {
   ApiClient,
@@ -261,20 +263,23 @@ function CeidSelect({ value, onChange, ceids, ariaLabel }: {
   );
 }
 
-/** 采集配置字段（新增/编辑弹窗共用）：本机目录可用时用下拉，否则手动输入。 */
-function CollectPlanFields({ form, update, catalog }: {
+/** 采集配置字段（新增/编辑弹窗共用）：目录可用时下拉选 CEID / 多选 SVID，否则手动输入。 */
+function CollectPlanFields({ form, update, catalog, manual, onToggleManual }: {
   form: CollectPlanForm;
   update: (patch: Partial<CollectPlanForm>) => void;
   catalog: LocalCatalog | null;
+  /** 目录可用时仍可切到「高级：手输」；目录不可用时强制手输。 */
+  manual: boolean;
+  onToggleManual: (next: boolean) => void;
 }): JSX.Element {
+  const useCatalog = catalog !== null && !manual;
   const ceids = catalog?.ceids ?? [];
   const svids = catalog?.svids ?? [];
-  const pickedSvids = parseIdList(form.svids).map(String);
   return (
     <>
       <div className="form-row">
         <label className="field">启动 CEID
-          {ceids.length > 0
+          {useCatalog
             ? (
               <CeidSelect
                 value={form.startCeid}
@@ -286,7 +291,7 @@ function CollectPlanFields({ form, update, catalog }: {
             : <input value={form.startCeid} onChange={(event) => update({ startCeid: event.target.value })} />}
         </label>
         <label className="field">停止 CEID
-          {ceids.length > 0
+          {useCatalog
             ? (
               <CeidSelect
                 value={form.stopCeid}
@@ -301,27 +306,40 @@ function CollectPlanFields({ form, update, catalog }: {
           <input value={form.intervalMs} onChange={(event) => update({ intervalMs: event.target.value })} />
         </label>
       </div>
-      <label className="field field-wide">
-        {svids.length > 0 ? '采集变量（可多选）' : '采集变量(逗号/空格分隔)'}
-        {svids.length > 0
-          ? (
-            <select
-              multiple
-              size={Math.min(8, Math.max(4, svids.length))}
-              value={pickedSvids}
-              aria-label="采集变量（可多选）"
-              onChange={(event) => {
-                const picked = Array.from(event.target.selectedOptions, (option) => option.value);
-                update({ svids: parseIdList(picked.join(',')).join(', ') });
-              }}
-            >
-              {svids.map((item) => (
-                <option key={item.svid} value={String(item.svid)}>{`${item.svid} · ${item.slot}`}</option>
-              ))}
-            </select>
-          )
-          : <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />}
-      </label>
+      {useCatalog
+        ? (
+          <label className="field-block">
+            采集变量（从设备目录多选）
+            <MultiSelect<number>
+              label="SVID"
+              ariaLabel="采集变量 SVID 多选"
+              options={svids.map((item) => ({
+                value: item.svid,
+                name: item.slot || item.owner,
+                meta: String(item.svid),
+              }))}
+              value={parseIdList(form.svids)}
+              onChange={(next) => update({ svids: next.join(', ') })}
+              emptyText="设备目录里还没有 SVID"
+            />
+          </label>
+        )
+        : (
+          <label className="field field-wide">
+            采集变量(SVID，逗号/空格分隔)
+            <input value={form.svids} onChange={(event) => update({ svids: event.target.value })} />
+          </label>
+        )}
+      {catalog !== null && (
+        <label className="check-inline">
+          <input
+            type="checkbox"
+            checked={manual}
+            onChange={(event) => onToggleManual(event.target.checked)}
+          />
+          高级：手动输入 CEID / SVID
+        </label>
+      )}
     </>
   );
 }
@@ -361,6 +379,8 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [catalog, setCatalog] = useState<LocalCatalog | null>(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
+  /** 目录可用时是否走「高级：手输」；目录不可用则强制手输。 */
+  const [manualFields, setManualFields] = useState(false);
   const timerRef = useRef<number | null>(null);
   /** 目录只读一次；关闭/重开弹窗后旧请求的结果直接丢弃。 */
   const catalogSeq = useRef(0);
@@ -555,6 +575,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
+    setManualFields(false);
     setEditingId(null);
     setModalOpen(true);
     void loadCatalog();
@@ -565,6 +586,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
       name: plan.name, startCeid: plan.startCeid, stopCeid: plan.stopCeid,
       intervalMs: plan.intervalMs, svids: plan.svids,
     });
+    setManualFields(false);
     setEditingId(plan.id);
     setModalOpen(true);
     void loadCatalog();
@@ -654,7 +676,28 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
   const totalErrors = runningPlans.reduce((sum, item) => sum + (item.decodeErrors ?? 0), 0);
   const batchBusy = batch !== null;
 
+  /* 运行页没配置时只留一张空态卡：表格空行 + 状态行 + 曲线空行合成一句 */
+  const runtimeEmpty = !readOnly && plans.length === 0;
+
   return (
+    <div className="panel-stack">
+      {runtimeEmpty ? (
+        <Panel id="panel-host-collect" title="数据采集（S1F3 轮询）" headless>
+          <EmptyState
+            text="还没有采集配置"
+            hint="到配置区新增配置后，回到这里下发 S1F3 配置、启停采集并查看曲线。"
+            action={
+              <button
+                type="button"
+                className="primary"
+                onClick={() => goTo?.(`host-page:${hostId}:config:collect`)}
+              >
+                去配置区新增
+              </button>
+            }
+          />
+        </Panel>
+      ) : (
     <Panel
       id="panel-host-collect"
       title={readOnly ? '采集设置（S1F3 配置库）' : '数据采集（S1F3 轮询）'}
@@ -748,8 +791,8 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
               : armedPlans.length > 0
                 ? `待命 ${armedPlans.length} 份 · 已下发配置，等待设备上报启动 CEID`
                 : (state?.collectors ?? []).length > 0
-                  ? '已配置 · 在方案列表点「启动」开跑（多份计划可同时采）'
-                  : '未配置 · 在方案列表点「启动」下发配置'}
+                  ? '已下发配置 · 在列表点「启动」开跑（多份计划可同时采）'
+                  : `已保存 ${plans.length} 份配置 · 在列表点「启动」下发并开跑`}
           </span>
         </div>
       )}
@@ -760,7 +803,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
             <h2 style={{ margin: 0 }}>采集曲线</h2>
             <span className="hint-inline">按配置折叠，点「查看曲线」才展示</span>
           </div>
-          {plans.length === 0 && <p className="hint">还没有采集配置；到配置区新增后这里按配置看曲线。</p>}
           {plans.map((plan) => {
             const open = viewingPlanId === plan.id;
             const planSvids = parseIdList(plan.svids);
@@ -833,9 +875,13 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
         <CollectPlanFields
           form={form}
           catalog={catalog}
+          manual={manualFields}
+          onToggleManual={setManualFields}
           update={(patch) => setForm((previous) => ({ ...previous, ...patch }))}
         />
       </Modal>
     </Panel>
+      )}
+    </div>
   );
 }

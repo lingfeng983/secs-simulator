@@ -26,7 +26,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   const [stateFilter, setStateFilter] = useState<DeviceStatus | ''>('');
   /** 区域筛选：空串看全部，其余只看该区域的设备。 */
   const [regionFilter, setRegionFilter] = useState('');
-  /** 新增设备弹框：链接信息 + 模板 + 区域都在这一个框里填。 */
+  /** 新增设备弹框：连接信息 + 模板 + 区域都在这一个框里填。 */
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createDraft, setCreateDraft] = useState<CreateDeviceDraft>({
@@ -354,7 +354,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
     }
   };
 
-  /** 按弹框里填的链接信息 + 模板建设备：配置文件名取设备名，其余写进 session 段；批量模式走批量路径。 */
+  /** 按弹框里填的连接信息 + 模板建设备：配置文件名取设备名，其余写进 session 段；批量模式走批量路径。 */
   const createFromTemplate = async (draft: CreateDeviceDraft) => {
     if (draft.batch) {
       await createBatchDevices(draft);
@@ -579,7 +579,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
               className="primary"
               onClick={openCreate}
               disabled={batchBusy}
-              title="新增设备：填写链接信息并选择设备模板"
+              title="新增设备：填写连接信息并选择设备模板"
             >
               新建设备
             </button>

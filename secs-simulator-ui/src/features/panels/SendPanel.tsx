@@ -34,6 +34,13 @@ function remoteCommandSml(rcmdid: number): string {
   return 'S2F41 W' + NL + '<L' + NL + '  <U4 ' + rcmdid + '>' + NL + '  <A "SIM">' + NL + '>.';
 }
 
+/** 报文头：stream/function 缺失或非有限时显示「—」，不向用户输出 undefined。 */
+function sendHeader(result: SentMessageResult, session: string): string {
+  const stream = Number.isFinite(result.stream) ? result.stream : '—';
+  const func = Number.isFinite(result.function) ? result.function : '—';
+  return `发送 ${session}  S${stream}F${func}${result.wbit ? ' W' : ''}`;
+}
+
 /**
  * 手动与压测发送面板。
  *
@@ -123,15 +130,22 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     if (disabled || draft.trim() === '') {
       return;
     }
+    if (backend.client === null) {
+      notifier.error('发送失败', '后端未连接');
+      return;
+    }
     setBusy(true);
     setError('');
     setResult(null);
     try {
-      const sent = await backend.sendSml(activeSession, draft);
-      /* sendSml 已经弹过提示了；这里再把结构化结果留下来给用户细看 */
+      /* 直接走原始 API：后端包装层会弹一条完整的「S1F1 -> S1F2 / 耗时 …」toast，
+         与本面板的结果区内容重复。这里结果区展示全部细节，toast 只留一句「已发送」。 */
+      const sent = await backend.client.sendSml(activeSession, draft);
       setResult(sent);
+      notifier.info('已发送');
     } catch (sendError) {
-      /* 控制器已经报过错，这里只把详情留在结果区 */
+      /* 错误 toast 仍要弹：结果区只留详情，右下角给出即时反馈 */
+      notifier.error('发送失败', (sendError as Error).message);
       setError((sendError as Error).message);
     } finally {
       setBusy(false);
@@ -139,22 +153,7 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   };
 
   return (
-    <Panel
-      id="panel-send"
-      title="手动发送"
-      headless
-      actions={
-        <button
-          type="button"
-          className="primary"
-          onClick={() => void onSend()}
-          disabled={disabled || busy || draft.trim() === ''}
-          title="发送到选中的会话（W 位会等待回复）"
-        >
-          {busy ? '发送中…' : '发送 SML'}
-        </button>
-      }
-    >
+    <Panel id="panel-send" title="手动发送" headless>
       {/* 预设是"填内容"的工具，不是面板动作：放在编辑器上方更贴近使用位置 */}
       <div className="editor-tools" role="group" aria-label="发送预设">
         <span className="editor-tools-label">快速填入</span>
@@ -198,6 +197,25 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
         aria-label="SML 报文内容"
         title="报文头写 SxFy，可带 W；数据项支持 L/A/B/BOOLEAN/I1..I8/U1..U8/F4/F8。W 位会等 T3，没有对端时服务端回 409。同一条消息要重复发送就用下面的压测。"
       />
+      {/* 发送按钮 + 结果紧跟编辑器：发完立刻在视线内看到回复，不用往下找面板头部 */}
+      <div className="send-actions">
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void onSend()}
+          disabled={disabled || busy || draft.trim() === ''}
+          title="发送到选中的会话（W 位会等待回复）"
+        >
+          {busy ? '发送中…' : '发送 SML'}
+        </button>
+        <span className="hint-inline">W 位会等待回复；结果就显示在这里</span>
+      </div>
+      {error !== '' && (
+        <pre className="sml-result error-result">发送失败：{error}</pre>
+      )}
+      {result !== null && (
+        <SmlResult header={sendHeader(result, activeSession)} result={result} peerLabel="主机" />
+      )}
 
       <h3 className="sub-title">压测发送（服务端循环这条消息）</h3>
       <div className="toolbar">
@@ -255,12 +273,6 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
           {burstRunning ? '压测中…' : '开始压测'}
         </button>
       </div>
-      {error !== '' && (
-        <pre className="sml-result error-result">发送失败：{error}</pre>
-      )}
-      {result !== null && (
-        <SmlResult header={`发送 ${activeSession}  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`} result={result} peerLabel="主机" />
-      )}
     </Panel>
   );
 }

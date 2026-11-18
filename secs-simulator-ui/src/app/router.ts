@@ -20,7 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 /** 设备配置区子页：描述「这台设备是什么」（保存后需重载）。 */
 export type DeviceConfigPage =
-  | 'overview'    // 概览：名称/模板/自动连接
+  | 'overview'    // 概览：身份信息 + 连接/结构/周期摘要（静态事实读配置，运行状态读会话）
   | 'connection'  // 连接：session 段
   | 'structure'   // 结构：单元/模板/组合 整体模型
   | 'svids'       // 变量配置：SVID 定义（写入配置草稿）

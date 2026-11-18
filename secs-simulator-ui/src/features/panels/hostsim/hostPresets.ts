@@ -95,9 +95,10 @@ export const HOST_PRESETS: readonly HostPreset[] = [
     sml: 'S2F33 W\n<L\n  <U4 0>\n  <L\n    <L\n      <U4 3001>\n      <L\n        <U4 1001>\n        <U4 1004>\n      >\n    >\n  >\n>.',
   },
   {
+    /* SECS-II 协议术语 Link（事件↔报告的绑定），不是网络「连接」——故保留「链接」措辞并给出解释。 */
     label: 'S2F35 链接事件',
     group: '报告与事件',
-    desc: '把 CEID 2001 链接到 RPTID 3001，事件触发时按该报告上报，设备回 S2F36。',
+    desc: '协议术语 Link（事件与报告的绑定关系，非网络「连接」）：把 CEID 2001 链接到 RPTID 3001，事件触发时按该报告上报，设备回 S2F36。',
     reply: 'S2F36',
     sml: 'S2F35 W\n<L\n  <L\n    <U4 2001>\n    <L\n      <U4 3001>\n    >\n  >\n>.',
   },

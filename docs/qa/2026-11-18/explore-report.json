@@ -1,0 +1,6514 @@
+[
+  {
+    "name": "01-workbench",
+    "hash": "#/workbench",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "新建设备",
+        "title": "新增设备：填写链接信息并选择设备模板",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "批量同步配置",
+        "title": "以选中的第一台为原始配置，把其余设备的配置同步为一致，只改会话 id/端口/设备号/名称",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 9,
+        "text": "批量重启",
+        "title": "对选中的设备逐台重启（按各自配置重新装载；配置有问题时旧会话不受影响，主机会断连）",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 10,
+        "text": "批量停止",
+        "title": "停止选中设备的端口监听（链路断开、端口立即释放；设备保留，可再启动）",
+        "aria": "",
+        "cls": "danger",
+        "disabled": true
+      },
+      {
+        "i": 11,
+        "text": "批量删除",
+        "title": "从清单里删掉选中的设备：先停端口监听再软删配置，配置历史仍留在库里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": true
+      },
+      {
+        "i": 12,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "",
+        "title": "导入 CSV：按导出时的表头解析，导入的行只在本页查看",
+        "aria": "导入 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "ETCH01",
+        "title": "进入设备页",
+        "aria": "",
+        "cls": "link",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "重启",
+        "title": "重启：按配置文件重新装载，配置有问题时旧会话不受影响",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "停止",
+        "title": "停止端口监听：链路断开、端口立即释放，设备保留在清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "删除",
+        "title": "删除这台设备：先停止端口监听，再从清单里删掉；配置历史仍留在库里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-sessions"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "02-device-config-overview",
+    "hash": "#/device/ETCH01/config/overview",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-overview"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "03-device-config-connection",
+    "hash": "#/device/ETCH01/config/connection",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：连接参数",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-connection"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "04-device-config-structure",
+    "hash": "#/device/ETCH01/config/structure",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "设备已启动：改单元结构前先停止设备",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      },
+      {
+        "i": 25,
+        "text": "+ 单元",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "删除单元",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-structure"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "05-device-config-svids",
+    "hash": "#/device/ETCH01/config/svids",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：变量定义",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "＋ 新建变量",
+        "title": "没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 37,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 38,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 39,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 40,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 41,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 42,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 43,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 44,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 45,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 46,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 47,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 48,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 49,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 50,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 51,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 52,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 53,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 54,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 55,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 56,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 57,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 58,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 59,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 60,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 61,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 62,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 63,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 64,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 65,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 66,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 67,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 68,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 69,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 70,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 71,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 72,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 73,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 74,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 75,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 76,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 77,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 78,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 79,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 80,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 81,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 82,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 83,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 84,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 85,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 86,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 87,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 88,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 89,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 90,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 91,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 92,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 93,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 94,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 95,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 96,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 97,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 98,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 99,
+        "text": "预览",
+        "title": "按当前草稿预览这个变量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 100,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-svid-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "06-device-config-context",
+    "hash": "#/device/ETCH01/config/context",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：晶圆属性",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "＋ 新建属性",
+        "title": "「按片变化」的 pattern 用 {03} 表示补零到 3 位的片序，例如 W{03} 生成 W001、W002；every 表示每几片进一档（每 25 片换批号时 every 填 25）。晶圆属性随工艺周期换片：停止时冻结，启动后从第 0 片起跑。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "预览",
+        "title": "文本属性没有曲线可看",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 28,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "预览",
+        "title": "文本属性没有曲线可看",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 31,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "预览",
+        "title": "文本属性没有曲线可看",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 34,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "预览",
+        "title": "文本属性没有曲线可看",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 37,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 38,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 39,
+        "text": "预览",
+        "title": "文本属性没有曲线可看",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 40,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-context-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "07-device-config-events",
+    "hash": "#/device/ETCH01/config/events",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：事件定义、报告定义",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "+ 全局 CEID",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "+ 报告",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "UNIT_ID、TEMP_PV、PRESS_PV、RF_POWER 4",
+        "title": "SVID：UNIT_ID、TEMP_PV、PRESS_PV、RF_POWER",
+        "aria": "SVID",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "未选择",
+        "title": "设备常量：未选择",
+        "aria": "设备常量",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "未选择",
+        "title": "晶圆属性：未选择",
+        "aria": "晶圆属性",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "删除",
+        "title": "删除这一行",
+        "aria": "",
+        "cls": "form-grid-del",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "ETCH_DEPTH_A、REMOVAL_A 2",
+        "title": "SVID：ETCH_DEPTH_A、REMOVAL_A",
+        "aria": "SVID",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "ecid.501（TEMP_LIMIT） 1",
+        "title": "设备常量：ecid.501（TEMP_LIMIT）",
+        "aria": "设备常量",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "ctx.LOTID、ctx.WAFERID、ctx.RCPID 3",
+        "title": "晶圆属性：ctx.LOTID、ctx.WAFERID、ctx.RCPID",
+        "aria": "晶圆属性",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "删除",
+        "title": "删除这一行",
+        "aria": "",
+        "cls": "form-grid-del",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "+ 事件",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "PROCESS_DATA 1",
+        "title": "引用报告：PROCESS_DATA",
+        "aria": "引用报告",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 37,
+        "text": "删除",
+        "title": "删除这一行",
+        "aria": "",
+        "cls": "form-grid-del",
+        "disabled": false
+      },
+      {
+        "i": 38,
+        "text": "PROCESS_DATA 1",
+        "title": "引用报告：PROCESS_DATA",
+        "aria": "引用报告",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 39,
+        "text": "删除",
+        "title": "删除这一行",
+        "aria": "",
+        "cls": "form-grid-del",
+        "disabled": false
+      },
+      {
+        "i": 40,
+        "text": "PROCESS_DATA、DETAIL 2",
+        "title": "引用报告：PROCESS_DATA、DETAIL",
+        "aria": "引用报告",
+        "cls": "ref-dropdown-trigger",
+        "disabled": false
+      },
+      {
+        "i": 41,
+        "text": "删除",
+        "title": "删除这一行",
+        "aria": "",
+        "cls": "form-grid-del",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-ceid-report-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "08-device-config-cycle",
+    "hash": "#/device/ETCH01/config/cycle",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：工艺周期",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "移除周期段",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "+ 周期事件",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "参数： TEMP_PV ▾",
+        "title": "已选：TEMP_PV",
+        "aria": "选择图上展示的参数",
+        "cls": "multi-select-trigger",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "重新预览",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "＋",
+        "title": "放大时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "－",
+        "title": "缩小时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "复位",
+        "title": "恢复整个时间窗",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "1001 TEMP_PV (C)",
+        "title": "点一下隐藏这条曲线",
+        "aria": "",
+        "cls": "event-curve-series-item",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "CEID 2001",
+        "title": "点一下隐藏这类事件的竖线",
+        "aria": "",
+        "cls": "event-legend-item",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "CEID 2002",
+        "title": "点一下隐藏这类事件的竖线",
+        "aria": "",
+        "cls": "event-legend-item",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-cycle"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "09-device-config-plans",
+    "hash": "#/device/ETCH01/config/plans",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：事件计划、事件发送",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "+ 事件计划",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "参数： TEMP_PV ▾",
+        "title": "已选：TEMP_PV",
+        "aria": "选择图上展示的参数",
+        "cls": "multi-select-trigger",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "重新预览",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "＋",
+        "title": "放大时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "－",
+        "title": "缩小时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "复位",
+        "title": "恢复整个时间窗",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "1001 TEMP_PV (C)",
+        "title": "点一下隐藏这条曲线",
+        "aria": "",
+        "cls": "event-curve-series-item",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "StartPlan",
+        "title": "点一下隐藏这类事件的竖线",
+        "aria": "",
+        "cls": "event-legend-item",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-plan-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "10-device-config-document",
+    "hash": "#/device/ETCH01/config/document",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "查看差异",
+        "title": "看当前草稿与磁盘版本的差异",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 23,
+        "text": "格式化",
+        "title": "按 2 空格缩进重新排版（不合法时保持原文）",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "重新载入",
+        "title": "丢掉本地改动，重新拉磁盘上的原文",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "校验",
+        "title": "只做校验，不写文件：确认改动能不能编译",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "",
+        "title": "导入 JSON：从本地文件读入草稿（只进编辑器，仍需校验/保存）",
+        "aria": "导入 JSON",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "",
+        "title": "导出 JSON：把当前草稿存成文件（可选择保存位置）",
+        "aria": "导出 JSON",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "保存",
+        "title": "校验通过后整份写回，不会写一半",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "11-device-config-constants",
+    "hash": "#/device/ETCH01/config/constants",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "重新载入",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "校验",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "保存",
+        "title": "只保存并生效：设备常量",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "＋ 新建常量",
+        "title": "常量可以只给「初始值」（可用 S2F15 写入），也可以配一份值定义让它随时间/周期变化；配了值定义之后 S2F15 会拒写（写死一个随时间变的值没有意义）。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "预览",
+        "title": "只有初始值，不随时间变化",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 28,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "预览",
+        "title": "按当前草稿预览这个常量随时间的变化",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-constants-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "12-device-config-revisions",
+    "hash": "#/device/ETCH01/config/revisions",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "设备身份与模板选择；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "连接",
+        "title": "HSMS 连接参数（session 段）：地址、端口、模式。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "结构",
+        "title": "设备名/号段/单元的整体模型编辑；保存后需重启生效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "设备常量",
+        "title": "设备常量（ECV）定义：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "晶圆属性",
+        "title": "晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "变量配置",
+        "title": "状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "事件与报告",
+        "title": "事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "工艺周期",
+        "title": "工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "事件计划",
+        "title": "事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "配置原文",
+        "title": "配置原文 JSON 与版本 diff。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "版本历史",
+        "title": "配置版本历史与回看。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      }
+    ],
+    "panelIds": [],
+    "consoleErrors": []
+  },
+  {
+    "name": "13-device-runtime-plans",
+    "hash": "#/device/ETCH01/runtime/plans",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "事件执行",
+        "title": "计划启停等运行态设置；改动仅本次运行有效。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "工艺周期",
+        "title": "工艺周期运行态：启停、当前片号/相位/进度与片内事件的发送记录。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "手动与压测",
+        "title": "手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "批量启动",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 15,
+        "text": "批量停止",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 16,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "预览",
+        "title": "在下面的预览里只看这条计划的触发时刻",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "单步试跑",
+        "title": "触发一次，记为试跑，不推进倒计时",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "触发",
+        "title": "手动触发一次",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "启动",
+        "title": "设备离线：先上线再启动",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 21,
+        "text": "预览",
+        "title": "在下面的预览里只看这条计划的触发时刻",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "单步试跑",
+        "title": "触发一次，记为试跑，不推进倒计时",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "触发",
+        "title": "手动触发一次",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "启动",
+        "title": "设备离线：先上线再启动",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 25,
+        "text": "刷新",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "",
+        "title": "导出 CSV：把当前筛选的执行记录存成文件",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "清理历史",
+        "title": "清空该设备的全部历史执行记录，不影响配置与计划",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "参数： TEMP_PV ▾",
+        "title": "已选：TEMP_PV",
+        "aria": "选择图上展示的参数",
+        "cls": "multi-select-trigger",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "重新预览",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "＋",
+        "title": "放大时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "－",
+        "title": "缩小时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "复位",
+        "title": "恢复整个时间窗",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "1001 TEMP_PV (C)",
+        "title": "点一下隐藏这条曲线",
+        "aria": "",
+        "cls": "event-curve-series-item",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "全部启动",
+        "title": "设备离线：先上线再启动",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 35,
+        "text": "全部停止",
+        "title": "停止全部计划：已在队列里的延迟事件一并清除",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      }
+    ],
+    "panelIds": [
+      "panel-events"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "14-device-runtime-cycle",
+    "hash": "#/device/ETCH01/runtime/cycle",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "事件执行",
+        "title": "计划启停等运行态设置；改动仅本次运行有效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "工艺周期",
+        "title": "工艺周期运行态：启停、当前片号/相位/进度与片内事件的发送记录。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "手动与压测",
+        "title": "手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "启动周期",
+        "title": "设备离线：先上线再启动",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      },
+      {
+        "i": 15,
+        "text": "停止周期",
+        "title": "停止周期：值冻结在当前表现；重启从第 0 片重来",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 16,
+        "text": "参数： TEMP_PV ▾",
+        "title": "已选：TEMP_PV",
+        "aria": "选择图上展示的参数",
+        "cls": "multi-select-trigger",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "重新预览",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "＋",
+        "title": "放大时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "－",
+        "title": "缩小时间轴",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "复位",
+        "title": "恢复整个时间窗",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "1001 TEMP_PV (C)",
+        "title": "点一下隐藏这条曲线",
+        "aria": "",
+        "cls": "event-curve-series-item",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "刷新",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "",
+        "title": "导出 CSV：把当前筛选的执行记录存成文件",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "清理历史",
+        "title": "清空该设备的全部历史执行记录，不影响配置与计划",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-cycle-run",
+      "panel-cycle-config"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "15-device-runtime-manual",
+    "hash": "#/device/ETCH01/runtime/manual",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改的是设备定义;保存后需重启设备才会进入运行。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次运行有效;重启后按配置恢复。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "停止设备",
+        "title": "停止端口监听：链路断开、端口释放，设备仍保留在设备清单里",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "上线",
+        "title": "设备上线（等价主机发 S1F17）：上线后事件才按规则上报",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "事件执行",
+        "title": "计划启停等运行态设置；改动仅本次运行有效。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "工艺周期",
+        "title": "工艺周期运行态：启停、当前片号/相位/进度与片内事件的发送记录。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "手动与压测",
+        "title": "手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "示例 S1F1",
+        "title": "",
+        "aria": "",
+        "cls": "chip",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "示例 S5F1",
+        "title": "",
+        "aria": "",
+        "cls": "chip",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "时钟同步 S2F17",
+        "title": "让设备用主机时间对钟（S2F18 回当前时间）",
+        "aria": "",
+        "cls": "chip",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "压测发送",
+        "title": "在服务端循环发送编辑框里这条 SML,消除 HTTP 往返失真",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "开始压测",
+        "title": "在服务端循环上报该 CEID(走手动上报路径,不受 events.maxPerSec 限制)",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      },
+      {
+        "i": 19,
+        "text": "发送 SML",
+        "title": "发送到选中的会话（W 位会等待回复）",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "报警风暴",
+        "title": "在服务端对上面编辑好的报警交替置位/清除,观察主机侧压力",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "清除报警",
+        "title": "清除报警（S5F1，带 W 位）",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "置位报警",
+        "title": "置位报警（S5F1，带 W 位）",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-send",
+      "panel-alarms"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "16-host-list",
+    "hash": "#/hosts",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "＋ 新建主机",
+        "title": "新建一台主机：填写目标地址与端口，可选主机模板套用方案",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "批量链接",
+        "title": "对选中的主机逐台建立链接（已经连上的跳过）",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 9,
+        "text": "批量断开",
+        "title": "对选中的主机逐台断开链接（没连上的跳过）",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 10,
+        "text": "批量删除",
+        "title": "删除选中的主机实例：连着的先断开再删",
+        "aria": "",
+        "cls": "danger",
+        "disabled": true
+      },
+      {
+        "i": 11,
+        "text": "host_01M7JGP6SCX1NPR0VXGJXA34RT",
+        "title": "",
+        "aria": "",
+        "cls": "link",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "断开",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "详情",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "删除",
+        "title": "删除会先断开链接",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-hosts-v2"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "17-host-config-overview",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/config/overview",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "主机身份与目标；保存后需「使设置生效」。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "报文模板",
+        "title": "主机侧 16 条报文预设与说明。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "Trace 设置",
+        "title": "S2F23 采样方案库：只管理方案与参数，发送在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "采集设置",
+        "title": "S1F3 采集配置库：只管理配置方案，下发与采集在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "保存名称",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      },
+      {
+        "i": 16,
+        "text": "保存目标",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      }
+    ],
+    "panelIds": [
+      "panel-host-overview",
+      "panel-host-overview-collect"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "18-host-config-presets",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/config/presets",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "主机身份与目标；保存后需「使设置生效」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "报文模板",
+        "title": "主机侧 16 条报文预设与说明。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "Trace 设置",
+        "title": "S2F23 采样方案库：只管理方案与参数，发送在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "采集设置",
+        "title": "S1F3 采集配置库：只管理配置方案，下发与采集在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "新增",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 37,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 38,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 39,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 40,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 41,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 42,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 43,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 44,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 45,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      },
+      {
+        "i": 46,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 47,
+        "text": "删除",
+        "title": "",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-presets"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "19-host-config-trace",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/config/trace",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "主机身份与目标；保存后需「使设置生效」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "报文模板",
+        "title": "主机侧 16 条报文预设与说明。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "Trace 设置",
+        "title": "S2F23 采样方案库：只管理方案与参数，发送在运行区。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "采集设置",
+        "title": "S1F3 采集配置库：只管理配置方案，下发与采集在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "去下发 →",
+        "title": "",
+        "aria": "",
+        "cls": "link-button",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "新增方案",
+        "title": "TOTSMP=0 可提前终止该 TRID；方案按主机落配置库（config.db），重启后端、换机器都不丢。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "编辑",
+        "title": "打开编辑弹窗改参数，保存后写回方案库",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "删除",
+        "title": "删除方案（配置库同步删除）",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-trace"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "20-host-config-collect",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/config/collect",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config active",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "概览",
+        "title": "主机身份与目标；保存后需「使设置生效」。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "报文模板",
+        "title": "主机侧 16 条报文预设与说明。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "Trace 设置",
+        "title": "S2F23 采样方案库：只管理方案与参数，发送在运行区。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "采集设置",
+        "title": "S1F3 采集配置库：只管理配置方案，下发与采集在运行区。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "去下发 →",
+        "title": "",
+        "aria": "",
+        "cls": "link-button",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "新增配置",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "编辑",
+        "title": "打开编辑弹窗改参数，保存后写回配置库",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "删除",
+        "title": "删除配置（配置库同步删除）",
+        "aria": "",
+        "cls": "danger",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-collect"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "21-host-runtime-messages",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/runtime/messages",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "消息发送",
+        "title": "向本主机发送报文。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "Trace 采集",
+        "title": "下发 S2F23 采样并查看 S6F1 参数趋势。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "数据采集",
+        "title": "下发采集配置、启停采集并查看数据曲线。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "S1F1 在吗",
+        "title": "主机探活/心跳：确认设备还在线，设备回 S1F2。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "S1F13 建立通信",
+        "title": "建立通信：主机请求建链，设备回 S1F14（COMMACK）；之后才能发其它报文。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "S1F17 上线",
+        "title": "请求设备进入 ONLINE；只有 ONLINE 后设备才主动上报 S6F1 / S6F11。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "S1F15 下线",
+        "title": "请求设备退出 ONLINE，设备回 S1F16；主动上报随之停止。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "S1F3 读状态变量",
+        "title": "按 SVID 列表读当前值（这里读 1001/1003），设备回 S1F4。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "S2F23 开始 Trace",
+        "title": "按 DSPER=1s、REPGSZ=1 采集 1001/1003，设备回 S2F24 后周期推 S6F1。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "发送",
+        "title": "带 W 的报文会等待设备回复；模板填入后仍可修改再发送。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-send"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "22-host-runtime-trace",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/runtime/trace",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "消息发送",
+        "title": "向本主机发送报文。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "Trace 采集",
+        "title": "下发 S2F23 采样并查看 S6F1 参数趋势。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "数据采集",
+        "title": "下发采集配置、启停采集并查看数据曲线。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "批量启动",
+        "title": "对选中方案逐条下发 S2F23 开始采样（已采集中者跳过）。TOTSMP=0 可提前终止该 TRID；方案按主机落配置库（config.db），重启后端、换机器都不丢。",
+        "aria": "",
+        "cls": "primary",
+        "disabled": true
+      },
+      {
+        "i": 15,
+        "text": "批量停止",
+        "title": "对选中方案逐条下发 TOTSMP=0（未启动者跳过）",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 16,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "启动",
+        "title": "向设备下发 S2F23 开始采样",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "查看曲线",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-trace",
+      "panel-host-trace-charts"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "23-host-runtime-collect",
+    "hash": "#/hosts/host_01M7JGP6SCX1NPR0VXGJXA34RT/runtime/collect",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "▣ 配置区",
+        "title": "▣ 修改后点「使设置生效」，按最新设置重连。",
+        "aria": "",
+        "cls": "zone-switch-btn config",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "◉ 运行区",
+        "title": "◉ 这里的操作只对本次连接有效；收发只作用于本主机。",
+        "aria": "",
+        "cls": "zone-switch-btn runtime active",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "断开连接",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "使设置生效",
+        "title": "按最新设置重连并恢复采集",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "消息发送",
+        "title": "向本主机发送报文。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "Trace 采集",
+        "title": "下发 S2F23 采样并查看 S6F1 参数趋势。",
+        "aria": "",
+        "cls": "subtab",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "数据采集",
+        "title": "下发采集配置、启停采集并查看数据曲线。",
+        "aria": "",
+        "cls": "subtab active",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "批量启动",
+        "title": "按选中顺序逐份下发配置并启动；已经启动的计划自动跳过",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 15,
+        "text": "批量停止",
+        "title": "停止选中且在采的计划；未启动的自动跳过",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 16,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "启动",
+        "title": "下发该配置并启动采集",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "查看曲线",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-collect"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "24-host-templates",
+    "hash": "#/host-templates",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "＋ 新建模板",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "套用新建",
+        "title": "新建一台主机，并把模板里的方案复制进它的配置区",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "套用新建",
+        "title": "新建一台主机，并把模板里的方案复制进它的配置区",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-host-templates"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "25-device-templates",
+    "hash": "#/templates",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "新建模板",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "编辑",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-templates"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "26-param-templates",
+    "hash": "#/svid-templates",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "＋ 新建模板",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 9,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 12,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 13,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 14,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 15,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 16,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 17,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 18,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 19,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 20,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 21,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 22,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 23,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 24,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 25,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 26,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 27,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 28,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 29,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 30,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 31,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 32,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 33,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 34,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 35,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 36,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 37,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 38,
+        "text": "复制",
+        "title": "内置条目只读，复制一份自定义再改",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 39,
+        "text": "预览",
+        "title": "只读预览这条变化逻辑",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-svid-templates"
+    ],
+    "consoleErrors": []
+  },
+  {
+    "name": "27-audit",
+    "hash": "#/system/audit",
+    "buttons": [
+      {
+        "i": 0,
+        "text": "",
+        "title": "通用设置：主题、布局、字号、主色、面板间隔、日志级别",
+        "aria": "通用设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 1,
+        "text": "",
+        "title": "展开实时消息监控（接收 / 发送按颜色区分）",
+        "aria": "消息监控",
+        "cls": "icon-btn monitor-toggle",
+        "disabled": false
+      },
+      {
+        "i": 2,
+        "text": "",
+        "title": "立即刷新所有数据（R）",
+        "aria": "刷新",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 3,
+        "text": "",
+        "title": "命令面板（Ctrl+K）",
+        "aria": "命令面板",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 4,
+        "text": "",
+        "title": "设置后端地址（远程运行时后端）",
+        "aria": "连接设置",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 5,
+        "text": "",
+        "title": "切换到深色",
+        "aria": "切换主题",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 6,
+        "text": "",
+        "title": "快捷键（?）",
+        "aria": "快捷键帮助",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 7,
+        "text": "过滤",
+        "title": "",
+        "aria": "",
+        "cls": "primary",
+        "disabled": false
+      },
+      {
+        "i": 8,
+        "text": "清除过滤",
+        "title": "",
+        "aria": "",
+        "cls": "",
+        "disabled": true
+      },
+      {
+        "i": 9,
+        "text": "载入更早",
+        "title": "最近 200 条操作记录；以当前最早一条为游标向服务端要更早的一页。完整历史在 --work-dir/logs/audit.jsonl（重启后仍保留最近 1000 条）；导入 CSV 可把导出的审计放在本页只读查看，不会写回服务端。",
+        "aria": "",
+        "cls": "",
+        "disabled": false
+      },
+      {
+        "i": 10,
+        "text": "",
+        "title": "导出 CSV：把当前筛选结果存成文件（可选择保存位置）",
+        "aria": "导出 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      },
+      {
+        "i": 11,
+        "text": "",
+        "title": "导入 CSV：按导出时的表头解析，导入的行只在本页查看",
+        "aria": "导入 CSV",
+        "cls": "icon-btn",
+        "disabled": false
+      }
+    ],
+    "panelIds": [
+      "panel-audit"
+    ],
+    "consoleErrors": []
+  }
+]

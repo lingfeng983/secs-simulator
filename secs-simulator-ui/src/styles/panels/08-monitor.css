@@ -422,6 +422,7 @@
   }
   .monitor-drawer {
     width: min(100vw, 420px) !important;
-    z-index: 60;
+    /* 层级阶梯：抽屉恒为 45，窄屏也一样，不能越过遮罩 80 */
+    z-index: 45;
   }
 }
