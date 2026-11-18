@@ -244,7 +244,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   /**
    * 批量新建设备：按模板建（或复用）一份基础配置，再走 /sessions/bulk 逐台递增开多台。
    *
-   * <p>第 i 台的会话 id/端口/Device ID 是运行期覆盖，不写回配置文件——
+   * <p>第 i 台的端口/Device ID 是运行期覆盖，会话 id 由服务端生成，都不写回配置文件——
    * 一批设备共用一份配置本体（单元、变量、事件都一致）。基础配置名带模板 id，
    * 同「前缀+模板」的批次复用同一份，不同模板互不覆盖。</p>
    */
