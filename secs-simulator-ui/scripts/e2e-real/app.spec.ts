@@ -231,19 +231,23 @@ test('独立工具 4 页（主机模板 / 设备模板 / 参数模板 / 审计�
 test('设备 · 变量配置：逐变量曲线预览能出图', async ({ page }) => {
   await page.goto('/#/workbench');
   await gotoDevice(page);
-  await openDevicePage(page, 'config', '变量配置', 'svids');
+  await openDevicePage(page, 'config', '变量配置', 'svid-config');
   const panel = page.locator('#panel-svid-config');
   await expect(panel.getByRole('row').nth(1)).toBeVisible();
   await panel.getByRole('button', { name: '预览', exact: true }).first().click();
-  await expect(panel.locator('.variable-chart canvas').first()).toBeVisible();
+  /* 预览走 Modal + ParamCurveChart（SVG，不是 canvas）；Overlay 是 createPortal 到 body 的 */
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('svg.param-curve-chart').first()).toBeVisible();
 });
 
 test('设备 · 事件执行：计划启停可来回切换', async ({ page }) => {
   await page.goto('/#/workbench');
   await gotoDevice(page);
-  await openDevicePage(page, 'runtime', '事件执行', 'plans');
+  await openDevicePage(page, 'runtime', '事件执行', 'events');
   const panel = page.locator('#panel-events');
-  await expect(panel.getByRole('row').nth(1)).toBeVisible();
+  /* #panel-events 自己就是 region「事件执行」 */
+  await expect(panel).toBeVisible();
 
   const disable = panel.getByRole('button', { name: '禁用', exact: true }).first();
   if (await disable.isVisible()) {
@@ -252,13 +256,18 @@ test('设备 · 事件执行：计划启停可来回切换', async ({ page }) =>
     /* 还原，避免影响后续用例与人工查看 */
     await panel.getByRole('button', { name: '启用', exact: true }).first().click();
     await expect(panel.getByRole('button', { name: '禁用', exact: true }).first()).toBeVisible();
+  } else {
+    /* 内置模板不带事件计划：空态下「全部启动/停止」必须禁用，不能是能点但无效果的假按钮 */
+    await expect(panel.getByText(/还没有事件计划/)).toBeVisible();
+    await expect(panel.getByRole('button', { name: '全部启动' })).toBeDisabled();
+    await expect(panel.getByRole('button', { name: '全部停止' })).toBeDisabled();
   }
 });
 
 test('设备 · 配置原文：自动载入本设备配置且无多余提示', async ({ page }) => {
   await page.goto('/#/workbench');
   await gotoDevice(page);
-  await openDevicePage(page, 'config', '配置原文', 'document');
+  await openDevicePage(page, 'config', '配置原文', 'config');
   await expect(
     page.locator('#panel-config textarea').or(page.locator('#panel-config .config-editor')).first(),
   ).toBeVisible({ timeout: 15_000 });
@@ -271,10 +280,15 @@ test('设备 · 版本历史：表格渲染且能触发对比', async ({ page })
   await openDevicePage(page, 'config', '版本历史', 'revisions');
   const panel = page.locator('#panel-revisions');
   await expect(panel.getByRole('row').nth(1)).toBeVisible();
-  /* 「对比当前草稿」是这一页唯一安全的动作按钮 */
+  /* 「对比当前草稿」是这一页唯一安全的动作按钮；无未保存草稿时按设计禁用 */
   const compare = panel.getByRole('button', { name: /对比/ }).first();
-  if (await compare.isVisible()) {
+  await expect(compare).toBeVisible();
+  if (await compare.isEnabled()) {
     await compare.click();
+  } else {
+    /* 禁用必须有明确原因（没有草稿可对比），不是渲染坏了的假按钮 */
+    await expect(compare).toBeDisabled();
+    await expect(compare).toHaveAttribute('title', /草稿/);
   }
 });
 
