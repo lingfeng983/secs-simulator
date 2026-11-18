@@ -11,7 +11,11 @@ export type StreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' |
  * {@code alarm}（报警置位/清除）、{@code session}（会话状态迁移）、
  * {@code plan-fired}（3.0 M4 编排触发，200ms 合并帧）、{@code device-link}
  * （设备链路相位）、{@code host-link}（主机链路相位）、{@code config-changed}
- * （配置保存/新建/删除）。漏订阅等于后端白发。</p>
+ * （配置保存/分段保存/新建/删除）。漏订阅等于后端白发。</p>
+ *
+ * <p>顶层 sessionId 只在会话域事件（s6f11/alarm/session/device-link）帧里出现；
+ * plan-fired/host-link/config-changed 的身份在 data 里（deviceId/hostId/name），
+ * 帧顶层不带 sessionId，解析后规整成空串。要按设备/主机/配置过滤，读 data。</p>
  */
 export type NoticeType =
   | 's6f11'
@@ -24,6 +28,7 @@ export type NoticeType =
 
 export interface NoticeWire {
   type: NoticeType;
+  /** 会话域四类才有值；其余类型后端不发顶层 sessionId，这里规整成空串（不是会话 id，别拿它匹配设备/主机/配置）。 */
   sessionId: string;
   at: number;
   data: Record<string, unknown>;
@@ -169,7 +174,9 @@ export function useEventStream(
 
         /* schema v6 类型化通知:同一条 SSE 通道上的 s6f11/alarm/session 帧；
            3.0 M4 的 plan-fired 是 200ms 合并帧（items 数组），只当刷新信号；
-           device-link / host-link 是链路相位，config-changed 是配置已保存。 */
+           device-link / host-link 是链路相位，config-changed 是配置变更
+           （save/save-section/create/delete）。后端只在会话域四类帧里带顶层
+           sessionId，其余类型解构出 undefined，按下游语义规整成空串。 */
         for (const type of [
           's6f11', 'alarm', 'session', 'plan-fired',
           'device-link', 'host-link', 'config-changed',
