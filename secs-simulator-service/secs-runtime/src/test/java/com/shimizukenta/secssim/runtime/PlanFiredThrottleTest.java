@@ -42,7 +42,8 @@ class PlanFiredThrottleTest {
             assertEquals(1, frames.size(), "同设备合并成一帧");
             NoticeEvent frame = frames.get(0);
             assertEquals(PlanFiredThrottle.EVENT_TYPE, frame.type());
-            assertEquals("devA", frame.sessionId());
+            /* sourceId 装设备 id：plan-fired 不是会话域事件，SSE 帧顶层不带 sessionId */
+            assertEquals("devA", frame.sourceId());
             assertTrue(frame.payload().contains("\"merged\":true"));
             assertTrue(frame.payload().contains("\"count\":3"));
             assertEquals(3, count(frame.payload(), "\"status\":\"SENT\""));
@@ -85,9 +86,9 @@ class PlanFiredThrottleTest {
             awaitFrames(frames, 2);
 
             assertEquals(2, frames.size());
-            assertTrue(frames.stream().anyMatch(f -> f.sessionId().equals("devA")
+            assertTrue(frames.stream().anyMatch(f -> f.sourceId().equals("devA")
                     && f.payload().contains("\"count\":2") && f.payload().contains("\"merged\":true")));
-            assertTrue(frames.stream().anyMatch(f -> f.sessionId().equals("devB")
+            assertTrue(frames.stream().anyMatch(f -> f.sourceId().equals("devB")
                     && f.payload().contains("\"count\":1") && f.payload().contains("\"merged\":false")));
         }
     }

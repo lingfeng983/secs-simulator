@@ -262,26 +262,47 @@ final class StreamHandler extends HttpSupport {
             return;
         }
 
-        /* payload 是 JSON 文本：只有合法对象才拆外层花括号与 sessionId/at 合并；
+        /* payload 是 JSON 文本：只有合法对象才拆外层花括号与身份/at 合并；
            非对象（数组/字符串/数字等）整体放进 payload 字段，避免 substring 产出非法帧。 */
         String payload = event.payload() == null ? "" : event.payload().trim();
+        /* 顶层 sessionId 只进会话域帧（见 sessionScoped）：其余三类身份在 payload 里，
+           顶层只留 at——host-link 曾把 hostId 装进 sessionId（审计 P2-1），
+           帧说谎的代价是按 sessionId 过滤通知的代码迟早误命中。 */
+        String head = sessionScoped(event.type())
+                ? "{\"sessionId\":\"" + json(event.sourceId()) + "\",\"at\":" + event.atMillis()
+                : "{\"at\":" + event.atMillis();
         String merged;
         /* 只有“没有载荷”与空对象两种可以丢掉 payload：`[]` 是合法数组，
            按长度 ≤2 判空会把它当空对象，前端就永远看不到这个通知的内容 */
         if (payload.isEmpty() || payload.equals("{}")) {
-            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis() + "}";
+            merged = head + "}";
         } else if (payload.startsWith("{") && payload.endsWith("}")) {
-            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis()
-                    + "," + payload.substring(1);
+            merged = head + "," + payload.substring(1);
         } else {
-            merged = "{\"sessionId\":\"" + json(event.sessionId()) + "\",\"at\":" + event.atMillis()
-                    + ",\"payload\":" + payload + "}";
+            merged = head + ",\"payload\":" + payload + "}";
         }
 
         String frame = sseFrame(event.type(), merged);
         for (Subscriber subscriber : this.subscribers) {
             subscriber.enqueue(frame);
         }
+    }
+
+    /**
+     * 通知帧顶层是否写 sessionId：只有会话域事件（s6f11 / alarm / session / device-link）。
+     *
+     * <p>wire 契约：host-link / config-changed / plan-fired 的身份本来就在 payload 里
+     * （hostId / name / deviceId），顶层不带 sessionId、也不新增别的身份字段。
+     * 过去这三类把 hostId、配置名、设备 id 塞进 sessionId 字段（审计 2026-11-18 P2-1），
+     * 帧类型上承诺的"会话 id"于是装了三种别的东西——消费方已经不信任这个字段
+     * （host-link 分支改读 payload 的 hostId），唯一还信它的报警过滤也只是
+     * 碰巧没踩坑。</p>
+     */
+    private static boolean sessionScoped(String type) {
+        return switch (type == null ? "" : type) {
+            case NoticeEvent.S6F11, NoticeEvent.ALARM, NoticeEvent.SESSION, NoticeEvent.DEVICE_LINK -> true;
+            default -> false;
+        };
     }
 
 

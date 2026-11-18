@@ -1,6 +1,8 @@
 package com.shimizukenta.secssim.api.http;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
@@ -11,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -168,6 +171,7 @@ class SseMessageTest {
 
             assertTrue(text.contains("\"payload\":[]"), "空数组是合法载荷，不能丢: " + text);
             assertTrue(text.contains("\"at\":789"), text);
+            assertTrue(text.contains("\"sessionId\":\"s1\""), "会话域帧必须带 sessionId: " + text);
 
             /* 子串对不代表整帧合法：拼接残留（如多余的逗号）也会让前端 JSON.parse 静默失败 */
             int at = text.indexOf("event: session");
@@ -179,6 +183,110 @@ class SseMessageTest {
             pool.shutdownNow();
             server.close();
         }
+    }
+
+    @Test
+    void sessionScopedFramesCarrySessionIdAndOthersDoNot() throws Exception {
+        /* wire 契约（审计 P2-1）：顶层 sessionId 只进会话域帧（s6f11/alarm/session/device-link）。
+           host-link/config-changed 的身份在 payload 里（hostId/name），过去把 hostId、
+           配置名塞进 sessionId 字段是在说谎——按 sessionId 过滤通知的代码会误命中。 */
+        EventBus bus = new EventBus();
+        NoticeBus notices = new NoticeBus();
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
+                new StubContext(), null, bus);
+        server.subscribeNotices(notices);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
+            HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            Future<String> reader = pool.submit(() -> readUntil(stream, "event: config-changed"));
+
+            for (int i = 0; i < 30 && !reader.isDone(); i++) {
+                notices.publish(new NoticeEvent("s1", NoticeEvent.ALARM,
+                        "{\"alid\":1001,\"set\":true}", 111L));
+                notices.publish(new NoticeEvent("host-9", NoticeEvent.HOST_LINK,
+                        "{\"hostId\":\"host-9\",\"phase\":\"CONNECTED\"}", 222L));
+                notices.publish(new NoticeEvent("cfg.json", NoticeEvent.CONFIG_CHANGED,
+                        "{\"name\":\"cfg.json\",\"action\":\"save\"}", 333L));
+                Thread.sleep(100L);
+            }
+
+            String text = reader.get(5L, TimeUnit.SECONDS);
+
+            String alarmData = dataLine(text, "event: alarm");
+            assertTrue(alarmData.contains("\"sessionId\":\"s1\""),
+                    "会话域帧（对象载荷）必须带 sessionId: " + alarmData);
+            assertTrue(alarmData.contains("\"alid\":1001"), alarmData);
+
+            String hostData = dataLine(text, "event: host-link");
+            assertTrue(hostData.contains("\"hostId\":\"host-9\""), hostData);
+            assertFalse(hostData.contains("sessionId"), "host-link 帧顶层不得出现 sessionId: " + hostData);
+
+            String cfgData = dataLine(text, "event: config-changed");
+            assertTrue(cfgData.contains("\"name\":\"cfg.json\""), cfgData);
+            assertFalse(cfgData.contains("sessionId"), "config-changed 帧顶层不得出现 sessionId: " + cfgData);
+
+            /* 子串对不代表整帧合法：三种帧都要能被前端 JSON.parse */
+            for (String data : List.of(alarmData, hostData, cfgData)) {
+                assertDoesNotThrow(() -> com.shimizukenta.jsonhub.JsonHub.fromJson(data),
+                        "通知帧必须是合法 JSON: " + data);
+            }
+        } finally {
+            pool.shutdownNow();
+            server.close();
+        }
+    }
+
+    @Test
+    void emptyPayloadNoticeOfNonSessionTypeStaysValid() throws Exception {
+        /* 非会话域 + 空载荷：顶层只剩 at。去掉 sessionId 之后"没有载荷"分支
+           也必须保持合法 JSON，不能因为少了一个字段拼出残留逗号。 */
+        EventBus bus = new EventBus();
+        NoticeBus notices = new NoticeBus();
+        HttpApiServer server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0), AccessControl.open(),
+                new StubContext(), null, bus);
+        server.subscribeNotices(notices);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String ticket = ticket(base);
+            HttpResponse<InputStream> stream = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(base + "/api/v1/events?ticket=" + ticket))
+                            .timeout(Duration.ofSeconds(10)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            Future<String> reader = pool.submit(() -> readUntil(stream, "event: config-changed"));
+
+            for (int i = 0; i < 30 && !reader.isDone(); i++) {
+                notices.publish(new NoticeEvent("cfg.json", NoticeEvent.CONFIG_CHANGED, "", 444L));
+                Thread.sleep(100L);
+            }
+
+            String text = reader.get(5L, TimeUnit.SECONDS);
+
+            String data = dataLine(text, "event: config-changed");
+            assertEquals("{\"at\":444}", data, "空载荷的非会话域帧顶层只剩 at: " + data);
+            assertDoesNotThrow(() -> com.shimizukenta.jsonhub.JsonHub.fromJson(data),
+                    "通知帧必须是合法 JSON: " + data);
+        } finally {
+            pool.shutdownNow();
+            server.close();
+        }
+    }
+
+    /** 取 marker 指定事件帧的 data 行（这里的通知载荷都是单行 JSON）。 */
+    private static String dataLine(String text, String marker) {
+        int at = text.indexOf(marker);
+        assertTrue(at >= 0, "没有收到帧: " + text);
+        int from = text.indexOf("data: ", at) + "data: ".length();
+        return text.substring(from, text.indexOf('\n', from));
     }
 
     private static String ticket(String base) throws Exception {
