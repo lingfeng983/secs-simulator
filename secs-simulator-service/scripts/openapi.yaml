@@ -196,57 +196,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: 演示会话没有配置来源（not-reloadable）
-  /api/v1/sessions/{id}/ceid/{ceid}:
-    post:
-      tags: [control]
-      summary: 手动触发一次 S6F11
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-        - name: ceid
-          in: path
-          required: true
-          schema: { type: integer, minimum: 1 }
-      responses:
-        '202':
-          description: 已接受
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: 会话未打开或没有主机（session-not-open）
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/v1/sessions/{id}/alarm/{alid}:
-    post:
-      tags: [control]
-      summary: 置位/清除报警（S5F1）
-      parameters:
-        - $ref: '#/components/parameters/SessionId'
-        - name: alid
-          in: path
-          required: true
-          schema: { type: integer, minimum: 1 }
-        - name: set
-          in: query
-          schema: { type: boolean, default: true }
-        - name: text
-          in: query
-          schema: { type: string }
-        - name: category
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 7, default: 1 }
-      responses:
-        '202':
-          description: 已接受
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: 会话未打开或没有主机（session-not-open）
-        '500':
-          $ref: '#/components/responses/InternalError'
   /api/v1/sessions/{id}/alarms:
     get:
       tags: [sessions]

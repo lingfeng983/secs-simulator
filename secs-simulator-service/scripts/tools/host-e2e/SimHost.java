@@ -309,7 +309,7 @@ public final class SimHost {
         check(er.secs2().getByte(0) == 0, "S2F37 → ERACK=0", er.secs2().toJson());
 
         push.clear();
-        expect(202, "HTTP 触发 CEID 2003", call("POST", "/api/v1/sessions/" + etchId + "/ceid/2003", null));
+        expect(202, "HTTP 触发 CEID 2003", call("POST", "/api/v2/devices/" + etchId + "/runtime/ceid/2003", null));
         SecsMessage s6f11 = awaitMessage(6, 11, 8000);
         check(s6f11 != null, "设备主动上报 S6F11", s6f11 == null ? "(超时)" : "ok");
         if (s6f11 != null) {
@@ -330,7 +330,7 @@ public final class SimHost {
         section("G. 报警 S5F1（HTTP 置位 → 设备推送）");
         push.clear();
         expect(202, "HTTP 置位报警", call("POST",
-                "/api/v1/sessions/" + etchId + "/alarm/1?set=true&text=SIM%20HIGH&category=4", null));
+                "/api/v2/devices/" + etchId + "/runtime/alarm/1?text=SIM%20HIGH&category=4", null));
         SecsMessage s5f1 = awaitMessage(5, 1, 8000);
         check(s5f1 != null, "收到 S5F1", s5f1 == null ? "(超时)" : s5f1.secs2().toJson());
         if (s5f1 != null) {
@@ -338,7 +338,8 @@ public final class SimHost {
             check("SIM HIGH".equals(s5f1.secs2().get(2).getAscii()), "S5F1 ALTX 正确",
                     s5f1.secs2().get(2).getAscii());
         }
-        call("POST", "/api/v1/sessions/" + etchId + "/alarm/1?set=false", null);
+        /* v2 清除 = DELETE（方法表达方向，不再用 set 参数） */
+        call("DELETE", "/api/v2/devices/" + etchId + "/runtime/alarm/1", null);
 
         section("H. S9F7 非法数据（raw socket 连 cvd-01）");
         try (Socket raw = new Socket()) {
@@ -458,7 +459,7 @@ public final class SimHost {
         sseThread.setDaemon(true);
         sseThread.start();
         Thread.sleep(400);
-        call("POST", "/api/v1/sessions/" + etchId + "/ceid/2003", null);
+        call("POST", "/api/v2/devices/" + etchId + "/runtime/ceid/2003", null);
         boolean gotSse = sseDone.await(12, TimeUnit.SECONDS);
         String sseText;
         synchronized (sseBuf) {

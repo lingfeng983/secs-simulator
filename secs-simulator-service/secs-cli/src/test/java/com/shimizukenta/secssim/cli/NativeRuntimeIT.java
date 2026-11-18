@@ -263,8 +263,9 @@ class NativeRuntimeIT {
     }
 
     private static String hsnsBase(int httpPort, String sessionId) {
-        /* etch-01 是第一个演示会话，监听 --hsms-port 指定的端口 */
-        return "http://127.0.0.1:" + httpPort + "/api/v1/sessions/" + sessionId + "/ceid/2001";
+        /* etch-01 是第一个演示会话，监听 --hsms-port 指定的端口；
+           手动触发走 v2 运行时端点（v1 的 ceid 端点已删） */
+        return "http://127.0.0.1:" + httpPort + "/api/v2/devices/" + sessionId + "/runtime/ceid/2001";
     }
 
     private static HttpResponse<String> trigger(String url) throws Exception {

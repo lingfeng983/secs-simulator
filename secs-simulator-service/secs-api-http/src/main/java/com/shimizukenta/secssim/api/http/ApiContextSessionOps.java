@@ -19,31 +19,6 @@ public interface ApiContextSessionOps {
     }
 
     /**
-     * 手动触发一个采集事件。
-     *
-     * @param sessionId 会话标识
-     * @param ceid      CEID
-     * @return 结果
-     */
-    default TriggerOutcome triggerCeid(String sessionId, int ceid) {
-        return TriggerOutcome.UNKNOWN_SESSION;
-    }
-
-    /**
-     * 置位/清除一个报警（S5F1）。
-     *
-     * @param sessionId 会话标识
-     * @param alid      ALID
-     * @param set       {@code true} 置位，{@code false} 清除
-     * @param text      报警文本，空串用默认文本
-     * @param category  类别 0..7
-     * @return 结果
-     */
-    default TriggerOutcome triggerAlarm(String sessionId, int alid, boolean set, String text, int category) {
-        return TriggerOutcome.UNKNOWN_SESSION;
-    }
-
-    /**
      * 会话的活动报警 JSON；会话不存在时返回 {@code null}。
      *
      * @param sessionId 会话标识

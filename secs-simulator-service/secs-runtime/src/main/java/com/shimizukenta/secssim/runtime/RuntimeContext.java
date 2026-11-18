@@ -163,16 +163,8 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     }
 
     /* ---------- 手动触发 ---------- */
-
-    @Override
-    public TriggerOutcome triggerCeid(String sessionId, int ceid) {
-        return this.api.triggerCeid(sessionId, ceid);
-    }
-
-    @Override
-    public TriggerOutcome triggerAlarm(String sessionId, int alid, boolean set, String text, int category) {
-        return this.api.triggerAlarm(sessionId, alid, set, text, category);
-    }
+    /* v1 的 HTTP 触发端点已删；RuntimeApi.triggerCeid/triggerAlarm 仍由
+       DeviceV2Delegates 的 v2 实现复用（v2 加台账/解析后落到这两个方法）。 */
 
     @Override
     public String alarmsJson(String sessionId) {

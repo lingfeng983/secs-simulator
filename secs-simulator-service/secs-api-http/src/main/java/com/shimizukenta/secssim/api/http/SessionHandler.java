@@ -1,7 +1,6 @@
 package com.shimizukenta.secssim.api.http;
 
 import java.io.IOException;
-import java.util.Map;
 import com.shimizukenta.secssim.app.log.Log;
 
 import com.shimizukenta.jsonhub.JsonHub;
@@ -382,12 +381,9 @@ final class SessionHandler extends HttpSupport {
         }
 
         if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
-            /* 命令路径用 GET 访问时仍按 405 处理，而不是误报 400 */
-            if (parts.length == 3 && ("ceid".equals(parts[1]) || "alarm".equals(parts[1]))) {
-                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
-                return;
-            }
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            /* 手动触发的 v1 端点已随迁 v2 删除：GET 打到不存在的子资源一律 404，
+               与 POST 侧同语义——接口没了不是参数错了 */
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
 
@@ -480,87 +476,10 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
-        /* 只剩 ceid / alarm 两个 POST 子资源。已删掉的 v1 实体编辑端点（svids、reports、
-           ceids、events、plans…）不能再落到下面的「段数不对 → 400 bad-path」：
-           接口本身不存在，回 404 才让调用方知道是端点没了，而不是自己参数写错。 */
-        if (parts.length < 2 || (!"ceid".equals(parts[1]) && !"alarm".equals(parts[1]))) {
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-
-        if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
-            return;
-        }
-
-        TriggerOutcome outcome;
-
-        if ("ceid".equals(parts[1])) {
-            int ceid;
-            try {
-                ceid = Integer.parseInt(parts[2]);
-            } catch (NumberFormatException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
-                return;
-            }
-            if (ceid < 1) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-ceid\"}");
-                return;
-            }
-            outcome = this.context.triggerCeid(parts[0], ceid);
-            audit(ex, "trigger-ceid", parts[0], "ceid=" + ceid + " outcome=" + outcome);
-        } else if ("alarm".equals(parts[1])) {
-            int alid;
-            try {
-                alid = Integer.parseInt(parts[2]);
-            } catch (NumberFormatException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
-                return;
-            }
-            if (alid < 1) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-alid\"}");
-                return;
-            }
-
-            Map<String, String> query = parseQuery(ex.getRequestURI().getRawQuery());
-            boolean set = !"false".equalsIgnoreCase(query.getOrDefault("set", "true"));
-            String text = query.getOrDefault("text", "");
-            /* SECS-II 的 A 是 US-ASCII：在这里拒绝，别等异步发送时才在日志里失败 */
-            if (!isAscii(text)) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-text\"}");
-                return;
-            }
-
-            int category;
-            try {
-                category = Integer.parseInt(query.getOrDefault("category", "1"));
-            } catch (NumberFormatException e) {
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
-                return;
-            }
-            if (category < 1 || category > 7) {
-                /* E30：ALCD 低 3 位是类别，0 无定义。放行 0 会在 AlarmReporter
-                   入口抛 IOException，最终变成 500——在入口就按 400 拒绝。 */
-                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-category\"}");
-                return;
-            }
-
-            outcome = this.context.triggerAlarm(parts[0], alid, set, text, category);
-            audit(ex, "alarm", parts[0], "alid=" + alid + " set=" + set
-                    + " category=" + category + " outcome=" + outcome);
-        } else {
-            /* 白名单已挡住其它子资源；这里只剩「ceid/alarm 但参数残缺」之外的兜底 */
-            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
-            return;
-        }
-
-        switch (outcome) {
-            case OK -> respond(ex, 202, "{\"ok\":true}");
-            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"unknown-session\"}");
-            case NOT_OPEN -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
-            /* 与其他发送路径对齐：链路级失败是 502，不是 500 */
-            case FAILED -> respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
-        }
+        /* 手动触发（ceid / alarm）也已迁 v2（POST|DELETE /api/v2/devices/{id}/runtime/…）。
+           与上面删掉的 v1 实体编辑端点同理：接口不存在回 404，才让调用方知道
+           是端点没了，而不是自己参数写错。 */
+        respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
     }
 
 
@@ -651,16 +570,5 @@ final class SessionHandler extends HttpSupport {
             return "burst-busy".equals(code) || "burst-running".equals(code) ? 409 : 400;
         }
         return 200;
-    }
-
-
-    /** SECS-II 的 A 类型只允许 US-ASCII（ALTX 含中文时编码会失败）。 */
-    private static boolean isAscii(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) > 0x7F) {
-                return false;
-            }
-        }
-        return true;
     }
 }

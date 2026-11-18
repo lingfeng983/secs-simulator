@@ -132,22 +132,24 @@ export const sessionApi: SessionApi = {
     );
   },
   async trigger(sessionId, ceid) {
+    /* v2 运行时端点；sessionOf 兼容会话 id（ses_）/配置名/设备 id，调用方不用换 id 语义 */
     return commandStatus(
-      await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/ceid/${ceid}`), {
+      await request(apiUrl(`/api/v2/devices/${encodeURIComponent(sessionId)}/runtime/ceid/${ceid}`), {
         method: 'POST',
       }),
     );
   },
   async alarm(sessionId, alid, set, text, category) {
+    /* v2 用方法表达方向：POST 置位、DELETE 清除；文本与类别仍走 query */
     const query = new URLSearchParams({
-      set: String(set),
       text,
       category: String(category),
     });
     return commandStatus(
-      await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarm/${alid}?${query}`), {
-        method: 'POST',
-      }),
+      await request(
+        apiUrl(`/api/v2/devices/${encodeURIComponent(sessionId)}/runtime/alarm/${alid}?${query}`),
+        { method: set ? 'POST' : 'DELETE' },
+      ),
     );
   },
   async activeAlarms(sessionId) {

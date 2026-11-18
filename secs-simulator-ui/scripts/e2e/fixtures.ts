@@ -344,14 +344,16 @@ export async function mockApi(page: Page): Promise<MockState> {
         }],
       });
     }
-    if (/^\/api\/v1\/sessions\/[^/]+\/ceid\/\d+$/.test(path)) {
+    /* 手动触发：v2 运行时端点（POST = 置位方向；清除是 DELETE） */
+    if (/^\/api\/v2\/devices\/[^/]+\/runtime\/ceid\/\d+$/.test(path) && method === 'POST') {
       return ok({ ok: true, outcome: 'OK' });
     }
     /* 活动报警清单：v2 信封 {"alarms":[…]}（按 ALID 升序），面板靠它打底 */
     if (/^\/api\/v2\/devices\/[^/]+\/runtime\/alarms$/.test(path) && method === 'GET') {
       return ok({ alarms: [{ alid: 1001, text: 'TEMP HIGH', category: 1, atMillis: Date.now() - 3_000 }] });
     }
-    if (/^\/api\/v1\/sessions\/[^/]+\/alarm\/\d+$/.test(path)) {
+    if (/^\/api\/v2\/devices\/[^/]+\/runtime\/alarm\/\d+$/.test(path)
+        && (method === 'POST' || method === 'DELETE')) {
       return ok({ ok: true });
     }
     if (/^\/api\/v1\/sessions\/[^/]+\/message$/.test(path)) {

@@ -134,7 +134,9 @@ final class RuntimeApi {
                 .orElse(null);
     }
 
-    /* ---------- 手动触发 ---------- */
+    /* ---------- 手动触发 ----------
+       v1 的 HTTP 端点已删；这两个方法是会话级实现，由 DeviceV2Delegates 的
+       v2 触发路径（解析设备 → 记台账 → 落到这里）复用。 */
 
     TriggerOutcome triggerCeid(String sessionId, int ceid) {
         SessionRuntime session = this.sessions.find(sessionId).orElse(null);

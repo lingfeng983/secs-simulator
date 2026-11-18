@@ -107,27 +107,27 @@ class HttpApiServerTest {
             }
 
             @Override
-            public TriggerOutcome triggerCeid(String sessionId, int ceid) {
-                if ("missing".equals(sessionId)) {
+            public TriggerOutcome triggerCeidV2(String deviceId, int ceid) {
+                if ("missing".equals(deviceId)) {
                     return TriggerOutcome.UNKNOWN_SESSION;
                 }
-                if ("closed".equals(sessionId)) {
+                if ("closed".equals(deviceId)) {
                     return TriggerOutcome.NOT_OPEN;
                 }
-                triggered.add(sessionId + ":" + ceid);
+                triggered.add(deviceId + ":" + ceid);
                 return outcome;
             }
 
             @Override
-            public TriggerOutcome triggerAlarm(String sessionId, int alid, boolean set,
-                                               String text, int category) {
-                if ("missing".equals(sessionId)) {
+            public TriggerOutcome triggerAlarmV2(String deviceId, int alid, boolean set,
+                                                 String text, int category) {
+                if ("missing".equals(deviceId)) {
                     return TriggerOutcome.UNKNOWN_SESSION;
                 }
-                if ("closed".equals(sessionId)) {
+                if ("closed".equals(deviceId)) {
                     return TriggerOutcome.NOT_OPEN;
                 }
-                alarms.add(sessionId + ":" + alid + ":" + set + ":" + text + ":" + category);
+                alarms.add(deviceId + ":" + alid + ":" + set + ":" + text + ":" + category);
                 return outcome;
             }
 
@@ -296,40 +296,59 @@ class HttpApiServerTest {
 
     @Test
     void triggerAcceptsPostAndReturns202() throws Exception {
-        HttpResponse<String> response = post("/api/v1/sessions/s1/ceid/2001", null);
+        HttpResponse<String> response = post("/api/v2/devices/s1/runtime/ceid/2001", null);
         assertEquals(202, response.statusCode(), response.body());
         assertEquals(List.of("s1:2001"), this.triggered);
     }
 
     @Test
+    void alarmSetIsPostAndClearIsDelete() throws Exception {
+        /* v2 用方法表达方向：POST 置位、DELETE 清除；文本与类别走 query */
+        HttpResponse<String> set = post("/api/v2/devices/s1/runtime/alarm/1?text=HI&category=4", null);
+        assertEquals(202, set.statusCode(), set.body());
+        assertEquals(List.of("s1:1:true:HI:4"), this.alarms);
+
+        HttpResponse<String> clear = delete("/api/v2/devices/s1/runtime/alarm/1", null);
+        assertEquals(202, clear.statusCode(), clear.body());
+        assertEquals(List.of("s1:1:true:HI:4", "s1:1:false::1"), this.alarms);
+    }
+
+    @Test
     void triggerRequiresPost() throws Exception {
-        assertEquals(405, get("/api/v1/sessions/s1/ceid/2001", null).statusCode());
+        assertEquals(405, get("/api/v2/devices/s1/runtime/ceid/2001", null).statusCode());
     }
 
     @Test
     void unknownSessionIs404() throws Exception {
-        assertEquals(404, post("/api/v1/sessions/missing/ceid/2001", null).statusCode());
+        /* v2 设备域 404 文案是 device-not-found */
+        HttpResponse<String> response = post("/api/v2/devices/missing/runtime/ceid/2001", null);
+        assertEquals(404, response.statusCode(), response.body());
+        assertTrue(response.body().contains("device-not-found"), response.body());
     }
 
     @Test
     void notOpenSessionIs409() throws Exception {
-        assertEquals(409, post("/api/v1/sessions/closed/ceid/2001", null).statusCode());
+        assertEquals(409, post("/api/v2/devices/closed/runtime/ceid/2001", null).statusCode());
     }
 
     @Test
     void malformedCommandPathIs400() throws Exception {
-        assertEquals(400, post("/api/v1/sessions/s1/ceid/not-a-number", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions//ceid/2001", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/ceid/not-a-number", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/not-a-number", null).statusCode());
     }
 
     @Test
     void unknownSubResourceIs404Not400() throws Exception {
-        /* 已删的 v1 实体端点（svids/reports/ceids/events）与任何未知子资源都按「端点不存在」
-           回 404；只有 ceid/alarm 参数写错才是 400。 */
+        /* 已删的 v1 端点（实体编辑 + 手动触发）与任何未知子资源都按「端点不存在」
+           回 404——接口没了要让调用方知道是端点没了，而不是参数写错。 */
         assertEquals(404, post("/api/v1/sessions/s1/other/2001", null).statusCode());
         assertEquals(404, post("/api/v1/sessions/s1/svids", null).statusCode());
         assertEquals(404, post("/api/v1/sessions/s1/reports", null).statusCode());
         assertEquals(404, post("/api/v1/sessions/s1/ceids", null).statusCode());
+        /* 手动触发也已迁 v2：v1 的 ceid/alarm 端点回 404（GET/POST 都一样） */
+        assertEquals(404, post("/api/v1/sessions/s1/ceid/2001", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/alarm/1", null).statusCode());
+        assertEquals(404, get("/api/v1/sessions/s1/ceid/2001", null).statusCode());
     }
 
     @Test
