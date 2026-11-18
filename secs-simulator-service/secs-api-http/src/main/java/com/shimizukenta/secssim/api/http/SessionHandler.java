@@ -16,6 +16,8 @@ import com.sun.net.httpserver.HttpExchange;
  */
 final class SessionHandler extends HttpSupport {
 
+    private static final Log.Facade LOG = Log.of(SessionHandler.class);
+
     /**
      * 查询压测状态的哨兵请求体。
      *
@@ -645,12 +647,22 @@ final class SessionHandler extends HttpSupport {
             respond(ex, 409, "{\"ok\":false,\"error\":\"session-not-open\"}");
         } catch (IOException e) {
             audit(ex, "send-sml", sessionId, "outcome=failed bytes=" + sml.length());
-            Log.error("手动发送 SML 失败", e);
+            LOG.error("手动发送 SML 失败（会话 {}，SML: {}）", sessionId, head(sml), e);
             /* 与 v2 手动发送（POST /devices/{id}/runtime/message）统一：502 */
             respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
     }
 
+
+    /** 日志里只放 SML 首行：整段 SML 可能有几十行，进了日志就没人看得懂。 */
+    private static String head(String sml) {
+        if (sml == null) {
+            return "";
+        }
+        int newline = sml.indexOf('\n');
+        String first = (newline >= 0 ? sml.substring(0, newline) : sml).strip();
+        return first.length() <= 120 ? first : first.substring(0, 120) + "…";
+    }
 
     /**
      * SECS ID 是否合法：CEID / SVID / RPTID 都是 1..65535 的无符号值。

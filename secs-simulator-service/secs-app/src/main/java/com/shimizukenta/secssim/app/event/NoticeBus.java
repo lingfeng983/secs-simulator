@@ -14,6 +14,8 @@ import com.shimizukenta.secssim.app.log.Log;
  */
 public final class NoticeBus {
 
+    private static final Log.Facade LOG = Log.of(NoticeBus.class);
+
     private final CopyOnWriteArrayList<Consumer<NoticeEvent>> listeners = new CopyOnWriteArrayList<>();
 
     /**
@@ -37,7 +39,7 @@ public final class NoticeBus {
             try {
                 listener.accept(event);
             } catch (RuntimeException e) {
-                Log.error("通知订阅者失败（已忽略）", e);
+                LOG.warn("通知订阅者失败（已忽略）", e);
             }
         }
     }

@@ -16,6 +16,8 @@ import com.sun.net.httpserver.HttpExchange;
  */
 final class DeviceRuntimeHandler extends HttpSupport {
 
+    private static final Log.Facade LOG = Log.of(DeviceRuntimeHandler.class);
+
     private final PlanExecutionsHandler plans;
     private final CatalogEditHandler catalogs;
     private final DeviceLinkHandler links;
@@ -265,9 +267,19 @@ final class DeviceRuntimeHandler extends HttpSupport {
             respond(ex, 409, "{\"ok\":false,\"error\":\"device-offline\"}");
         } catch (IOException e) {
             audit(ex, "send-sml", deviceId, "outcome=failed bytes=" + sml.length());
-            Log.error("手动发送 SML 失败（v2 设备 " + deviceId + "）", e);
+            LOG.error("手动发送 SML 失败（v2 设备 {}，SML: {}）", deviceId, head(sml), e);
             respond(ex, 502, "{\"ok\":false,\"error\":\"send-failed\"}");
         }
+    }
+
+    /** 日志里只放 SML 首行：整段 SML 可能有几十行，进了日志就没人看得懂。 */
+    private static String head(String sml) {
+        if (sml == null) {
+            return "";
+        }
+        int newline = sml.indexOf('\n');
+        String first = (newline >= 0 ? sml.substring(0, newline) : sml).strip();
+        return first.length() <= 120 ? first : first.substring(0, 120) + "…";
     }
 
     /** {@code POST|DELETE /runtime/alarm/{alid}}：置位 / 清除。 */

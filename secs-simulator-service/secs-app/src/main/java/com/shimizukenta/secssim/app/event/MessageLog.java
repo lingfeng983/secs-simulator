@@ -45,6 +45,8 @@ import com.shimizukenta.secssim.app.log.Log;
  */
 public final class MessageLog implements AutoCloseable {
 
+    private static final Log.Facade LOG = Log.of(MessageLog.class);
+
     /** 内存里保留的最近条数，也是 HTTP 历史接口的默认上限。 */
     public static final int DEFAULT_RECENT = 5_000;
 
@@ -227,7 +229,7 @@ public final class MessageLog implements AutoCloseable {
         catch ( RuntimeException e ) {
             if ( ! this.mainWriteFailed ) {
                 this.mainWriteFailed = true;
-                Log.error("写报文日志失败（后续仍继续运行）: " + this.file, e);
+                LOG.warn("写报文日志失败（后续仍继续运行）: {}", this.file, e);
             }
         }
 
@@ -248,7 +250,7 @@ public final class MessageLog implements AutoCloseable {
             }
             catch ( IOException e ) {
                 if ( this.failedSplits.add(target) ) {
-                    Log.error("打开拆分报文日志失败（后续仍继续运行）: " + target, e);
+                    LOG.warn("打开拆分报文日志失败（后续仍继续运行）: {}", target, e);
                 }
                 return;
             }
@@ -262,7 +264,7 @@ public final class MessageLog implements AutoCloseable {
         }
         catch ( RuntimeException e ) {
             if ( this.failedSplits.add(target) ) {
-                Log.error("写拆分报文日志失败（后续仍继续运行）: " + target, e);
+                LOG.warn("写拆分报文日志失败（后续仍继续运行）: {}", target, e);
             }
         }
     }
@@ -394,7 +396,7 @@ public final class MessageLog implements AutoCloseable {
         if ( this.writerThread.isAlive() ) {
             /* 写线程还卡在磁盘上：这时关 writer 会与它并发写同一个 BufferedWriter，
                可能写出半行或抛异常。宁可让 JVM 退出时丢弃缓冲，也不要破坏文件。 */
-            Log.warn("报文日志写线程未在 2 秒内结束，跳过关闭以避免并发写: " + this.file);
+            LOG.warn("报文日志写线程未在 2 秒内结束，跳过关闭以避免并发写: {}", this.file);
             return;
         }
 
@@ -452,7 +454,7 @@ public final class MessageLog implements AutoCloseable {
             }
         } catch (IOException | RuntimeException e) {
             /* 历史读不出来不影响新报文继续写；这里只是少一段"刚才" */
-            Log.error("读取报文历史失败（继续运行）: " + this.file, e);
+            LOG.warn("读取报文历史失败（继续运行）: {}", this.file, e);
         }
     }
 
@@ -672,7 +674,7 @@ public final class MessageLog implements AutoCloseable {
                 this.bytes = 0L;
             }
             catch ( IOException e ) {
-                Log.error("报文日志轮转失败（重新打开当前文件继续写）: " + this.file, e);
+                LOG.warn("报文日志轮转失败（重新打开当前文件继续写）: {}", this.file, e);
                 try {
                     /* 失败路径必须把 writer 重新打开：rotate() 已经关掉了它，
                        不重开的话后续每次 write 都抛异常，报文日志会静默停写。 */
@@ -680,7 +682,7 @@ public final class MessageLog implements AutoCloseable {
                     this.bytes = Files.exists(this.file) ? Files.size(this.file) : 0L;
                 }
                 catch ( IOException reopen ) {
-                    Log.error("报文日志重新打开失败（后续写入将失败）: " + this.file, reopen);
+                    LOG.error("报文日志重新打开失败（后续写入将失败）: {}", this.file, reopen);
                 }
             }
         }
@@ -690,7 +692,7 @@ public final class MessageLog implements AutoCloseable {
                 this.out.close();
             }
             catch ( IOException e ) {
-                Log.error("关闭报文日志失败: " + this.file, e);
+                LOG.error("关闭报文日志失败: {}", this.file, e);
             }
         }
     }

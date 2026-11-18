@@ -31,6 +31,8 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  */
 final class HostSimRegistry {
 
+    private static final Log.Facade LOG = Log.of(HostSimRegistry.class);
+
     private final SessionManager sessions;
     private final com.shimizukenta.secssim.app.event.EventBus eventBus;
     private final HostRepository hosts;
@@ -155,12 +157,12 @@ final class HostSimRegistry {
                 int port = parsed.get("port").optionalInt().orElse(0);
                 int deviceId = parsed.get("deviceId").optionalInt().orElse(0);
                 if (host.isBlank() || port < 1 || port > 65535) {
-                    Log.error("主机模拟远程目标非法（会话 " + sessionId + "）", null);
+                    LOG.error("主机模拟远程目标非法（会话 {}）", sessionId);
                     return new CreateResult("", SessionOutcome.FAILED);
                 }
                 target = new HsmsConnectionTarget(host, port, deviceId);
             } catch (RuntimeException e) {
-                Log.error("主机模拟远程目标解析失败（会话 " + sessionId + "）: " + e.getMessage(), null);
+                LOG.error("主机模拟远程目标解析失败（会话 {}）: {}", sessionId, e.getMessage());
                 return new CreateResult("", SessionOutcome.FAILED);
             }
         } else {
@@ -226,7 +228,7 @@ final class HostSimRegistry {
             sim.connect();
             return SessionOutcome.OK;
         } catch (IOException e) {
-            Log.error("主机重连失败: " + hostId + ": " + e.getMessage(), null);
+            LOG.error("主机重连失败: {}: {}", hostId, e.getMessage());
             return SessionOutcome.FAILED;
         }
     }
@@ -241,7 +243,7 @@ final class HostSimRegistry {
             sim.apply();
             return SessionOutcome.OK;
         } catch (IOException e) {
-            Log.error("主机使设置生效失败: " + hostId + ": " + e.getMessage(), null);
+            LOG.error("主机使设置生效失败: {}: {}", hostId, e.getMessage());
             return SessionOutcome.FAILED;
         }
     }
@@ -289,7 +291,7 @@ final class HostSimRegistry {
             return sim.sendSml(sml);
         } catch (IOException e) {
             if (!sim.isOpen()) {
-                Log.info("主机连接已断（" + who + "），自动重连后重试");
+                LOG.info("主机连接已断（{}），自动重连后重试", who);
                 try {
                     sim.reconnect();
                 } catch (IOException reconnectError) {
@@ -454,7 +456,7 @@ final class HostSimRegistry {
             }
             attach(view.id());
         }
-        Log.info("主机实例已从配置库装回内存 " + this.hostSims.size() + " 台（全部断开态）");
+        LOG.info("主机实例已从配置库装回内存 {} 台（全部断开态）", this.hostSims.size());
     }
 
     /** 停机：断开所有实例（实例行保留，重启后仍是列表里的一员）。 */
@@ -465,7 +467,7 @@ final class HostSimRegistry {
                 try {
                     sim.disconnect();
                 } catch (RuntimeException e) {
-                    Log.error("关闭主机实例失败（停机继续）: " + hostId, e);
+                    LOG.warn("关闭主机实例失败（停机继续）: {}", hostId, e);
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.shimizukenta.secssim.runtime;
 
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import com.shimizukenta.secssim.app.log.Log;
@@ -19,10 +20,24 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  */
 final class RuntimePersister {
 
+    private static final Log.Facade LOG = Log.of(RuntimePersister.class);
+
+    /** 运行态写库累计失败次数：业务已生效但没落库，重启后可能丢。 */
+    private static final AtomicLong PERSIST_FAILURES = new AtomicLong();
+
     private final RuntimeStateRepository state;
 
     /** 会话 id / v1 legacy stem → config.db ULID。 */
     private final Function<String, String> deviceKey;
+
+    /**
+     * 运行态写库累计失败次数（{@code /health} 用来判断"重启会不会丢数据"）。
+     *
+     * @return 自进程启动以来的失败次数
+     */
+    public static long persistFailures() {
+        return PERSIST_FAILURES.get();
+    }
 
     RuntimePersister(RuntimeStateRepository state, Function<String, String> deviceKey) {
         this.state = state;
@@ -97,7 +112,7 @@ final class RuntimePersister {
                     this.state.planOverrides(key),
                     this.state.catalogEdits(key));
         } catch (RuntimeException e) {
-            Log.error("读运行态编辑失败（重载失败时将无法回滚）: " + key + " " + e.getMessage(), e);
+            LOG.error("读运行态编辑失败（重载失败时将无法回滚）: {} {}", key, e.getMessage(), e);
             return null;
         }
     }
@@ -175,8 +190,9 @@ final class RuntimePersister {
         try {
             action.run();
         } catch (RuntimeException e) {
-            Log.error("写 " + what + " 到 runtime.db 失败（业务已生效，重启后可能丢失）: "
-                    + e.getMessage(), e);
+            PERSIST_FAILURES.incrementAndGet();
+            LOG.warn("写 {} 到 runtime.db 失败（业务已生效，重启后可能丢失）: {}",
+                    what, e.getMessage(), e);
         }
     }
 }
