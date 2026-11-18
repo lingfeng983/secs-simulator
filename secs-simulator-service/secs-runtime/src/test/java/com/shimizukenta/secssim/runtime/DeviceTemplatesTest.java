@@ -62,8 +62,7 @@ class DeviceTemplatesTest {
         java.nio.file.Path workDir = java.nio.file.Files.createTempDirectory("devtpl-test");
         try {
             var db = com.shimizukenta.secssim.store.Db.open(workDir);
-            var repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                    db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+            var repo = new com.shimizukenta.secssim.store.ConfigRepository(db);
             ConfigStore store = new ConfigStore(repo,
                     new com.shimizukenta.secssim.store.TemplateRepository(db), workDir);
 

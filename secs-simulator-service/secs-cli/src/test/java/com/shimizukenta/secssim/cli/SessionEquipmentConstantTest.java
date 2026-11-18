@@ -238,8 +238,8 @@ class SessionEquipmentConstantTest {
                 parsed.spec().deviceId(), parsed.spec().seed(), parsed.spec().equipment());
 
         com.shimizukenta.secssim.store.Db db = com.shimizukenta.secssim.store.Db.open(config.getParent());
-        com.shimizukenta.secssim.store.ConfigRepository repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        com.shimizukenta.secssim.store.ConfigRepository repo =
+                new com.shimizukenta.secssim.store.ConfigRepository(db);
         ConfigStore store = new ConfigStore(repo, new com.shimizukenta.secssim.store.TemplateRepository(db),
                 config.getParent());
         repo.createDevice(NAME.substring(0, NAME.length() - 5), NAME.substring(0, NAME.length() - 5),

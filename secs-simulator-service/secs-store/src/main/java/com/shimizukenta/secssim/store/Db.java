@@ -17,8 +17,9 @@ import org.sqlite.SQLiteDataSource;
 /**
  * 双库门面（ADR 0017）：config.db（权威配置）+ runtime.db（运行态）。
  *
- * <p><b>写路径单写者</b>：进程内用一把锁串行化两个库的全部写事务（设计 §2.3.2）；
- * 写事务在锁内 BEGIN IMMEDIATE → 提交才返回，失败整体回滚。<b>读路径</b>每次从
+ * <p><b>写路径单写者</b>：进程内每个库各一把写锁串行化写事务（设计 §2.3.2）；
+ * 两个库物理独立、没有跨库事务，所以不共用一把锁。写事务在锁内
+ * BEGIN IMMEDIATE → 提交才返回，失败整体回滚。<b>读路径</b>每次从
  * {@link SQLiteDataSource} 取独立连接——WAL 下读写不互锁，读者不会拖写者。</p>
  *
  * <p><b>跨进程</b>：同一 {@code --work-dir} 不允许跑两个进程。SQLite 自身的锁只保证
@@ -26,7 +27,7 @@ import org.sqlite.SQLiteDataSource;
  * {@code config.db.lock} 加文件锁，抢不到直接失败并给出明确提示。不锁 db 本体：
  * Windows 上整文件锁会与 SQLite 的字节段锁互相干扰。</p>
  *
- * <p>本类不认识任何业务类型：SQL 之外的一切（校验、投影、SSE）由仓储与上层负责。</p>
+ * <p>本类不认识任何业务类型：SQL 之外的一切（校验、SSE）由仓储与上层负责。</p>
  */
 public final class Db implements AutoCloseable {
 
@@ -35,7 +36,9 @@ public final class Db implements AutoCloseable {
     private final SQLiteDataSource runtimeReader;
     private final Connection configWriter;
     private final Connection runtimeWriter;
-    private final Object writerLock = new Object();
+    /* 两个库各一把锁：物理独立、无跨库事务，串行化没必要也不该互相拖慢 */
+    private final Object configWriterLock = new Object();
+    private final Object runtimeWriterLock = new Object();
     private final LockHandle processLock;
     private boolean closed;
 
@@ -50,13 +53,26 @@ public final class Db implements AutoCloseable {
     }
 
     /**
-     * 打开（必要时创建）双库并初始化表结构。
+     * 打开（必要时创建）双库并初始化表结构；版本不匹配时拒绝启动。
      *
      * @param workDir 工作目录
      * @return 门面
      * @throws StoreException 打开失败（目录不可写、被别的进程占用、磁盘错误）
      */
     public static Db open(Path workDir) {
+        return open(workDir, false);
+    }
+
+    /**
+     * 打开（必要时创建）双库并初始化表结构。
+     *
+     * @param workDir         工作目录
+     * @param allowSchemaReset 版本不匹配时是否允许备份后重建（{@code --allow-schema-reset}）
+     * @return 门面
+     * @throws StoreException 打开失败（目录不可写、被别的进程占用、磁盘错误）
+     * @throws IllegalStateException 版本不匹配且未授权重建
+     */
+    public static Db open(Path workDir, boolean allowSchemaReset) {
         Objects.requireNonNull(workDir, "workDir");
         try {
             Files.createDirectories(workDir);
@@ -72,8 +88,8 @@ public final class Db implements AutoCloseable {
                 try {
                     tune(configWriter);
                     tune(runtimeWriter);
-                    Schema.apply(configWriter, true);
-                    Schema.apply(runtimeWriter, false);
+                    Schema.apply(configWriter, true, configDb, allowSchemaReset);
+                    Schema.apply(runtimeWriter, false, runtimeDb, allowSchemaReset);
                 } catch (SQLException | RuntimeException e) {
                     try {
                         configWriter.close();
@@ -167,7 +183,16 @@ public final class Db implements AutoCloseable {
         }
     }
 
-    /** config.db 的读连接（用完必须 close；WAL 下与写者不互锁）。 */
+    /**
+     * config.db 的读连接（用完必须 close；WAL 下与写者不互锁）。
+     *
+     * <p>读连接每次新建、每次跑一遍 {@link #tune}：SQLite 的
+     * {@code foreign_keys} / {@code busy_timeout} / {@code synchronous} 是
+     * <b>连接级</b>属性，不复用连接就必须逐条设置。{@code journal_mode=WAL}
+     * 是库级持久属性，重复设置只是读回当前值，没有写放大。做连接池才有意义
+     * 省掉这几条 PRAGMA，但会引入连接生命周期与跨线程归还问题——目前读写都短、
+     * 数量可控，保持现状更安全。</p>
+     */
     public Connection readConfig() {
         try {
             Connection connection = this.configReader.getConnection();
@@ -198,7 +223,7 @@ public final class Db implements AutoCloseable {
      * @return 事务体的返回值
      */
     public <T> T writeConfig(Function<Connection, T> work) {
-        synchronized (this.writerLock) {
+        synchronized (this.configWriterLock) {
             return write(this.configWriter, work, "config.db");
         }
     }
@@ -211,7 +236,7 @@ public final class Db implements AutoCloseable {
      * @return 事务体的返回值
      */
     public <T> T writeRuntime(Function<Connection, T> work) {
-        synchronized (this.writerLock) {
+        synchronized (this.runtimeWriterLock) {
             return write(this.runtimeWriter, work, "runtime.db");
         }
     }

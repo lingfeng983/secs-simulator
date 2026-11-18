@@ -34,9 +34,7 @@ import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 import com.shimizukenta.secssim.runtime.session.PlanExecutor;
 import com.shimizukenta.secssim.runtime.session.RuntimeEdits;
-import com.shimizukenta.secssim.runtime.store.ConfigProjector;
 import com.shimizukenta.secssim.app.session.SessionState;
-import com.shimizukenta.secssim.store.ConfigMigrator;
 import com.shimizukenta.secssim.store.ConfigRepository;
 import com.shimizukenta.secssim.store.Db;
 import com.shimizukenta.secssim.store.HostRepository;
@@ -140,25 +138,17 @@ public final class Bootstrap {
         launcher.noticeBus(notices);
 
         /*
-         * 3.0 存储（ADR 0017）：打开双库、按需迁移、播种，然后建门面。
-         * config.db 是权威配置；work-dir 下的 JSON 在迁移后归档进 legacy/。
-         * 运行态编辑表随库建立，M2 起写入。
+         * 3.0 存储（ADR 0017）：打开双库、播种，然后建门面。
+         * config.db 是权威配置；运行态编辑表随库建立。
          */
         if (options.resetRuntime()) {
             deleteRuntimeDb(options.workDir());
         }
-        Db db = Db.open(options.workDir());
-        ConfigRepository configRepo = new ConfigRepository(db, new ConfigProjector());
+        Db db = Db.open(options.workDir(), options.allowSchemaReset());
+        ConfigRepository configRepo = new ConfigRepository(db);
         TemplateRepository templateRepo = new TemplateRepository(db);
         PlanExecutionRepository planExecutions = new PlanExecutionRepository(db);
-        ConfigMigrator migrator = new ConfigMigrator(db, configRepo, templateRepo);
 
-        if (options.migrateConfig() || migrator.needed(options.workDir())) {
-            ConfigMigrator.Report report = migrator.migrate(options.workDir(), builtinTemplateBodies());
-            Log.info("配置迁移完成: devices=" + report.devices() + " templates=" + report.templates()
-                    + (report.archived() ? "（原文件已归档到 legacy/）" : "")
-                    + (report.problems().isEmpty() ? "" : " problems=" + report.problems()));
-        }
         /*
          * 内置模板正文全部来自 classpath 的 seed/*.json。资源缺失或解析失败必须
          * 让启动直接失败：静默跳过留给用户的是一套"看着能开、其实没有模板"的空库。
@@ -217,7 +207,7 @@ public final class Bootstrap {
         });
 
         if (options.exportConfig() != null) {
-            int exported = migrator.exportTo(options.exportConfig());
+            int exported = configRepo.exportTo(options.exportConfig());
             Log.info("已导出 " + exported + " 台设备到 " + options.exportConfig());
             System.out.println("EXPORT ok devices=" + exported + " dir=" + options.exportConfig().toAbsolutePath());
             planFired.close();
@@ -512,7 +502,7 @@ public final class Bootstrap {
         }
     }
 
-    /** 内置模板 id → 正文（迁移播种与模板表播种共用）。 */
+    /** 内置模板 id → 正文（模板表播种用）。 */
     private static java.util.Map<String, String> builtinTemplateBodies() {
         java.util.Map<String, String> bodies = new java.util.LinkedHashMap<>();
         for (DeviceTemplates.Entry entry : DeviceTemplates.catalog()) {

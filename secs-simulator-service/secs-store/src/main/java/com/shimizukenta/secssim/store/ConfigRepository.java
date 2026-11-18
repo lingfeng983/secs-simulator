@@ -1,5 +1,11 @@
 package com.shimizukenta.secssim.store;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -11,48 +17,28 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 配置仓储：device 实体 + config_document（权威正文）+ config_revision（版本快照）
- * + 投影表（结构化 UI 读的形状）。
+ * 配置仓储：device 实体 + config_document（权威正文）+ config_revision（版本快照）。
  *
  * <p><b>唯一写口</b>（设计 §2.3.2）：所有正文写入都走 {@link #saveDocument} /
  * {@link #createDevice} / {@link #updateConstants}——先比 revision（乐观锁），
- * 再升版本、留快照、整体重投影，任何一步失败整事务回滚。投影表只由
- * {@link DocumentProjector} 从正文重算，禁止单表写入。</p>
+ * 再升版本、留快照，任何一步失败整事务回滚。正文之外不维护任何结构化副本：
+ * 查询与展示一律解析正文，避免「一份配置两处写、迟早不一致」。</p>
  *
  * <p>本模块不解析配置正文：编译校验由调用方（secs-runtime 的 ConfigStore.validate）
- * 在进入本类之前完成；投影由上层注入 {@link DocumentProjector} 实现——
- * 这是「secs-store 不依赖 secs-app」唯一可行的拆法。</p>
+ * 在进入本类之前完成。</p>
  */
 public final class ConfigRepository {
 
     /** 每设备保留的版本快照数（超出按时间裁剪，设计 §2.2.1）。 */
     public static final int REVISION_RETENTION = 200;
 
-    /**
-     * 正文 → 投影表。实现由上层给出（用现有的配置解析器写连接规格 / 单元 /
-     * SVID / 报告 / 事件 / 模板 / 常量等投影行）；在写事务内被调用。
-     */
-    public interface DocumentProjector {
-        void project(Connection connection, String deviceId, String body) throws SQLException;
-    }
-
-    /** 重投影前要清空的投影表（由投影实现负责填业务行）。 */
-    private static final String[] PROJECTION_TABLES = {
-        "connection_spec", "equipment_spec", "unit_def", "svid_def", "equipment_constant",
-        "report_def", "report_svid", "ceid_def", "ceid_report",
-        "event_plan", "plan_action",
-    };
-
     private final Db db;
-    private final DocumentProjector projector;
 
     /**
-     * @param db        双库门面
-     * @param projector 正文 → 投影表（上层注入）
+     * @param db 双库门面
      */
-    public ConfigRepository(Db db, DocumentProjector projector) {
-        this.db = db;
-        this.projector = Objects.requireNonNull(projector, "projector");
+    public ConfigRepository(Db db) {
+        this.db = Objects.requireNonNull(db, "db");
     }
 
     /** 设备实体视图（配置与文档 JOIN 后的只读形状）。 */
@@ -72,7 +58,7 @@ public final class ConfigRepository {
     }
 
     /**
-     * 新建设备：插入实体 + revision 1 的正文与快照 + 首次投影。
+     * 新建设备：插入实体 + revision 1 的正文与快照。
      *
      * @param name       设备名（v1 语义下同时充当 legacy_id = 文件名 stem）
      * @param legacyId   v1 兼容 id；null 表示没有（v2 新建设备）
@@ -110,13 +96,12 @@ public final class ConfigRepository {
             }
             insertDocument(connection, id, body, sha, 1, actor, "created");
             insertRevisionSnapshot(connection, id, 1, body, sha, actor, "created");
-            this.projector.project(connection, id, body);
             return id;
         }));
     }
 
     /**
-     * 保存正文（唯一写口）：乐观锁 → 升版本 → 快照 → 重投影 → 裁剪。
+     * 保存正文（唯一写口）：乐观锁 → 升版本 → 快照 → 裁剪。
      *
      * @param key              设备 key（legacy_id 或 id）
      * @param body             新正文（调用方已校验）
@@ -188,7 +173,6 @@ public final class ConfigRepository {
                 st.executeUpdate();
             }
             insertRevisionSnapshot(connection, device.id(), next, body, sha, actor, note);
-            reproject(connection, device.id(), body);
             trimRevisions(connection, device.id());
             touchDevice(connection, device.id());
             return next;
@@ -196,7 +180,7 @@ public final class ConfigRepository {
     }
 
     /**
-     * S2F15 常量回写的专用写口：升版本 + 重投影，但<b>不写快照</b>，提交后把
+     * S2F15 常量回写的专用写口：升版本，但<b>不写快照</b>，提交后把
      * runtime.db 的 device_link.config_revision 追平——运行版本本来就等于最新版本，
      * 若走 saveDocument 的语义会出现永久「配置待生效」（设计 §2.3.2）。
      *
@@ -236,7 +220,6 @@ public final class ConfigRepository {
                 st.setString(7, device.id());
                 st.executeUpdate();
             }
-            reproject(connection, device.id(), newBody);
             touchDevice(connection, device.id());
             return device.id() + "|" + next;
         }));
@@ -384,17 +367,45 @@ public final class ConfigRepository {
         }
     }
 
-    /** 直接重投影（迁移 / 校验自检用）：整体重建该设备的投影表。 */
-    public void reproject(String key) {
-        this.db.writeConfig(unchecked(connection -> {
-            DeviceRow device = findLiveDevice(connection, key);
-            Optional<DocumentView> doc = readDocumentInTx(connection, device.id());
+    /**
+     * 全量导出（备份通道）：每台设备写 {@code <legacy_id>.json}（无 legacy 用 name）。
+     *
+     * @param dir 目标目录（自动创建；已存在的同名文件覆盖）
+     * @return 导出的设备数
+     */
+    public int exportTo(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new StoreException("导出目录不可用: " + dir + ": " + e.getMessage(), e);
+        }
+        int count = 0;
+        for (DeviceView device : this.listDevices()) {
+            Optional<DocumentView> doc = readDocument(
+                    device.legacyId() != null ? device.legacyId() : device.id());
             if (doc.isEmpty()) {
-                throw StoreException.notFound("设备没有配置正文: " + key);
+                continue;
             }
-            reproject(connection, device.id(), doc.get().body());
-            return null;
-        }));
+            String fileName = (device.legacyId() != null ? device.legacyId() : device.name()) + ".json";
+            try {
+                Path target = dir.resolve(fileName);
+                Path tmp = dir.resolve(fileName + ".tmp");
+                Files.writeString(tmp, doc.get().body(), StandardCharsets.UTF_8);
+                move(tmp, target);
+                count++;
+            } catch (IOException e) {
+                throw new StoreException("导出 " + fileName + " 失败: " + e.getMessage(), e);
+            }
+        }
+        return count;
+    }
+
+    private static void move(Path from, Path to) throws IOException {
+        try {
+            Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     /* ---------- 内部 ---------- */
@@ -531,21 +542,6 @@ public final class ConfigRepository {
         }
     }
 
-    private void reproject(Connection connection, String deviceId, String body) throws SQLException {
-        clearProjections(connection, deviceId);
-        this.projector.project(connection, deviceId, body);
-    }
-
-    private static void clearProjections(Connection connection, String deviceId) throws SQLException {
-        for (String table : PROJECTION_TABLES) {
-            try (PreparedStatement st = connection.prepareStatement(
-                    "DELETE FROM " + table + " WHERE device_id=?")) {
-                st.setString(1, deviceId);
-                st.executeUpdate();
-            }
-        }
-    }
-
     /** 快照保留策略：每设备只留最近 REVISION_RETENTION 版，超出删最旧。 */
     private static void trimRevisions(Connection connection, String deviceId) throws SQLException {
         try (PreparedStatement st = connection.prepareStatement(
@@ -565,22 +561,6 @@ public final class ConfigRepository {
             st.setLong(1, System.currentTimeMillis());
             st.setString(2, deviceId);
             st.executeUpdate();
-        }
-    }
-
-    private static Optional<DocumentView> readDocumentInTx(Connection connection, String deviceId) throws SQLException {
-        try (PreparedStatement st = connection.prepareStatement(
-                "SELECT device_id, body, revision, content_sha256, updated_at, updated_by, change_note "
-                        + "FROM config_document WHERE device_id=?")) {
-            st.setString(1, deviceId);
-            try (ResultSet rs = st.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of(new DocumentView(rs.getString(1), rs.getString(2),
-                        rs.getLong(3), rs.getString(4), rs.getLong(5), rs.getString(6),
-                        rs.getString(7)));
-            }
         }
     }
 }

@@ -46,8 +46,7 @@ class SessionLauncherTest {
         this.launcher = new SessionLauncher(this.sessions, new EventBus(), this.workDir);
         /* 3.0：配置正文在 config.db，launcher 经门面读写 */
         var db = com.shimizukenta.secssim.store.Db.open(this.workDir.resolve("db").normalize());
-        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(
-                db, new com.shimizukenta.secssim.runtime.store.ConfigProjector());
+        this.repo = new com.shimizukenta.secssim.store.ConfigRepository(db);
         this.launcher.configStore(new ConfigStore(this.repo,
                 new com.shimizukenta.secssim.store.TemplateRepository(db), this.workDir));
     }

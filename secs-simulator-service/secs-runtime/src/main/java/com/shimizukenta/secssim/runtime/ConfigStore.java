@@ -48,7 +48,7 @@ public final class ConfigStore {
     /**
      * 创建配置门面。
      *
-     * @param repository 配置仓储（含投影器）
+     * @param repository 配置仓储
      * @param templates  设备模板仓储
      * @param workDir    工作目录（legacy 文件归档仍在它下面）
      */
