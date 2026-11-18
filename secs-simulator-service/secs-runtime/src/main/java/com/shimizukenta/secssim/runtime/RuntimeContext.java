@@ -6,7 +6,6 @@ import java.util.List;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
 import com.shimizukenta.secssim.api.http.SessionCreated;
@@ -195,11 +194,6 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.api.eventsJson(sessionId);
     }
 
-    @Override
-    public EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-        return this.api.setEventEnabled(sessionId, planId, enabled);
-    }
-
     /* ---------- 报文与审计 ---------- */
 
     @Override
@@ -237,78 +231,6 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public String auditJson(int limit, String action, String actor, long beforeMs) {
         return this.api.auditJson(limit, action, actor, beforeMs);
-    }
-
-    /* ---------- 运行时编辑(设备页·事件/报告/状态变量) ---------- */
-
-    @Override
-    public int addEventPlan(String sessionId, String planJson) {
-        return this.api.addEventPlan(sessionId, planJson);
-    }
-
-    @Override
-    public int updateEventPlan(String sessionId, String planId, String planJson) {
-        return this.api.updateEventPlan(sessionId, planId, planJson);
-    }
-
-    @Override
-    public int removeEventPlan(String sessionId, String planId) {
-        return this.api.removeEventPlan(sessionId, planId);
-    }
-
-    @Override
-    public int addReport(String sessionId, String reportJson) {
-        return this.api.addReport(sessionId, reportJson);
-    }
-
-    @Override
-    public int updateReport(String sessionId, int rptid, String reportJson) {
-        return this.api.updateReport(sessionId, rptid, reportJson);
-    }
-
-    @Override
-    public int addCeid(String sessionId, String ceidJson) {
-        return this.api.addCeid(sessionId, ceidJson);
-    }
-
-    @Override
-    public int updateCeid(String sessionId, int ceid, String ceidJson) {
-        return this.api.updateCeid(sessionId, ceid, ceidJson);
-    }
-
-    @Override
-    public int removeCeid(String sessionId, int ceid) {
-        return this.api.removeCeid(sessionId, ceid);
-    }
-
-    @Override
-    public int removeReport(String sessionId, int rptid) {
-        return this.api.removeReport(sessionId, rptid);
-    }
-
-    @Override
-    public int addSvid(String sessionId, String svidJson) {
-        return this.api.addSvid(sessionId, svidJson);
-    }
-
-    @Override
-    public int updateSvid(String sessionId, int svid, String svidJson) {
-        return this.api.updateSvid(sessionId, svid, svidJson);
-    }
-
-    @Override
-    public int removeSvid(String sessionId, int svid) {
-        return this.api.removeSvid(sessionId, svid);
-    }
-
-    @Override
-    public int pinSvidValue(String sessionId, int svid, String valueJson) {
-        return this.api.pinSvidValue(sessionId, svid, valueJson);
-    }
-
-    @Override
-    public int unpinSvidValue(String sessionId, int svid) {
-        return this.api.unpinSvidValue(sessionId, svid);
     }
 
     @Override

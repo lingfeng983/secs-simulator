@@ -18,7 +18,6 @@ import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.AuditSink;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.HttpApiServer;
 import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.api.http.SessionsJson;

@@ -344,26 +344,6 @@ export async function mockApi(page: Page): Promise<MockState> {
         }],
       });
     }
-    if (/^\/api\/v1\/sessions\/[^/]+\/events(\/[^/]+)?$/.test(path)) {
-      /* POST /events/{id}?enabled= 是启停；PUT/DELETE 是编辑与删除 */
-      if (url.searchParams.has('enabled')) {
-        state.eventEnabled = url.searchParams.get('enabled') === 'true';
-        return ok({ ok: true });
-      }
-      if (method === 'PUT' || method === 'DELETE') {
-        return ok({ ok: true });
-      }
-      return ok({ ok: true }, 201);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/reports(\/\d+)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/svids(\/\d+)?(\/value)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
-    if (/^\/api\/v1\/sessions\/[^/]+\/ceids(\/\d+)?$/.test(path)) {
-      return ok({ ok: true }, method === 'POST' ? 201 : 200);
-    }
     if (/^\/api\/v1\/sessions\/[^/]+\/ceid\/\d+$/.test(path)) {
       return ok({ ok: true, outcome: 'OK' });
     }
@@ -638,6 +618,10 @@ export async function mockApi(page: Page): Promise<MockState> {
     }
     if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/step$/.test(path)) {
       return ok({ ok: true, planId: 'beat' });
+    }
+    if (/^\/api\/v2\/devices\/[^/]+\/runtime\/plans\/[^/]+\/enabled$/.test(path)) {
+      state.eventEnabled = url.searchParams.get('enabled') === 'true';
+      return ok({ ok: true });
     }
 
     return ok({});

@@ -203,7 +203,7 @@ export const sessionApi: SessionApi = {
     const query = new URLSearchParams({ enabled: String(enabled) });
     return commandStatus(
       await request(
-        apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/events/${encodeURIComponent(planId)}?${query}`),
+        apiUrl(`/api/v2/devices/${encodeURIComponent(sessionId)}/runtime/plans/${encodeURIComponent(planId)}/enabled?${query}`),
         { method: 'POST' },
       ),
     );

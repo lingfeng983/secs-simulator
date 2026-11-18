@@ -54,12 +54,6 @@ final class RuntimePersister {
         this.guard("取消钉值", () -> this.state.unpinSvid(this.key(sessionId), svid));
     }
 
-    /** 计划启停 + 下次触发时刻（周期计划 = enabledAt + k×period 的下一次；§2.1）。 */
-    void planState(String sessionId, String planId, boolean enabled, java.lang.Long nextFireAt) {
-        this.guard("计划启用态",
-                () -> this.state.savePlanState(this.key(sessionId), planId, enabled, nextFireAt, ""));
-    }
-
     /** 运行时计划正文覆盖（add / update / remove）。 */
     void planOverride(String sessionId, String planId, String op, String bodyJson) {
         this.guard("计划覆盖",
