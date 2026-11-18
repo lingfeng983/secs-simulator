@@ -165,14 +165,13 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                                                   （设备会话的 SECS 口以各自配置为准，无兜底）
                   --device-id <n>                   SECS device-id，默认 10
                   --config <path>                   把一份设备配置导入数据库并立即启动（显式动作）
-                  --config <path>                   从 Schema v5 JSON 装载设备与会话配置（v4 兼容）
                   --web-root <dir>                  托管静态前端（与 API 同源，浏览器直接打开）
                   --work-dir <path>                 工作目录
                   --tls-keystore <path>             PKCS#12 keystore；提供时 API 走 HTTPS
                   --tls-password <s>                keystore 密码（默认空）
                   --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
                   --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
-                  --export-config <dir>             把库里的全部设备导出为 <dir>/<legacy>.json 后退出（备份通道）
+                  --export-config <dir>             把库里的全部设备导出为 <dir>/<name>.json 后退出（备份通道）
                   --reset-runtime                   启动前删除 runtime.db（运行态可随时丢弃重建）
                   --allow-schema-reset              库结构版本与程序不一致时，备份后自动重建；默认拒绝启动
                   --help                            打印本帮助
