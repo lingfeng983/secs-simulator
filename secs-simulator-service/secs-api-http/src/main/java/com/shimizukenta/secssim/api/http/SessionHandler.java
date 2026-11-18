@@ -461,6 +461,14 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
+        /* 只剩 ceid / alarm 两个 POST 子资源。已删掉的 v1 实体编辑端点（svids、reports、
+           ceids、events、plans…）不能再落到下面的「段数不对 → 400 bad-path」：
+           接口本身不存在，回 404 才让调用方知道是端点没了，而不是自己参数写错。 */
+        if (parts.length < 2 || (!"ceid".equals(parts[1]) && !"alarm".equals(parts[1]))) {
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+            return;
+        }
+
         if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
             return;
@@ -522,7 +530,8 @@ final class SessionHandler extends HttpSupport {
             audit(ex, "alarm", parts[0], "alid=" + alid + " set=" + set
                     + " category=" + category + " outcome=" + outcome);
         } else {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            /* 白名单已挡住其它子资源；这里只剩「ceid/alarm 但参数残缺」之外的兜底 */
+            respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
             return;
         }
 

@@ -313,8 +313,17 @@ class HttpApiServerTest {
     @Test
     void malformedCommandPathIs400() throws Exception {
         assertEquals(400, post("/api/v1/sessions/s1/ceid/not-a-number", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/other/2001", null).statusCode());
         assertEquals(400, post("/api/v1/sessions//ceid/2001", null).statusCode());
+    }
+
+    @Test
+    void unknownSubResourceIs404Not400() throws Exception {
+        /* 已删的 v1 实体端点（svids/reports/ceids/events）与任何未知子资源都按「端点不存在」
+           回 404；只有 ceid/alarm 参数写错才是 400。 */
+        assertEquals(404, post("/api/v1/sessions/s1/other/2001", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/svids", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/reports", null).statusCode());
+        assertEquals(404, post("/api/v1/sessions/s1/ceids", null).statusCode());
     }
 
     @Test
