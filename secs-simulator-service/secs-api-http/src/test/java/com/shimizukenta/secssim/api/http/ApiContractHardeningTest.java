@@ -136,18 +136,6 @@ class ApiContractHardeningTest {
                 calls.add("template-delete:" + id);
                 return ApiContractHardeningTest.this.actionOutcome;
             }
-
-            @Override
-            public int removeSvid(String sessionId, int svid) {
-                calls.add("remove-svid:" + svid);
-                return 200;
-            }
-
-            @Override
-            public int updateReport(String sessionId, int rptid, String json) {
-                calls.add("update-report:" + rptid);
-                return 200;
-            }
         };
         this.server = HttpApiServer.start(new InetSocketAddress("127.0.0.1", 0),
                 AccessControl.open(), context, this.webRoot, null, null, null);
@@ -282,9 +270,9 @@ class ApiContractHardeningTest {
 
     @Test
     void nonNumericSecsIdIsBadRequestNotNotFound() throws Exception {
-        assertEquals(400, send("DELETE", "/api/v1/sessions/s1/svids/abc", null).statusCode());
-        assertEquals(400, send("PUT", "/api/v1/sessions/s1/reports/xyz", "{}").statusCode());
-        assertEquals(400, send("DELETE", "/api/v1/sessions/s1/svids/0", null).statusCode());
+        assertEquals(400, send("DELETE", "/api/v2/devices/dev_a/runtime/catalog/svid/abc", null).statusCode());
+        assertEquals(400, send("PUT", "/api/v2/devices/dev_a/runtime/catalog/report/xyz", "{}").statusCode());
+        assertEquals(400, send("DELETE", "/api/v2/devices/dev_a/runtime/svids/0/pin", null).statusCode());
         assertTrue(this.calls.isEmpty(), "非法 id 不能进业务层: " + this.calls);
     }
 

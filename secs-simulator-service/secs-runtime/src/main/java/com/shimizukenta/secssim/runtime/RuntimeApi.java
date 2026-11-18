@@ -12,7 +12,6 @@ import com.shimizukenta.jsonhub.JsonHub;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
-import com.shimizukenta.secssim.api.http.EventOutcome;
 import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
 import com.shimizukenta.secssim.api.http.SessionCreated;
@@ -189,26 +188,6 @@ final class RuntimeApi {
 
     String eventsJson(String sessionId) {
         return this.sessions.find(sessionId).map(SessionRuntime::eventsJson).orElse(null);
-    }
-
-    EventOutcome setEventEnabled(String sessionId, String planId, boolean enabled) {
-        SessionRuntime session = this.sessions.find(sessionId).orElse(null);
-        if (session == null) {
-            return EventOutcome.UNKNOWN_SESSION;
-        }
-        com.shimizukenta.secssim.app.session.PlanEnableOutcome outcome =
-                session.setEventEnabled(planId, enabled);
-        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.UNKNOWN_PLAN) {
-            return EventOutcome.UNKNOWN_PLAN;
-        }
-        if (outcome == com.shimizukenta.secssim.app.session.PlanEnableOutcome.NOT_ONLINE) {
-            /* 2026-11-16 设计 §2.2：离线时拒绝启动（409 not-online），界面禁用按钮 */
-            return EventOutcome.NOT_ONLINE;
-        }
-        /* next_fire_at 开始写入：周期计划 = enabledAt + k×period 的下一次（§2.1）；
-           启用态不再跨重启回放（D4），本行只承载统计与倒计时初值 */
-        this.persister.planState(sessionId, planId, enabled, session.nextFireAtOf(planId));
-        return EventOutcome.OK;
     }
 
     /* ---------- 报文与审计 ---------- */

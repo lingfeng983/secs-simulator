@@ -510,23 +510,24 @@ public final class SimHost {
         check(logBad.statusCode() == 400, "非法 log-level → 400", "status=" + logBad.statusCode());
 
         section("K. 运行时编辑");
+        String dev = "/api/v2/devices/" + etchId + "/runtime";
         String plan = "{\"id\":\"pl-host\",\"ceid\":2003,"
                 + "\"trigger\":{\"type\":\"periodic\",\"periodMs\":600000}}";
-        expect(201, "新增编排", call("POST", "/api/v1/sessions/" + etchId + "/events", plan));
-        expect(200, "禁用编排", call("POST", "/api/v1/sessions/" + etchId + "/events/pl-host?enabled=false", null));
-        expect(200, "删除编排", call("DELETE", "/api/v1/sessions/" + etchId + "/events/pl-host", null));
+        expect(201, "新增编排", call("POST", dev + "/plans", plan));
+        expect(200, "禁用编排", call("POST", dev + "/plans/pl-host/enabled?enabled=false", null));
+        expect(200, "删除编排", call("DELETE", dev + "/plans/pl-host", null));
 
         String report = "{\"id\":6001,\"slot\":\"HOSTTEST\",\"svids\":[1001,1002]}";
-        expect(201, "新增报告", call("POST", "/api/v1/sessions/" + etchId + "/reports", report));
-        expect(200, "删除报告", call("DELETE", "/api/v1/sessions/" + etchId + "/reports/6001", null));
+        expect(201, "新增报告", call("POST", dev + "/catalog/report", report));
+        expect(200, "删除报告", call("DELETE", dev + "/catalog/report/6001", null));
 
         String svidDef = "{\"id\":6101,\"slot\":\"HOST_VAR\",\"type\":\"F4\",\"unit\":\"X\",\"decimals\":1}";
-        expect(201, "新增 SVID", call("POST", "/api/v1/sessions/" + etchId + "/svids", svidDef));
-        expect(200, "钉值 42.5", call("PUT", "/api/v1/sessions/" + etchId + "/svids/6101/value", "{\"value\":42.5}"));
+        expect(201, "新增 SVID", call("POST", dev + "/catalog/svid", svidDef));
+        expect(200, "钉值 42.5", call("PUT", dev + "/svids/6101/pin", "{\"value\":42.5}"));
         double pinV = host.send(1, 3, true, b.list(b.uint4(6101))).orElseThrow().secs2().get(0).getDouble(0);
         check(Math.abs(pinV - 42.5) < 0.01, "S1F3 读到钉值", String.valueOf(pinV));
-        expect(200, "解钉", call("DELETE", "/api/v1/sessions/" + etchId + "/svids/6101/value", null));
-        expect(200, "删除 SVID", call("DELETE", "/api/v1/sessions/" + etchId + "/svids/6101", null));
+        expect(200, "解钉", call("DELETE", dev + "/svids/6101/pin", null));
+        expect(200, "删除 SVID", call("DELETE", dev + "/catalog/svid/6101", null));
 
         section("L. 手动发送 SML");
         HttpResponse<String> sent0 = call("POST", "/api/v1/sessions/" + etchId + "/message",
