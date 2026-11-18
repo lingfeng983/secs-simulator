@@ -145,6 +145,10 @@ public final class Bootstrap {
             deleteRuntimeDb(options.workDir());
         }
         Db db = Db.open(options.workDir(), options.allowSchemaReset());
+        for (Path backup : db.schemaBackups()) {
+            Log.of(Bootstrap.class).warn(
+                    "schema 版本不匹配，已备份旧库并重建：{}（旧库内容不再读取，需要时手工恢复）", backup);
+        }
         ConfigRepository configRepo = new ConfigRepository(db);
         TemplateRepository templateRepo = new TemplateRepository(db);
         PlanExecutionRepository planExecutions = new PlanExecutionRepository(db);

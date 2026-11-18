@@ -40,16 +40,19 @@ public final class Db implements AutoCloseable {
     private final Object configWriterLock = new Object();
     private final Object runtimeWriterLock = new Object();
     private final LockHandle processLock;
+    private final java.util.List<Path> schemaBackups;
     private boolean closed;
 
     private Db(Path workDir, SQLiteDataSource configReader, SQLiteDataSource runtimeReader,
-               Connection configWriter, Connection runtimeWriter, LockHandle processLock) {
+               Connection configWriter, Connection runtimeWriter, LockHandle processLock,
+               java.util.List<Path> schemaBackups) {
         this.workDir = workDir;
         this.configReader = configReader;
         this.runtimeReader = runtimeReader;
         this.configWriter = configWriter;
         this.runtimeWriter = runtimeWriter;
         this.processLock = processLock;
+        this.schemaBackups = java.util.List.copyOf(schemaBackups);
     }
 
     /**
@@ -88,8 +91,17 @@ public final class Db implements AutoCloseable {
                 try {
                     tune(configWriter);
                     tune(runtimeWriter);
-                    Schema.apply(configWriter, true, configDb, allowSchemaReset);
-                    Schema.apply(runtimeWriter, false, runtimeDb, allowSchemaReset);
+                    java.util.List<Path> backups = new java.util.ArrayList<>();
+                    Path configBackup = Schema.apply(configWriter, true, configDb, allowSchemaReset);
+                    if (configBackup != null) {
+                        backups.add(configBackup);
+                    }
+                    Path runtimeBackup = Schema.apply(runtimeWriter, false, runtimeDb, allowSchemaReset);
+                    if (runtimeBackup != null) {
+                        backups.add(runtimeBackup);
+                    }
+                    return new Db(workDir, reader(configDb), reader(runtimeDb),
+                            configWriter, runtimeWriter, lock, backups);
                 } catch (SQLException | RuntimeException e) {
                     try {
                         configWriter.close();
@@ -103,9 +115,6 @@ public final class Db implements AutoCloseable {
                     }
                     throw e;
                 }
-
-                return new Db(workDir, reader(configDb), reader(runtimeDb),
-                        configWriter, runtimeWriter, lock);
             } catch (SQLException | RuntimeException e) {
                 lock.release();
                 throw e;
@@ -276,6 +285,18 @@ public final class Db implements AutoCloseable {
     /** work-dir。 */
     public Path workDir() {
         return this.workDir;
+    }
+
+    /**
+     * 本次启动因 schema 版本不匹配而重建时产生的备份文件（可能 0～2 个）。
+     *
+     * <p>调用方（启动器）负责把路径打到日志里：{@code Schema} 位于 store 层，
+     * 不能依赖上层的日志门面，所以这里只把事实带出来，不做输出。</p>
+     *
+     * @return 备份文件路径，按 config.db、runtime.db 顺序；无重建时为空列表
+     */
+    public java.util.List<Path> schemaBackups() {
+        return this.schemaBackups;
     }
 
     /** meta 表读值（database = "config" | "runtime"）；不存在返回 null。 */

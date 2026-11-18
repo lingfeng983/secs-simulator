@@ -270,12 +270,14 @@ public final class Schema {
      * @param configDatabase true = config.db 的 DDL；false = runtime.db 的 DDL
      * @param dbPath         库文件路径（报错提示与备份文件名都用它）
      * @param allowReset     true = 版本不匹配时备份后重建；false = 直接拒绝
+     * @return 本次重建产生的备份文件路径；未发生重建时返回 {@code null}
      * @throws SQLException         建表 / 读写版本失败
      * @throws IllegalStateException 版本不匹配且未授权重建
      */
-    public static void apply(Connection connection, boolean configDatabase, Path dbPath,
+    public static Path apply(Connection connection, boolean configDatabase, Path dbPath,
                              boolean allowReset) throws SQLException {
         int found = readVersion(connection);
+        Path backupPath = null;
         if (found != 0 && found != VERSION) {
             if (!allowReset) {
                 throw new IllegalStateException(
@@ -284,11 +286,12 @@ public final class Schema {
                         + " 再重启（运行态库可直接删；配置库删除后需重新导入设备配置）。"
                         + " 确认要自动重建请加 --allow-schema-reset。");
             }
-            backup(connection, dbPath);
+            backupPath = backup(connection, dbPath);
             RESET.reset(connection, dbPath, found, VERSION);
         }
         createAll(connection, configDatabase);
         writeVersion(connection, VERSION);
+        return backupPath;
     }
 
     /**
@@ -349,13 +352,15 @@ public final class Schema {
      *
      * <p>优先 {@code VACUUM INTO}（WAL 下直接复制主文件会丢未 checkpoint 的写入）；
      * 旧 SQLite 不支持时退化为复制 db + -wal + -shm 三个文件。</p>
+     *
+     * @return 备份文件路径
      */
-    private static void backup(Connection connection, Path dbPath) {
+    private static Path backup(Connection connection, Path dbPath) {
         Path target = dbPath.resolveSibling(dbPath.getFileName()
                 + ".bak." + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")));
         try (Statement st = connection.createStatement()) {
             st.execute("VACUUM INTO '" + target.toString().replace("'", "''") + "'");
-            return;
+            return target;
         } catch (SQLException e) {
             /* VACUUM INTO 不可用（版本过旧 / 目标已存在）→ 退化为文件复制 */
         }
@@ -371,6 +376,7 @@ public final class Schema {
             throw new StoreException("schema 版本不匹配，备份数据库失败（拒绝继续重建）: "
                     + target + ": " + e.getMessage(), e);
         }
+        return target;
     }
 
     /** 删掉全部用户表（索引随表一起消失；保留 sqlite_ 内部表）。 */
