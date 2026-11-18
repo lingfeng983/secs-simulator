@@ -112,6 +112,8 @@ export function App(): JSX.Element {
 
   const [route, navigate] = useRoute(preferences.activeTab);
   const hostV2 = useHostsV2(client);
+  /* 稳定引用：SSE 回调的依赖数组里不能放每次渲染都新建的 hostV2 对象 */
+  const applyHostPhase = hostV2.applyPhase;
   const regions = useRegions();
 
   /** 打开「连接设置」：桌面壳内显示当前模式并预填远程地址；浏览器环境维持 localStorage 编辑。 */
@@ -197,12 +199,38 @@ export function App(): JSX.Element {
           const next = [...previous, notice];
           return next.length > MAX_LIVE_EVENTS ? next.slice(next.length - MAX_LIVE_EVENTS) : next;
         });
-        if (notice.type === 'session') {
-          /* 设备状态迁移:工作台表格与侧栏状态点要跟上 */
-          void backend.refreshSessions();
+        switch (notice.type) {
+          case 'session':
+            /* 设备控制状态迁移（ONLINE/OFFLINE）：工作台表格与侧栏状态点要跟上 */
+            void backend.refreshSessions();
+            break;
+          case 'device-link':
+            /* 设备链路相位（STARTING/LISTENING/CONNECTED/DISCONNECTED/FAILED）：
+               会话列表里的 state 就是它，重拉一次即同步。
+               payload 带的是 ULID 形式的 deviceId，与列表行对不上，不做增量合并。 */
+            void backend.refreshSessions();
+            break;
+          case 'host-link':
+            /* 主机链路相位：payload 的 phase 与列表字段同值域，就地改这一台，
+               不重拉整个列表（自动重连会反复切相位，重拉会闪）。 */
+            applyHostPhase(
+              typeof notice.data.hostId === 'string' ? notice.data.hostId : '',
+              notice.data.phase,
+            );
+            break;
+          case 'config-changed':
+            /* 配置保存/新建/删除：设备清单与配置目录跟着变（新配置是"未启动的设备"） */
+            void backend.refreshConfigs();
+            if (notice.data.action === 'delete') {
+              /* 删配置时后端会先停掉用它的会话：设备清单也要跟上 */
+              void backend.refreshSessions();
+            }
+            break;
+          default:
+            break;
         }
       },
-      [backend],
+      [backend, applyHostPhase],
     ),
   });
 

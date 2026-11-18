@@ -4,8 +4,23 @@ import type { ApiClient, WireMessage } from '../api';
 /** 事件流状态。 */
 export type StreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
-/** SSE 类型化通知（schema v6:s6f11/alarm/session；3.0 M4 增加 plan-fired）。 */
-export type NoticeType = 's6f11' | 'alarm' | 'session' | 'plan-fired';
+/**
+ * SSE 类型化通知。
+ *
+ * <p>与后端 {@code NoticeEvent} 的常量一一对应：{@code s6f11}（采集事件上报）、
+ * {@code alarm}（报警置位/清除）、{@code session}（会话状态迁移）、
+ * {@code plan-fired}（3.0 M4 编排触发，200ms 合并帧）、{@code device-link}
+ * （设备链路相位）、{@code host-link}（主机链路相位）、{@code config-changed}
+ * （配置保存/新建/删除）。漏订阅等于后端白发。</p>
+ */
+export type NoticeType =
+  | 's6f11'
+  | 'alarm'
+  | 'session'
+  | 'plan-fired'
+  | 'device-link'
+  | 'host-link'
+  | 'config-changed';
 
 export interface NoticeWire {
   type: NoticeType;
@@ -153,8 +168,12 @@ export function useEventStream(
         });
 
         /* schema v6 类型化通知:同一条 SSE 通道上的 s6f11/alarm/session 帧；
-           3.0 M4 的 plan-fired 是 200ms 合并帧（items 数组），只当刷新信号。 */
-        for (const type of ['s6f11', 'alarm', 'session', 'plan-fired'] as const) {
+           3.0 M4 的 plan-fired 是 200ms 合并帧（items 数组），只当刷新信号；
+           device-link / host-link 是链路相位，config-changed 是配置已保存。 */
+        for (const type of [
+          's6f11', 'alarm', 'session', 'plan-fired',
+          'device-link', 'host-link', 'config-changed',
+        ] as const) {
           source.addEventListener(type, (event) => {
             let data: Record<string, unknown>;
             try {

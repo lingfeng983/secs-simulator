@@ -361,6 +361,10 @@ export async function mockApi(page: Page): Promise<MockState> {
     if (/^\/api\/v1\/sessions\/[^/]+\/ceid\/\d+$/.test(path)) {
       return ok({ ok: true, outcome: 'OK' });
     }
+    /* 活动报警清单：后端回裸数组（按 ALID 升序），面板靠它打底 */
+    if (/^\/api\/v1\/sessions\/[^/]+\/alarms$/.test(path) && method === 'GET') {
+      return ok([{ alid: 1001, text: 'TEMP HIGH', category: 1, atMillis: Date.now() - 3_000 }]);
+    }
     if (/^\/api\/v1\/sessions\/[^/]+\/alarm\/\d+$/.test(path)) {
       return ok({ ok: true });
     }

@@ -561,7 +561,7 @@ function DeviceRevisionsPanel({
   const draftChanged = draft.status === 'ready' && draft.text !== draft.baselineText;
 
   return (
-    <section className="panel-section">
+    <section className="panel-section" id="panel-revisions">
       <div className="section-head">
         <h2>配置版本历史</h2>
         <div className="preview-controls">

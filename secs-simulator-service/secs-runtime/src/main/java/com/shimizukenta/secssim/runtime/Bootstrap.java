@@ -254,16 +254,27 @@ public final class Bootstrap {
             probe = SecsProbe.open(options.hsmsPort());
         }
 
-        StringBuilder extra = new StringBuilder();
-        extra.append(",\"vm\":\"").append(vmKind()).append('"')
-                .append(",\"utf8\":").append(utf8Ok)
-                .append(",\"sessions\":").append(sessions.list().size());
-        if (probe != null) {
-            extra.append(",\"hsmsPort\":").append(options.hsmsPort());
-        }
+        /*
+         * 健康附加字段必须每次请求重新算：sessions 是会变的，persistFailures 更是
+         * 只在出问题时才涨。原先这里拼成字符串传给 RuntimeContext，于是 /health
+         * 永远报启动那一刻的会话数。
+         */
+        /* probe 在分支里被赋值，lambda 里要用就得先取一份 final 快照 */
+        final SecsProbe probeForHealth = probe;
+        java.util.function.Supplier<String> extraHealth = () -> {
+            StringBuilder extra = new StringBuilder();
+            extra.append(",\"vm\":\"").append(vmKind()).append('"')
+                    .append(",\"utf8\":").append(utf8Ok)
+                    .append(",\"sessions\":").append(sessions.list().size())
+                    .append(",\"persistFailures\":").append(RuntimePersister.persistFailures());
+            if (probeForHealth != null) {
+                extra.append(",\"hsmsPort\":").append(options.hsmsPort());
+            }
+            return extra.toString();
+        };
 
         RuntimeContext runtimeContext = new RuntimeContext(options.mode().id(), BuildInfo.version(),
-                extra.toString(), stopped::countDown, sessions, launcher, configStore, templates,
+                extraHealth, stopped::countDown, sessions, launcher, configStore, templates,
                 paramTemplates, messageLog, auditLog, bus, notices, hostRepo, linkState,
                 planExecutions, configRepo);
 
@@ -321,6 +332,21 @@ public final class Bootstrap {
 
         /* 握手文件给部署脚本读：stdout 经常被 systemd/包装脚本吞掉 */
         writeReadyFile(options.workDir().resolve("ready.txt"), options, api.port());
+
+        /*
+         * 启动横幅：端口、两个库的路径、程序版本、日志落点、生效级别。
+         * 这七行专门用来回答"为什么连不上"——在此之前，启动期只打了报文/审计
+         * 日志的路径，恰好缺了排查最需要的三条（监听地址、库、版本）。
+         */
+        Log.banner(
+                BuildInfo.VERSION,
+                options.workDir(),
+                options.workDir().resolve("config.db"),
+                options.workDir().resolve("runtime.db"),
+                options.bindHost(),
+                api.port(),
+                options.workDir().resolve("logs").resolve("app.log"),
+                options.logLevel());
 
         System.out.println("READY mode=" + options.mode().id()
                 + " http=" + api.port()

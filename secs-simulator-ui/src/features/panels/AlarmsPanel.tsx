@@ -1,43 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../shared/ui/Panel';
 import { ApiError } from '../../api/base';
-import type { NoticeWire } from '../../state/useEventStream';
+import type { ActiveAlarm } from '../../api';
 import type { PanelBaseProps } from './types';
-
-/** 一条报警的当前状态（由本会话的 S5F1 通知重放出来）。 */
-interface AlarmState {
-  alid: number;
-  text: string;
-  category: number;
-  active: boolean;
-  at: number;
-}
-
-/**
- * 重放本会话的报警通知：后端只推置位/清除事件，不返回活动报警清单。
- * 同一 ALID 只看最后一次，清除了的也留一行，方便看"刚才是哪条报的"。
- */
-function replayAlarms(notices: readonly NoticeWire[] | undefined, sessionId: string): AlarmState[] {
-  const byAlid = new Map<number, AlarmState>();
-  for (const notice of notices ?? []) {
-    if (notice.type !== 'alarm' || notice.sessionId !== sessionId) {
-      continue;
-    }
-    const alid = Number(notice.data.alid);
-    if (!Number.isFinite(alid) || alid <= 0) {
-      continue;
-    }
-    const category = Number(notice.data.category);
-    byAlid.set(alid, {
-      alid,
-      text: typeof notice.data.text === 'string' ? notice.data.text : '',
-      category: Number.isFinite(category) ? category : 0,
-      active: notice.data.set === true,
-      at: notice.at,
-    });
-  }
-  return [...byAlid.values()].sort((left, right) => right.at - left.at);
-}
+import { mergeActiveAlarms } from './alarmRows';
 
 /** 报警文本会进 SECS-II 的 A 类型，只接受 US-ASCII。 */
 function hasNonAscii(text: string): boolean {
@@ -47,10 +13,10 @@ function hasNonAscii(text: string): boolean {
 /**
  * 报警面板：当前活动报警 + 编辑报警并发送 / 压测。
  *
- * <p>后端只给活动报警<b>计数</b>（counters.activeAlarms），明细靠本会话的
- * S5F1 通知重放；页面刷新前的置位不会补发，所以计数大于重放条数是正常的，
- * 界面必须说清楚，而不是把计数当成"一条具体报警"。历史报文去右侧消息监控
- * 看 S5F1/S5F2 更直接。</p>
+ * <p>活动报警清单以服务端为准（{@code GET /sessions/{id}/alarms}）：
+ * 进面板或切设备时拉一次快照，之后用本会话的 S5F1 通知做增量——置位加一行、
+ * 清除删一行。刷新页面不会丢状态，也不存在"计数比明细多"这种事。
+ * 历史报文去右侧消息监控看 S5F1/S5F2 更直接。</p>
  */
 export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): JSX.Element {
   const [alid, setAlid] = useState(1001);
@@ -61,11 +27,44 @@ export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
   const [stormInterval, setStormInterval] = useState('0');
   const [stormRunning, setStormRunning] = useState(false);
 
-  const { activeSession, sessions } = backend;
+  const { activeSession, client } = backend;
   const disabled = activeSession === '';
-  const alarmRows = useMemo(() => replayAlarms(liveEvents, activeSession), [liveEvents, activeSession]);
-  const activeFromNotices = alarmRows.filter((row) => row.active).length;
-  const activeCounter = sessions.find((session) => session.id === activeSession)?.counters.activeAlarms ?? 0;
+
+  /* 后端快照：进面板/切设备拉一次。undefined = 还没回来（不是"没有报警"）。 */
+  const [snapshot, setSnapshot] = useState<ActiveAlarm[] | undefined>(undefined);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    setSnapshot(undefined);
+    setLoadError('');
+    if (client === null || activeSession === '') {
+      return;
+    }
+    let cancelled = false;
+    client
+      .activeAlarms(activeSession)
+      .then((list) => {
+        if (!cancelled) {
+          setSnapshot(list);
+          setLoadError('');
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setLoadError((error as Error)?.message ?? '拉取失败');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, activeSession]);
+
+  const alarmRows = useMemo(
+    () => mergeActiveAlarms(snapshot, liveEvents, activeSession),
+    [snapshot, liveEvents, activeSession],
+  );
+  /** 快照还没回来（不是"没有报警"）。没有会话/没有后端时不算加载中。 */
+  const loading = client !== null && activeSession !== '' && snapshot === undefined && loadError === '';
 
   /** 对编辑好的报警信息做服务端压测:交替置位/清除。 */
   const runStorm = async () => {
@@ -111,42 +110,36 @@ export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     <div className="panel-stack">
       <Panel id="panel-active-alarms" title="当前活动报警" headless>
         <p className="hint">
-          后端计数：<b>{activeCounter}</b> 条活动报警（会话 counters，权威值）。
-          下面的明细由本会话收到的 S5F1 通知重放：当前置位 {activeFromNotices} 条，
-          后端不返回活动报警清单，页面刷新前的置位不会补发。
+          当前活动报警 <b>{alarmRows.length}</b> 条。
         </p>
+        {loadError !== '' && (
+          <p className="hint">活动报警拉取失败:{loadError}。收到的置位/清除通知仍会即时反映在下面。</p>
+        )}
         {alarmRows.length === 0 ? (
           <p className="hint">
-            {activeCounter > 0
-              ? `后端报告 ${activeCounter} 条活动报警，但本次会话没有收到 S5F1 通知明细（可能是在页面打开前置位的）。请打开右侧消息监控看 S5F1，或清除后重新置位。`
-              : '当前没有活动报警。后端不返回报警明细清单；要看历史 S5F1/S5F2，请打开右侧消息监控。'}
+            {loading
+              ? '正在读取活动报警…'
+              : '当前没有活动报警。历史 S5F1/S5F2 报文请打开右侧消息监控查看。'}
           </p>
         ) : (
-          <>
-            <table className="effects-table">
-              <thead>
-                <tr><th>ALID</th><th>状态</th><th>类别</th><th>文本</th><th>时间</th></tr>
-              </thead>
-              <tbody>
-                {alarmRows.map((row) => (
-                  <tr key={row.alid}>
-                    <td className="mono">{row.alid}</td>
-                    <td>
-                      <span className={`badge ${row.active ? 'tone-danger' : 'tone-muted'}`}>
-                        {row.active ? '活动' : '已清除'}
-                      </span>
-                    </td>
-                    <td>{row.category === 0 ? '—' : row.category}</td>
-                    <td className="mono">{row.text || '—'}</td>
-                    <td className="mono">{new Date(row.at).toLocaleTimeString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="hint">
-              同一 ALID 只显示最后一次置位/清除；与后端计数不一致时以后端计数为准（刷新前的置位没有通知可重放）。
-            </p>
-          </>
+          <table className="effects-table">
+            <thead>
+              <tr><th>ALID</th><th>状态</th><th>类别</th><th>文本</th><th>时间</th></tr>
+            </thead>
+            <tbody>
+              {alarmRows.map((row) => (
+                <tr key={row.alid}>
+                  <td className="mono">{row.alid}</td>
+                  <td>
+                    <span className="badge tone-danger">活动</span>
+                  </td>
+                  <td>{row.category === 0 ? '—' : row.category}</td>
+                  <td className="mono">{row.text || '—'}</td>
+                  <td className="mono">{new Date(row.at).toLocaleTimeString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </Panel>
 

@@ -42,7 +42,14 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     private final String mode;
     private final String version;
-    private final String extraHealthJson;
+    /**
+     * 健康附加字段的<b>求值函数</b>而不是字符串。
+     *
+     * <p>原先这里存的是启动时算好的字符串，于是 {@code /health} 的 sessions 永远
+     * 是启动那一刻的值——3 个会话跑着，健康检查还报 0。改成 Supplier 后每次请求
+     * 重新求值。</p>
+     */
+    private final java.util.function.Supplier<String> extraHealthJson;
     private final Runnable shutdown;
     private final RuntimeApi api;
     private final HostSimRegistry hosts;
@@ -60,7 +67,7 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     /** v2 主机命名空间的委托。 */
     private final HostV2Delegates hostV2;
 
-    RuntimeContext(String mode, String version, String extraHealthJson, Runnable shutdown,
+    RuntimeContext(String mode, String version, java.util.function.Supplier<String> extraHealthJson, Runnable shutdown,
             SessionManager sessions, SessionLauncher launcher, ConfigStore configs,
             TemplateStore templates, ParamTemplateStore paramTemplates, MessageLog messages,
             AuditLog audit,
@@ -118,7 +125,7 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public String extraHealthJson() {
-        return this.extraHealthJson;
+        return this.extraHealthJson.get();
     }
 
     @Override

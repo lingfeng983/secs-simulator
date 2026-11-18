@@ -79,6 +79,29 @@ export function useHostsV2(client: ApiClient | null) {
     [hosts],
   );
 
+  /**
+   * SSE {@code host-link} 的即时相位更新：只改这一台主机，不发请求。
+   *
+   * <p>相位是后端直出的枚举（{@code phase.name()}），payload 里给的就是它；
+   * 自动重连会反复 CONNECTING→FAILED，每次收到都重拉整个列表既慢又会闪，
+   * 所以就地改。{@code open}（实例是否打开）不随相位变，不用碰。</p>
+   */
+  const applyPhase = useCallback((hostId: string, phase: unknown) => {
+    if (!isHostPhase(phase)) {
+      return;
+    }
+    setHosts((previous) => {
+      const index = previous.findIndex((host) => host.id === hostId);
+      /* 找不到或相位没变：返回原数组，避免无谓重渲染 */
+      if (index < 0 || previous[index].phase === phase) {
+        return previous;
+      }
+      const next = [...previous];
+      next[index] = { ...next[index], phase };
+      return next;
+    });
+  }, []);
+
   /** 把模板里的方案逐条复制进某台主机的方案库（换 id，互不覆盖）。 */
   const applyTemplate = useCallback(
     async (hostId: string, template: HostTemplate) => {
@@ -218,11 +241,24 @@ export function useHostsV2(client: ApiClient | null) {
 
   return {
     hosts, templates, loading, find, refresh, create, remove, connect, disconnect,
-    apply, saveSettings, send, applyTemplate, saveTemplate, deleteTemplate,
+    apply, saveSettings, send, applyTemplate, saveTemplate, deleteTemplate, applyPhase,
   };
 }
 
 export type HostsV2State = ReturnType<typeof useHostsV2>;
+
+/** 主机的四个链路相位（与后端 {@code HostSimulator.Phase} 同值域）。 */
+const HOST_PHASES: readonly HostV2['phase'][] = ['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'FAILED'];
+
+/**
+ * SSE payload 里来的相位是不是已知相位。
+ *
+ * <p>通知的 payload 是外部输入（JSON 解析结果），不校验就直接塞进状态，
+ * 会让界面渲染出 `phase=undefined` 的徽标。</p>
+ */
+export function isHostPhase(value: unknown): value is HostV2['phase'] {
+  return typeof value === 'string' && (HOST_PHASES as readonly string[]).includes(value);
+}
 
 /**
  * 主机相位 → 徽标色调：只有「已连接」是绿，其余都是中性灰。

@@ -441,8 +441,30 @@ abstract class HttpSupport {
 
     /* ===== 响应 ===== */
 
+    /**
+     * 最近一次响应的状态码，供访问日志读取。
+     *
+     * <p>{@link HttpExchange} 不暴露已发送的状态码，而访问日志又必须记它——
+     * 没有状态码的访问日志只能证明"有人来过"，不能证明"他拿到了什么"。
+     * 这里在 {@link #respond} 里记一份，同一个请求线程上读回来即可。
+     * 慢请求虽然换了线程执行，但写入与读取都在那个线程内，所以照样成立。</p>
+     */
+    private static final ThreadLocal<Integer> LAST_STATUS = new ThreadLocal<>();
+
+    /** 当前线程最近一次响应的状态码；尚未响应时返回 {@code 0}。 */
+    protected static int lastStatus() {
+        Integer value = LAST_STATUS.get();
+        return value == null ? 0 : value;
+    }
+
+    /** 清掉状态记录，避免线程池复用时串到下一个请求上。 */
+    protected static void clearLastStatus() {
+        LAST_STATUS.remove();
+    }
+
     /** 回 JSON 正文。 */
     protected static void respond(HttpExchange ex, int status, String body) throws IOException {
+        LAST_STATUS.set(status);
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         ex.sendResponseHeaders(status, bytes.length);

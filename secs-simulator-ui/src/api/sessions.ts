@@ -5,6 +5,7 @@
  */
 
 import type {
+  ActiveAlarm,
   ApiClient,
   BurstResult,
   BurstStatus,
@@ -32,6 +33,7 @@ type SessionApi = Pick<
   | 'reloadSession'
   | 'trigger'
   | 'alarm'
+  | 'activeAlarms'
   | 'catalog'
   | 'preview'
   | 'events'
@@ -44,6 +46,16 @@ type SessionApi = Pick<
   | 'burst'
   | 'burstStatus'
 >;
+
+/**
+ * 活动报警清单的地址。
+ *
+ * <p>后端目前挂在 v1 会话命名空间下；后续批次会迁到
+ * {@code /api/v2/devices/{id}/runtime/alarms}，届时只改这一行。</p>
+ */
+function activeAlarmsUrl(sessionId: string): string {
+  return apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/alarms`);
+}
 
 export const sessionApi: SessionApi = {
   async health() {
@@ -137,6 +149,14 @@ export const sessionApi: SessionApi = {
         method: 'POST',
       }),
     );
+  },
+  async activeAlarms(sessionId) {
+    /* 后端回的是裸数组（按 ALID 升序）。夹具/老后端没有这个端点时可能回对象，
+       这里兜底成空清单，面板不至于整块崩掉。 */
+    const body = await readJson<ActiveAlarm[] | { alarms?: ActiveAlarm[] }>(
+      await request(activeAlarmsUrl(sessionId)),
+    );
+    return Array.isArray(body) ? body : body.alarms ?? [];
   },
   async catalog(sessionId) {
     const body = await readJson<Partial<Catalog>>(
