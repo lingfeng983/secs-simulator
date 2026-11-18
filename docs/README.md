@@ -38,6 +38,7 @@
 - [全局功能审计 2026-10-25](reports/audit-2026-10-25.md)
 - [全量代码审核 2026-10-28](reports/audit-2026-10-28.md)
 - [全量代码审核 2026-10-29](reports/audit-2026-10-29.md)
+- [API 契约一致性审计 2026-11-18](reports/audit-2026-11-18-api-contract.md) — v1 会话查询四种响应形状、SSE 帧 sessionId 复用、CONFIG_CHANGED 注释漏 save-section、openapi 死声明；含四批次修复建议
 - [全量代码评审 2026-10-17](reports/code-review-2026-10-17.md)
 - [全量代码评审 2026-10-20（协议符合性专项）](reports/code-review-2026-10-20.md)
 - [实机全量测试 2026-10-30](reports/host-e2e-2026-10-30.md)
