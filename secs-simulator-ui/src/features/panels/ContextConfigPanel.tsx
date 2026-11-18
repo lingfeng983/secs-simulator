@@ -47,6 +47,7 @@ export function ContextConfigPanel(props: PanelBaseProps & { sessionId?: string;
       sessionId={sessionId}
       configName={configName}
       panelId="panel-context-config"
+      sections={['context']}
       title="晶圆属性（context）"
     >
       {({ root, edit }) => (

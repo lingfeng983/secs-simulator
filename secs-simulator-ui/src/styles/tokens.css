@@ -89,6 +89,18 @@
   --event-11: #a16207;
   --event-12: #9f1239;
 
+  /* —— 参数曲线色：一张图里叠多条参数曲线时按顺序取用 ——
+     与事件色分开，是因为同一张图上"实线=参数、虚线=事件"，
+     两套色系混用会让人分不清哪条线是谁。 —— */
+  --series-1: #0f766e;
+  --series-2: #1d4ed8;
+  --series-3: #c2410c;
+  --series-4: #7c3aed;
+  --series-5: #4d7c0f;
+  --series-6: #be185d;
+  --series-7: #0369a1;
+  --series-8: #a16207;
+
   /* —— 阴影:轻、冷、只在必要时出现 —— */
   --shadow-1: 0 1px 2px rgba(12, 20, 32, 0.05);
   --shadow-2: 0 2px 6px rgba(12, 20, 32, 0.06), 0 12px 32px rgba(12, 20, 32, 0.07);
@@ -197,6 +209,16 @@
   --event-10: #22d3ee;
   --event-11: #facc15;
   --event-12: #fb7185;
+
+  /* —— 参数曲线色（深色）：同色相提亮 —— */
+  --series-1: #2dd4bf;
+  --series-2: #60a5fa;
+  --series-3: #fb923c;
+  --series-4: #c084fc;
+  --series-5: #a3e635;
+  --series-6: #f472b6;
+  --series-7: #38bdf8;
+  --series-8: #facc15;
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.35);

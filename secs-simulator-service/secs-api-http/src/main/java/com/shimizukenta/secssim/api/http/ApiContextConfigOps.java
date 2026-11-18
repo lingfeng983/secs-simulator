@@ -61,6 +61,29 @@ public interface ApiContextConfigOps {
     }
 
     /**
+     * 分段保存的结果：HTTP 状态码 + 已经拼好的 JSON 正文。
+     *
+     * <p>三段守卫（结构下线、运行中周期引用、常量覆盖）都带结构化 detail，
+     * 在这里统一成 JSON 比让 HTTP 层再拼一次更省事。</p>
+     */
+    record SectionSaveResult(int status, String json) {
+    }
+
+    /**
+     * 分段保存：请求体 {@code {"sections":{"cycle":{...}}}}。
+     *
+     * @param name              配置文件名
+     * @param body              请求体
+     * @param expectedModifiedMs If-Match 带回的修改时间
+     * @param confirmOverwrite  已确认覆盖运行时常量（守卫 C）
+     * @return 状态码 + JSON
+     */
+    default SectionSaveResult saveConfigSections(String name, String body,
+                                                 Long expectedModifiedMs, boolean confirmOverwrite) {
+        return new SectionSaveResult(405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
+    /**
      * 新建一份配置（内容是能直接编译的骨架）。
      *
      * @param name 文件名

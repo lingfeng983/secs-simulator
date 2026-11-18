@@ -4,12 +4,15 @@ import { SmlResult } from '../../../shared/ui/SmlResult';
 import type { SentMessageResult } from '../../../api';
 import { useHostSendDraft } from '../../../state/hostPlans';
 import { HOST_PRESETS } from './hostPresets';
-import { MessageMonitorInline } from '../MessageMonitorDrawer';
-import type { WireMessage } from '../../../api';
 import type { PanelArgs } from './hostPanelShared';
 
-/** 消息发送(单主机):消息监控(全部渠道,页面最初位置) + 预设 + SML 编辑 + 发送 + 压测。 */
-export function HostSendPanel({ hostId, hosts, messages }: PanelArgs & { messages?: WireMessage[] }): JSX.Element {
+/**
+ * 消息发送（单主机）：预设 + SML 编辑 + 发送 + 压测。
+ *
+ * <p>页内不再嵌「实时消息监控（全部渠道）」——运行区只留"对这台主机动手"的事，
+ * 收发明细到顶栏右侧的监控抽屉里看（那里还能按本主机收窄）。</p>
+ */
+export function HostSendPanel({ hostId, hosts }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
   const [storedDraft, setDraft] = useHostSendDraft(hostId, 'send');
   const draft = storedDraft === '' ? 'S1F13 W' : storedDraft;
@@ -35,9 +38,6 @@ export function HostSendPanel({ hostId, hosts, messages }: PanelArgs & { message
   return (
     <Panel id="panel-host-send" title="消息发送" headless>
       {error !== '' && <p className="inline-note danger">{error}</p>}
-      {/* 消息监控提到消息收发的最初位置：所有渠道、无论收发都在这条流里
-          （2026-11-18 用户要求），工艺周期的片内事件也在其中 */}
-      <MessageMonitorInline messages={messages ?? []} windowMin={30} />
       <div className="preview-controls">
         {HOST_PRESETS.filter((preset) => preset.quick).map((preset) => (
           <button key={preset.label} type="button" title={preset.desc}

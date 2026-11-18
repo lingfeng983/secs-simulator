@@ -275,6 +275,26 @@ public final class HostSimulator {
         this.settingRevision.incrementAndGet();
     }
 
+    /**
+     * 只改名称：不进设置版本、不要求重连。
+     *
+     * <p>名称不参与建链（目标地址 / 端口 / Device ID 才参与），保存后立刻生效。
+     * 以前走 {@link #saveSettings} 会把 settingRevision +1，界面就一直挂着
+     * 「设置待生效」，而点「使设置生效」只是白白断链重连一次。</p>
+     *
+     * @param name 新名称（空白忽略）
+     */
+    public void rename(String name) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+    }
+
+    /** 已生效的设置版本（与 {@link #settingRevision()} 相等 = 没有待生效改动）。 */
+    public long appliedRevision() {
+        return this.appliedRevision.get();
+    }
+
     private void cancelRetry() {
         synchronized (this.retryLock) {
             ScheduledExecutorService retry = this.retryExecutor;

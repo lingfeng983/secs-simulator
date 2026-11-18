@@ -252,6 +252,77 @@ final class EventScheduler {
     }
 
 
+    /** 当前启用中的计划数（分段生效的"保留了几条"提示用）。 */
+    synchronized int enabledCount() {
+        int count = 0;
+        for (EventPlan plan : this.schedule.plans()) {
+            if (!this.disabledPlans.contains(plan.id())) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    /** 只改限流：不换表、不动启用态（事件发送口径页）。 */
+    synchronized void maxPerSec(int maxEventsPerSec) {
+        this.gate.configure(maxEventsPerSec);
+    }
+
+    /**
+     * 换编排表，但保留没改过的那几条计划的启用态与锚点（分段生效专用）。
+     *
+     * <p>与 {@link #enableSchedule} 的区别：那个是「重建会话 / 模型换了」，
+     * 一律全停；这里只改事件计划页时用——操作员手上一堆正在跑的计划，
+     * 不该因为改了一条不相关的计划全部回到禁用。规则：</p>
+     *
+     * <ul>
+     *   <li>新表里内容与旧表完全一致（{@link EventPlan#equals}）且原本启用 → 保留启用态与锚点；</li>
+     *   <li>新增 / 改动 / 原本禁用的计划 → 保持禁用（新增的还要操作员显式启动）；</li>
+     *   <li>删掉的计划 → 挂起触发、去抖进度一并丢弃。</li>
+     * </ul>
+     *
+     * @param schedule        新编排表
+     * @param maxEventsPerSec 新限流
+     */
+    synchronized void replaceSchedulePreservingState(EventSchedule schedule, int maxEventsPerSec) {
+        EventSchedule next = schedule == null ? EventSchedule.empty() : schedule;
+        this.gate.configure(maxEventsPerSec);
+
+        Map<String, EventPlan> previous = new java.util.LinkedHashMap<>();
+        for (EventPlan plan : this.schedule.plans()) {
+            previous.put(plan.id(), plan);
+        }
+
+        Set<String> keepRunning = new java.util.LinkedHashSet<>();
+        Set<String> disabled = new java.util.LinkedHashSet<>();
+        Map<String, Long> anchors = new java.util.LinkedHashMap<>();
+        for (EventPlan plan : next.plans()) {
+            EventPlan old = previous.get(plan.id());
+            boolean unchanged = old != null && old.equals(plan);
+            boolean wasEnabled = old != null && !this.disabledPlans.contains(plan.id());
+            if (unchanged && wasEnabled) {
+                keepRunning.add(plan.id());
+                Long anchor = this.enabledAnchors.get(plan.id());
+                if (anchor != null) {
+                    anchors.put(plan.id(), anchor);
+                }
+            } else {
+                disabled.add(plan.id());
+            }
+        }
+
+        this.conditionDebouncers.keySet().retainAll(keepRunning);
+        this.conditionErrorLogged.retainAll(keepRunning);
+        synchronized (this.pendingFires) {
+            this.pendingFires.removeIf(fire -> !keepRunning.contains(fire.planId()));
+        }
+        this.disabledPlans.clear();
+        this.disabledPlans.addAll(disabled);
+        this.enabledAnchors.clear();
+        this.enabledAnchors.putAll(anchors);
+        this.schedule = next;
+    }
+
     /**
      * 当前编排列表（含启用状态、触发规则与归属）。
      *

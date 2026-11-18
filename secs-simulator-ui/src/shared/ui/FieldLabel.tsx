@@ -5,14 +5,23 @@ import type { ReactNode } from 'react';
  *
  * <p>描述性的说明默认不展示，悬浮在标题上时以气泡展示
  * （原生 title 作兜底，CSS 气泡即时可见、可换行）。</p>
+ *
+ * <p>{@code required} 在标题后加一个红色星号：必填项要写在字段上，
+ * 而不是等用户点「确定」时弹一条"不能为空"的横幅。</p>
  */
-export function FieldLabel({ text, help }: { text: string; help?: string }): JSX.Element {
+export function FieldLabel({ text, help, required = false }: { text: string; help?: string; required?: boolean }): JSX.Element {
+  const body = (
+    <>
+      {text}
+      {required && <span className="field-required" aria-hidden="true">*</span>}
+    </>
+  );
   if (help === undefined || help === '') {
-    return <span className="modal-field-label">{text}</span>;
+    return <span className="modal-field-label">{body}</span>;
   }
   return (
     <span className="modal-field-label has-help" title={help} tabIndex={0}>
-      {text}
+      {body}
       <span className="field-tip" role="tooltip" aria-hidden="true">{help}</span>
     </span>
   );

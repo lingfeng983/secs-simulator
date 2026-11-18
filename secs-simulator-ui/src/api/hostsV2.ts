@@ -30,6 +30,20 @@ export interface HostV2 {
 }
 
 /**
+ * 保存主机设置的结果。
+ *
+ * <p>{@code changed} 说明这次到底动了什么：只有 {@code target}（地址/端口/Device ID）
+ * 才需要「使设置生效」；{@code name} 是热生效的，保存完就完了。</p>
+ */
+export interface HostSaveResult {
+  changed: Array<'name' | 'target'>;
+  /** 目标变了且主机在线：需要点「使设置生效」重建链路 */
+  needsReconnect: boolean;
+  settingRevision: number;
+  appliedRevision: number;
+}
+
+/**
  * 后端 host_template 的一行（旧端点形状）。
  *
  * <p>目标地址 / 端口 / Device ID 是主机实例自己的设置，不属于模板；
@@ -86,7 +100,13 @@ export const hostsV2Api: HostsV2Api = {
     return response.ok;
   },
   async saveHostV2(hostId, req) {
-    const body = await readJson<{ ok?: boolean; error?: string }>(
+    const body = await readJson<{
+      ok?: boolean; error?: string;
+      changed?: Array<'name' | 'target'>;
+      needsReconnect?: boolean;
+      settingRevision?: number;
+      appliedRevision?: number;
+    }>(
       await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -96,6 +116,12 @@ export const hostsV2Api: HostsV2Api = {
     if (!body.ok) {
       throw new Error(body.error ?? '保存设置失败');
     }
+    return {
+      changed: body.changed ?? [],
+      needsReconnect: body.needsReconnect === true,
+      settingRevision: body.settingRevision ?? 0,
+      appliedRevision: body.appliedRevision ?? 0,
+    };
   },
   async connectHostV2(hostId) {
     const body = await readJson<{ ok?: boolean; error?: string }>(

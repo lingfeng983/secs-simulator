@@ -34,9 +34,9 @@ afterAll(() => {
 
 const CONFIG_NAME = 'tpl-furnace.json';
 
-function makeBackend(): BackendController {
+function makeBackend(sessions: unknown[] = []): BackendController {
   return {
-    sessions: [],
+    sessions,
     configList: [{ name: CONFIG_NAME, sizeBytes: 785, modifiedMs: 1, template: 'furnace' }],
     activeSession: '',
     setActiveSession: vi.fn(),
@@ -61,9 +61,13 @@ const notifier = {
   dismissAll: () => undefined,
 };
 
-function renderDevice(page: 'overview' | 'plans', zone: 'config' | 'runtime'): string {
+function renderDevice(
+  page: 'overview' | 'plans',
+  zone: 'config' | 'runtime',
+  sessions: unknown[] = [],
+): string {
   const props: PanelBaseProps & { sessionId: string; zone: 'config' | 'runtime'; page: never } = {
-    backend: makeBackend(),
+    backend: makeBackend(sessions),
     notifier: notifier as never,
     preferences: {} as never,
     updatePreferences: () => undefined,
@@ -113,5 +117,24 @@ describe('DevicePage 骨架', () => {
     /* 配置区的子页照常可点，不是只剩配置区 */
     expect(html).toContain('配置区');
     expect(html).toContain('启动设备');
+  });
+
+  /* 2026-11-18 现场反馈：从清单点进来的地址 key 是配置文件名，启动后会话 id
+     变成 ULID/legacy stem，页面却还在按 id 找自己——于是永远显示「启动设备」，
+     运行区也拿不到数据。这里钉住"按配置来源反查会话"。 */
+  it('设备已启动时按配置来源认回会话，不再显示「启动设备」', () => {
+    const html = renderDevice('overview', 'config', [{
+      id: 'dev-01',
+      state: 'OPEN',
+      controlState: 'OFFLINE',
+      device: 'ETCH01',
+      config: CONFIG_NAME,
+      units: 1,
+      counters: {},
+    }]);
+    expect(html).toContain('停止设备');
+    expect(html).not.toContain('启动设备');
+    /* 概览里的会话 id 用的是真实的那个，不是配置文件名 */
+    expect(html).toContain('dev-01');
   });
 });

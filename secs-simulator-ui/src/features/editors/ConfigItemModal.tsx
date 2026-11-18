@@ -11,12 +11,18 @@ export type ItemEdit = (fn: (target: JsonObject) => void) => void;
  * <p>弹窗改的是这条数据项的一份副本，点「确定」才交给页面写回草稿，
  * 点「取消」或 Esc 不留痕迹。调用方按需挂载（打开时才渲染），每次打开都从
  * {@code initial} 重新开始。</p>
+ *
+ * <p>{@code problemBanner} 关掉时，问题只体现在「确定」按钮的禁用与悬浮说明上——
+ * "必填"这类一眼就能看出来的约束，用标题上的星号说就够了，不必在弹框里
+ * 常驻一条红条（用户还没动手就先看到一片红）。</p>
  */
-export function ConfigItemModal({ title, initial, problemOf, onClose, onSubmit, children }: {
+export function ConfigItemModal({ title, initial, problemOf, problemBanner = true, onClose, onSubmit, children }: {
   title: string;
   initial: JsonObject;
   /** 当前副本有问题时返回提示文字，「确定」随之禁用；没问题返回 ''。 */
   problemOf?: (item: JsonObject) => string;
+  /** 是否把问题显示成弹框底部的红色横幅（默认显示）。 */
+  problemBanner?: boolean;
   onClose: () => void;
   onSubmit: (item: JsonObject) => void;
   children: (item: JsonObject, mutate: ItemEdit) => ReactNode;
@@ -54,7 +60,7 @@ export function ConfigItemModal({ title, initial, problemOf, onClose, onSubmit, 
       }
     >
       {children(item, mutate)}
-      {problem !== '' && <p className="problems">{problem}</p>}
+      {problemBanner && problem !== '' && <p className="problems">{problem}</p>}
     </Modal>
   );
 }

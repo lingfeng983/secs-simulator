@@ -98,6 +98,9 @@ final class ApiPaths {
     /** 只校验不落盘的子路径。 */
     static final String VALIDATE_SUFFIX = "validate";
 
+    /** 分段保存子路径：{@code /api/v1/configs/<name>/sections}。 */
+    static final String SECTIONS_SUFFIX = "sections";
+
     private ApiPaths() {
     }
 }

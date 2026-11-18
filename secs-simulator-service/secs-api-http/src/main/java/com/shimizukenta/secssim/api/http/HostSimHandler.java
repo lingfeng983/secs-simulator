@@ -420,10 +420,10 @@ final class HostSimHandler extends HttpSupport {
                 respond(ex, 400, "{\"ok\":false,\"error\":\"bad-target\"}");
                 return;
             }
-            SessionOutcome outcome = this.context.saveHostV2(hostId, name, host, port, deviceId);
-            audit(ex, "host-v2-save", hostId, "outcome=" + outcome);
+            ApiContextHostOps.HostSaveResult result = this.context.saveHostSettingsV2(hostId, name, host, port, deviceId);
+            audit(ex, "host-v2-save", hostId, "status=" + result.status());
             /* 写库失败以前一律报 404「主机不存在」，用户会去重建一个已经存在的实例 */
-            respond(ex, statusOf(outcome), "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+            respond(ex, result.status(), result.json());
             return;
         }
         if ("DELETE".equals(method) && action.isEmpty()) {

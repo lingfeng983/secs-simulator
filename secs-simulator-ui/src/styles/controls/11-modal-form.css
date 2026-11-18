@@ -44,6 +44,13 @@
   line-height: 1.35;
 }
 
+/* 必填标记：跟着标题走，不占单独一行 */
+.field-required {
+  margin-left: 2px;
+  color: var(--danger);
+  font-weight: 700;
+}
+
 /* 带说明的标题：虚线下划线提示"这里有说明"，悬浮/聚焦出气泡。
    字段标题（.modal-field-label）与小节/弹框标题（.hint-title）共用。 */
 .has-help {

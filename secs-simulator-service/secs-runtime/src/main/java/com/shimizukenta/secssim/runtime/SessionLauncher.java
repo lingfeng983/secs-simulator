@@ -222,6 +222,51 @@ public final class SessionLauncher {
     }
 
     /**
+     * 按配置段最小生效（2026-11-18 设计 §4/§8）。
+     *
+     * <p>与 {@link #reload(String)} 的区别：那个是「整份配置重来」，模型换、
+     * 编排清、周期停、钉值丢；这里只把文件里已经保存的新内容按段应用——
+     * 只改事件计划时，没改过的计划继续跑。连接段（{@code session}）变化不走
+     * 这里，必须重建会话，由调用方转 {@link #reload(String)}。</p>
+     *
+     * @param id      会话标识
+     * @param changed 实际变化的段
+     * @return 这次动了哪些东西；会话不存在 / 没接口时返回 {@code null}
+     * @throws ConfigException 配置读不了或编译不过
+     * @throws IOException     重建类动作失败
+     */
+    public com.shimizukenta.secssim.runtime.session.SectionApplyOutcome applySections(
+            String id, java.util.Collection<ConfigSection> changed) throws ConfigException, IOException {
+        this.lifecycleLock.lock();
+        try {
+            SessionSource source = this.sources.get(id);
+            if (source == null) {
+                return null;
+            }
+            /* 以磁盘上的新内容为准重新编译一次：保存已经落盘，这里只负责应用。
+               编译不过说明保存与生效之间文件被改坏了——抛出去让调用方报失败。 */
+            String body = this.configStore.read(source.configName());
+            Prepared prepared = prepare(source.configName(), body, source.overrides());
+            String fingerprint = structureFingerprint(body);
+            SessionRuntime current = this.sessions.find(id).orElse(null);
+            if (!(current instanceof HsmsSessionRuntime running)) {
+                return null;
+            }
+            com.shimizukenta.secssim.runtime.session.SectionApplyOutcome outcome = running.applySections(
+                    prepared.model, prepared.values, prepared.schedule,
+                    prepared.maxPerSec, prepared.s6f11Wbit, prepared.s6f1Wbit,
+                    prepared.contextTable, prepared.ecidValues,
+                    prepared.cycle, prepared.lifecycleClock,
+                    java.util.Set.copyOf(changed));
+            this.sources.put(id, source.withLastGood(prepared, fingerprint));
+            Log.info("会话 " + id + " 已分段生效：" + changed);
+            return outcome;
+        } finally {
+            this.lifecycleLock.unlock();
+        }
+    }
+
+    /**
      * 同端口/同目标的重建：先关旧，再开新；失败时用上一次成功的快照恢复旧会话。
      *
      * @param id          会话标识

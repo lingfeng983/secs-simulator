@@ -10,6 +10,9 @@ import {
   type ConfigEntry,
   type ConfigProblems,
   type ConfigSaveResult,
+  type ConfigSectionApplyResult,
+  type ConfigSectionName,
+  type ConfigSectionSaveResult,
   type ConfigTemplateEntry,
   type ConfigTextSnapshot,
   type EventPlanView,
@@ -123,6 +126,18 @@ export interface BackendController {
   validateConfig: (name: string, text: string) => Promise<ConfigProblems | null>;
   /** 校验通过后落盘;expectedModifiedMs 非空时 If-Match 并发保护,被改过回 409。 */
   saveConfig: (name: string, text: string, expectedModifiedMs?: number | null) => Promise<ConfigSaveResult | null>;
+  /** 按段保存：只提交本页拥有的片段，回实际变化的段与影响级别。 */
+  saveConfigSections: (
+    name: string,
+    sections: Partial<Record<ConfigSectionName, unknown>>,
+    expectedModifiedMs?: number | null,
+    confirmOverwrite?: boolean,
+  ) => Promise<ConfigSectionSaveResult | null>;
+  /** 把刚保存的段应用到正在跑的这台设备（按段最小生效）。 */
+  applyConfigSections: (
+    deviceId: string,
+    sections: readonly ConfigSectionName[],
+  ) => Promise<ConfigSectionApplyResult | null>;
   closeSession: (sessionId: string) => Promise<void>;
   /** 重新建链：断开态的设备对象复用，模型/钉值/计划启用态原样恢复。 */
   connectSession: (deviceId: string) => Promise<void>;
@@ -135,6 +150,8 @@ export interface BackendController {
   /* 定义类编辑已上收配置区（写配置草稿）；运行时目录编辑端点不再从前端调用。 */
   /** 只回放某一条编排计划的预览（事件及其效果）。 */
   previewPlan: (sessionId: string, planId: string, windowMs: number) => Promise<PreviewData | null>;
+  /** 整台设备的运行态预览（全部 SVID + 全部事件标记）：运行区预览卡用。 */
+  previewSession: (sessionId: string, windowMs: number) => Promise<PreviewData | null>;
   /** 拉整台设备的曲线(全部 SVID + 事件标记),用于"事件串起来"的预览。 */
   /** 手动发送一条 SML；返回发送结果。 */
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;

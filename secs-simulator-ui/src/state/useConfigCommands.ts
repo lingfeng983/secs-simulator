@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { ApiClient, ConfigProblems, ConfigSaveResult, ConfigTemplateEntry, ConfigTextSnapshot } from '../api';
+import type {
+  ApiClient, ConfigProblems, ConfigSaveResult, ConfigSectionApplyResult, ConfigSectionName,
+  ConfigSectionSaveResult, ConfigTemplateEntry, ConfigTextSnapshot,
+} from '../api';
+import { effectNote } from '../shared/lib/configSections';
 import type { Notifier } from './useToasts';
 
 /**
@@ -126,6 +130,68 @@ export function useConfigCommands({
     [client, reloadSessionsUsing],
   );
 
+  /**
+   * 按段保存：只提交本页拥有的片段。
+   *
+   * <p>不在这里自动重载会话——保存完要按"实际变化的段"调
+   * {@link applyConfigSectionsLike}，逐段最小生效；整份重载会把没改的东西也重置。
+   * 成功只弹右下角 toast，页面内不写「已保存」（2026-11-18 反馈）。</p>
+   */
+  const saveConfigSections = useCallback(
+    async (
+      name: string,
+      sections: Partial<Record<ConfigSectionName, unknown>>,
+      expectedModifiedMs?: number | null,
+      confirmOverwrite?: boolean,
+    ): Promise<ConfigSectionSaveResult | null> => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        const result = await client.saveConfigSections(name, sections, expectedModifiedMs, confirmOverwrite);
+        if (result.status === 200) {
+          notifierRef.current.success(`已保存 ${name}`);
+          await refreshConfigs();
+        }
+        /* 守卫拒绝与并发冲突由页面按 error 显示原因（那里才知道是哪一页） */
+        return result;
+      } catch (error) {
+        notifierRef.current.error('保存失败', (error as Error).message);
+        return null;
+      }
+    },
+    [client, refreshConfigs],
+  );
+
+  /** 分段生效：把刚保存的段应用到正在跑的这台设备。 */
+  const applyConfigSections = useCallback(
+    async (deviceId: string, sections: readonly ConfigSectionName[]): Promise<ConfigSectionApplyResult | null> => {
+      if (client === null || deviceId === '' || sections.length === 0) {
+        return null;
+      }
+      try {
+        const result = await client.applyConfigSections(deviceId, sections);
+        if (result.status !== 200) {
+          notifierRef.current.warn(
+            '配置已保存到文件，但设备未生效',
+            result.detail === '' ? result.error : result.detail,
+          );
+          return result;
+        }
+        /* 只有"有东西被重置"时才补一条：周期被停、钉值失效都属于必须知道的事 */
+        const note = effectNote(result.effect, result.reset, result.pinsDropped, result.plansKept);
+        if (note !== '' && result.reset.includes('cycle')) {
+          notifierRef.current.info('配置已生效', note);
+        }
+        return result;
+      } catch (error) {
+        notifierRef.current.warn('配置已保存，但设备未生效', (error as Error).message);
+        return null;
+      }
+    },
+    [client],
+  );
+
   /** 内置设备模板目录；取不到就回空列表，选型下拉里只剩骨架。 */
   const configTemplates = useCallback(async (): Promise<ConfigTemplateEntry[]> => {
     if (client === null) {
@@ -140,7 +206,11 @@ export function useConfigCommands({
   }, [client]);
 
   return useMemo(
-    () => ({ createConfig, deleteConfig, readConfig, validateConfig, saveConfig, configTemplates }),
-    [createConfig, deleteConfig, readConfig, validateConfig, saveConfig, configTemplates],
+    () => ({
+      createConfig, deleteConfig, readConfig, validateConfig, saveConfig,
+      saveConfigSections, applyConfigSections, configTemplates,
+    }),
+    [createConfig, deleteConfig, readConfig, validateConfig, saveConfig,
+      saveConfigSections, applyConfigSections, configTemplates],
   );
 }

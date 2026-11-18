@@ -310,7 +310,65 @@ public final class ConfigStore {
         }
     }
 
-    /** 保存配置：先校验，通过后入库（无并发检查）。 */
+    /**
+     * 分段保存（2026-11-18 配置按页保存）：正文由 {@link ConfigSectionPatcher}
+     * 按段替换后交过来，这里做整份编译与入库。
+     *
+     * <p>判据与整份保存完全一致——计划引用的 CEID、周期事件的 CEID、报告引用的
+     * SVID / {@code ctx.*} 这些跨段关系只有整份编译才查得出。</p>
+     *
+     * @param name               文件名
+     * @param text               替换后的整份正文
+     * @param expectedModifiedMs If-Match 带回的修改时间；null 不检查
+     * @param note               版本备注（{@code section:cycle} 之类）
+     * @return 校验/入库结果
+     */
+    public ConfigResult saveSections(String name, String text, Long expectedModifiedMs, String note) {
+        String key;
+        try {
+            key = keyOf(name);
+        } catch (ConfigException e) {
+            return ConfigResult.notFound(e.getMessage());
+        }
+
+        List<String> problems = validate(text);
+        if (!problems.isEmpty()) {
+            return ConfigResult.invalid(problems);
+        }
+
+        try {
+            if (this.repository.findDevice(key).isEmpty()) {
+                return ConfigResult.notFound("配置不存在: " + name);
+            }
+            this.repository.saveDocument(key, text, null, expectedModifiedMs, "ui",
+                    note == null ? "" : note);
+            Log.info("配置分段已保存: " + name + " (" + note + ")");
+            return ConfigResult.ok();
+        } catch (StoreException e) {
+            if (e.kind() == StoreException.Kind.CONFLICT) {
+                return ConfigResult.conflict(e.getMessage());
+            }
+            Log.error("配置分段保存失败: " + name, e);
+            return ConfigResult.failed(e.getMessage());
+        }
+    }
+
+    /** 当前版本号（分段保存的响应里回给前端做下一次 If-Match 基准）。 */
+    public Long revision(String name) {
+        String key;
+        try {
+            key = keyOf(name);
+        } catch (ConfigException e) {
+            return null;
+        }
+        return this.repository.readDocument(key)
+                .map(ConfigRepository.DocumentView::revision)
+                .orElse(null);
+    }
+
+    /**
+     * 保存配置：先校验，通过后入库（无并发检查）。
+     */
     public ConfigResult save(String name, String text) {        return this.save(name, text, null);
     }
 

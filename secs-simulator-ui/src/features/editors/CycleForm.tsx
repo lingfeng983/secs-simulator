@@ -21,7 +21,16 @@ type Edit = (mutate: (root: JsonObject) => void) => void;
  * <p>事件在构建期按片展开成普通的时间触发计划——所以这里配 3 条、跑 25 片，
  * 编译出来就是 75 条计划；界面上写清这个乘法，避免有人以为只发 3 条。</p>
  */
-export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+export function CycleForm({ root, edit, readOnly = false }: {
+  root: JsonObject;
+  edit: Edit;
+  /**
+   * 只读：按同样的字段把周期定义摆出来，但不给任何输入框与增删按钮。
+   * 运行区「工艺周期」页用它显示"这台设备现在跑的是哪个周期"
+   * （2026-11-18 用户要求：运行区要看到周期配置，不可编辑）。
+   */
+  readOnly?: boolean;
+}): JSX.Element {
   const cycle = isJsonObject(root.cycle) ? root.cycle : null;
   const ceidChoices = collectCeids(root);
   /* 事件计划里已有计划时，标题说明里追加它与片内事件的分工（原底部提示的展示条件） */
@@ -33,24 +42,29 @@ export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX
       <div className="cfg-section">
         <div className="template-head">
           <h3>工艺周期（cycle）</h3>
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              draft.cycle = {
-                durationMs: 180_000,
-                jitterMs: 0,
-                count: 25,
-                noisePerWafer: false,
-                events: [],
-              };
-            })}
-          >
-            插入 cycle 段
-          </button>
+          {readOnly
+            ? <span className="hint-inline">只读 · 来自已保存的设备配置</span>
+            : (
+              <button
+                type="button"
+                onClick={() => edit((draft) => {
+                  draft.cycle = {
+                    durationMs: 180_000,
+                    jitterMs: 0,
+                    count: 25,
+                    noisePerWafer: false,
+                    events: [],
+                  };
+                })}
+              >
+                插入 cycle 段
+              </button>
+            )}
         </div>
         <p className="hint">
-          没有周期段：设备按绝对时间跑一次，曲线时间参数就是启动后的秒数。
-          插入后，曲线默认按片内相位每片重放，事件按片内偏移重复。
+          {readOnly
+            ? '这份配置没有周期段：设备按绝对时间跑一次，曲线的时间参数就是启动后的秒数。'
+            : '没有周期段：设备按绝对时间跑一次，曲线时间参数就是启动后的秒数。插入后，曲线默认按片内相位每片重放，事件按片内偏移重复。'}
         </p>
       </div>
     );
@@ -61,6 +75,85 @@ export function CycleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX
   const jitterMs = numberField(cycle, 'jitterMs') ?? 0;
   const count = numberField(cycle, 'count') ?? 0;
   const shortest = Math.max(0, durationMs - jitterMs);
+
+  /* 只读分支：与编辑态同一套字段名，值一律是文本，没有按钮可点 */
+  if (readOnly) {
+    return (
+      <div className="cfg-section cfg-readonly">
+        <div className="template-head">
+          <h3>工艺周期（cycle）</h3>
+          <span className="hint-inline">只读 · 来自已保存的设备配置</span>
+        </div>
+        <table className="effects-table">
+          <tbody>
+            <tr>
+              <th>周期时长</th>
+              <td className="mono">{durationMs} ms · {(durationMs / 1000).toFixed(1)} 秒</td>
+            </tr>
+            <tr>
+              <th>每片误差</th>
+              <td className="mono">
+                {jitterMs > 0 ? `± ${jitterMs} ms` : '0（严格等间隔）'}
+              </td>
+            </tr>
+            <tr>
+              <th>片数</th>
+              <td className="mono">{count} 片</td>
+            </tr>
+            <tr>
+              <th>噪声</th>
+              <td>{cycle.noisePerWafer === true ? '每片不同（随机）' : '每片相同'}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        {typeof events === 'string' ? (
+          <p className="problems">cycle.events {events}</p>
+        ) : events.length === 0 ? (
+          <p className="hint">周期内没有事件：只在片边界重放参数，不上报。</p>
+        ) : (
+          <>
+            <p className="template-label">片内事件（{events.length} 条）</p>
+            <table className="effects-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>片内偏移</th>
+                  <th>CEID</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((event, index) => {
+                  const atMs = numberField(event, 'atMs') ?? 0;
+                  const ceid = numberField(event, 'ceid');
+                  return (
+                    <tr key={index}>
+                      <td className="mono">{index + 1}</td>
+                      <td className="mono">{atMs} ms</td>
+                      <td className="mono">{ceid ?? '—'}</td>
+                      <td className="hint-inline">
+                        {shortest > 0 && atMs > shortest ? `超过最短片长 ${shortest} ms，会落在下一片` : '片内发送'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="hint">
+              编译期会按片展开：{count > 0 ? count : '?'} 片 × {events.length} 条 =
+              {count > 0 ? ` ${count * events.length} ` : ' ? '}
+              条触发计划。同一 CEID 在片内出现多次是允许的（每次都会上报）。
+            </p>
+          </>
+        )}
+
+        {jitterMs >= durationMs && (
+          <p className="problems">每片误差必须小于周期时长，否则最短片长 ≤ 0。</p>
+        )}
+      </div>
+    );
+  }
 
   const setNumber = (key: string, value: number) => {
     edit((draft) => {

@@ -67,6 +67,12 @@
   font-weight: 500;
 }
 
+/* 连接页的字段都短（端口、deviceId、种子、超时毫秒），拉满整行反而看不出这是
+   一个"填个数"的格子：控件列给个上限，绑定地址这类长度够用还留白 */
+#panel-connection .modal-field > input {
+  max-width: 22rem;
+}
+
 /* 面板说明按 \n 显式换行，而不是宽度不够才折 */
 .panel-desc {
   white-space: pre-line;

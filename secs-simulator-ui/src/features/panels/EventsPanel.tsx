@@ -4,10 +4,8 @@ import { setPlansEnabled, type PlanBatchResult } from './eventBatch';
 import type { EventPlanView } from '../../api';
 import { Panel, PanelFootnote } from '../../shared/ui/Panel';
 import { DataTable, type Column } from '../../shared/ui/DataTable';
-import { HintTitle } from '../../shared/ui/FieldLabel';
-import { EventPreview } from '../charts/EventPreview';
+import { PreviewCard } from './PreviewCard';
 import { PlanExecutionTimeline } from './PlanExecutionTimeline';
-import type { PreviewData } from '../../api';
 import { usePlanExecutions } from '../../state/usePlanExecutions';
 import type { PanelBaseProps } from './types';
 import { saveHint } from '../../shared/lib/saveFile';
@@ -44,6 +42,37 @@ const PLAN_STATUS_BADGE: Record<PlanStatus, { text: string; badge: string }> = {
   waiting: { text: '等待上线', badge: 'badge-warn' },
   running: { text: '运行中', badge: 'badge-ok' },
 };
+
+/**
+ * 「下次事件」列：有倒计时就报秒数，没有就按触发方式说清为什么没有。
+ *
+ * <p>不能一律写「条件驱动 / 暂无数据」——周期计划没启用也这么说，
+ * 看着像配置坏了，其实是"没开"。</p>
+ */
+export function nextEventText(plan: EventPlanView, remainingMs: number): string {
+  if (remainingMs > 0) {
+    return `${Math.ceil(remainingMs / 1000)} 秒`;
+  }
+  const status = planStatusOf(plan);
+  if (status === 'waiting') {
+    return '等待上线';
+  }
+  if (status === 'stopped') {
+    return plan.triggerType === 'onCondition' ? '条件驱动（未启用）' : '未启用';
+  }
+  switch (plan.triggerType) {
+    case 'onCondition':
+      return '等条件成立';
+    case 'afterEvent':
+      return '等上游事件';
+    case 'at':
+      return '已触发过';
+    case 'periodic':
+      return '等下一个周期';
+    default:
+      return '—';
+  }
+}
 
 /** 等待原因说清楚：是设备没上线，还是主机把这个事件屏蔽了。 */
 function planStatusHint(plan: EventPlanView): string {
@@ -109,10 +138,9 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
     }
   };
 
-  /* 单计划预览：只回放选中的这条计划，看它携带的效果 */
-  const [planPreview, setPlanPreview] = useState<{ planId: string; data: PreviewData } | null>(null);
-  const [planPreviewBusy, setPlanPreviewBusy] = useState(false);
-  const [planPreviewWindowMs, setPlanPreviewWindowMs] = useState(120_000);
+  /* 预览：默认看全部计划的触发时刻；点某一行的「预览」只看那一条。
+     外观与配置区「事件计划」页同一套（参数下拉 + 时间窗 + 可点图例）。 */
+  const [previewPlanId, setPreviewPlanId] = useState('');
 
   const svidChoices = catalog?.svids ?? [];
 
@@ -187,34 +215,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
   const online = (backend.sessions.find((item) => item.id === activeSession)?.controlState ?? '')
     === 'ONLINE';
 
-  /* 周期预览已归「工艺周期」页（2026-11-16 拆分 M4）：这里只留单计划预览。 */
-
-  /**
-   * 只看一条计划：排除其它计划的效果，回答"这个事件自己带来了什么变化"。
-   */
-  const loadPlanPreview = async (plan: EventPlanView) => {
-    if (activeSession === '') {
-      return;
-    }
-    setPlanPreviewBusy(true);
-    try {
-      const data = await backend.previewPlan(activeSession, plan.id, planPreviewWindowMs);
-      if (data !== null) {
-        setPlanPreview({ planId: plan.id, data });
-      }
-    } finally {
-      setPlanPreviewBusy(false);
-    }
-  };
-
-  /* 图例用符号名 */
-  const svidLabels = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const item of svidChoices) {
-      map.set(item.svid, item.slot);
-    }
-    return map;
-  }, [svidChoices]);
+  /* 周期预览已归「工艺周期」页（2026-11-16 拆分 M4）：这里只留事件计划的预览。 */
 
   const columns: Column<EventPlanView>[] = [
     {
@@ -271,11 +272,7 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         ? row.nextFireInMs : Number.MAX_SAFE_INTEGER),
       render: (row) => {
         const remaining = row.nextFireInMs ?? 0;
-        return (
-          <span className="hint-inline">
-            {remaining > 0 ? `${Math.ceil(remaining / 1000)} 秒` : '条件驱动 / 暂无数据'}
-          </span>
-        );
+        return <span className="hint-inline">{nextEventText(row, remaining)}</span>;
       },
     },
     {
@@ -318,9 +315,9 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         <div className="row-actions">
           <button
             type="button"
-            onClick={() => void loadPlanPreview(row)}
-            disabled={activeSession === '' || planPreviewBusy}
-            title="只回放这条计划：看它携带的参数效果与触发时刻"
+            onClick={() => setPreviewPlanId(row.id)}
+            disabled={activeSession === ''}
+            title="在下面的预览里只看这条计划的触发时刻"
           >
             预览
           </button>
@@ -448,51 +445,36 @@ export function EventsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         exceptCycle
       />
 
-      {/* 单计划预览：只回放这一条计划，效果归属清楚 */}
-      {planPreview !== null && (
-        <section className="panel-section block">
-          <div className="section-head">
-            <h2>
-              <HintTitle text="只回放这一条计划：其它计划的效果不参与，曲线上每个跳变都由它带来。竖线的颜色按计划区分；全量视图（含工艺周期的片内事件）在配置区「工艺周期」页。">
-                计划预览 · <span className="mono">{planPreview.planId}</span>
-              </HintTitle>
-            </h2>
-            <div className="preview-controls">
-              <label className="field">
-                时间窗
-                <select
-                  value={planPreviewWindowMs}
-                  onChange={(event) => setPlanPreviewWindowMs(Number(event.target.value))}
-                  aria-label="计划预览时间窗"
-                >
-                  {[60_000, 120_000, 300_000, 600_000, 1_800_000].map((ms) => (
-                    <option key={ms} value={ms}>{ms >= 60_000 ? `${ms / 60_000} 分钟` : `${ms / 1000} 秒`}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={planPreviewBusy}
-                onClick={() => {
-                  const plan = eventPlans.find((item) => item.id === planPreview.planId);
-                  if (plan !== undefined) {
-                    void loadPlanPreview(plan);
-                  }
-                }}
-              >
-                重算
-              </button>
-              <button type="button" onClick={() => setPlanPreview(null)}>收起</button>
-            </div>
-          </div>
-          <EventPreview
-            data={planPreview.data}
-            height={92}
-            labels={svidLabels}
-            eventLabel="触发"
-          />
-        </section>
-      )}
+      {/* 事件预览：默认看全部计划，行内「预览」可缩到一条。
+          外观（参数下拉 / 时间窗 / 可点图例 / 一张叠线图）与配置区一致。 */}
+      <PreviewCard
+        title={previewPlanId === '' ? '事件预览（当前运行）' : `计划预览 · ${previewPlanId}`}
+        hint={previewPlanId === ''
+          ? '画的是这台设备最近这段时间的实跑曲线：横轴是距窗口起点的秒数（最右端 = 现在）、纵轴是参数值，竖虚线是所有事件计划的触发时刻。默认只画第一个参数，需要对比时在「参数」里再勾选；点图例可以隐藏/显示某条曲线或某类事件。工艺周期的片内事件不在本图，去运行区「工艺周期」页看。'
+          : '只看这一条计划：其它计划的竖线不在图上，一眼看出它自己什么时候发。要点回全部计划，点左上角的「查看全部计划」。'}
+        eventLabel="计划触发"
+        scope="plans"
+        relativeTime
+        params={svidChoices}
+        defaultWindowMs={120_000}
+        emptyParamsText="这台设备还没有可展示的变量（先在配置区定义 SVID，并重启设备）。"
+        invalidText="这台设备现在读不到运行数据（可能刚停止或正在重启），稍后会自己出现。"
+        actions={previewPlanId === '' ? undefined : (
+          <button type="button" onClick={() => setPreviewPlanId('')}>查看全部计划</button>
+        )}
+        source={{
+          key: `${activeSession}|${previewPlanId}`,
+          refreshMs: 5_000,
+          fetch: (windowMs) => {
+            if (activeSession === '' || backend.client === null) {
+              return Promise.resolve(null);
+            }
+            return previewPlanId === ''
+              ? backend.previewSession(activeSession, windowMs)
+              : backend.previewPlan(activeSession, previewPlanId, windowMs);
+          },
+        }}
+      />
 
       <p className="hint">
         这里改的是<b>运行时状态</b>，不写回配置；重启设备会恢复配置里的编排。

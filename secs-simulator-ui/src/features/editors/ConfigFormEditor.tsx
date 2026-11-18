@@ -169,10 +169,16 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
 }
 
 /** 一行"标题 + 控件"：标题列对齐；说明默认不展示，悬浮/聚焦在标题上时出气泡。 */
-export function SessionField({ label, help, children }: { label: string; help: string; children: ReactNode }): JSX.Element {
+export function SessionField({ label, help, required = false, children }: {
+  label: string;
+  help: string;
+  /** 必填项：标题后加红色星号（比"点了确定才弹一条横幅"更好用）。 */
+  required?: boolean;
+  children: ReactNode;
+}): JSX.Element {
   return (
     <label className="field modal-field">
-      <FieldLabel text={label} help={help} />
+      <FieldLabel text={label} help={help} required={required} />
       {children}
     </label>
   );
@@ -294,7 +300,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
   if (events === null) {
     return (
       <div className="cfg-section">
-        <SectionHead title="事件编排">
+        <SectionHead title="事件计划列表">
           <button
             type="button"
             onClick={() => edit((draft) => {
@@ -336,7 +342,13 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
     return choice === undefined ? String(ceid) : `${choice.owner}.${choice.slot}`;
   };
 
-  /* 计划行的字段编辑（弹框里用）：id / CEID / 触发方式 + 各类型参数 */
+  /**
+   * 计划行的字段编辑（弹框里用）：id / CEID / 触发方式 + 各类型参数。
+   *
+   * <p>一行一个配置项、标题列右对齐——与「新建事件」「新建设备常量」等
+   * 弹框同一条纪律（{@link SessionField}），不再把五六个字段挤成一行。
+   * 依赖关系强的两项（CEID、源计划）改成下拉，省得手敲编号敲错。</p>
+   */
   const planFields = (item: JsonObject, mutate: (fn: (target: JsonObject) => void) => void) => {
     const trigger = objectField(item, 'trigger');
     const rawType = trigger.type;
@@ -346,30 +358,47 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
         fn(objectField(target, 'trigger'));
       });
     };
+    const currentCeid = numberField(item, 'ceid');
+    const currentSource = stringField(trigger, 'sourcePlan');
+    const siblingPlans = (Array.isArray(plans) ? plans : [])
+      .map((plan) => stringField(plan, 'id'))
+      .filter((id) => id !== '' && id !== stringField(item, 'id'));
+
     return (
-      <>
-        <label className="field field-cell">
-          <span className="field-cell-name">计划 id</span>
+      <div className="session-fields">
+        <SessionField label="计划 id" required help="唯一标识：运行区的启停/试跑台账按它归属；「事件后」触发用它当源计划。">
           <TextField
             value={stringField(item, 'id')}
             onCommit={(next) => mutate((target) => {
               target.id = next;
             })}
           />
-        </label>
-        <label className="field field-cell">
-          <span className="field-cell-name">CEID</span>
-          <NumberField
-            value={numberField(item, 'ceid')}
-            integer
-            list="cfg-ceid-options"
-            onCommit={(next) => mutate((target) => {
-              target.ceid = next;
-            })}
-          />
-        </label>
-        <label className="field field-cell">
-          <span className="field-cell-name">触发方式</span>
+        </SessionField>
+
+        <SessionField label="CEID" help="这条计划触发时上报的事件；只能选设备模型里已定义的事件（在「事件与报告」页定义）。">
+          <select
+            value={currentCeid === undefined ? '' : String(currentCeid)}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isFinite(next) && next > 0) {
+                mutate((target) => {
+                  target.ceid = next;
+                });
+              }
+            }}
+          >
+            {(currentCeid === undefined || !ceidSet.has(currentCeid)) && (
+              <option value="">{currentCeid === undefined ? '请选择事件' : `未知 CEID ${currentCeid}`}</option>
+            )}
+            {ceidChoices.map((choice) => (
+              <option key={choice.svid} value={choice.svid}>
+                {choice.svid} · {choice.owner}.{choice.slot}
+              </option>
+            ))}
+          </select>
+        </SessionField>
+
+        <SessionField label="触发方式" help="定时一次 / 周期 / 条件 / 事件后——切换后下面的参数会换成对应那一组。">
           <select
             value={type ?? ''}
             onChange={(event) => {
@@ -388,10 +417,10 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
               </option>
             ))}
           </select>
-        </label>
+        </SessionField>
+
         {type === 'at' && (
-          <label className="field field-cell">
-            <span className="field-cell-name">atMs（启动后毫秒）</span>
+          <SessionField label="启动后 ms" help="计划启动后的第几毫秒触发一次；不是绝对时间。">
             <NumberField
               value={numberField(trigger, 'atMs')}
               integer
@@ -399,12 +428,12 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                 target.atMs = next;
               })}
             />
-          </label>
+          </SessionField>
         )}
+
         {type === 'periodic' && (
           <>
-            <label className="field field-cell">
-              <span className="field-cell-name">周期 ms</span>
+            <SessionField label="周期 ms" help="每隔多少毫秒触发一次。">
               <NumberField
                 value={numberField(trigger, 'periodMs')}
                 integer
@@ -412,9 +441,8 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                   target.periodMs = next;
                 })}
               />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">抖动 ms</span>
+            </SessionField>
+            <SessionField label="抖动 ms" help="每次触发的随机偏移上限（0 = 严格等间隔）：让曲线不像节拍器。">
               <NumberField
                 value={numberField(trigger, 'jitterMs')}
                 integer
@@ -422,23 +450,21 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                   target.jitterMs = next;
                 })}
               />
-            </label>
+            </SessionField>
           </>
         )}
+
         {type === 'onCondition' && (
           <>
-            <label className="field field-cell">
-              <span className="field-cell-name">条件表达式（t、svid.&lt;id&gt;）</span>
+            <SessionField label="条件表达式" help="可用 t（模拟时间，秒）与 svid.<id>；表达式为真的那一刻触发。">
               <TextField
-                wide
                 value={stringField(trigger, 'expression')}
                 onCommit={(next) => mutateTrigger((target) => {
                   target.expression = next;
                 })}
               />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">防抖 ms</span>
+            </SessionField>
+            <SessionField label="防抖 ms" help="条件需要连续成立多久才真正触发，用来滤掉抖动。">
               <NumberField
                 value={numberField(trigger, 'debounceMs')}
                 integer
@@ -446,22 +472,31 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                   target.debounceMs = next;
                 })}
               />
-            </label>
+            </SessionField>
           </>
         )}
+
         {type === 'afterEvent' && (
           <>
-            <label className="field field-cell">
-              <span className="field-cell-name">源计划 id</span>
-              <TextField
-                value={stringField(trigger, 'sourcePlan')}
-                onCommit={(next) => mutateTrigger((target) => {
-                  target.sourcePlan = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">延迟 ms</span>
+            <SessionField label="源计划" help="跟在哪个计划后面：那个计划每发一次，本计划就排一次延迟触发。">
+              <select
+                value={currentSource}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  mutateTrigger((target) => {
+                    target.sourcePlan = next;
+                  });
+                }}
+              >
+                <option value="">（未指定）</option>
+                {siblingPlans.map((id) => <option key={id} value={id}>{id}</option>)}
+                {/* 源计划可能已被删掉：原值保留在选项里，避免静默被改成空串 */}
+                {currentSource !== '' && !siblingPlans.includes(currentSource) && (
+                  <option value={currentSource}>{currentSource}（不在列表里）</option>
+                )}
+              </select>
+            </SessionField>
+            <SessionField label="延迟 ms" help="源计划发完之后再等多少毫秒触发。">
               <NumberField
                 value={numberField(trigger, 'delayMs')}
                 integer
@@ -469,16 +504,16 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                   target.delayMs = next;
                 })}
               />
-            </label>
+            </SessionField>
           </>
         )}
-      </>
+      </div>
     );
   };
 
   return (
     <div className="cfg-section">
-      <SectionHead title="事件编排">
+      <SectionHead title="事件计划列表">
         <button
           type="button"
           onClick={() => setEditing({ index: null, draft: { id: '', ceid: ceidChoices[0]?.svid ?? 0, trigger: defaultTrigger('periodic') } })}
@@ -487,7 +522,10 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
         </button>
       </SectionHead>
 
+      {/* 这三项是 events 段的发送口径，不是某一条计划：放在列表上方一行，
+          与计划逐条配置区分开（列表才是本页主体）。 */}
       <div className="form-row">
+        <span className="template-label">事件发送</span>
         <label className="field field-cell">
           <span className="field-cell-name">每秒事件上限</span>
           <NumberField
@@ -531,7 +569,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
       {typeof plans === 'string' ? (
         <p className="problems">events.plans {plans}</p>
       ) : plans.length === 0 ? (
-        <p className="hint">还没有事件计划。</p>
+        <p className="hint">还没有事件计划：点右上角「+ 事件计划」新增一条，新增/修改都只写进本页草稿。</p>
       ) : (
         <table className="effects-table" aria-label="事件计划列表">
           <thead>
@@ -599,6 +637,9 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
         <ConfigItemModal
           title={editing.index === null ? '新建事件计划' : `编辑事件计划 · ${stringField(editing.draft, 'id')}`}
           initial={editing.draft}
+          /* 必填/非法只落在「确定」的禁用与悬浮说明上：标题里的星号已经提示过，
+             不必在弹框里常驻一条红横幅（用户刚打开就看到"不能为空"） */
+          problemBanner={false}
           problemOf={(item) => {
             if (stringField(item, 'id').trim() === '') {
               return '计划 id 不能为空';

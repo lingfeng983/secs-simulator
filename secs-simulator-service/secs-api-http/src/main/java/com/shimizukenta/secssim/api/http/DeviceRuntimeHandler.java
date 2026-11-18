@@ -62,6 +62,10 @@ final class DeviceRuntimeHandler extends HttpSupport {
             this.handleDeviceCycleV2(ex, parts[0], ex.getRequestMethod().toUpperCase(Locale.ROOT), parts);
             return;
         }
+        if (parts.length == 2 && "apply-sections".equals(parts[1]) && !parts[0].isBlank()) {
+            this.handleApplySectionsV2(ex, parts[0]);
+            return;
+        }
         if (parts.length >= 3 && !parts[0].isBlank() && "runtime".equals(parts[1])) {
             this.handleDeviceRuntimeV2(ex, parts);
             return;
@@ -129,6 +133,49 @@ final class DeviceRuntimeHandler extends HttpSupport {
             case "ceid" -> this.handleDeviceCeidV2(ex, deviceId, method, parts);
             default -> respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
         }
+    }
+
+    /**
+     * POST /api/v2/devices/{id}/apply-sections：把刚落盘的配置段应用到这台设备。
+     *
+     * <p>请求体 {@code {"sections":["plans","throttle"]}}，段名与分段保存的
+     * {@code changed} 一一对应。服务端以磁盘内容为准重新编译，再按段最小应用；
+     * 前端不需要传新的配置正文，避免"UI 里的草稿"与"实际生效"出现两份真相。</p>
+     */
+    private void handleApplySectionsV2(HttpExchange ex, String deviceId) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        String body = readBody(ex, MAX_CONFIG_BYTES);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        java.util.List<String> sections = new java.util.ArrayList<>();
+        try {
+            com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+            com.shimizukenta.jsonhub.JsonHub list = root.isObject() ? root.get("sections") : null;
+            if (list == null || !list.isArray()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+                return;
+            }
+            for (int i = 0; i < list.length(); i += 1) {
+                com.shimizukenta.jsonhub.JsonHub item = list.get(i);
+                if (item != null && item.isString()) {
+                    item.optionalString().ifPresent(sections::add);
+                }
+            }
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        ApiContextSessionOps.SectionsApplyResult result = this.context.applySectionsV2(deviceId, sections);
+        audit(ex, "apply-sections", deviceId, "status=" + result.status());
+        respond(ex, result.status(), result.json());
     }
 
     /**

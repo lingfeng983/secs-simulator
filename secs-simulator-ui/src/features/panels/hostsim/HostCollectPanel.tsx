@@ -345,7 +345,7 @@ const EMPTY_FORM: CollectPlanForm = {
  * 状态列、单按钮启停与批量启停；数据曲线按配置折叠，点「查看曲线」才展示。
  * 新增/编辑弹窗在本机在线设备可用时用 SVID 多选与 CEID 单选，否则回退手动输入。</p>
  */
-export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [] }: PanelArgs): JSX.Element {
+export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
   const [plans, setPlans] = useCollectPlans(hostId);
   const [busy, setBusy] = useState(false);
@@ -662,6 +662,22 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, messages = [
     >
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {notice !== '' && <p className="inline-note">{notice}</p>}
+
+      {/* 配置区只管配置库：S1F3 的下发与启停在运行区「数据采集」页 */}
+      {readOnly && (
+        <p className="hint">
+          这里保存的是<b>采集配置库</b>（落 config.db，重启后端也不丢），保存本身<b>不会下发</b>。
+          下发与启停在运行区「数据采集」页。
+          {' · '}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => goTo?.(`host-page:${hostId}:runtime:collect`)}
+          >
+            去下发 →
+          </button>
+        </p>
+      )}
 
       <CollectPlanTable
         mode={readOnly ? 'config' : 'runtime'}

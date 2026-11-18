@@ -1,45 +1,46 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PanelBaseProps } from './types';
 import { Panel } from '../../shared/ui/Panel';
 import { ConfigEditShell } from './ConfigEditShell';
 import { DraftPreviewCard } from './DraftPreviewCard';
 import { CycleForm } from '../editors/CycleForm';
-import { collectSvids, type JsonObject } from '../editors/templateConfig';
-import { HintTitle } from '../../shared/ui/FieldLabel';
+import type { JsonObject } from '../editors/templateConfig';
 import type { CycleRuntimeView } from '../../api';
-
-/** 预览时间窗候选（草稿是确定性重放，右端点相对模拟时钟 0）。 */
-const WINDOWS: ReadonlyArray<{ label: string; ms: number }> = [
-  { label: '30 秒', ms: 30_000 },
-  { label: '60 秒', ms: 60_000 },
-  { label: '2 分钟', ms: 120_000 },
-  { label: '5 分钟', ms: 300_000 },
-];
 
 /**
  * 设备 · 配置区 · 工艺周期（2026-11-16 计划生命周期重设计 §2.4/M4）。
  *
- * <p>cycle 从「事件计划」页拆出来独立成页：节拍参数 + 片内事件（写配置草稿）、
- * 运行卡（启动/停止 + 状态/片号/相位/进度，ONLINE 门控同计划启停）、
- * 周期预览（按草稿确定性重放）。事件编排的异常路径仍在「事件计划」页。</p>
+ * <p>这一页只管<b>定义</b>：节拍参数 + 片内事件（写配置草稿），以及按这份
+ * 草稿重放出来的预览图。周期的启停、片号/相位/进度与片内事件的发送台账
+ * 都在运行区「工艺周期」页（{@link import('./CycleRuntimePanel').CycleRuntimePanel}）——
+ * 配置区不再放运行卡：同一组按钮在两个区各出现一次，最容易让人在
+ * "改配置"的时候顺手把周期停了。</p>
+ *
+ * <p>预览只取工艺周期的片内事件，与「事件计划」页的计划触发无关。</p>
  */
 export function CyclePanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
-  const { backend, notifier, sessionId, configName } = props;
-  const deviceId = sessionId ?? backend.activeSession;
+  const { backend, sessionId, configName } = props;
   return (
-    <div className="panel-stack">
-      <CycleRunCard backend={backend} notifier={notifier} deviceId={deviceId} />
-      <ConfigEditShell
-        backend={backend}
-        sessionId={sessionId}
-        configName={configName}
-        panelId="panel-cycle"
-        title="周期参数与片内事件"
-      >
-        {({ root, edit, text }) => <CycleEditor root={root} edit={edit} text={text} backend={backend} />}
-      </ConfigEditShell>
-    </div>
+    <ConfigEditShell
+      backend={backend}
+      sessionId={sessionId}
+      configName={configName}
+      panelId="panel-cycle"
+      sections={['cycle']}
+      title="周期参数与片内事件"
+    >
+      {({ root, edit, text }) => <CycleEditor root={root} edit={edit} text={text} backend={backend} />}
+    </ConfigEditShell>
   );
+}
+
+/** 周期定义摘要（来自设备配置）：运行区没有会话时也能说清"这台设备的周期长什么样"。 */
+export interface CycleDefinition {
+  durationMs: number;
+  jitterMs: number;
+  count: number;
+  /** 片内事件条数（一个周期内配置了几条）。 */
+  events: number;
 }
 
 /** 运行卡：轮询 /api/v2/devices/{id}/cycle，启动/停止走 ONLINE 门控（§2.2）。 */
@@ -189,15 +190,19 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
         <p className="hint">设备未启动：启动设备后这里显示节拍与片内事件的运行态。</p>
       ) : !cycle.hasCycle ? (
         <p className="hint">
-          这份配置还没有 cycle 段：在下方「周期参数」里插入一个周期并保存（需重启设备）后即可启动。
+          这份配置还没有 cycle 段：到配置区「工艺周期」页插入一个周期并保存（需重启设备）后即可启动。
         </p>
       ) : (
         <p className="cycle-run-state">
           <span className="state-pill" data-tone={tone}>{stateLabel}</span>
           <span className="hint-inline">{valueState}</span>
-          <span className="hint-inline">
-            进度 {cycle.waferIndex + 1}/{cycle.totalWafers} 片
-          </span>
+          {/* 没跑起来的周期没有"进度"可言：写着 1/25 会让人以为已经出过片 */}
+          {cycle.state === 'RUNNING' && (
+            <span className="hint-inline">进度 {cycle.waferIndex + 1}/{cycle.totalWafers} 片</span>
+          )}
+          {cycle.state === 'FINISHED' && (
+            <span className="hint-inline">共 {cycle.totalWafers} 片</span>
+          )}
           <span className="hint-inline">已发片内事件 {cycle.firedCount} 条</span>
           {!online && <span className="hint-inline">（设备离线：先上线再启动）</span>}
         </p>
@@ -206,7 +211,7 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
   );
 }
 
-/** 周期参数 + 片内事件（编辑走配置草稿）；周期预览在 DraftPreviewCard 里（只取片内事件标记）。 */
+/** 周期参数 + 片内事件（编辑走配置草稿）；周期预览只取片内事件标记。 */
 function CycleEditor({ root, edit, text, backend }: {
   root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
@@ -215,6 +220,10 @@ function CycleEditor({ root, edit, text, backend }: {
 }): JSX.Element {
   return (
     <>
+      <p className="hint">
+        本页改的是<b>定义</b>（片长、片数、片内事件）。周期什么时候启停、跑到第几片、
+        已发了哪些片内事件，都在运行区「工艺周期」页看和操作。
+      </p>
       <CycleForm root={root} edit={edit} />
       <DraftPreviewCard
         backend={backend}
@@ -222,7 +231,7 @@ function CycleEditor({ root, edit, text, backend }: {
         text={text}
         marks="cycle"
         title="周期预览（按草稿）"
-        hint="不需要保存或启动设备：按当前草稿（含未保存改动）做一次确定性重放。横轴是模拟时间，竖线是各片按「如果现在启动」会发送片内事件的时刻——曲线与实跑同锚（M3 预览对齐）。只显示工艺周期的片内事件。"
+        hint="不需要保存或启动设备：按当前草稿（含未保存改动）做一次确定性重放。横轴是模拟时间、纵轴是参数值，竖虚线是片内事件的发送时刻——一个周期内每片按片内相位重放，所以竖线会按片长重复。这里只画工艺周期的片内事件，与「事件计划」页的计划触发无关。默认只画第一个参数，需要对比时在「参数」里再勾选（多选，勾几条画几条）。"
         eventLabel="片内事件"
       />
     </>

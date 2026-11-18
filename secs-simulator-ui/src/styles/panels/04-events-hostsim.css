@@ -61,7 +61,28 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  padding: 1px 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
   color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.event-legend-item:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+/* 被图例关掉的那类事件：色块留个空框、文字压灰 */
+.event-legend-item[data-off='true'] {
+  opacity: 0.5;
+}
+
+.event-legend-item[data-off='true'] > span:not(.event-swatch) {
+  text-decoration: line-through;
+  text-decoration-color: var(--muted);
 }
 
 /* 事件颜色块：和曲线上竖线/三角同色 */

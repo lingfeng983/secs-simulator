@@ -17,6 +17,7 @@ import { CyclePanel } from '../panels/CyclePanel';
 import { EndpointTag, SubTabs, ZoneSwitch } from '../../shared/ui/zone';
 import { Panel } from '../../shared/ui/Panel';
 import { useDeviceEndpoint } from '../../state/deviceEndpoint';
+import { useDirtyPages } from '../../state/configDraftStore';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -54,27 +55,37 @@ export function DevicePage({
   const configOnly = summary === undefined
     ? (backend.configList.find((entry) => entry.name === sessionId || entry.name === `${sessionId}.json`) ?? null)
     : null;
-  const isConfigOnly = configOnly !== null;
   const configOnlyName = configOnly?.name ?? '';
-  const configName = summary?.config ?? configOnlyName;
+  /* 从设备清单点进来时路由 key 是配置文件名；在这页点「启动设备」之后会话 id
+     变成 ULID / legacy stem，路由 key 却还是文件名——只按 id 找的话这一帧
+     找不到会话，页面就一直认为"还没启动"，运行区永远停在「启动设备」上、
+     面板也拿不到运行数据（2026-11-18 用户反馈）。所以再按配置来源反查一次：
+     同一份配置开出来的会话，无论 id 是什么都算"这台设备已经启动"。 */
+  const session = summary ?? (configOnlyName === ''
+    ? undefined
+    : backend.sessions.find((item) => item.config === configOnlyName));
+  /* 会话 id：面板取数、启停、上线都用它（不是路由 key） */
+  const deviceSessionId = session?.id ?? sessionId;
+  const isConfigOnly = session === undefined && configOnly !== null;
+  const configName = session?.config ?? configOnlyName;
   const [busy, setBusy] = useState(false);
   /* 监听端点：配置 session 段的 绑定地址 / 端口 / Device ID。
      端口先用总览里的数兜底，配置读回来后再补上地址与 Device ID。 */
   const endpoint = useDeviceEndpoint(
     backend,
     configName,
-    backend.overview.find((row) => row.id === sessionId)?.port,
+    backend.overview.find((row) => row.id === deviceSessionId)?.port,
   );
 
   /* 四态判据统一走 deviceStatus：设备页头、侧栏、设备清单必须说同一句话 */
-  const status = isConfigOnly ? deviceStatus({ state: 'CLOSED' }) : deviceStatus(summary ?? {});
+  const status = deviceStatus(session ?? { state: 'CLOSED' });
 
   const startDevice = () => {
     setBusy(true);
     /* 未启动的库内设备：「启动」= 按配置创建会话（与设备清单的「启动」同一动作） */
     const action = isConfigOnly
       ? backend.createSession(configOnlyName)
-      : backend.connectSession(sessionId);
+      : backend.connectSession(deviceSessionId);
     /* 启动后立即刷新运行区（事件计划/周期运行卡/台账都按新会话取数），
        不等 2s 轮询慢一拍（2026-11-18 用户反馈：运行区状态不即时刷新） */
     void action
@@ -83,14 +94,14 @@ export function DevicePage({
   };
   const stopDevice = () => {
     setBusy(true);
-    void backend.closeSession(sessionId)
+    void backend.closeSession(deviceSessionId)
       .then(() => backend.refreshAll())
       .finally(() => setBusy(false));
   };
   /* 上线/下线只动 GEM 控制状态，不动链路：等价于主机发 S1F17 / S1F15 */
   const setOnline = (online: boolean) => {
     setBusy(true);
-    void backend.setDeviceOnline(sessionId, online)
+    void backend.setDeviceOnline(deviceSessionId, online)
       .then(() => backend.refreshAll())
       .finally(() => setBusy(false));
   };
@@ -102,10 +113,10 @@ export function DevicePage({
   const setActiveSession = backend.setActiveSession;
   const activeSession = backend.activeSession;
   useLayoutEffect(() => {
-    if (summary !== undefined && activeSession !== sessionId) {
-      setActiveSession(sessionId);
+    if (session !== undefined && activeSession !== session.id) {
+      setActiveSession(session.id);
     }
-  }, [activeSession, setActiveSession, sessionId, summary]);
+  }, [activeSession, setActiveSession, session]);
 
   const baseProps: PanelBaseProps = {
     backend,
@@ -119,7 +130,7 @@ export function DevicePage({
 
   /* 会话与配置库里都找不到（被删掉、或手输/收藏了旧地址）时不要继续渲染面板：
      面板按 activeSession 取数，会把"上一台设备"的数据挂在这个不存在的 id 下。 */
-  const sessionKnown = summary !== undefined || isConfigOnly || backend.sessions.length === 0;
+  const sessionKnown = session !== undefined || isConfigOnly || backend.sessions.length === 0;
   if (!sessionKnown) {
     return (
       <div className="panel-stack">
@@ -136,12 +147,15 @@ export function DevicePage({
     );
   }
 
+  /* 配置区各页哪些还有未保存改动：切走之后也要看得出来（页签上点小圆点） */
+  const dirtyPages = useDirtyPages(zone === 'config' ? configName : '');
   const pages = zone === 'config'
-    ? DEVICE_CONFIG_PAGES.map((id) => ({ id, label: DEVICE_CONFIG_PAGE_LABELS[id], note: DEVICE_CONFIG_PAGE_NOTES[id] }))
+    ? DEVICE_CONFIG_PAGES.map((id) => ({
+      id, label: DEVICE_CONFIG_PAGE_LABELS[id], note: DEVICE_CONFIG_PAGE_NOTES[id], dirty: dirtyPages.has(id),
+    }))
     : DEVICE_RUNTIME_PAGES.map((id) => ({ id, label: DEVICE_RUNTIME_PAGE_LABELS[id], note: DEVICE_RUNTIME_PAGE_NOTES[id] }));
   /* 标题行不展示了，设备名仍要能被读屏与自动化认出来：挂在页面根节点的 aria-label 上 */
-  const deviceLabel = summary?.device
-    ?? (isConfigOnly ? configOnlyName : sessionId).replace(/\.json$/i, '');
+  const deviceLabel = (session?.device ?? (configOnlyName !== '' ? configOnlyName : sessionId)).replace(/\.json$/i, '');
 
   return (
     <div className="panel-stack device-page" role="region" aria-label={`设备 ${deviceLabel}`} data-device={deviceLabel}>
@@ -221,37 +235,37 @@ export function DevicePage({
       {/* 面板按会话重挂：切设备时编辑器/自动打开的配置不能沿用上一台设备的状态 */}
       <div className="tab-page">
         {zone === 'config' && page === 'overview' && (
-          <DeviceOverviewPanel {...baseProps} sessionId={sessionId} configName={configName} />
+          <DeviceOverviewPanel {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'connection' && (
-          <ConnectionPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <ConnectionPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'structure' && (
-          <StructurePanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <StructurePanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'svids' && (
-          <SvidConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <SvidConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'context' && (
-          <ContextConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <ContextConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'events' && (
-          <CeidReportConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <CeidReportConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'cycle' && (
-          <CyclePanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <CyclePanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'plans' && (
-          <PlanConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <PlanConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'document' && (
-          <ConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <ConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'constants' && (
-          <ConstantsConfigPanel key={sessionId} {...baseProps} sessionId={sessionId} configName={configName} />
+          <ConstantsConfigPanel key={sessionId} {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
         {zone === 'config' && page === 'revisions' && (
-          <DeviceRevisionsPanel {...baseProps} sessionId={sessionId} configName={configName} />
+          <DeviceRevisionsPanel {...baseProps} sessionId={deviceSessionId} configName={configName} />
         )}
 
         {/* 未启动的设备照样有运行区这几页：页面骨架不随状态变，
@@ -261,11 +275,8 @@ export function DevicePage({
           <div className="empty-zone" role="status">
             <strong>运行区 · {pages.find((item) => item.id === page)?.label ?? '运行'}</strong>
             <div>这台设备还没有启动，运行数据要等它启动后才产生；配置区的定义随时可改。</div>
-            <div style={{ marginTop: 10 }}>
-              <button type="button" className="primary" disabled={busy} onClick={startDevice}>
-                启动设备
-              </button>
-            </div>
+            {/* 启动按钮只在页头留一个：两处并排的「启动设备」容易点错 */}
+            <div className="hint">点右上角「启动设备」即可。</div>
           </div>
         )}
         {zone === 'runtime' && !isConfigOnly && page === 'plans' && (

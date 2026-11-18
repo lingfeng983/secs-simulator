@@ -251,6 +251,30 @@
   padding: var(--panel-pad);
 }
 
+/* 无标题面板的顶部操作行：状态在左、按钮右对齐。
+   与标题面板的 .panel-head 保持同一条视觉基线——页面往下滚之前，
+   保存/校验总在视野里（编辑页的操作不该藏在内容末尾）。 */
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px var(--panel-pad) 0;
+}
+
+.panel-toolbar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+/* 顶上已有操作行时，内容与它之间不必再留一整块面板内边距 */
+.panel-toolbar + .panel-body {
+  padding-top: 12px;
+}
+
 .panel-body > * + * {
   margin-top: 0.85rem;
 }

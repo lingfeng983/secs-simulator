@@ -1,0 +1,94 @@
+/* ===== 下拉多选（MultiSelect） =====
+ * 平时只占一个按钮：显示"已选了什么、选了几个"；
+ * 展开后才列出选项，参数多的时候不会把一行工具条撑成一堆勾选框。 */
+.multi-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.multi-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 22rem;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: calc(12px * var(--font-scale));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.multi-select-trigger:hover {
+  border-color: var(--accent-line);
+}
+
+.multi-select-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.multi-select-label {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.multi-select-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multi-select-caret {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+/* 浮层：贴着按钮左边缘向下展开，宽一点好放"编号 + 名称" */
+.multi-select-menu {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  min-width: 26rem;
+  max-width: 36rem;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.multi-select-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 2px 14px;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.multi-select-option {
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.multi-select-option > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multi-select-empty {
+  margin: 0 0 6px;
+}
+
+.multi-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}

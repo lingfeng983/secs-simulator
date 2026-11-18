@@ -4,7 +4,7 @@
  * <p>这里没有任何会话状态：配置是磁盘上的文件，改完要重载会话才生效。</p>
  */
 
-import type { ApiClient, ConfigEntry, ConfigProblems, ConfigTemplateEntry, PreviewData } from './types';
+import type { ApiClient, ConfigEntry, ConfigProblems, ConfigSectionApplyResult, ConfigSectionEffect, ConfigSectionName, ConfigSectionSaveResult, ConfigTemplateEntry, PreviewData } from './types';
 import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
 
 type ConfigApi = Pick<
@@ -21,9 +21,48 @@ type ConfigApi = Pick<
   | 'configText'
   | 'validateConfig'
   | 'saveConfig'
+  | 'saveConfigSections'
+  | 'applyConfigSections'
   | 'configRevisions'
   | 'previewConfigDraft'
 >;
+
+/**
+ * 后端的 detail 可能是字符串、冲突数组或常量差异列表：统一翻成一句人话。
+ *
+ * <p>守卫 B 回的是 {@code [{kind,name,ceids}]}，守卫 C 回的是
+ * {@code warnings:[{ecid,runtime,config}]}——直接 {@code String()} 会变成
+ * 「[object Object]」，现场看不懂被哪条变量挡住了。</p>
+ */
+function detailText(raw: unknown): string {
+  if (raw == null) {
+    return '';
+  }
+  if (typeof raw === 'string') {
+    return raw;
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((item) => {
+      if (item === null || typeof item !== 'object') {
+        return String(item);
+      }
+      const entry = item as { kind?: string; name?: string; ceids?: number[]; ecid?: number; runtime?: number; config?: number };
+      if (entry.kind !== undefined) {
+        const kind = entry.kind === 'context' ? '晶圆属性' : '变量';
+        const ceids = (entry.ceids ?? []).join('/');
+        return `${kind} ${entry.name ?? ''} 正被周期事件 CEID ${ceids} 引用`;
+      }
+      if (entry.ecid !== undefined) {
+        return `常量 ${entry.ecid}：运行时值 ${entry.runtime ?? '?'} → 配置值 ${entry.config ?? '?'}`;
+      }
+      return JSON.stringify(item);
+    }).join('；');
+  }
+  if (typeof raw === 'object') {
+    return JSON.stringify(raw);
+  }
+  return String(raw);
+}
 
 /** 按配置草稿算确定性预览（不落盘、不需要运行中的会话）；编译失败返回 null。 */
 async function previewConfigDraft(text: string, fromMs: number, toMs: number,
@@ -154,6 +193,86 @@ export const configApi: ConfigApi = {
     }
     return { status: response.status, problems };
   },
+  async saveConfigSections(name, sections, expectedModifiedMs, confirmOverwrite) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (expectedModifiedMs != null) {
+      headers['If-Match'] = String(expectedModifiedMs);
+    }
+    const query = confirmOverwrite === true ? '?confirmOverwrite=1' : '';
+    const response = await request(
+      apiUrl(`/api/v1/configs/${encodeURIComponent(name)}/sections${query}`),
+      {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ sections }),
+      },
+      LONG_REQUEST_TIMEOUT_MS,
+    );
+
+    /* 失败响应带 error/detail/problems，尽量带回来给页面显示原因 */
+    let body: {
+      error?: string; detail?: unknown;
+      problems?: string[] | Array<{ path?: string; message?: string }>;
+      warnings?: unknown;
+      changed?: ConfigSectionName[]; effect?: ConfigSectionEffect;
+    } = {};
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      /* 非 JSON 响应（网关错误页等）没有可带回来的细节 */
+    }
+    const problems = (body.problems ?? []).map((item) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+      const path = item.path ?? '';
+      return path === '' ? (item.message ?? String(item)) : `${path}：${item.message ?? ''}`;
+    });
+    return {
+      status: response.status,
+      problems,
+      changed: body.changed ?? [],
+      effect: body.effect ?? 'hot',
+      error: body.error ?? '',
+      /* 常量覆盖的确认文案在 warnings 里（ecv-overwrite 没有 detail） */
+      detail: detailText(body.detail ?? body.warnings ?? ''),
+    };
+  },
+
+  async applyConfigSections(deviceId, sections) {
+    const response = await request(
+      apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/apply-sections`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sections }),
+      },
+      LONG_REQUEST_TIMEOUT_MS,
+    );
+    let body: {
+      effect?: ConfigSectionEffect; changed?: ConfigSectionName[];
+      reset?: string[]; preserved?: string[];
+      plansKept?: number; pinsDropped?: number;
+      error?: string; detail?: unknown;
+    } = {};
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      /* 同上：没有 body 也要把状态码带回去 */
+    }
+    return {
+      status: response.status,
+      effect: body.effect ?? 'hot',
+      changed: body.changed ?? [],
+      reset: body.reset ?? [],
+      preserved: body.preserved ?? [],
+      plansKept: body.plansKept ?? 0,
+      pinsDropped: body.pinsDropped ?? 0,
+      error: body.error ?? '',
+      detail: detailText(body.detail ?? ''),
+    } satisfies ConfigSectionApplyResult;
+  },
+
   async configRevisions(name, limit = 50) {
     const body = await readJson<{ revisions?: Array<{
       revision: number; sha256: string; createdAt: number; createdBy: string; note: string;

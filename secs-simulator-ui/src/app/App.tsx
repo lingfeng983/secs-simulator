@@ -26,7 +26,7 @@ import { useHostsV2, hostPhaseLabel, hostPhaseTone } from '../state/useHostsV2';
 import { useRegions } from '../state/useRegions';
 import { TabBar, type TabCloseMode } from './layout/TabBar';
 import { GeneralSettingsModal } from './layout/GeneralSettingsModal';
-import { nextTabAfterClose, tabIdForRoute, upsertTab, type AppTab } from './layout/tabs';
+import { nextTabAfterClose, canonicalizeDeviceTabs, deviceTabLabel, tabIdForRoute, upsertTab, type AppTab } from './layout/tabs';
 import { WorkbenchPage } from '../features/pages/WorkbenchPage';
 import { DevicePage as DevicePageView } from '../features/pages/DevicePage';
 import {
@@ -505,10 +505,11 @@ export function App(): JSX.Element {
 
   /* ---------- 布局 ---------- */
 
-  /* 页签标题用设备名；没启动的设备路由 key 是配置文件名，去掉 .json 再显示 */
+  /* 页签标题用设备名；没启动的设备路由 key 是配置文件名，去掉 .json 再显示。
+     身份与名字都按配置归一：同一台设备无论地址里写的是文件名还是会话 id，
+     都是同一个页签、同一个名字（2026-11-18 用户反馈"一台设备会开两个页签"）。 */
   const deviceName = route.name === 'device'
-    ? (backend.sessions.find((session) => session.id === route.sessionId)?.device
-      ?? route.sessionId.replace(/\.json$/i, ''))
+    ? deviceTabLabel(route.sessionId, backend.sessions, backend.configList)
     : '';
   const devicePageDescription = route.name === 'device'
     ? (route.zone === 'config' ? DEVICE_CONFIG_PAGE_LABELS : DEVICE_RUNTIME_PAGE_LABELS)[route.page as never]
@@ -539,7 +540,7 @@ export function App(): JSX.Element {
   /* ---------- 顶部页面标签 ----------
      一个设备 / 一台主机 / 一个独立页各占一个标签；在子页之间切换只更新该标签
      最后停留的地址，切回来还落在刚才那一页，又不会把顶栏开成一长排。 */
-  const currentTabId = tabIdForRoute(route);
+  const currentTabId = tabIdForRoute(route, backend.sessions, backend.configList);
   const currentHash = toHash(route);
   const currentTabLabel = route.name === 'device'
     ? (deviceName === '' ? '设备' : deviceName)
@@ -551,6 +552,15 @@ export function App(): JSX.Element {
       id: currentTabId, label: currentTabLabel, hash: currentHash,
     }));
   }, [currentTabId, currentTabLabel, currentHash, setTabs]);
+
+  /* 以前存下来的页签可能带着两种身份（配置文件全名 / 会话 id），或者是设备重启前
+     的旧会话 id：按当前会话表归一一次，同一台设备只留一个标签。
+     归一不需要改动时返回原数组，轮询刷新不会造成无谓的重渲染。 */
+  useEffect(() => {
+    setTabs((previous) => canonicalizeDeviceTabs(
+      previous, backend.sessions, backend.configList, currentTabId, currentHash,
+    ));
+  }, [backend.sessions, backend.configList, currentTabId, currentHash, setTabs]);
 
   const selectTab = (tab: AppTab) => navigate(parseHash(tab.hash));
   const closeTab = (tab: AppTab) => {

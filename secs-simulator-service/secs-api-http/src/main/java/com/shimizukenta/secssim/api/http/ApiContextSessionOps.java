@@ -308,6 +308,26 @@ public interface ApiContextSessionOps {
         return SessionOutcome.OK;
     }
 
+    /**
+     * 分段生效的结果：HTTP 状态码 + 已拼好的 JSON 正文。
+     *
+     * @param status HTTP 状态
+     * @param json   响应体
+     */
+    record SectionsApplyResult(int status, String json) {
+    }
+
+    /**
+     * v2：把刚保存的配置段应用到正在跑的这台设备（2026-11-18 设计 §4.4）。
+     *
+     * @param deviceId 设备（会话）标识
+     * @param sections 变化段名
+     * @return 状态码 + JSON
+     */
+    default SectionsApplyResult applySectionsV2(String deviceId, java.util.List<String> sections) {
+        return new SectionsApplyResult(405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+    }
+
     /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
 
     /**

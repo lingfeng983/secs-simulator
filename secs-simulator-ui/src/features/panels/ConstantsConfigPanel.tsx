@@ -41,6 +41,7 @@ export function ConstantsConfigPanel(props: PanelBaseProps & { sessionId?: strin
       sessionId={sessionId}
       configName={configName}
       panelId="panel-constants-config"
+      sections={['constants']}
       title="设备常量（ECV）"
     >
       {({ root, edit }) => (

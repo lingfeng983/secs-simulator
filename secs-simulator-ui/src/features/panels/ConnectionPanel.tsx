@@ -1,77 +1,40 @@
-import { useMemo } from 'react';
 import type { PanelBaseProps } from './types';
-import { Panel } from '../../shared/ui/Panel';
+import { ConfigEditShell } from './ConfigEditShell';
 import { SessionForm } from '../editors/ConfigFormEditor';
-import { editDocument, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
-import { useConfigDraft } from '../../state/useConfigDraft';
 
 /**
  * 设备 · 连接：配置里的 session 段。
  *
- * <p>原来这段表单在「配置」页，和 JSON 原文抢同一份事实来源；
- * 现在配置页只编辑原文，连接参数在这里结构化编辑，保存后仍然走
- * 「校验 → 保存 → 相关会话重载」的同一路径。</p>
+ * <p>这段只有它能改：端口 / 绑定地址 / Device ID 变化必须断链重建，
+ * 是唯一会「全清」的一页（保存成功后会提示主机重连、运行态清空）。
+ * 保存与校验走 {@link ConfigEditShell} 的统一路径。</p>
  */
 export function ConnectionPanel({ backend, sessionId, configName }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
-  const deviceId = sessionId ?? backend.activeSession;
-  const draft = useConfigDraft(backend, deviceId, configName);
-  const parsed = useMemo(() => parseConfigDocument(draft.text), [draft.text]);
-
-  const edit = (mutate: (root: JsonObject) => void) => {
-    const result = editDocument(draft.text, mutate);
-    if (result.ok) {
-      draft.setText(result.text);
-    }
-  };
-
   return (
-    <Panel
-      id="panel-connection"
+    <ConfigEditShell
+      backend={backend}
+      sessionId={sessionId}
+      configName={configName}
+      panelId="panel-connection"
       title="连接"
-      headless
-      status={
-        draft.configName === ''
-          ? <span className="state-pill" data-tone="muted">无配置来源</span>
-          : draft.dirty
-            ? <span className="state-pill" data-tone="warn">有未保存改动</span>
-            : undefined
-      }
-      actions={
-        <>
-          <button type="button" onClick={() => void draft.reload()} disabled={draft.busy || draft.configName === ''}>
-            重新载入
-          </button>
-          <button type="button" onClick={() => void draft.validate()} disabled={draft.busy || draft.configName === ''}>
-            校验
-          </button>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void draft.save()}
-            disabled={draft.busy || draft.configName === ''}
-          >
-            保存
-          </button>
-        </>
-      }
+      sections={['session']}
+      /* 这段改的是监听口，保存一定重建会话：设备启动着时先问一句 */
+      confirmOnSave={{
+        title: '保存连接参数并重启会话？',
+        message: '端口 / 绑定地址 / Device ID 改完要按新参数重建会话：端口会重新监听，'
+          + '当前连接会断开，钉值、计划启用态、周期进度等运行状态全部清空。',
+        confirmLabel: '保存并重启会话',
+      }}
     >
-      {draft.configName === '' ? (
-        <p className="hint">这台设备没有配置文件来源（演示会话）。可在「配置」页新建一份配置后再编辑连接参数。</p>
-      ) : !parsed.ok ? (
-        <p className="hint">
-          配置原文不是合法 JSON：<code>{parsed.error}</code>。先到「配置」页修好原文，表单才能动手。
-        </p>
-      ) : (
+      {({ root, edit }) => (
         <>
-          {draft.notice !== '' && <p className="inline-note">{draft.notice}</p>}
-          {draft.problems.length > 0 && (
-            <ul className="problems">
-              {draft.problems.map((problem, index) => <li key={index}>{problem}</li>)}
-            </ul>
-          )}
-          <SessionForm root={parsed.config.root} edit={edit} />
+          <p className="hint">
+            这段是 HSMS 连接参数。<b>保存后会按新参数重启会话</b>：端口重新监听、当前连接断开，
+            钉值 / 计划启用态 / 周期进度这些运行状态全部清空（设备启动着保存会先问一句）。
+          </p>
+          <SessionForm root={root} edit={edit} />
         </>
       )}
-    </Panel>
+    </ConfigEditShell>
   );
 }

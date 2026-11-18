@@ -469,6 +469,12 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         return this.deviceV2.cycleStopV2(deviceId);
     }
 
+    @Override
+    public ApiContext.SectionsApplyResult applySectionsV2(String deviceId, java.util.List<String> sections) {
+        RuntimeApi.SectionsApply result = this.api.applySections(deviceId, sections);
+        return new ApiContext.SectionsApplyResult(result.status(), result.json());
+    }
+
     /* ---------- 3.0 v2：设备运行时（设计 §2.5） ---------- */
 
     @Override
@@ -580,6 +586,30 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     @Override
     public SessionOutcome saveHostV2(String hostId, String name, String host, int port, int deviceId) {
         return this.hostV2.saveHostV2(hostId, name, host, port, deviceId);
+    }
+
+    @Override
+    public ApiContext.HostSaveResult saveHostSettingsV2(String hostId, String name, String host,
+            int port, int deviceId) {
+        HostV2Delegates.SettingsSave save = this.hostV2.saveSettingsV2(hostId, name, host, port, deviceId);
+        if (save.outcome() == SessionOutcome.UNKNOWN_SESSION) {
+            return new ApiContext.HostSaveResult(404, "{\"ok\":false,\"error\":\"host-not-found\"}");
+        }
+        if (save.outcome() != SessionOutcome.OK) {
+            return new ApiContext.HostSaveResult(500, "{\"ok\":false,\"error\":\"save-failed\"}");
+        }
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"changed\":[");
+        for (int i = 0; i < save.changed().size(); i += 1) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(RuntimeJson.escape(save.changed().get(i))).append('"');
+        }
+        sb.append("],\"needsReconnect\":").append(save.needsReconnect())
+                .append(",\"settingRevision\":").append(save.settingRevision())
+                .append(",\"appliedRevision\":").append(save.appliedRevision())
+                .append('}');
+        return new ApiContext.HostSaveResult(200, sb.toString());
     }
 
     @Override
@@ -720,6 +750,16 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
         ConfigResult result = this.api.saveConfig(name, text);
         this.announceConfig(name, "save", result);
         return result;
+    }
+
+    @Override
+    public ApiContext.SectionSaveResult saveConfigSections(String name, String body,
+                                                           Long expectedModifiedMs, boolean confirmOverwrite) {
+        RuntimeApi.SectionsSave result = this.api.saveSections(name, body, expectedModifiedMs, confirmOverwrite);
+        if (result.status() == 200 && !result.json().contains("\"changed\":[]")) {
+            this.announceConfig(name, "save-section", ConfigResult.ok());
+        }
+        return new ApiContext.SectionSaveResult(result.status(), result.json());
     }
 
     @Override

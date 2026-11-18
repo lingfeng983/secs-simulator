@@ -640,6 +640,18 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
+     * 工艺周期是否正在跑。
+     *
+     * <p>分段保存的守卫用它：只有运行中的周期才需要保护被其 CEID 引用的
+     * SVID / 晶圆属性（2026-11-18 设计 §3.1 守卫 B）。</p>
+     *
+     * @return true = {@code RUNNING}
+     */
+    public boolean cycleRunning() {
+        return this.cycleRunner != null && this.cycleRunner.running();
+    }
+
+    /**
      * 工艺周期运行态 JSON（cycle 页运行卡）。
      *
      * @return {@code {"state","startedAt","waferIndex","phaseMs","totalWafers","firedCount","hasCycle"}}
@@ -729,6 +741,161 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                 : new LifecycleCycleClock(
                         com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
                         LifecycleCycleClock.State.RUNNING));
+    }
+
+    /**
+     * 这次分段保存要动哪些运行态部件。
+     *
+     * <p>关键区分（2026-11-18 真机验守卫 B 后收紧）：</p>
+     * <ul>
+     *   <li>{@code structure}——单元/号段变了，旧编排、旧视图、旧引用全部不再成立，
+     *       只有这一档要求"全停"；</li>
+     *   <li>{@code catalog}——变量 / 报告 / 事件目录变了，要换模型视图、重建值来源与编排，
+     *       但计划与周期可以照跑（未被引用的项按口径「可热改」）。</li>
+     * </ul>
+     *
+     * <p>引用完整性不靠这里兜：删掉/改名被报告、周期、计划引用的对象，
+     * 整份编译会在写盘前就 422 拦下，走不到 apply。</p>
+     *
+     * @param changed 实际变化的段
+     */
+    record SectionEffects(
+            boolean structure,
+            boolean catalog,
+            boolean values,
+            boolean schedule,
+            boolean throttle,
+            boolean data,
+            boolean cycle) {
+
+        static SectionEffects of(java.util.Set<com.shimizukenta.secssim.runtime.ConfigSection> changed) {
+            boolean structure = changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.STRUCTURE);
+            boolean catalog = changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.SVIDS)
+                    || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.REPORTS)
+                    || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CEIDS);
+            boolean views = structure || catalog;
+            return new SectionEffects(
+                    structure,
+                    catalog,
+                    /* 值来源与工艺周期共享同一个生命周期时钟：只改周期配置也必须重建值来源，
+                       否则周期停了、曲线还在走（设计 §5.2）。钉值按 SVID 迁移，删掉的丢弃。 */
+                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CYCLE),
+                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.PLANS),
+                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.THROTTLE),
+                    views
+                            || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CONTEXT)
+                            || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CONSTANTS),
+                    structure || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CYCLE));
+        }
+    }
+
+    /**
+     * 按配置段最小生效（2026-11-18 设计 §4、§8）。
+     *
+     * <p>与 {@link #applyHot} 的区别：那个是「重建会话 / 模型换了」的全量替换，
+     * 一律全停；这里只动真正变化的段——只改事件计划时，没改过的计划保留启用态
+     * 与锚点、周期照跑；只改工艺周期时，周期回停止但计划、钉值、计数不动。</p>
+     *
+     * <p>设备结构段变化才做全量热重置：单元/号段换了，旧视图、旧编排、旧引用都不再有效。
+     * 变量 / 报告 / 事件目录变化只换模型视图、重建值来源与编排，计划与周期照跑
+     * （口径「未被引用的项可热改」）。</p>
+     *
+     * @param model          新设备模型
+     * @param values         新值来源；{@code null} = 回落设备默认曲线
+     * @param schedule       新编排表
+     * @param maxPerSec      新限流
+     * @param s6f11Wbit      S6F11 W 位
+     * @param s6f1Wbit       S6F1 W 位
+     * @param contextTable   新晶圆属性表；{@code null} = 保持现状
+     * @param ecidValues     新设备常量取值器；{@code null} = 保持现状
+     * @param cycle          新 cycle 配置；{@code null} = 配置里没有 cycle 段
+     * @param lifecycleClock 新生命周期时钟（与 values 同实例）
+     * @param changed        实际变化的段（由保存结果给出）
+     * @return 这次动了哪些东西
+     */
+    public SectionApplyOutcome applySections(
+            ResolvedEquipment model, ValueSource values,
+            EventSchedule schedule, int maxPerSec, boolean s6f11Wbit, boolean s6f1Wbit,
+            com.shimizukenta.secssim.core.context.ContextTable contextTable,
+            EcidValues ecidValues, CycleConfig cycle,
+            LifecycleCycleClock lifecycleClock,
+            java.util.Set<com.shimizukenta.secssim.runtime.ConfigSection> changed) {
+
+        SectionEffects fx = SectionEffects.of(changed);
+        boolean modelChanged = fx.structure();
+        boolean catalogChanged = fx.catalog();
+        boolean valuesChanged = fx.values();
+        boolean scheduleChanged = fx.schedule();
+        boolean throttleChanged = fx.throttle();
+        boolean dataChanged = fx.data();
+        boolean cycleChanged = fx.cycle();
+
+        /* --- 1. 模型与视图：结构变了先全停；只是目录（变量/报告/事件）变则换视图、运行不动 --- */
+        if (modelChanged || catalogChanged) {
+            this.model = model;
+            this.modelViews.refresh(model);
+        }
+        if (modelChanged) {
+            this.stopAllPlans();
+        }
+
+        /* --- 2. 值来源：重建后把钉值搬过去（只搬新模型里还存在的 SVID） --- */
+        int pinsDropped = 0;
+        if (valuesChanged) {
+            ValueSource base = values;
+            if (base == null) {
+                DefaultCurves.bind(this.store, this.spec.equipment(), model);
+                base = new CurveValueSource(this.store);
+            }
+            java.util.Map<Integer, Double> pins = this.pinnedValues == null
+                    ? java.util.Map.of() : this.pinnedValues.pins();
+            PinnedValueSource next = new PinnedValueSource(base);
+            for (java.util.Map.Entry<Integer, Double> entry : pins.entrySet()) {
+                if (base.svids().contains(entry.getKey())) {
+                    next.pin(entry.getKey(), entry.getValue());
+                } else {
+                    pinsDropped += 1;
+                }
+            }
+            this.pinnedValues = next;
+            this.values.set(next);
+        }
+
+        /* --- 3. 编排：模型换了走全停装载；只改计划则保留未改动计划的启用态 --- */
+        int plansKept = 0;
+        if (scheduleChanged) {
+            if (modelChanged) {
+                this.scheduler.enableSchedule(schedule, maxPerSec);
+            } else {
+                this.scheduler.replaceSchedulePreservingState(schedule, maxPerSec);
+                plansKept = this.scheduler.enabledCount();
+            }
+        } else if (throttleChanged) {
+            this.scheduler.maxPerSec(maxPerSec);
+        }
+
+        /* --- 4. W 位 --- */
+        if (throttleChanged) {
+            this.collectionEventWbit(s6f11Wbit);
+            this.traceWbit(s6f1Wbit);
+        }
+
+        /* --- 5. 晶圆属性 / 设备常量：装配器持有引用，换掉下一次 S6F11 就生效 --- */
+        if (dataChanged && contextTable != null && ecidValues != null) {
+            this.modelViews.dataModel(contextTable, ecidValues);
+        }
+
+        /* --- 6. 工艺周期：配置换了就回 STOPPED，等操作员手动重新启动 --- */
+        if (cycleChanged) {
+            this.cycleRunner.reconfigure(cycle, lifecycleClock != null
+                    ? lifecycleClock
+                    : new LifecycleCycleClock(
+                            com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
+                            LifecycleCycleClock.State.RUNNING));
+        }
+
+        return new SectionApplyOutcome(modelChanged, catalogChanged, valuesChanged, scheduleChanged,
+                throttleChanged, dataChanged, cycleChanged, pinsDropped, plansKept);
     }
 
     /**

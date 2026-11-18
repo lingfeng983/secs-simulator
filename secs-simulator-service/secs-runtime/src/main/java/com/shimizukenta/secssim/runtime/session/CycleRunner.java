@@ -108,6 +108,11 @@ public final class CycleRunner {
         this.firedFlags = new boolean[config == null ? 0 : config.events().size()];
     }
 
+    /** 周期是否正在跑（守卫 B 用：只保护运行中周期的引用）。 */
+    public boolean running() {
+        return this.state == State.RUNNING;
+    }
+
     /** 配置里是否有 cycle 段。 */
     boolean hasCycle() {
         return this.config != null;

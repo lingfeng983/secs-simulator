@@ -8,10 +8,9 @@ import { useThemeVersion } from '../../state/useThemeVersion';
 /**
  * 单变量曲线图（带坐标轴）。
  *
- * <p>与 {@link import('./Sparkline').Sparkline} 的区别：这里只画一个变量，
- * 但把坐标轴画全了——左边 Y 轴是数值、右边 X 轴是时间。
- * 现场看图最常问的两句是"这个点是多少"和"这是什么时候"，
- * 没有刻度就只能靠猜。</p>
+ * <p>与预览卡里的 {@link import('../panels/PreviewCard').PreviewCard} 不同：
+ * 这里只画一个变量（主机采集 / Trace 页用），但把纵向缩放与平移都放开，
+ * 现场看图最常问的两句是"这个点是多少"和"这是什么时候"——没有刻度就只能靠猜。</p>
  *
  * <p>曲线本身是 min/max 包络 + avg 线：包络是每个桶里采样点的上下界，
  * avg 是桶内平均值。抖动大的时候包络会鼓起来，一眼能看出"这个点不稳"。</p>

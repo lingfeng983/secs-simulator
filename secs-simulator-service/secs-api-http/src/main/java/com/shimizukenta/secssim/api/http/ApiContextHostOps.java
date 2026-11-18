@@ -46,6 +46,42 @@ public interface ApiContextHostOps {
         return SessionOutcome.FAILED;
     }
 
+    /**
+     * v2 保存主机设置的结果：HTTP 状态码 + 已拼好的 JSON。
+     *
+     * @param status HTTP 状态
+     * @param json   响应体
+     */
+    record HostSaveResult(int status, String json) {
+    }
+
+    /**
+     * v2：保存主机名称与连接目标（2026-11-18 P3）。
+     *
+     * <p>名称是热生效（不重建链路、不涨设置版本）；目标变化才标记「待生效」，
+     * 由 {@link #hostApplyV2(String)} 重建链路。响应带回
+     * {@code changed / needsReconnect / settingRevision / appliedRevision}。</p>
+     *
+     * @param hostId   主机实例 id
+     * @param name     名称
+     * @param host     目标地址
+     * @param port     目标端口
+     * @param deviceId Device ID
+     * @return 状态码 + JSON
+     */
+    default HostSaveResult saveHostSettingsV2(String hostId, String name, String host, int port, int deviceId) {
+        /* 兼容只实现了 saveHostV2 的旧形态（测试桩、嵌入式实现）：
+           按老语义把它映射成状态码，不能默认回 405 让保存直接失效 */
+        SessionOutcome outcome = this.saveHostV2(hostId, name, host, port, deviceId);
+        int status = switch (outcome) {
+            case OK -> 200;
+            case UNKNOWN_SESSION -> 404;
+            case CONFLICT, NOT_RELOADABLE -> 409;
+            default -> 502;
+        };
+        return new HostSaveResult(status, "{\"ok\":" + (outcome == SessionOutcome.OK) + "}");
+    }
+
     /** v2：删除主机。 */
     default SessionOutcome destroyHostV2(String hostId) {
         return SessionOutcome.FAILED;

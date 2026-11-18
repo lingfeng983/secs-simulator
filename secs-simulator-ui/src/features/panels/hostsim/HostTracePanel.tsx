@@ -310,7 +310,7 @@ interface TracePlanForm extends TraceDraft {
  * 提供状态列与启停（启动 = 下发 S2F23 开始采样，停止 = 该 TRID 下发 TOTSMP=0），
  * 并支持勾选多行批量启停；数据曲线按方案折叠，点「查看曲线」才计算绘制。</p>
  */
-export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] }: PanelArgs): JSX.Element {
+export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
   const [plans, setPlans] = useTracePlans(hostId);
   const [busy, setBusy] = useState(false);
@@ -595,6 +595,21 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, messages = [] 
         headless
       >
         {error !== '' && <p className="inline-note danger">{error}</p>}
+        {/* 配置区只管方案库：保存不下发，开始采样在运行区——说清楚，省得"保存了怎么没数据" */}
+        {readOnly && (
+          <p className="hint">
+            这里保存的是<b>方案库</b>（落 config.db，重启后端也不丢），保存本身<b>不会下发</b>。
+            真正开始 / 停止采样在运行区「Trace 采集」页。
+            {' · '}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => goTo?.(`host-page:${hostId}:runtime:trace`)}
+            >
+              去下发 →
+            </button>
+          </p>
+        )}
         {host.open && !readOnly && host.phase !== 'CONNECTED' && (
           <p className="problems">主机还没连接,先到实例头点「连接」。</p>
         )}

@@ -45,18 +45,61 @@ final class HostV2Delegates {
                 result.hostId() == null ? "" : result.hostId());
     }
 
+    /**
+     * 保存主机设置的结果：改了哪几项、是否需要「使设置生效」。
+     *
+     * @param outcome         结果
+     * @param changed         实际变化的项（name / target）
+     * @param needsReconnect  目标变了且主机在线：需要点「使设置生效」重建链路
+     * @param settingRevision 新的设置版本
+     * @param appliedRevision 当前已生效版本
+     */
+    record SettingsSave(SessionOutcome outcome, List<String> changed, boolean needsReconnect,
+                        long settingRevision, long appliedRevision) {
+    }
+
     SessionOutcome saveHostV2(String hostId, String name, String host, int port, int deviceId) {
+        return this.saveSettingsV2(hostId, name, host, port, deviceId).outcome();
+    }
+
+    /**
+     * 保存设置（2026-11-18 P3）：名称与连接目标分开处理。
+     *
+     * <p>名称不参与建链，改了立刻生效、不涨设置版本；目标（地址/端口/Device ID）
+     * 改了才升版本并标记「待生效」，由操作员点「使设置生效」重建链路——
+     * 这样不会因为改个名字就断一次正在采样的连接。</p>
+     */
+    SettingsSave saveSettingsV2(String hostId, String name, String host, int port, int deviceId) {
         var sim = this.hosts.findSim(hostId);
         if (sim == null) {
-            return SessionOutcome.UNKNOWN_SESSION;
+            return new SettingsSave(SessionOutcome.UNKNOWN_SESSION, List.of(), false, 0L, 0L);
         }
-        sim.saveSettings(name, new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId));
+        var current = sim.target();
+        boolean nameChanged = name != null && !name.isBlank() && !name.equals(sim.name());
+        boolean targetChanged = current == null
+                || !host.equals(current.bindHost()) || port != current.port() || deviceId != current.deviceId();
+
+        java.util.List<String> changed = new java.util.ArrayList<>();
+        if (nameChanged) {
+            changed.add("name");
+        }
+        if (targetChanged) {
+            changed.add("target");
+        }
+        if (nameChanged) {
+            sim.rename(name);
+        }
+        if (targetChanged) {
+            sim.saveSettings(null,
+                    new com.shimizukenta.secssim.app.session.HsmsConnectionTarget(host, port, deviceId));
+        }
         var view = this.hostRepository.find(hostId).orElse(null);
         if (view != null) {
             this.hostRepository.save(hostId, sim.name(), host, port, deviceId,
                     view.collectorJson(), view.autoReconnect(), view.note());
         }
-        return SessionOutcome.OK;
+        return new SettingsSave(SessionOutcome.OK, changed,
+                targetChanged && sim.isOpen(), sim.settingRevision(), sim.appliedRevision());
     }
 
     String hostV2Json(String hostId) {

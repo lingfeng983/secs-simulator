@@ -84,7 +84,7 @@ export function SubTabs({
   active,
   onSelect,
 }: {
-  pages: ReadonlyArray<{ id: string; label: string; note?: string }>;
+  pages: ReadonlyArray<{ id: string; label: string; note?: string; dirty?: boolean }>;
   active: string;
   onSelect: (page: string) => void;
 }): JSX.Element {
@@ -97,10 +97,13 @@ export function SubTabs({
           role="tab"
           aria-selected={active === page.id}
           className={`subtab${active === page.id ? ' active' : ''}`}
-          title={page.note}
+          title={page.dirty === true ? `${page.note ?? ''}（本页有未保存改动）`.trim() : page.note}
           onClick={() => onSelect(page.id)}
         >
           {page.label}
+          {page.dirty === true && (
+            <span className="subtab-dot" role="img" aria-label="本页有未保存改动" />
+          )}
         </button>
       ))}
     </div>

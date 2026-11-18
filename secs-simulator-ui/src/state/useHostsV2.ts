@@ -145,13 +145,20 @@ export function useHostsV2(client: ApiClient | null) {
     [client, refresh],
   );
 
+  /**
+   * 保存主机设置：返回「改了什么、要不要使设置生效」。
+   *
+   * <p>名称是热生效的（不重建链路），目标变化才需要操作员点「使设置生效」；
+   * 页面据此显示「设置待生效」横幅，而不是每次保存都提示一遍。</p>
+   */
   const saveSettings = useCallback(
     async (hostId: string, request: { name: string; host: string; port: number; deviceId: number }) => {
       if (client === null) {
         throw new Error('后端未就绪');
       }
-      await client.saveHostV2(hostId, request);
+      const result = await client.saveHostV2(hostId, request);
       await refresh();
+      return result;
     },
     [client, refresh],
   );

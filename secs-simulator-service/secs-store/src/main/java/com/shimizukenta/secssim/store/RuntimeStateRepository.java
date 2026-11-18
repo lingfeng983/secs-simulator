@@ -127,7 +127,7 @@ public final class RuntimeStateRepository {
                 }
                 return Optional.of(new LinkRow(rs.getString(1), rs.getString(2), rs.getLong(3),
                         rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                        (Long) rs.getObject(8), (Long) rs.getObject(9)));
+                        longOrNull(rs, 8), longOrNull(rs, 9)));
             }
         } catch (SQLException e) {
             throw new StoreException("读 device_link 失败: " + e.getMessage(), e);
@@ -203,7 +203,7 @@ public final class RuntimeStateRepository {
                 }
                 return Optional.of(new LinkRow(rs.getString(1), rs.getString(2), rs.getLong(3),
                         rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                        (Long) rs.getObject(8), (Long) rs.getObject(9)));
+                        longOrNull(rs, 8), longOrNull(rs, 9)));
             }
         } catch (SQLException e) {
             throw new StoreException("读 host_link 失败: " + e.getMessage(), e);
@@ -292,6 +292,18 @@ public final class RuntimeStateRepository {
         });
     }
 
+    /**
+     * 可空整数列 → Long。
+     *
+     * <p>SQLite 的 JDBC 驱动对小整数返回 {@link Integer}，直接 {@code (Long)}
+     * 会在「计划启动过一次、把统计落了库」之后抛 ClassCastException——
+     * 只有真正跑起来才会踩到。NULL 仍然返回 {@code null}。</p>
+     */
+    private static Long longOrNull(ResultSet rs, int index) throws SQLException {
+        long value = rs.getLong(index);
+        return rs.wasNull() ? null : Long.valueOf(value);
+    }
+
     /** 全部计划运行态。 */
     public List<PlanStateRow> planStates(String deviceId) {
         try (Connection connection = this.db.readRuntime();
@@ -303,7 +315,7 @@ public final class RuntimeStateRepository {
                 List<PlanStateRow> result = new ArrayList<>();
                 while (rs.next()) {
                     result.add(new PlanStateRow(rs.getString(1), rs.getInt(2) == 1,
-                            (Long) rs.getObject(3), (Long) rs.getObject(4), (Long) rs.getObject(5),
+                            longOrNull(rs, 3), longOrNull(rs, 4), longOrNull(rs, 5),
                             rs.getLong(6), rs.getLong(7), rs.getString(8)));
                 }
                 return result;

@@ -20,10 +20,16 @@ export interface PanelProps {
    * 不渲染标题行（标题只留在无障碍树里当 aria-label）。
    *
    * <p>详情页的子页用：页签已经说明"这是哪一页"，面板不再重复标题与说明，
-   * 内容直接开始。此时 status / actions 不会丢——它们落到内容下方的一条
-   * 操作行里，状态在左、按钮右对齐。</p>
+   * 内容直接开始。此时 status / actions 不会丢——默认落到内容下方的一条
+   * 操作行里，状态在左、按钮右对齐；{@code actionsAt='top'} 时改放到内容
+   * 上方（保存/校验这类"先看按钮再干活"的编辑页用）。</p>
    */
   headless?: boolean;
+  /**
+   * 无标题面板的操作区放在哪：{@code foot}（默认，内容下方）或
+   * {@code top}（内容上方，与标题面板的操作区同一个视觉位置）。
+   */
+  actionsAt?: 'foot' | 'top';
 }
 
 /**
@@ -42,9 +48,11 @@ export function Panel({
   index,
   status,
   headless = false,
+  actionsAt = 'foot',
 }: PanelProps): JSX.Element {
-  /* 无标题的面板把状态与动作放到内容下方：按钮下移、右对齐 */
-  const footed = headless && (status !== undefined || actions !== undefined);
+  /* 操作区在顶部时先画一行工具条；放底部时才是"脚注式"操作行 */
+  const actionsOnTop = headless && actionsAt === 'top' && (status !== undefined || actions !== undefined);
+  const footed = headless && !actionsOnTop && (status !== undefined || actions !== undefined);
   return (
     <section
       className={`panel${footed ? ' panel--footed' : ''}`}
@@ -73,6 +81,17 @@ export function Panel({
         </div>
       )}
       {stats !== undefined && <div className="panel-stats">{stats}</div>}
+      {actionsOnTop && (
+        <div className="panel-toolbar">
+          {status !== undefined && <span className="panel-toolbar-status">{status}</span>}
+          <span className="spacer" aria-hidden="true" />
+          {actions !== undefined && (
+            <div className="panel-actions" role="toolbar" aria-label={`${title} 操作`}>
+              {actions}
+            </div>
+          )}
+        </div>
+      )}
       <div className="panel-body">{children}</div>
       {footed && (
         <div className="panel-foot">

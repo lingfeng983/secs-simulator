@@ -270,6 +270,18 @@ final class ConfigHandler extends HttpSupport {
      * </p>
      */
     void handleConfigPath(HttpExchange ex) throws IOException {
+        /* 分段保存：PUT /api/v1/configs/{name}/sections（2026-11-18） */
+        if (isSectionsPath(ex)) {
+            if (!"PUT".equalsIgnoreCase(ex.getRequestMethod())) {
+                respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+                return;
+            }
+            if (!requireRole(ex, ApiRole.OPERATOR)) {
+                return;
+            }
+            this.saveConfigSections(ex);
+            return;
+        }
         if ("PUT".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.OPERATOR)) {
                 return;
@@ -402,6 +414,61 @@ final class ConfigHandler extends HttpSupport {
 
 
     /**
+     * PUT /api/v1/configs/{name}/sections：按段保存（2026-11-18）。
+     *
+     * <p>请求体是 {@code {"sections":{"cycle":{...}}}}，每段只带该页自己的节点。
+     * 服务端按段替换、整份编译、跑三道守卫后落盘，响应回实际变化的段与影响级别。</p>
+     */
+    void saveConfigSections(HttpExchange ex) throws IOException {
+        String name = configNameFromPath(ex);
+        if (name == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-path\"}");
+            return;
+        }
+        String body = readBody(ex, MAX_CONFIG_BYTES);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+        Long expectedModifiedMs = ifMatch(ex);
+        boolean confirmOverwrite = queryFlag(ex, "confirmOverwrite");
+        ApiContextConfigOps.SectionSaveResult result =
+                this.context.saveConfigSections(name, body, expectedModifiedMs, confirmOverwrite);
+        audit(ex, "config-save-section", name, "status=" + result.status());
+        respond(ex, result.status(), result.json());
+    }
+
+    /** If-Match 头 → modifiedMs；缺省或非法返回 null（非法时由上层按"不检查"处理）。 */
+    private static Long ifMatch(HttpExchange ex) {
+        String value = ex.getRequestHeaders().getFirst("If-Match");
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim().replace("\"", ""));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 查询串里是否有该开关（{@code ?confirmOverwrite=1}）。 */
+    private static boolean queryFlag(HttpExchange ex, String name) {
+        String query = ex.getRequestURI().getRawQuery();
+        if (query == null || query.isEmpty()) {
+            return false;
+        }
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq < 0 ? pair : pair.substring(0, eq);
+            String value = eq < 0 ? "" : pair.substring(eq + 1);
+            if (key.equals(name)) {
+                return value.isEmpty() || "1".equals(value) || "true".equalsIgnoreCase(value);
+            }
+        }
+        return false;
+    }
+
+    /**
      * DELETE /api/v1/configs/{name}：从设备清单里删掉一台设备。
      *
      * <p>删之前先停掉它对应的会话（否则端口还占着、清单里却查不到是谁），
@@ -456,12 +523,23 @@ final class ConfigHandler extends HttpSupport {
             /* getPath() 已解码：不要再 decode，含 % 的名字会被解坏 */
             return parts[0];
         }
-        if (parts.length == 2 && !parts[0].isEmpty() && ApiPaths.VALIDATE_SUFFIX.equals(parts[1])) {
+        if (parts.length == 2 && !parts[0].isEmpty()
+                && (ApiPaths.VALIDATE_SUFFIX.equals(parts[1]) || ApiPaths.SECTIONS_SUFFIX.equals(parts[1]))) {
             return parts[0];
         }
         return null;
     }
 
+
+    /** 请求是否打在分段保存子路径上（{@code /configs/<name>/sections}）。 */
+    static boolean isSectionsPath(HttpExchange ex) {
+        String path = ex.getRequestURI().getPath();
+        if (path == null || !path.startsWith(ApiPaths.CONFIG_PREFIX)) {
+            return false;
+        }
+        String[] parts = path.substring(ApiPaths.CONFIG_PREFIX.length()).split("/");
+        return parts.length == 2 && ApiPaths.SECTIONS_SUFFIX.equals(parts[1]);
+    }
 
     /** 请求是否打在校验子路径上（必须恰好是 {@code /configs/<name>/validate} 两段）。 */
     static boolean isValidatePath(HttpExchange ex) {

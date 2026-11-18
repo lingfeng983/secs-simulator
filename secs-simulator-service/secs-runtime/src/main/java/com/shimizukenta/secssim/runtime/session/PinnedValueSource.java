@@ -63,6 +63,18 @@ public final class PinnedValueSource implements ValueSource {
     }
 
     /**
+     * 当前钉值快照（分段生效时迁到新值来源上）。
+     *
+     * <p>值来源重建后旧实例会被丢弃，只有把这些钉值搬过去，
+     * 「只改事件计划」才不会把操作员钉住的调试值一起清掉。</p>
+     *
+     * @return SVID → 设定值（只读副本）
+     */
+    public java.util.Map<Integer, Double> pins() {
+        return java.util.Map.copyOf(this.pinned);
+    }
+
+    /**
      * 是否被钉住。
      *
      * @param svid 绝对 SVID

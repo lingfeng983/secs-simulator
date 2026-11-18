@@ -418,6 +418,56 @@ export interface ConfigSaveResult {
 }
 
 /**
+ * 配置段名：与后端 ConfigSection 白名单一一对应。
+ *
+ * <p>页面只提交自己拥有的段，后端按段替换、按段生效——改「工艺周期」
+ * 不会把「事件计划」页没保存的半成品一起写进文件。</p>
+ */
+export type ConfigSectionName =
+  | 'session'
+  | 'structure'
+  | 'svids'
+  | 'reports'
+  | 'ceids'
+  | 'constants'
+  | 'context'
+  | 'cycle'
+  | 'plans'
+  | 'throttle';
+
+/** 段的影响级别：断链重建 / 不断链但重置 / 全部保留。 */
+export type ConfigSectionEffect = 'reconnect' | 'hot-reset' | 'hot';
+
+/** 分段保存结果。 */
+export interface ConfigSectionSaveResult {
+  status: number;
+  problems: string[];
+  /** 实际变化的段（后端按内容判定，不信前端报的） */
+  changed: ConfigSectionName[];
+  effect: ConfigSectionEffect;
+  /** 失败时的错误码：revision-conflict / not-offline / cycle-running-guard / ecv-overwrite / config-invalid */
+  error: string;
+  /** 给人看的说明（守卫拒绝的原因、哪些变量被周期引用） */
+  detail: string;
+}
+
+/** 分段生效结果：哪些运行态被重置、哪些被保留。 */
+export interface ConfigSectionApplyResult {
+  status: number;
+  effect: ConfigSectionEffect;
+  changed: ConfigSectionName[];
+  /** model / values / schedule / cycle / trace / edits / plans / pins 等 */
+  reset: string[];
+  preserved: string[];
+  /** 换表时保留下来的启用计划数 */
+  plansKept: number;
+  /** 因 SVID 被删而失效的钉值数 */
+  pinsDropped: number;
+  error: string;
+  detail: string;
+}
+
+/**
  * 后端客户端接口。
  *
  * <p>实现按域拆在 {@code api/sessions.ts}、{@code api/configs.ts}、
@@ -488,6 +538,20 @@ export interface ApiClient {
   validateConfig(name: string, text: string): Promise<ConfigProblems>;
   /** 校验通过后落盘;expectedModifiedMs 非空时经 If-Match 做并发保护,被改过回 409。 */
   saveConfig(name: string, text: string, expectedModifiedMs?: number | null): Promise<ConfigSaveResult>;
+  /**
+   * 按段保存：body 只带本页拥有的片段（{@code {cycle: {...}}}）。
+   *
+   * <p>服务端按段替换、整份编译、跑守卫后落盘，回实际变化的段与影响级别。
+   * confirmOverwrite = 已确认「配置常量覆盖 S2F15 写入值」。</p>
+   */
+  saveConfigSections(
+    name: string,
+    sections: Partial<Record<ConfigSectionName, unknown>>,
+    expectedModifiedMs?: number | null,
+    confirmOverwrite?: boolean,
+  ): Promise<ConfigSectionSaveResult>;
+  /** 把刚保存的段应用到正在跑的这台设备（不断链，按段最小生效）。 */
+  applyConfigSections(deviceId: string, sections: readonly ConfigSectionName[]): Promise<ConfigSectionApplyResult>;
   /** 取一次性 SSE 票据（30 秒、只能用一次）。 */
   ticket(): Promise<string>;
   eventsUrl(ticket: string): string;
@@ -546,7 +610,7 @@ export interface ApiClient {
     host: string;
     port: number;
     deviceId: number;
-  }): Promise<void>;
+  }): Promise<import('./hostsV2').HostSaveResult>;
   connectHostV2(hostId: string): Promise<void>;
   disconnectHostV2(hostId: string): Promise<void>;
   applyHostV2(hostId: string): Promise<void>;
