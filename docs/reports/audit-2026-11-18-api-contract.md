@@ -1,5 +1,7 @@
 # API 契约一致性审计（2026-11-18）
 
+> **整改进度（同日完成）**：四个问题全部修复并合并进 master。批次二+三——新增 v2 `GET /api/v2/devices/{id}/runtime/alarms`（信封 `{"alarms":[…]}`，deviceId 经 `sessionOf` 兼容会话 id/配置名/设备 id）、前端切换 v2 单形状、v1 alarms/terminal 挂 `Deprecation`+`Sunset`（v1 alarms 200 借机收敛为带 hint 的信封）、openapi 新增 v2 声明并删 7 组死声明。批次四+一——SSE 帧 sessionId 只进会话域四类（plan-fired/host-link/config-changed 不再带假身份）、`NoticeEvent` 组件改名 `sourceId`、CONFIG_CHANGED 注释补 `save-section`。验证：后端全 reactor `mvn test` 通过；前端 tsc / vitest 226 / playwright mock e2e 71 全绿。**遗留**：真机 e2e 未跑（需真机链路，随下轮真机批次）；`LiveEventList.tsx` 为无调用方死代码且渲染 `notice.sessionId`（复用时只该喂会话域事件）；前端 `setAlarm`/`trigger` 仍走 v1 触发端点（不在本批范围）。
+
 > 范围：v1/v2 会话与设备查询端点的响应形状、SSE 通知帧的契约、`NoticeEvent` 事件类型注释、openapi.yaml 声明与后端实现的一致性。结论基于逐文件阅读与 grep 复核，代码位置均给出（master @ 0cb0e9b）。
 
 ## 总体结论
