@@ -242,7 +242,7 @@ class SessionEquipmentConstantTest {
                 new com.shimizukenta.secssim.store.ConfigRepository(db);
         ConfigStore store = new ConfigStore(repo, new com.shimizukenta.secssim.store.TemplateRepository(db),
                 config.getParent());
-        repo.createDevice(NAME.substring(0, NAME.length() - 5), NAME.substring(0, NAME.length() - 5),
+        repo.createDevice(NAME.substring(0, NAME.length() - 5),
                 null, Files.readString(config, StandardCharsets.UTF_8), true, "test");
 
         HsmsSessionRuntime session = new HsmsSessionRuntime(spec, compiled.equipment(), new ManualEngineClock(0L));

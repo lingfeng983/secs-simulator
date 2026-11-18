@@ -172,7 +172,7 @@ public record RuntimeOptions(RuntimeMode mode, String bindHost, int httpPort,
                   --tls-password <s>                keystore 密码（默认空）
                   --messages-recent <n>             报文历史内存保留条数，默认 5000（界面上能回看的窗口）
                   --audit-recent <n>                审计历史内存保留条数，默认 1000（重启后也从文件恢复这么多）
-                  --export-config <dir>             把库里的全部设备导出为 <dir>/<legacy>.json 后退出（备份通道）
+                  --export-config <dir>             把库里的全部设备导出为 <dir>/<设备名>.json 后退出（备份通道）
                   --reset-runtime                   启动前删除 runtime.db（运行态可随时丢弃重建）
                   --allow-schema-reset              库结构版本与程序不一致时，备份后自动重建；默认拒绝启动
                   --help                            打印本帮助

@@ -18,7 +18,7 @@ export interface CreateDeviceDraft {
   batch: boolean;
   /** 批量台数（1–100），字符串形态与单台字段一致，提交时统一 parse。 */
   count: string;
-  /** 会话 id 前缀：第 i 台 = 前缀 + i。 */
+  /** 批次前缀：第 i 台共用同一份基础配置，前缀只用于命名这份配置。 */
   prefix: string;
   /** 起始端口：第 i 台 = 起始 + i − 1。 */
   portBase: string;
@@ -97,7 +97,7 @@ export function CreateDeviceModal({
         <label className="field modal-field">
           <FieldLabel
             text="批量新建"
-            help="打开后按同一份设备模板一次开一批：会话 id、端口、Device ID 按前缀与起始值逐台递增；批量创建的每台创建后立即启动。"
+            help="打开后按同一份设备模板一次开一批：端口、Device ID 按起始值逐台递增；批量创建的每台创建后立即启动。"
           />
           <span className="check-inline">
             <input
@@ -156,14 +156,14 @@ export function CreateDeviceModal({
             </label>
             <label className="field modal-field">
               <FieldLabel
-                text="会话 id 前缀"
-                help="第 i 台的会话 id = 前缀 + i（如 dev-1、dev-2）；不能含空白、斜杠或引号。"
+                text="批次前缀"
+                help="用来命名这批设备共用的基础配置（前缀-模板-base.json）；会话 id 由服务端生成。不能含空白、斜杠或引号。"
               />
               <input
                 value={draft.prefix}
                 onChange={(event) => patch({ prefix: event.target.value })}
                 placeholder="dev-"
-                aria-label="会话 id 前缀"
+                aria-label="批次前缀"
               />
             </label>
             <label className="field modal-field">

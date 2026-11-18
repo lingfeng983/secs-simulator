@@ -186,8 +186,12 @@ public final class Bootstrap {
             if (!(runtime instanceof HsmsSessionRuntime hsms)) {
                 return;
             }
-            /* 台账归属用 config.db 的 ULID，不是 v1 的 legacy stem（设计 §2.5） */
-            ConfigRepository.DeviceView device = configRepo.findDevice(runtime.id()).orElse(null);
+            /* 台账归属用 config.db 的 ULID：会话 id 是 ses_ ULID，得先经配置来源
+               换算成设备（设计 §2.5）。演示会话没有来源，退回会话 id。 */
+            ConfigRepository.DeviceView device = launcher.sourceOf(runtime.id())
+                    .flatMap(configStore::deviceIdOf)
+                    .flatMap(configRepo::findDevice)
+                    .orElse(null);
             String deviceId = device == null ? runtime.id() : device.id();
             hsms.planExecutor(new PlanExecutor(deviceId,
                     planSink(deviceId, planExecutions, planFired)));

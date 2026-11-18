@@ -29,7 +29,7 @@ import java.util.List;
 public final class Schema {
 
     /** 当前实现对应的 schema 版本。结构变更即递增，旧库会被拒绝启动。 */
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     /**
      * 版本不匹配时的重置策略。
@@ -76,7 +76,6 @@ public final class Schema {
         """
         CREATE TABLE IF NOT EXISTS device (
           id           TEXT PRIMARY KEY,
-          legacy_id    TEXT,
           name         TEXT NOT NULL,
           template_id  TEXT,
           auto_start   INTEGER NOT NULL DEFAULT 1,
@@ -88,7 +87,6 @@ public final class Schema {
         """,
         /* 软删后名字必须能重新使用，唯一性只约束未删除的行 */
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_device_name_live ON device(name) WHERE deleted_at IS NULL",
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_device_legacy ON device(legacy_id) WHERE legacy_id IS NOT NULL",
         """
         CREATE TABLE IF NOT EXISTS config_document (
           device_id       TEXT PRIMARY KEY REFERENCES device(id) ON DELETE CASCADE,

@@ -11,7 +11,6 @@ export type ApiRole = 'viewer' | 'operator' | 'admin';
 
 /** 部署期覆盖：多台设备复用一份设备配置时，逐台不同的连接标识。 */
 export interface SessionOverrides {
-  sessionId?: string;
   bindHost?: string;
   port?: number;
   deviceId?: number;
@@ -22,8 +21,6 @@ export interface SessionBulkParams extends SessionOverrides {
   config: string;
   /** 1..100 */
   count: number;
-  /** 会话 id 前缀，第 i 台为 `${前缀}i`。 */
-  sessionIdPrefix: string;
   /** 第 i 台端口 = portBase + i - 1；0 表示都用配置里的端口（会冲突，仅供 demo 会话）。 */
   portBase: number;
   /** 第 i 台 device-id = deviceIdBase + i - 1。 */

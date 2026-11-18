@@ -29,9 +29,10 @@ import com.shimizukenta.secssim.store.TemplateRepository;
  *
  * <p><b>正文仍是权威</b>：编辑器操作的还是原始 JSON 文本，不经过领域模型往返；
  * <b>先校验再入库</b>的判据不变。文件名（{@code line1.json}）继续是 v1 的身份——
- * 门面把它映射成设备的 legacy_id（文件名 stem），正文与版本存
+ * 门面把它映射成设备名（文件名 stem），正文与版本存
  * {@code config_document}，修改时间用 {@code updated_at}（毫秒）承担 If-Match
- * （设计 §2.5 的 v1 兼容规则）。</p>
+ * （设计 §2.5 的 v1 兼容规则）。设备实体 id（{@code dev_} ULID）只在需要
+ * 跨表引用时使用，不再参与文件名解析。</p>
  *
  * <p>S2F15 的常量回写走 {@link #writeConstants}：只替换 constants 子树、
  * 升版本但不写快照、不产生配置漂移（{@link ConfigRepository#updateConstants}）。</p>
@@ -50,7 +51,7 @@ public final class ConfigStore {
      *
      * @param repository 配置仓储
      * @param templates  设备模板仓储
-     * @param workDir    工作目录（legacy 文件归档仍在它下面）
+     * @param workDir    工作目录（模板、日志等运行期文件仍在它下面）
      */
     public ConfigStore(ConfigRepository repository, TemplateRepository templates, Path workDir) {
         this.repository = repository;
@@ -66,21 +67,41 @@ public final class ConfigStore {
     /**
      * 全部配置（按名称排序）。
      *
-     * <p>3.0 里这就是设备列表：v1 的「配置文件名」= legacy_id + {@code .json}。</p>
+     * <p>3.0 里这就是设备列表：设备名 + {@code .json} 就是 v1 的「配置文件名」。</p>
      */
     public List<Entry> list() {
         List<Entry> entries = new ArrayList<>();
         for (ConfigRepository.DeviceView device : this.repository.listDevices()) {
-            String body = this.repository.readDocument(device.legacyId() != null
-                            ? device.legacyId() : device.id())
+            String body = this.repository.readDocument(device.name())
                     .map(ConfigRepository.DocumentView::body)
                     .orElse("");
-            String name = (device.legacyId() != null ? device.legacyId() : device.name()) + CONFIG_SUFFIX;
+            String name = device.name() + CONFIG_SUFFIX;
             entries.add(new Entry(name, body.getBytes(StandardCharsets.UTF_8).length,
                     device.updatedAt(), device.templateId() == null ? "" : device.templateId()));
         }
         entries.sort(Comparator.comparing(Entry::name));
         return entries;
+    }
+
+    /**
+     * 设备实体 id（{@code dev_} ULID）。
+     *
+     * <p>运行态（device_link / 台账 / 钉值）一律按设备 id 归属；会话只记配置名，
+     * 需要落运行态时经这里换算。接受配置名（{@code x.json}）、文件名 stem
+     * （{@code x}）或设备 id 三种写法，配置不存在返回 {@code empty}。</p>
+     *
+     * @param key 配置名 / stem / 设备 id
+     * @return 设备 id
+     */
+    public java.util.Optional<String> deviceIdOf(String key) {
+        String trimmed = key == null ? "" : key.trim();
+        if (trimmed.endsWith(CONFIG_SUFFIX)) {
+            trimmed = trimmed.substring(0, trimmed.length() - CONFIG_SUFFIX.length());
+        }
+        if (trimmed.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        return this.repository.findDevice(trimmed).map(ConfigRepository.DeviceView::id);
     }
 
     /** 目录内容的 JSON 数组（与 v1 形状一致）。 */
@@ -225,7 +246,7 @@ public final class ConfigStore {
             return ConfigResult.invalid(problems);
         }
         try {
-            this.repository.createDevice(stem, stem, templateId, marked, true, "ui");
+            this.repository.createDevice(stem, templateId, marked, true, "ui");
             Log.info("已新建配置: " + name);
             return ConfigResult.ok();
         } catch (StoreException e) {
@@ -400,7 +421,7 @@ public final class ConfigStore {
         try {
             if (this.repository.findDevice(key).isEmpty()) {
                 /* v1 语义保留：save 可以从零建一份配置（模板编辑器场景） */
-                this.repository.createDevice(key, key, null, text, true, "ui");
+                this.repository.createDevice(key, null, text, true, "ui");
             } else {
                 this.repository.saveDocument(key, text, null, expectedModifiedMs, "ui", "");
             }
