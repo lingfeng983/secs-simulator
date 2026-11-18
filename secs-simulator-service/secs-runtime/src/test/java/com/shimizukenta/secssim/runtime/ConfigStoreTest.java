@@ -61,7 +61,7 @@ class ConfigStoreTest {
         if (this.repo.findDevice(stem).isPresent()) {
             this.repo.saveDocument(stem, body, null, "test", "");
         } else {
-            this.repo.createDevice(stem, stem, null, body, true, "test");
+            this.repo.createDevice(stem, null, body, true, "test");
         }
     }
 

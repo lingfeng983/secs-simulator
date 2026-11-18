@@ -105,6 +105,35 @@ public final class SimHost {
     static int hsmsPort;
     static int deviceId;
 
+    /** demo-etch.json 对应的会话 id：B1 之后是服务端生成的 ses_ ULID，不再等于配置名。 */
+    static String etchId;
+
+    /**
+     * 从会话列表里按配置名找会话 id。
+     *
+     * <p>会话 id 与会话配置名是两件事：配置名记在 {@code config} 字段里，
+     * 所有 {@code /sessions/{id}/...} 端点都要用服务端给的 id。</p>
+     */
+    static String sessionIdOf(String sessionsBody, String configName) {
+        try {
+            JsonHub root = JsonHub.fromJson(sessionsBody);
+            JsonHub list = root.get("sessions");
+            if (list == null) {
+                return null;
+            }
+            for (JsonHub item : list.values()) {
+                JsonHub config = item.get("config");
+                if (config != null && configName.equals(config.optionalString().orElse(""))) {
+                    JsonHub id = item.get("id");
+                    return id == null ? null : id.optionalString().orElse(null);
+                }
+            }
+        } catch (RuntimeException e) {
+            /* 解析失败交给调用方的 check 报出来 */
+        }
+        return null;
+    }
+
     static HsmsSsCommunicator connect() throws Exception {
         HsmsSsCommunicatorConfig cfg = new HsmsSsCommunicatorConfig();
         cfg.protocol(HsmsSsProtocol.ACTIVE);
@@ -213,6 +242,10 @@ public final class SimHost {
         expect(200, "sessions 200", sessions);
         check(sessions.body().contains("etch-01") && sessions.body().contains("cvd-01"),
                 "两台演示设备", brief(sessions.body()));
+        /* 后续所有 /sessions/{id}/... 都用服务端给的 id（ses_ ULID） */
+        etchId = sessionIdOf(sessions.body(), "etch-01.json");
+        check(etchId != null && etchId.startsWith("ses_"),
+                "etch-01 会话 id 来自服务端（ses_ ULID）", String.valueOf(etchId));
 
         section("B. HSMS 会话建立");
         long t0 = System.currentTimeMillis();
@@ -276,7 +309,7 @@ public final class SimHost {
         check(er.secs2().getByte(0) == 0, "S2F37 → ERACK=0", er.secs2().toJson());
 
         push.clear();
-        expect(202, "HTTP 触发 CEID 2003", call("POST", "/api/v1/sessions/etch-01/ceid/2003", null));
+        expect(202, "HTTP 触发 CEID 2003", call("POST", "/api/v1/sessions/" + etchId + "/ceid/2003", null));
         SecsMessage s6f11 = awaitMessage(6, 11, 8000);
         check(s6f11 != null, "设备主动上报 S6F11", s6f11 == null ? "(超时)" : "ok");
         if (s6f11 != null) {
@@ -297,7 +330,7 @@ public final class SimHost {
         section("G. 报警 S5F1（HTTP 置位 → 设备推送）");
         push.clear();
         expect(202, "HTTP 置位报警", call("POST",
-                "/api/v1/sessions/etch-01/alarm/1?set=true&text=SIM%20HIGH&category=4", null));
+                "/api/v1/sessions/" + etchId + "/alarm/1?set=true&text=SIM%20HIGH&category=4", null));
         SecsMessage s5f1 = awaitMessage(5, 1, 8000);
         check(s5f1 != null, "收到 S5F1", s5f1 == null ? "(超时)" : s5f1.secs2().toJson());
         if (s5f1 != null) {
@@ -305,7 +338,7 @@ public final class SimHost {
             check("SIM HIGH".equals(s5f1.secs2().get(2).getAscii()), "S5F1 ALTX 正确",
                     s5f1.secs2().get(2).getAscii());
         }
-        call("POST", "/api/v1/sessions/etch-01/alarm/1?set=false", null);
+        call("POST", "/api/v1/sessions/" + etchId + "/alarm/1?set=false", null);
 
         section("H. S9F7 非法数据（raw socket 连 cvd-01）");
         try (Socket raw = new Socket()) {
@@ -354,21 +387,21 @@ public final class SimHost {
         }
 
         section("I. 全量 HTTP 端点");
-        HttpResponse<String> catalog = call("GET", "/api/v1/sessions/etch-01/catalog", null);
+        HttpResponse<String> catalog = call("GET", "/api/v1/sessions/" + etchId + "/catalog", null);
         expect(200, "catalog", catalog);
         check(catalog.body().contains("TEMP_PV"), "catalog 含 TEMP_PV", brief(catalog.body()));
 
-        expect(200, "alarms", call("GET", "/api/v1/sessions/etch-01/alarms", null));
-        expect(200, "terminal", call("GET", "/api/v1/sessions/etch-01/terminal", null));
+        expect(200, "alarms", call("GET", "/api/v1/sessions/" + etchId + "/alarms", null));
+        expect(200, "terminal", call("GET", "/api/v1/sessions/" + etchId + "/terminal", null));
 
         long nowMs = System.currentTimeMillis();
-        HttpResponse<String> preview = call("GET", "/api/v1/preview?session=etch-01&from="
+        HttpResponse<String> preview = call("GET", "/api/v1/preview?session=" + etchId + "&from="
                 + (nowMs - 60000) + "&to=" + nowMs + "&buckets=60&svids=1001,1002,9001", null);
         expect(200, "preview", preview);
         check(preview.body().contains("\"series\""), "preview 含 series", brief(preview.body()));
 
         HttpResponse<byte[]> bin = http.send(
-                HttpRequest.newBuilder(URI.create(base + "/api/v1/preview.bin?session=etch-01&from="
+                HttpRequest.newBuilder(URI.create(base + "/api/v1/preview.bin?session=" + etchId + "&from="
                         + (nowMs - 60000) + "&to=" + nowMs + "&buckets=60"))
                         .timeout(Duration.ofSeconds(15)).GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
@@ -378,7 +411,7 @@ public final class SimHost {
 
         HttpResponse<String> overview = call("GET", "/api/v1/overview", null);
         expect(200, "overview", overview);
-        check(overview.body().contains("etch-01"), "overview 含 etch-01", brief(overview.body()));
+        check(overview.body().contains(etchId), "overview 含会话 id", brief(overview.body()));
 
         HttpResponse<String> msgs = call("GET", "/api/v1/messages?limit=100", null);
         expect(200, "messages", msgs);
@@ -425,7 +458,7 @@ public final class SimHost {
         sseThread.setDaemon(true);
         sseThread.start();
         Thread.sleep(400);
-        call("POST", "/api/v1/sessions/etch-01/ceid/2003", null);
+        call("POST", "/api/v1/sessions/" + etchId + "/ceid/2003", null);
         boolean gotSse = sseDone.await(12, TimeUnit.SECONDS);
         String sseText;
         synchronized (sseBuf) {
@@ -479,24 +512,24 @@ public final class SimHost {
         section("K. 运行时编辑");
         String plan = "{\"id\":\"pl-host\",\"ceid\":2003,"
                 + "\"trigger\":{\"type\":\"periodic\",\"periodMs\":600000}}";
-        expect(201, "新增编排", call("POST", "/api/v1/sessions/etch-01/events", plan));
-        expect(200, "禁用编排", call("POST", "/api/v1/sessions/etch-01/events/pl-host?enabled=false", null));
-        expect(200, "删除编排", call("DELETE", "/api/v1/sessions/etch-01/events/pl-host", null));
+        expect(201, "新增编排", call("POST", "/api/v1/sessions/" + etchId + "/events", plan));
+        expect(200, "禁用编排", call("POST", "/api/v1/sessions/" + etchId + "/events/pl-host?enabled=false", null));
+        expect(200, "删除编排", call("DELETE", "/api/v1/sessions/" + etchId + "/events/pl-host", null));
 
         String report = "{\"id\":6001,\"slot\":\"HOSTTEST\",\"svids\":[1001,1002]}";
-        expect(201, "新增报告", call("POST", "/api/v1/sessions/etch-01/reports", report));
-        expect(200, "删除报告", call("DELETE", "/api/v1/sessions/etch-01/reports/6001", null));
+        expect(201, "新增报告", call("POST", "/api/v1/sessions/" + etchId + "/reports", report));
+        expect(200, "删除报告", call("DELETE", "/api/v1/sessions/" + etchId + "/reports/6001", null));
 
         String svidDef = "{\"id\":6101,\"slot\":\"HOST_VAR\",\"type\":\"F4\",\"unit\":\"X\",\"decimals\":1}";
-        expect(201, "新增 SVID", call("POST", "/api/v1/sessions/etch-01/svids", svidDef));
-        expect(200, "钉值 42.5", call("PUT", "/api/v1/sessions/etch-01/svids/6101/value", "{\"value\":42.5}"));
+        expect(201, "新增 SVID", call("POST", "/api/v1/sessions/" + etchId + "/svids", svidDef));
+        expect(200, "钉值 42.5", call("PUT", "/api/v1/sessions/" + etchId + "/svids/6101/value", "{\"value\":42.5}"));
         double pinV = host.send(1, 3, true, b.list(b.uint4(6101))).orElseThrow().secs2().get(0).getDouble(0);
         check(Math.abs(pinV - 42.5) < 0.01, "S1F3 读到钉值", String.valueOf(pinV));
-        expect(200, "解钉", call("DELETE", "/api/v1/sessions/etch-01/svids/6101/value", null));
-        expect(200, "删除 SVID", call("DELETE", "/api/v1/sessions/etch-01/svids/6101", null));
+        expect(200, "解钉", call("DELETE", "/api/v1/sessions/" + etchId + "/svids/6101/value", null));
+        expect(200, "删除 SVID", call("DELETE", "/api/v1/sessions/" + etchId + "/svids/6101", null));
 
         section("L. 手动发送 SML");
-        HttpResponse<String> sent0 = call("POST", "/api/v1/sessions/etch-01/message",
+        HttpResponse<String> sent0 = call("POST", "/api/v1/sessions/" + etchId + "/message",
                 "S5F1 <L <B 0x84> <U4 9> <A \"MANUAL\">>.");
         expect(200, "手动发送 S5F1（设备→主机）", sent0);
         SecsMessage manual = awaitMessage(5, 1, 5000);
@@ -548,16 +581,16 @@ public final class SimHost {
         done.await(25, TimeUnit.SECONDS);
         check(errors[0] == 0, "40 并发 sessions 全 200", "errors=" + errors[0]);
 
-        HttpResponse<String> burst = call("POST", "/api/v1/sessions/etch-01/burst",
+        HttpResponse<String> burst = call("POST", "/api/v1/sessions/" + etchId + "/burst",
                 "{\"kind\":\"ceid\",\"ceid\":2003,\"count\":60,\"intervalMs\":20}");
         check(burst.statusCode() == 202, "burst 受理 202", "status=" + burst.statusCode() + " " + brief(burst.body()));
-        HttpResponse<String> burstBusy = call("POST", "/api/v1/sessions/etch-01/burst",
+        HttpResponse<String> burstBusy = call("POST", "/api/v1/sessions/" + etchId + "/burst",
                 "{\"kind\":\"ceid\",\"ceid\":2003,\"count\":10}");
         check(burstBusy.statusCode() == 409, "burst 重复 → 409", "status=" + burstBusy.statusCode());
         String stats = null;
         for (int i = 0; i < 100; i++) {
             Thread.sleep(200);
-            HttpResponse<String> bget = call("GET", "/api/v1/sessions/etch-01/burst", null);
+            HttpResponse<String> bget = call("GET", "/api/v1/sessions/" + etchId + "/burst", null);
             if (bget.body().contains("\"running\":false") && bget.body().contains("\"sent\"")) {
                 stats = bget.body();
                 break;
@@ -567,7 +600,7 @@ public final class SimHost {
 
         section("N. 会话重载（真主机自动重连）");
         host.close();
-        expect(200, "etch-01 重载", call("POST", "/api/v1/sessions/etch-01/reload", null));
+        expect(200, "etch-01 重载", call("POST", "/api/v1/sessions/" + etchId + "/reload", null));
         Thread.sleep(1500);
         host = connect();
         SecsMessage after = host.send(1, 1, true, Secs2.empty()).orElseThrow();
@@ -575,7 +608,7 @@ public final class SimHost {
 
         section("O. host-sim 实例（开 → 发 → 采集 → 关）");
         host.close();
-        HttpResponse<String> hs = call("POST", "/api/v1/host-sims", "{\"session\":\"etch-01\"}");
+        HttpResponse<String> hs = call("POST", "/api/v1/host-sims", "{\"session\":\"" + etchId + "\"}");
         check(hs.statusCode() == 200 || hs.statusCode() == 201, "host-sim 打开",
                 "status=" + hs.statusCode() + " " + brief(hs.body()));
         HttpResponse<String> hsList = call("GET", "/api/v1/host-sims", null);

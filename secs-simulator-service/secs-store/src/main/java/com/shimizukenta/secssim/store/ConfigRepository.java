@@ -42,7 +42,7 @@ public final class ConfigRepository {
     }
 
     /** 设备实体视图（配置与文档 JOIN 后的只读形状）。 */
-    public record DeviceView(String id, String legacyId, String name, String templateId,
+    public record DeviceView(String id, String name, String templateId,
                              boolean autoStart, String note, long revision,
                              long createdAt, long updatedAt) {
     }
@@ -60,8 +60,10 @@ public final class ConfigRepository {
     /**
      * 新建设备：插入实体 + revision 1 的正文与快照。
      *
-     * @param name       设备名（v1 语义下同时充当 legacy_id = 文件名 stem）
-     * @param legacyId   v1 兼容 id；null 表示没有（v2 新建设备）
+     * <p>设备名同时是配置文件的 stem（{@code <name>.json}），也是 v1 路径里
+     * 用来定位设备的自然键；实体 id 是独立的 {@code dev_} ULID，两者不再互为别名。</p>
+     *
+     * @param name       设备名（= 配置文件名去掉 {@code .json}）
      * @param templateId 来源模板（仅分组用）；可空
      * @param body       配置正文（调用方已校验）
      * @param autoStart  启动对账时是否自动连接
@@ -69,7 +71,7 @@ public final class ConfigRepository {
      * @return 新设备 id
      * @throws StoreException 名字冲突（未删除行内唯一）或写库失败
      */
-    public String createDevice(String name, String legacyId, String templateId,
+    public String createDevice(String name, String templateId,
                                String body, boolean autoStart, String actor) {
         Objects.requireNonNull(name, "name");
         String id = Ids.nextDevice();
@@ -77,20 +79,19 @@ public final class ConfigRepository {
         String sha = ContentHash.sha256Hex(body);
         return this.db.writeConfig(unchecked(connection -> {
             try (PreparedStatement st = connection.prepareStatement(
-                    "INSERT INTO device(id, legacy_id, name, template_id, auto_start, note, created_at, updated_at) "
-                            + "VALUES(?,?,?,?,?,?,?,?)")) {
+                    "INSERT INTO device(id, name, template_id, auto_start, note, created_at, updated_at) "
+                            + "VALUES(?,?,?,?,?,?,?)")) {
                 st.setString(1, id);
-                st.setString(2, legacyId);
-                st.setString(3, name);
-                st.setString(4, templateId);
-                st.setInt(5, autoStart ? 1 : 0);
-                st.setString(6, "");
+                st.setString(2, name);
+                st.setString(3, templateId);
+                st.setInt(4, autoStart ? 1 : 0);
+                st.setString(5, "");
+                st.setLong(6, now);
                 st.setLong(7, now);
-                st.setLong(8, now);
                 st.executeUpdate();
             } catch (SQLException e) {
                 if (isUniqueViolation(e)) {
-                    throw StoreException.conflict("设备名或 legacy id 冲突: " + name + " / " + legacyId);
+                    throw StoreException.conflict("设备名冲突: " + name);
                 }
                 throw new StoreException("建设备失败: " + e.getMessage(), e);
             }
@@ -103,7 +104,7 @@ public final class ConfigRepository {
     /**
      * 保存正文（唯一写口）：乐观锁 → 升版本 → 快照 → 裁剪。
      *
-     * @param key              设备 key（legacy_id 或 id）
+     * @param key              设备 key（设备名或设备 id）
      * @param body             新正文（调用方已校验）
      * @param expectedRevision 期望的当前版本；null 表示不检查
      * @param actor            操作者
@@ -240,7 +241,7 @@ public final class ConfigRepository {
         return revision;
     }
 
-    /** 按 key（legacy_id 优先，其次 id）找未删除设备。 */
+    /** 按 key（设备名或设备 id）找未删除设备。 */
     public Optional<DeviceView> findDevice(String key) {
         try (Connection connection = this.db.readConfig()) {
             DeviceRow row = findLiveDevice(connection, key);
@@ -260,7 +261,7 @@ public final class ConfigRepository {
         try (Connection connection = this.db.readConfig();
              Statement st = connection.createStatement();
              ResultSet rs = st.executeQuery(
-                     "SELECT id, legacy_id FROM device WHERE deleted_at IS NULL ORDER BY created_at, id")) {
+                     "SELECT id, name FROM device WHERE deleted_at IS NULL ORDER BY created_at, id")) {
             List<DeviceView> result = new ArrayList<>();
             while (rs.next()) {
                 result.add(toView(connection, new DeviceRow(rs.getString(1), rs.getString(2))));
@@ -276,11 +277,10 @@ public final class ConfigRepository {
      *
      * <p>不物理删除：配置正文、版本历史与运行台账都是排障时要翻的东西，
      * 一台设备从清单里删掉之后，"它上周为什么报警"仍然要查得到。
-     * {@code deleted_at} 一落，它就从设备列表消失；{@code legacy_id} 同时置空——
-     * 配置文件名（= legacy_id）的唯一索引不看 {@code deleted_at}，
-     * 不置空的话同名设备再也建不回来。</p>
+     * 名字唯一索引只看未删除行（{@code WHERE deleted_at IS NULL}），
+     * 所以软删之后同名设备可以直接建回来。</p>
      *
-     * @param key 设备 key（legacy_id 优先，其次 id）
+     * @param key 设备 key（设备名或设备 id）
      * @return 是否真的删掉了一台在用的设备（不存在或已删返回 {@code false}）
      */
     public boolean deleteDevice(String key) {
@@ -288,8 +288,8 @@ public final class ConfigRepository {
         return this.db.writeConfig(connection -> {
             long now = System.currentTimeMillis();
             try (PreparedStatement st = connection.prepareStatement(
-                    "UPDATE device SET deleted_at=?, updated_at=?, legacy_id=NULL "
-                            + "WHERE deleted_at IS NULL AND (legacy_id=? OR id=?)")) {
+                    "UPDATE device SET deleted_at=?, updated_at=? "
+                            + "WHERE deleted_at IS NULL AND (name=? OR id=?)")) {
                 st.setLong(1, now);
                 st.setLong(2, now);
                 st.setString(3, key);
@@ -368,7 +368,7 @@ public final class ConfigRepository {
     }
 
     /**
-     * 全量导出（备份通道）：每台设备写 {@code <legacy_id>.json}（无 legacy 用 name）。
+     * 全量导出（备份通道）：每台设备写 {@code <name>.json}。
      *
      * @param dir 目标目录（自动创建；已存在的同名文件覆盖）
      * @return 导出的设备数
@@ -381,12 +381,11 @@ public final class ConfigRepository {
         }
         int count = 0;
         for (DeviceView device : this.listDevices()) {
-            Optional<DocumentView> doc = readDocument(
-                    device.legacyId() != null ? device.legacyId() : device.id());
+            Optional<DocumentView> doc = readDocument(device.name());
             if (doc.isEmpty()) {
                 continue;
             }
-            String fileName = (device.legacyId() != null ? device.legacyId() : device.name()) + ".json";
+            String fileName = device.name() + ".json";
             try {
                 Path target = dir.resolve(fileName);
                 Path tmp = dir.resolve(fileName + ".tmp");
@@ -453,32 +452,32 @@ public final class ConfigRepository {
         };
     }
 
-    private record DeviceRow(String id, String legacyId) {
+    private record DeviceRow(String id, String name) {
     }
 
-    /** key 解析：先按 legacy_id 精确命中，再按 id；都未命中抛 notFound。 */
+    /** key 解析：先按设备名精确命中，再按 id；都未命中抛 notFound。 */
     private static DeviceRow findLiveDevice(Connection connection, String key) throws SQLException {
         String trimmed = key == null ? "" : key.trim();
         try (PreparedStatement st = connection.prepareStatement(
-                "SELECT id, legacy_id FROM device WHERE deleted_at IS NULL AND (legacy_id=? OR id=?) LIMIT 2")) {
+                "SELECT id, name FROM device WHERE deleted_at IS NULL AND (name=? OR id=?) LIMIT 2")) {
             st.setString(1, trimmed);
             st.setString(2, trimmed);
             try (ResultSet rs = st.executeQuery()) {
                 String id = null;
-                String legacy = null;
+                String name = null;
                 while (rs.next()) {
                     String rowId = rs.getString(1);
-                    String rowLegacy = rs.getString(2);
-                    if (trimmed.equals(rowLegacy)) {
-                        return new DeviceRow(rowId, rowLegacy);
+                    String rowName = rs.getString(2);
+                    if (trimmed.equals(rowName)) {
+                        return new DeviceRow(rowId, rowName);
                     }
                     if (id == null) {
                         id = rowId;
-                        legacy = rowLegacy;
+                        name = rowName;
                     }
                 }
                 if (id != null) {
-                    return new DeviceRow(id, legacy);
+                    return new DeviceRow(id, name);
                 }
             }
         }
@@ -503,7 +502,7 @@ public final class ConfigRepository {
                         }
                     }
                 }
-                return new DeviceView(row.id(), row.legacyId(), rs.getString(1), rs.getString(2),
+                return new DeviceView(row.id(), rs.getString(1), rs.getString(2),
                         rs.getInt(3) == 1, rs.getString(4), revision, rs.getLong(5), rs.getLong(6));
             }
         }

@@ -195,24 +195,24 @@ public interface ApiContextSessionOps {
      * @return 结果
      */
     default SessionOutcome createSession(String configName) {
-        return createSession(SessionCreateRequest.of(configName));
+        return createSession(SessionCreateRequest.of(configName)).outcome();
     }
 
     /**
      * 新建一个会话，允许用部署期覆盖替换配置里的连接标识。
      *
-     * <p>默认实现忽略覆盖、按配置原文建——不支持覆盖的形态（如 CLI 演示）自然退化。</p>
+     * <p>默认实现忽略覆盖、按配置原文建——不支持覆盖的形态（如 CLI 演示）自然退化。
+     * 会话 id 由运行时生成，随结果一起返回。</p>
      *
      * @param request 配置名 + 部署期覆盖
-     * @return 结果
+     * @return 结果（含新会话 id）
      */
-    default SessionOutcome createSession(SessionCreateRequest request) {
+    default SessionCreated createSession(SessionCreateRequest request) {
         /* 不带覆盖时委托给旧的 String 重载：已有实现（含测试桩）不用跟着改 */
-        if (request.sessionId() == null && request.bindHost() == null
-                && request.port() == null && request.deviceId() == null) {
-            return createSession(request.config());
+        if (request.bindHost() == null && request.port() == null && request.deviceId() == null) {
+            return new SessionCreated(createSession(request.config()), "");
         }
-        return SessionOutcome.FAILED;
+        return SessionCreated.failed(SessionOutcome.FAILED);
     }
 
     /**
@@ -245,7 +245,7 @@ public interface ApiContextSessionOps {
     /**
      * v2：执行台账查询。
      *
-     * @param deviceId 设备 id（ULID 或 legacy stem）
+     * @param deviceId 设备 id（{@code dev_} ULID）或配置名 stem
      * @param limit    条数上限
      * @param planId   计划过滤；null = 全部
      * @param status   状态过滤；null = 全部
@@ -480,7 +480,7 @@ public interface ApiContextSessionOps {
     /**
      * v2：设备链路相位（device_link 行 + 内存相位）。
      *
-     * @param deviceId 设备 id（ULID 或 v1 legacy stem，两者等价）
+     * @param deviceId 设备 id（{@code dev_} ULID）或配置名 stem
      * @return JSON；设备不存在返回 {@code null}
      */
     default String deviceLinkV2Json(String deviceId) {
@@ -532,6 +532,20 @@ public interface ApiContextSessionOps {
      * @return 结果
      */
     default SessionOutcome deviceReloadV2(String deviceId) {
+        return SessionOutcome.UNKNOWN_SESSION;
+    }
+
+    /**
+     * v2：销毁设备会话（{@code DELETE /api/v2/devices/{id}}）。
+     *
+     * <p>与 {@link #deviceDisconnectV2} 的区别：断开只放链路，销毁要释放端口、
+     * 把会话从注册表移除，并清掉钉值 / 计划覆盖 / 目录编辑等运行态。
+     * 设备实体与配置正文保留（那是 {@code DELETE /api/v1/configs/{name}} 的事）。</p>
+     *
+     * @param deviceId 设备 id
+     * @return 结果
+     */
+    default SessionOutcome destroyDeviceV2(String deviceId) {
         return SessionOutcome.UNKNOWN_SESSION;
     }
 }

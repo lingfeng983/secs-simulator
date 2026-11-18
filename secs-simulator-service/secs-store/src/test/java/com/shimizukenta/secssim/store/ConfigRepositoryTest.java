@@ -36,10 +36,10 @@ class ConfigRepositoryTest {
     @Test
     void createSaveFindAndIdempotentSave() {
         setUp();
-        String id = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        String id = this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
         assertTrue(id.startsWith("dev_"));
 
-        /* 按 legacy_id 与 id 都能找到 */
+        /* 按设备名与设备 id 都能找到 */
         assertTrue(this.repo.findDevice("line1").isPresent());
         assertTrue(this.repo.findDevice(id).isPresent());
         assertEquals(1, this.repo.findDevice(id).get().revision());
@@ -60,7 +60,7 @@ class ConfigRepositoryTest {
     @Test
     void revisionConflictIsDetected() {
         setUp();
-        this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
         StoreException e = assertThrows(StoreException.class,
                 () -> this.repo.saveDocument("line1", BODY_V1 + " ", 99L, "test", ""));
         assertEquals(StoreException.Kind.CONFLICT, e.kind());
@@ -69,16 +69,16 @@ class ConfigRepositoryTest {
     @Test
     void duplicateNameIsRejected() {
         setUp();
-        this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
         StoreException e = assertThrows(StoreException.class,
-                () -> this.repo.createDevice("line1", "line2", "etch", BODY_V1, true, "test"));
+                () -> this.repo.createDevice("line1", "etch", BODY_V1, true, "test"));
         assertEquals(StoreException.Kind.CONFLICT, e.kind());
     }
 
     @Test
     void updateConstantsBumpsRevisionWithoutSnapshotAndAlignsRuntime() {
         setUp();
-        String id = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        String id = this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
 
         /* 先放一条 device_link（模拟设备已连接；按解析后的设备 id 建行） */
         RuntimeStateRepository runtime = new RuntimeStateRepository(this.db);
@@ -96,7 +96,7 @@ class ConfigRepositoryTest {
     @Test
     void revisionRetentionTrimsToTwoHundred() {
         setUp();
-        this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
         long revision = 1;
         for (int i = 0; i < 230; i++) {
             revision = this.repo.saveDocument("line1", BODY_V1 + "//" + i, null, "test", "");
@@ -109,11 +109,11 @@ class ConfigRepositoryTest {
     }
 
     @Test
-    void legacyIdResolutionPrefersExplicitLegacy() {
+    void keyResolutionAcceptsNameOrId() {
         setUp();
-        String id = this.repo.createDevice("新设备", "legacy-stem", "etch", BODY_V1, true, "test");
-        /* key 解析只认 legacy_id 与 id（v1 的 name == legacy stem） */
-        assertTrue(this.repo.findDevice("legacy-stem").isPresent());
+        String id = this.repo.createDevice("新设备", "etch", BODY_V1, true, "test");
+        /* key 解析认设备名与设备 id，别的一律查不到 */
+        assertTrue(this.repo.findDevice("新设备").isPresent());
         assertTrue(this.repo.findDevice(id).isPresent());
         assertFalse(this.repo.findDevice("没有的").isPresent());
     }
@@ -121,7 +121,7 @@ class ConfigRepositoryTest {
     @Test
     void deleteDeviceHidesRowButKeepsHistoryAndFreesTheName() throws SQLException {
         setUp();
-        String id = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        String id = this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
 
         assertTrue(this.repo.deleteDevice("line1"), "第一次删除应当删掉一台在用设备");
         /* 清单里消失：列表与按 key 查都查不到（key 解析只认未删除设备） */
@@ -133,7 +133,7 @@ class ConfigRepositoryTest {
 
         /* 再删一次不是"又删了一台"；同名设备可以重建（唯一索引只约束未删除行） */
         assertFalse(this.repo.deleteDevice("line1"));
-        String again = this.repo.createDevice("line1", "line1", "etch", BODY_V1, true, "test");
+        String again = this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
         assertEquals(1, this.repo.listDevices().size());
         assertTrue(this.repo.findDevice("line1").isPresent());
         assertFalse(again.equals(id), "重建得到的是新设备行，不复用旧 id");
@@ -143,7 +143,7 @@ class ConfigRepositoryTest {
     void exportRoundTripsBytesExactly() throws Exception {
         setUp();
         String body = "{\"schemaVersion\":6,\"session\":{\"id\":\"round\"}}";
-        this.repo.createDevice("round", "round", null, body, true, "test");
+        this.repo.createDevice("round", null, body, true, "test");
 
         Path out = this.workDir.resolve("exported");
         assertEquals(1, this.repo.exportTo(out));
@@ -153,7 +153,7 @@ class ConfigRepositoryTest {
     @Test
     void listRevisionsComesBackNewestFirst() {
         setUp();
-        this.repo.createDevice("r", "r", null, "{\"v\":1}", true, "test");
+        this.repo.createDevice("r", null, "{\"v\":1}", true, "test");
         this.repo.saveDocument("r", "{\"v\":2}", null, "test", "");
         List<ConfigRepository.RevisionView> revisions = this.repo.listRevisions("r", 10);
         assertEquals(2, revisions.size());

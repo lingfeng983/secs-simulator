@@ -27,6 +27,7 @@ import com.shimizukenta.secssim.core.event.EventSchedule;
 import com.shimizukenta.secssim.core.event.Trigger;
 import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
+import com.shimizukenta.secssim.store.Ids;
 
 /**
  * 会话的创建、关闭与热重载。
@@ -95,6 +96,10 @@ public final class SessionLauncher {
     /**
      * 按请求创建一个会话。
      *
+     * <p>会话 id 由服务端生成（{@code ses_} + ULID），<b>不再等于配置文件名</b>：
+     * 同一份配置可以先后起多个会话实例，配置名只作为来源记在
+     * {@code SessionSource} 与会话列表的 {@code config} 字段里。</p>
+     *
      * @name work-dir 下的配置文件名（数据库设备的正文）
      * @return 新建的会话标识
      * @throws ConfigException 名称非法、配置读不了或编译不过
@@ -107,7 +112,7 @@ public final class SessionLauncher {
     /**
      * 按请求创建一个会话，允许用部署期覆盖替换配置里的连接标识。
      *
-     * <p>多台设备复用同一份设备配置时，只有 id / 端口 / device-id 需要逐台给；
+     * <p>多台设备复用同一份设备配置时，只有端口 / 绑定地址 / device-id 需要逐台给；
      * 覆盖不写回配置文件，重载时会原样再套一遍。</p>
      *
      * @param name      work-dir 下的配置文件名
@@ -168,9 +173,10 @@ public final class SessionLauncher {
             }
 
             /* 先构造新的：编译不过时旧会话还好端端地跑着。
-               部署覆盖与来源配置一起带上——否则重载第 2 台会抢第 1 台的端口。 */
+               部署覆盖与来源配置一起带上——否则重载第 2 台会抢第 1 台的端口。
+               会话 id 沿用原来的：重载是同一台设备的同一次运行身份。 */
             String body = this.configStore.read(source.configName());
-            Prepared prepared = prepare(source.configName(), body, source.overrides());
+            Prepared prepared = prepare(source.configName(), body, source.overrides(), id);
             String fingerprint = structureFingerprint(body);
             SessionRuntime current = this.sessions.find(id).orElse(null);
 
@@ -207,13 +213,15 @@ public final class SessionLauncher {
             HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.configName());
             try {
                 this.close(id);
+                /* 来源先于注册写入：注册观察者要靠它把会话 id 换算成设备 id */
+                this.sources.put(id, source.withLastGood(prepared, fingerprint));
                 this.sessions.register(opened);
             } catch (RuntimeException e) {
+                this.sources.remove(id);
                 opened.close();
                 Log.error("重载会话 " + id + " 失败（新会话已关闭）: " + source.configName(), e);
                 throw e;
             }
-            this.sources.put(id, source.withLastGood(prepared, fingerprint));
             Log.info("会话 " + id + " 已重建（连接标识变化，主机需重连）");
             return true;
         } finally {
@@ -246,7 +254,7 @@ public final class SessionLauncher {
             /* 以磁盘上的新内容为准重新编译一次：保存已经落盘，这里只负责应用。
                编译不过说明保存与生效之间文件被改坏了——抛出去让调用方报失败。 */
             String body = this.configStore.read(source.configName());
-            Prepared prepared = prepare(source.configName(), body, source.overrides());
+            Prepared prepared = prepare(source.configName(), body, source.overrides(), id);
             String fingerprint = structureFingerprint(body);
             SessionRuntime current = this.sessions.find(id).orElse(null);
             if (!(current instanceof HsmsSessionRuntime running)) {
@@ -283,11 +291,12 @@ public final class SessionLauncher {
 
         try {
             HsmsSessionRuntime opened = prepared.open(this.bus, this.noticeBus, source.configName());
-            this.sessions.register(opened);
             this.sources.put(id, source.withLastGood(prepared, fingerprint));
+            this.sessions.register(opened);
             Log.info("会话 " + id + " 已重建（同端口：先关旧再开新）");
             return true;
         } catch (IOException | RuntimeException failure) {
+            this.sources.remove(id);
             restore(id, source, previous, failure);
             throw failure;
         }
@@ -302,10 +311,11 @@ public final class SessionLauncher {
         HsmsSessionRuntime restored = null;
         try {
             restored = previous.open(this.bus, this.noticeBus, source.configName());
-            this.sessions.register(restored);
             this.sources.put(id, source);
+            this.sessions.register(restored);
             Log.warn("重载失败，已用旧配置恢复会话: " + id);
         } catch (IOException | RuntimeException rollback) {
+            this.sources.remove(id);
             failure.addSuppressed(rollback);
             Log.error("重载失败，旧会话也无法恢复: " + id, rollback);
             /* 已经 open 出来但没注册成功（管理器已关 / id 冲突）时，端口、
@@ -368,6 +378,9 @@ public final class SessionLauncher {
     /**
      * 从配置正文启动一个会话（库内配置的入口）。
      *
+     * <p>会话 id 在进入装配前生成（{@code ses_} + ULID）：它与配置名解耦，
+     * 同一份配置先后起的两个实例也各有自己的身份。</p>
+     *
      * @param configName 配置名（文件名，诊断与常量回写定位用）
      * @param body       配置正文
      * @param overrides  部署期覆盖
@@ -377,7 +390,8 @@ public final class SessionLauncher {
      */
     public HsmsSessionRuntime startFromConfig(String configName, String body, SessionOverrides overrides)
             throws ConfigException, IOException {
-        Prepared prepared = prepare(configName, body, overrides);
+        String sessionId = Ids.nextSession();
+        Prepared prepared = prepare(configName, body, overrides, sessionId);
         this.lifecycleLock.lock();
         try {
             /* 先把"会话 id 已存在"判掉：否则同一端口的既有会话会让端口检查先命中，
@@ -387,25 +401,33 @@ public final class SessionLauncher {
             }
             requirePortFree(prepared.spec().id(), prepared.spec());
             HsmsSessionRuntime runtime = prepared.open(this.bus, this.noticeBus, configName);
+            /* 来源必须在注册<b>之前</b>记下：注册观察者（Bootstrap 的编排执行器 /
+               device_link 落库）要靠它把会话 id 换算成设备 id。 */
+            this.sources.put(runtime.id(), new SessionSource(configName, overrides,
+                    structureFingerprint(body), prepared));
             try {
                 this.sessions.register(runtime);
             } catch (RuntimeException e) {
                 /* 已经 open 的会话在注册失败时必须 close：否则端口与线程都泄漏 */
+                this.sources.remove(runtime.id());
                 runtime.close();
                 throw e;
             }
-            /* 命令行启动的会话同样要记下来源，否则只有接口建的会话能重载，
-               而"能不能重载"取决于配置从哪来，与会话怎么起来的关系 */
-            this.sources.put(runtime.id(), new SessionSource(configName, overrides,
-                    structureFingerprint(body), prepared));
             return runtime;
         } finally {
             this.lifecycleLock.unlock();
         }
     }
 
-    /** 读配置、编译、组装好但还没 open。 */
-    private Prepared prepare(String configName, String body, SessionOverrides overrides)
+    /**
+     * 读配置、编译、组装好但还没 open。
+     *
+     * @param configName 配置名（诊断与常量回写定位用）
+     * @param body       配置正文
+     * @param overrides  部署期覆盖
+     * @param sessionId  会话 id；新建时生成 ULID，重载时沿用原 id
+     */
+    private Prepared prepare(String configName, String body, SessionOverrides overrides, String sessionId)
             throws ConfigException {
         SessionConfig config;
         try {
@@ -421,12 +443,12 @@ public final class SessionLauncher {
         }
 
         SessionSpec configured = config.spec();
-        String id = overrides.sessionId() != null ? overrides.sessionId() : configured.id();
+        /* 会话 id 由服务端生成，配置里的 session.id 只是历史字段：不再参与身份 */
         String bindHost = overrides.bindHost() != null ? overrides.bindHost() : configured.bindHost();
         /* 端口以配置（数据库）为准，没有兜底；部署期覆盖仍可替换 */
         int port = overrides.port() != null ? overrides.port() : configured.port();
         int deviceId = overrides.deviceId() != null ? overrides.deviceId() : configured.deviceId();
-        SessionSpec spec = new SessionSpec(id, configured.passive(), bindHost, port, deviceId,
+        SessionSpec spec = new SessionSpec(sessionId, configured.passive(), bindHost, port, deviceId,
                 configured.seed(), configured.equipment(), configured.timeouts());
 
         /* 生命周期周期时钟：值求值与工艺周期状态机的共享实例（2026-11-16 设计 §5.2）。
@@ -656,13 +678,31 @@ public final class SessionLauncher {
                 return null;
             }
             /* 只有 session 段（连接标识/超时）变化才需要重建连接；
-               equipment / events / templates 的变化全部走热生效。 */
+               equipment / events / templates 的变化全部走热生效。
+               session.id 不再是会话身份（服务端生成 ULID），改它不该触发重建。 */
             StringBuilder sb = new StringBuilder();
-            appendCanonical(sb, root.get("session"));
+            appendCanonical(sb, withoutSessionId(root.get("session")));
             return sb.toString();
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 去掉 {@code session.id} 的视图：它已不参与会话身份，不该进结构指纹。 */
+    private static com.shimizukenta.jsonhub.JsonHub withoutSessionId(
+            com.shimizukenta.jsonhub.JsonHub session) {
+        if (session == null || !session.isObject() || !session.containsKey("id")) {
+            return session;
+        }
+        com.shimizukenta.jsonhub.JsonHubBuilder b = com.shimizukenta.jsonhub.JsonHub.getBuilder();
+        java.util.List<com.shimizukenta.jsonhub.JsonObjectPair> pairs = new java.util.ArrayList<>();
+        for (com.shimizukenta.jsonhub.JsonString key : session.keySet()) {
+            String name = key.unescaped();
+            if (!"id".equals(name)) {
+                pairs.add(b.pair(name, session.get(name)));
+            }
+        }
+        return b.object(pairs);
     }
 
     /** 规范化输出：键排序、数组保序；缺段输出 {@code null}。 */

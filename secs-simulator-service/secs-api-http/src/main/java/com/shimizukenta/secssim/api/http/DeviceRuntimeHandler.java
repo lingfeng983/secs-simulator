@@ -72,7 +72,37 @@ final class DeviceRuntimeHandler extends HttpSupport {
             this.handleDeviceRuntimeV2(ex, parts);
             return;
         }
+        if (parts.length == 1 && !parts[0].isBlank()
+                && "DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            /* DELETE /api/v2/devices/{id}：销毁会话（释放端口、清运行态）。
+               只断链走 /link/disconnect；删除设备实体走 DELETE /api/v1/configs/{name}。 */
+            this.handleDeviceDestroyV2(ex, parts[0]);
+            return;
+        }
         this.links.handleConfigRevisionsV2(ex);
+    }
+
+    /**
+     * DELETE /api/v2/devices/{id}：销毁会话。
+     *
+     * <p>端口释放、会话从注册表移除、运行态编辑清理；设备实体与配置正文保留，
+     * 之后再「启动设备」会按配置重建一个新的会话。</p>
+     *
+     * @param ex       交换
+     * @param deviceId 设备 id（或配置名 stem）
+     * @throws IOException 写响应失败
+     */
+    private void handleDeviceDestroyV2(HttpExchange ex, String deviceId) throws IOException {
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+        SessionOutcome outcome = this.context.destroyDeviceV2(deviceId);
+        audit(ex, "device-destroy", deviceId, "outcome=" + outcome);
+        switch (outcome) {
+            case OK -> respond(ex, 200, "{\"ok\":true,\"destroyed\":true}");
+            case UNKNOWN_SESSION -> respond(ex, 404, "{\"ok\":false,\"error\":\"device-not-running\"}");
+            default -> respond(ex, 502, "{\"ok\":false,\"error\":\"destroy-failed\"}");
+        }
     }
 
     /**

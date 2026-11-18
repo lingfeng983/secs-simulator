@@ -87,10 +87,7 @@ final class SessionHandler extends HttpSupport {
         try {
             request = sessionCreateRequestFrom(body);
         } catch (IllegalArgumentException e) {
-            /* sessionId 的问题单独给 bad-session-id，客户端不用去解析 message */
-            String error = e.getMessage() != null && e.getMessage().startsWith("sessionId")
-                    ? "bad-session-id" : "bad-request";
-            respond(ex, 400, "{\"ok\":false,\"error\":\"" + error + "\",\"message\":" + json(e.getMessage()) + "}");
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\",\"message\":" + json(e.getMessage()) + "}");
             return;
         }
         if (request == null) {
@@ -98,10 +95,12 @@ final class SessionHandler extends HttpSupport {
             return;
         }
 
-        SessionOutcome outcome = this.context.createSession(request);
-        audit(ex, "session-create", request.config(), "outcome=" + outcome);
-        switch (outcome) {
-            case OK -> respond(ex, 201, "{\"ok\":true}");
+        SessionCreated created = this.context.createSession(request);
+        audit(ex, "session-create", request.config(), "outcome=" + created.outcome()
+                + " id=" + created.sessionId());
+        switch (created.outcome()) {
+            /* 会话 id 由服务端生成，必须回给调用方：配置名不再等于 id */
+            case OK -> respond(ex, 201, "{\"ok\":true,\"id\":\"" + json(created.sessionId()) + "\"}");
             case CONFLICT -> respond(ex, 409, "{\"ok\":false,\"error\":\"session-exists\"}");
             default -> respond(ex, 400, "{\"ok\":false,\"error\":\"create-failed\"}");
         }
@@ -111,8 +110,9 @@ final class SessionHandler extends HttpSupport {
     /**
      * 从请求体解析"新建会话"请求：config 必填，其余是可选的部署期覆盖。
      *
-     * <p>覆盖字段（sessionId / bindHost / port / deviceId）缺省就用配置原文里的——
-     * 多台设备复用一份设备配置时只有这几项逐台不同。</p>
+     * <p>覆盖字段（bindHost / port / deviceId）缺省就用配置原文里的——
+     * 多台设备复用一份设备配置时只有这几项逐台不同。会话 id 不接受指定：
+     * 服务端生成 {@code ses_} + ULID 并随 201 响应返回。</p>
      *
      * @return 请求；体不是对象或缺 config 时返回 {@code null}
      */
@@ -126,17 +126,6 @@ final class SessionHandler extends HttpSupport {
             String config = optionalString(root, "config");
             if (config == null) {
                 return null;
-            }
-            String sessionId = optionalString(root, "sessionId");
-            if (sessionId != null && sessionId.isBlank()) {
-                /* 空/空白 id 会生成一个既不可寻址也不可关闭的会话 */
-                throw new IllegalArgumentException("sessionId 不能为空");
-            }
-            if (sessionId != null
-                    && (sessionId.contains("/") || sessionId.contains("\\")
-                        || sessionId.chars().anyMatch(Character::isWhitespace))) {
-                /* 会话 id 会进 URL 路径：带分隔符或空白会让这个会话不可寻址 */
-                throw new IllegalArgumentException("sessionId 不能包含路径分隔符或空白: " + sessionId);
             }
             Integer port = null;
             if (root.containsKey("port")) {
@@ -153,7 +142,7 @@ final class SessionHandler extends HttpSupport {
                     throw new IllegalArgumentException("deviceId 必须是 0..32767 的整数");
                 }
             }
-            return new SessionCreateRequest(config, sessionId,
+            return new SessionCreateRequest(config,
                     optionalString(root, "bindHost"), port, deviceId);
         } catch (IllegalArgumentException e) {
             throw e;
@@ -166,11 +155,11 @@ final class SessionHandler extends HttpSupport {
     /**
      * POST /api/v1/sessions/bulk：从一份设备配置批量开多台设备。
      *
-     * <p>体形如 {@code {"config":"tpl.json","count":5,"sessionIdPrefix":"dev-",
+     * <p>体形如 {@code {"config":"tpl.json","count":5,
      * "portBase":5100,"deviceIdBase":100,"bindHost":"127.0.0.1"}}。
-     * 第 i 台（从 1 起）的会话 id 是 {@code prefix+i}、端口 {@code portBase+i-1}、
-     * device-id {@code deviceIdBase+i-1}。逐台独立创建：一台起不来不影响其余，
-     * 全部成功回 201，部分失败回 207 并逐台给原因。</p>
+     * 第 i 台（从 1 起）的端口 {@code portBase+i-1}、device-id {@code deviceIdBase+i-1}；
+     * 会话 id 由服务端生成（{@code ses_} + ULID），响应里逐台回真实 id。逐台独立创建：
+     * 一台起不来不影响其余，全部成功回 201，部分失败回 207 并逐台给原因。</p>
      */
     void handleBulkSessions(HttpExchange ex) throws IOException {
         if (!ApiPaths.SESSIONS_BULK.equals(ex.getRequestURI().getPath())) {
@@ -208,24 +197,12 @@ final class SessionHandler extends HttpSupport {
         }
         String config = optionalString(root, "config");
         int count = num(root, "count");
-        String prefix = optionalString(root, "sessionIdPrefix");
         int portBase = num(root, "portBase");
         int deviceIdBase = num(root, "deviceIdBase");
         String bindHost = optionalString(root, "bindHost");
 
         if (config == null || count < 1 || count > 100) {
             respond(ex, 400, "{\"ok\":false,\"error\":\"count 必须在 1..100，且 config 必填\"}");
-            return;
-        }
-        /* 前缀缺省用 dev-：null + i 会拼出 "null1" 这种会话 id。
-           斜杠会破坏会话 id 在 URL 路径里的可寻址性，在入口拒绝。 */
-        if (prefix == null || prefix.isBlank()) {
-            prefix = "dev-";
-        }
-        if (prefix.contains("/") || prefix.contains("\\") || prefix.contains("\"")
-                || prefix.chars().anyMatch(Character::isWhitespace)) {
-            /* 引号/空白会破坏拼出来的 JSON 与会话 id 的可寻址性 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"sessionIdPrefix 不能包含路径分隔符、引号或空白\"}");
             return;
         }
 
@@ -235,21 +212,22 @@ final class SessionHandler extends HttpSupport {
         for (int i = 1; i <= count; i++) {
             Integer port = portBase > 0 ? portBase + i - 1 : null;
             Integer deviceId = deviceIdBase >= 0 ? deviceIdBase + i - 1 : null;
-            SessionCreateRequest request = new SessionCreateRequest(config, prefix + i, bindHost, port, deviceId);
-            SessionOutcome outcome = this.context.createSession(request);
-            audit(ex, "session-create", config + "#" + i, "outcome=" + outcome);
-            if (outcome == SessionOutcome.OK) {
+            SessionCreateRequest request = new SessionCreateRequest(config, bindHost, port, deviceId);
+            SessionCreated result = this.context.createSession(request);
+            audit(ex, "session-create", config + "#" + i, "outcome=" + result.outcome()
+                    + " id=" + result.sessionId());
+            if (result.outcome() == SessionOutcome.OK) {
                 if (okCount > 0) {
                     created.append(',');
                 }
-                created.append("\"").append(json(prefix + i)).append('"');
+                created.append("\"").append(json(result.sessionId())).append('"');
                 okCount++;
             } else {
                 if (failed.length() > 0) {
                     failed.append(',');
                 }
                 failed.append("{\"index\":").append(i)
-                        .append(",\"error\":\"").append(outcome.name().toLowerCase()).append("\"}");
+                        .append(",\"error\":\"").append(result.outcome().name().toLowerCase()).append("\"}");
             }
         }
 

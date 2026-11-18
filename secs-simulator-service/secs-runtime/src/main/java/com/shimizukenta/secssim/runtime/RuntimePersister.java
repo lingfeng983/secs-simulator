@@ -15,7 +15,7 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  * 按设备回填。写库是辅助动作：runtime.db 掉了、磁盘满了都不该让正在处理的
  * HTTP 请求 500——异常只记日志。</p>
  *
- * <p>设备键统一用 config.db 的 ULID（v1 的 legacy stem 由调用方归一），
+ * <p>设备键统一用 config.db 的 ULID（会话 id / 配置名由调用方归一），
  * 与台账、{@code device_link} 的归属保持一致。</p>
  */
 final class RuntimePersister {
@@ -27,7 +27,7 @@ final class RuntimePersister {
 
     private final RuntimeStateRepository state;
 
-    /** 会话 id / v1 legacy stem → config.db ULID。 */
+    /** 会话 id / 配置名 → config.db ULID。 */
     private final Function<String, String> deviceKey;
 
     /**

@@ -70,6 +70,18 @@ public final class Ids {
         return "dev_" + next();
     }
 
+    /**
+     * 会话实例 id（{@code ses_} 前缀）。
+     *
+     * <p>会话是进程内对象，但 id 与设备实体同形（ULID）：两者在同一张
+     * 「设备 ↔ 会话」映射表里对得上，重启后也不会与历史 id 相撞。</p>
+     *
+     * @return 形如 {@code ses_01J…} 的 id
+     */
+    public static String nextSession() {
+        return "ses_" + next();
+    }
+
     /** 主机实体 id（{@code host_} 前缀）。 */
     public static String nextHost() {
         return "host_" + next();

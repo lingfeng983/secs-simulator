@@ -17,7 +17,7 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
 /**
  * 3.0 v2 设备域的委托：运行时编辑、计划台账、链路相位与单步试跑。
  *
- * <p>全部方法先按 {@link DeviceIdResolver} 把设备 id 归一，再落到会话或台账。</p>
+ * <p>全部方法先把设备 id / 配置名落到 {@link DeviceSessions} 的会话或台账。</p>
  */
 final class DeviceV2Delegates {
 
@@ -26,17 +26,17 @@ final class DeviceV2Delegates {
             new java.util.concurrent.atomic.AtomicLong();
 
     private final RuntimeApi api;
-    private final DeviceIdResolver ids;
+    private final DeviceSessions devices;
     private final RuntimeStateRepository linkState;
     private final PlanExecutionRepository planExecutions;
     private final RuntimePersister persister;
     private final ConfigRepository configRepository;
 
-    DeviceV2Delegates(RuntimeApi api, DeviceIdResolver ids, RuntimeStateRepository linkState,
+    DeviceV2Delegates(RuntimeApi api, DeviceSessions devices, RuntimeStateRepository linkState,
             PlanExecutionRepository planExecutions, RuntimePersister persister,
             ConfigRepository configRepository) {
         this.api = api;
-        this.ids = ids;
+        this.devices = devices;
         this.linkState = linkState;
         this.planExecutions = planExecutions;
         this.persister = persister;
@@ -47,7 +47,7 @@ final class DeviceV2Delegates {
 
     String planExecutionsV2(String deviceId, int limit, String planId,
                             String status, String dryRun) {
-        String canonical = this.ids.canonical(deviceId);
+        String canonical = this.devices.deviceIdOf(deviceId);
         boolean includeDryRun = dryRun != null && ("all".equalsIgnoreCase(dryRun)
                 || "1".equals(dryRun) || "true".equalsIgnoreCase(dryRun));
         int capped = Math.max(1, Math.min(500, limit));
@@ -80,7 +80,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome clearExecutionsV2(String deviceId) {
-        String canonical = this.ids.canonical(deviceId);
+        String canonical = this.devices.deviceIdOf(deviceId);
         if (this.configRepository.findDevice(canonical).isEmpty()) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -94,7 +94,7 @@ final class DeviceV2Delegates {
     }
 
     TriggerOutcome stepPlanV2(String deviceId, String planId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return TriggerOutcome.UNKNOWN_SESSION;
         }
@@ -108,7 +108,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome setPlanEnabledV2(String deviceId, String planId, boolean enabled) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -122,20 +122,20 @@ final class DeviceV2Delegates {
         }
         /* next_fire_at 开始写入（§2.1）：周期计划 = enabledAt + k×period 的下一次；
            启用态不再跨重启回放（D4），本行只承载统计与倒计时初值 */
-        this.linkState.savePlanState(this.ids.canonical(deviceId), planId, enabled,
+        this.linkState.savePlanState(this.devices.deviceIdOf(deviceId), planId, enabled,
                 session.nextFireAtOf(planId), "");
         return SessionOutcome.OK;
     }
 
     /** 工艺周期运行态 JSON（M3）；设备不在返回 {@code null}。 */
     String cycleJsonV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? null : session.cycleJson();
     }
 
     /** 启动工艺周期：ONLINE 门控同计划启停；没有 cycle 段返回 FAILED（409 no-cycle）。 */
     SessionOutcome cycleStartV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -150,7 +150,7 @@ final class DeviceV2Delegates {
 
     /** 停止工艺周期（禁用方向不受 ONLINE 限制）。 */
     SessionOutcome cycleStopV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -161,13 +161,13 @@ final class DeviceV2Delegates {
     /* ---------- 计划与目录 ---------- */
 
     String plansV2Json(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return null;
         }
         /* 统计缺失的计划按「没跑过」处理：配置里有、runtime_plan_state 里没有很正常 */
         Map<String, PlanRuntimeStat> stats = new LinkedHashMap<>();
-        for (RuntimeStateRepository.PlanStateRow row : this.linkState.planStates(this.ids.canonical(deviceId))) {
+        for (RuntimeStateRepository.PlanStateRow row : this.linkState.planStates(this.devices.deviceIdOf(deviceId))) {
             stats.put(row.planId(), new PlanRuntimeStat(row.fireCount(), row.skippedCount(),
                     row.lastFireAt() == null ? 0L : row.lastFireAt(),
                     row.nextFireAt() == null ? 0L : row.nextFireAt(),
@@ -177,22 +177,22 @@ final class DeviceV2Delegates {
     }
 
     int addPlanV2(String deviceId, String planJson) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? 404 : this.api.addEventPlan(session.id(), planJson);
     }
 
     int updatePlanV2(String deviceId, String planId, String planJson) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? 404 : this.api.updateEventPlan(session.id(), planId, planJson);
     }
 
     int removePlanV2(String deviceId, String planId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? 404 : this.api.removeEventPlan(session.id(), planId);
     }
 
     int addCatalogV2(String deviceId, String kind, String bodyJson) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return 404;
         }
@@ -205,7 +205,7 @@ final class DeviceV2Delegates {
     }
 
     int updateCatalogV2(String deviceId, String kind, int key, String bodyJson) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return 404;
         }
@@ -218,7 +218,7 @@ final class DeviceV2Delegates {
     }
 
     int removeCatalogV2(String deviceId, String kind, int key) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return 404;
         }
@@ -231,22 +231,22 @@ final class DeviceV2Delegates {
     }
 
     int pinSvidV2(String deviceId, int svid, String valueJson) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? 404 : this.api.pinSvidValue(session.id(), svid, valueJson);
     }
 
     int unpinSvidV2(String deviceId, int svid) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? 404 : this.api.unpinSvidValue(session.id(), svid);
     }
 
     String sendSmlV2(String deviceId, String sml) throws IOException {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? null : this.api.sendSml(session.id(), sml);
     }
 
     TriggerOutcome triggerCeidV2(String deviceId, int ceid) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return TriggerOutcome.UNKNOWN_SESSION;
         }
@@ -254,7 +254,7 @@ final class DeviceV2Delegates {
         /* 台账要留证据（设计 §2.5）：手工触发也记一行，plan_id 固定 manual，
            这样「谁在什么时候手动发过一次」能直接查出来，不用翻报文日志 */
         long now = System.currentTimeMillis();
-        String canonical = this.ids.canonical(deviceId);
+        String canonical = this.devices.deviceIdOf(deviceId);
         String key = canonical + "|manual|" + ceid + "|" + now
                 + "|" + MANUAL_TRIGGER_SEQ.incrementAndGet();
         this.planExecutions.append(new PlanExecutionRepository.Execution(
@@ -266,7 +266,7 @@ final class DeviceV2Delegates {
 
     TriggerOutcome triggerAlarmV2(String deviceId, int alid, boolean set,
                                   String text, int category) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         return session == null ? TriggerOutcome.UNKNOWN_SESSION
                 : this.api.triggerAlarm(session.id(), alid, set, text, category);
     }
@@ -274,8 +274,8 @@ final class DeviceV2Delegates {
     /* ---------- 链路 ---------- */
 
     String deviceLinkV2Json(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
-        String canonical = this.ids.canonical(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
+        String canonical = this.devices.deviceIdOf(deviceId);
         /* 内存相位是权威：device_link 行可能落后一拍（相位回调是异步的） */
         String phase = session == null ? null
                 : RuntimeApi.phaseName(session.linkPhase());
@@ -299,7 +299,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome deviceConnectV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -322,7 +322,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome deviceDisconnectV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -333,7 +333,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome deviceOnlineV2(String deviceId, boolean online) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
@@ -347,7 +347,7 @@ final class DeviceV2Delegates {
     }
 
     SessionOutcome deviceReloadV2(String deviceId) {
-        HsmsSessionRuntime session = this.ids.sessionFor(deviceId);
+        HsmsSessionRuntime session = this.devices.sessionOf(deviceId);
         if (session == null) {
             return SessionOutcome.UNKNOWN_SESSION;
         }
