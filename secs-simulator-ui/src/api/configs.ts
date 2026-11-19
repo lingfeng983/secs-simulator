@@ -4,13 +4,14 @@
  * <p>这里没有任何会话状态：配置是磁盘上的文件，改完要重载会话才生效。</p>
  */
 
-import type { ApiClient, ConfigEntry, ConfigProblems, ConfigSectionApplyResult, ConfigSectionEffect, ConfigSectionName, ConfigSectionSaveResult, ConfigTemplateEntry, PreviewData } from './types';
-import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
+import type { ApiClient, ConfigEntry, ConfigProblems, ConfigSectionApplyResult, ConfigSectionEffect, ConfigSectionName, ConfigSectionSaveResult, ConfigTemplateEntry, DeviceBatchResult, PreviewData } from './types';
+import { ApiError, apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, readJson, request } from './base';
 
 type ConfigApi = Pick<
   ApiClient,
   | 'configs'
   | 'createConfig'
+  | 'createDevicesBatch'
   | 'deleteConfig'
   | 'configTemplates'
   | 'templates'
@@ -101,6 +102,32 @@ export const configApi: ConfigApi = {
       body: JSON.stringify(templateId ? { name, template: templateId } : { name }),
     });
     return commandStatus(response);
+  },
+  async createDevicesBatch(params) {
+    /* 最多 100 台、逐台建配置并启动，8 秒不够 */
+    const response = await request(apiUrl('/api/v1/devices/bulk'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(params),
+    }, LONG_REQUEST_TIMEOUT_MS);
+    const text = await response.text();
+    let body: DeviceBatchResult | null = null;
+    try {
+      body = JSON.parse(text) as DeviceBatchResult;
+    } catch {
+      body = null;
+    }
+    /* 409（整批重名）与 422（一台都没建成）都带逐台原因：当成结果返回，
+       让面板能把"哪几台叫什么名字撞了"直接说给用户，而不是一句 HTTP 409 */
+    if (body !== null && Array.isArray(body.created)) {
+      return {
+        created: body.created,
+        failed: Array.isArray(body.failed) ? body.failed : [],
+        conflicts: Array.isArray(body.conflicts) ? body.conflicts : [],
+      };
+    }
+    throw new ApiError(response.status, 'bad-body',
+      `${response.status} 返回的不是批量结果：${text.slice(0, 120)}`);
   },
   async deleteConfig(name) {
     /* 后端会先停掉这台设备的会话再软删配置：删完它就从这个清单里消失了 */

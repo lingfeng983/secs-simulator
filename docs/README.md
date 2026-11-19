@@ -43,6 +43,7 @@
 - [全量代码评审 2026-10-20（协议符合性专项）](reports/code-review-2026-10-20.md)
 - [实机全量测试 2026-10-30](reports/host-e2e-2026-10-30.md)
 - [结构收敛验收报告 2026-11-09](reports/refactor-2026-11-09.md) — 三阶段目录/分层治理的验收数字，决策见 [ADR 0016](adr/0016-layout-and-layer-consolidation.md)
+- [3.3.0 发布说明](reports/release-notes-3.3.0.md) — 功能版：批量新建设备改为一台一份配置（名字=前缀+序号、Device ID 恒 0、重名整批拒绝）、CI 恢复绿、界面文案门禁清零
 - [3.2.0 发布说明](reports/release-notes-3.2.0.md) — 功能版：说明文字全量悬浮化、新建设备弹框批量模式、新建主机「立即连接」开关
 - [3.1.0 发布说明](reports/release-notes-3.1.0.md) — 功能版：一台主机并发多份 S1F3 采集计划、桌面版可用性修复与打包冒烟门禁
 - [3.0.1 发布说明](reports/release-notes-3.0.1.md) — 缺陷修复版：Trace 重连停发、重载失败丢运行态编辑、界面轮询与导入假成功

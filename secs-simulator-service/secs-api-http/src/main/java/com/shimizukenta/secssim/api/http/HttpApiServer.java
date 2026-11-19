@@ -323,6 +323,9 @@ public final class HttpApiServer {
         http.createContext(ApiPaths.SESSION_PREFIX, withCors(this.sessions::handleSessionPath));
         http.createContext(ApiPaths.CONFIG_PREVIEW, withCors(this.configs::handleConfigPreview));
         http.createContext(ApiPaths.CONFIGS, withCors(this.configs::handleConfigs));
+        /* 批量新建设备必须注册在 CONFIG_PREFIX 之前：HttpServer 按最长前缀匹配，
+           但 /api/v1/devices/bulk 与 /api/v1/configs 不共享前缀，顺序只为可读 */
+        http.createContext(ApiPaths.DEVICES_BULK, withCors(this.configs::createDevicesBulk));
         http.createContext(ApiPaths.CONFIG_PREFIX, withCors(this.configs::handleConfigPath));
         http.createContext(ApiPaths.CONFIG_TEMPLATES, withCors(this.configs::handleConfigTemplates));
         http.createContext(ApiPaths.TEMPLATES, withCors(this.configs::handleTemplates));

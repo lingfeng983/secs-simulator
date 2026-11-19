@@ -407,7 +407,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
 
     return (
       <div className="session-fields">
-        <SessionField label="计划 id" required help="唯一标识：运行区的启停/试跑台账按它归属；「事件后」触发用它当源计划。">
+        <SessionField label="计划 id" required help="唯一标识：运行区的启停/试跑记录按它归属；「事件后」触发用它当源计划。">
           <TextField
             value={stringField(item, 'id')}
             onCommit={(next) => mutate((target) => {

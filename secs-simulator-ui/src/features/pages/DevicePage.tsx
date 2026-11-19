@@ -661,7 +661,7 @@ function DeviceRevisionsPanel({
           </tbody>
         </table>
       )}
-      <p className="hint">版本历史来自后端 config_revision 快照（新→旧）；点版本号看变更摘要，用「对比当前草稿」看逐行差异。</p>
+      <p className="hint">版本按时间从新到旧排列；点版本号看这次改了什么，用「对比当前草稿」看逐行差异。</p>
     </section>
   );
 }

@@ -191,10 +191,10 @@ export function effectNote(
   if (plansKept > 0) {
     notes.push(`事件计划已更新：${plansKept} 条未改动的计划保持运行`);
   } else if (reset.includes('plans') && effect === 'hot-reset') {
-    notes.push('设备模型变了：事件计划与钉值已重置，需要重新启动计划');
+    notes.push('设备模型变了：事件计划与手动设定的变量已重置，需要重新启动计划');
   }
   if (pinsDropped > 0) {
-    notes.push(`有 ${pinsDropped} 个钉值因变量被删而失效`);
+    notes.push(`有 ${pinsDropped} 个手动设定的变量因被删而失效`);
   }
   return notes.join('；');
 }

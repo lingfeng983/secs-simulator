@@ -361,6 +361,57 @@ test('新增设备：关掉「立即启动」只保存设备，不启动会话',
   expect(state.sessions.some((item) => item.id === 'etch-idle')).toBe(false);
 });
 
+test('批量新建设备：名字 = 前缀 + 序号，Device ID 为 0', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/');
+  const panel = page.locator('#panel-sessions');
+  await panel.getByRole('button', { name: '新建设备' }).click();
+  const dialog = page.getByRole('dialog');
+
+  await dialog.getByLabel('批量新建设备').check();
+  await dialog.getByLabel('新建设备使用的模板').selectOption('etch');
+  await dialog.getByLabel('批量数量').fill('3');
+  await dialog.getByLabel('批次前缀').fill('cell-');
+  /* 起始序号不是 1：名字要从它起算，不能还从 1 开始 */
+  await dialog.getByLabel('起始序号').fill('5');
+  await dialog.getByLabel('起始端口').fill('6200');
+  /* Device ID 不再逐台递增：这个输入项在批量模式里已去掉 */
+  await expect(dialog.getByLabel('Device ID 起始')).toHaveCount(0);
+  await dialog.getByRole('button', { name: '创建 3 台设备' }).click();
+
+  await expect.poll(() => state.calls.filter((call) => call === 'POST /api/v1/devices/bulk').length).toBe(1);
+  await expect(page.locator('.toast', { hasText: '已批量新建设备 3 台' }).first()).toBeVisible();
+  /* 三台独立配置，名字就是「前缀 + 序号」，端口逐台 +1 */
+  expect(state.createdConfigs).toEqual(['cell-5.json', 'cell-6.json', 'cell-7.json']);
+  expect(state.sessions.filter((item) => item.device.startsWith('CELL-')).map((item) => item.device))
+    .toEqual(['CELL-5', 'CELL-6', 'CELL-7']);
+  expect(state.sessions.filter((item) => item.device.startsWith('CELL-')).map((item) => item.port))
+    .toEqual([6200, 6201, 6202]);
+});
+
+test('批量新建设备：设备名重复时一台都不建', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/');
+  const panel = page.locator('#panel-sessions');
+  await panel.getByRole('button', { name: '新建设备' }).click();
+  const dialog = page.getByRole('dialog');
+
+  await dialog.getByLabel('批量新建设备').check();
+  await dialog.getByLabel('新建设备使用的模板').selectOption('etch');
+  await dialog.getByLabel('批量数量').fill('2');
+  /* line1 已经存在：名字重复要在弹框里就拦下 */
+  await dialog.getByLabel('批次前缀').fill('line');
+  await dialog.getByLabel('起始序号').fill('1');
+  await dialog.getByLabel('起始端口').fill('6300');
+  await dialog.getByRole('button', { name: '创建 2 台设备' }).click();
+
+  /* 本地预检直接拦：连后端都不用打，弹框留在原地让用户改前缀 */
+  await expect(dialog.locator('.problems')).toContainText('设备名已被占用');
+  await expect(dialog).toBeVisible();
+  expect(state.calls.filter((call) => call === 'POST /api/v1/devices/bulk')).toHaveLength(0);
+  expect(state.createdConfigs).toEqual([]);
+});
+
 test('设备清单：批量动作与新建都在表格工具条这一行', async ({ page }) => {
   await page.goto('/');
   const panel = page.locator('#panel-sessions');

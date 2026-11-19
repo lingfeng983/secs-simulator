@@ -33,6 +33,58 @@ export interface SessionBulkResult {
   failed: { index: number; error: string }[];
 }
 
+/**
+ * 批量新建设备的请求：一台设备一份配置，名字 = 前缀 + 序号。
+ *
+ * <p>与 {@link SessionBulkParams}（一份配置开多个会话）不是同一件事：
+ * 这里每台设备都有独立正文，清单里能分别编辑 / 重载 / 删除。</p>
+ */
+export interface DeviceBatchParams {
+  /** 设备模板标识（内置或自定义）。 */
+  template: string;
+  /** 批次前缀：第 i 台的设备名与配置文件名都是「前缀 + 序号」。 */
+  prefix: string;
+  /** 起始序号（含）：第 i 台用 start + i − 1。 */
+  start: number;
+  /** 台数（1–100）。 */
+  count: number;
+  /** 起始端口：第 i 台的端口 = portBase + i − 1。 */
+  portBase: number;
+  /** 监听/连接地址；空串按 0.0.0.0。 */
+  bindHost?: string;
+  /** 被动监听。 */
+  passive?: boolean;
+  /** 建完是否立刻启动会话。 */
+  startNow?: boolean;
+}
+
+/** 批量新建设备时真正建成的一台。 */
+export interface DeviceBatchCreated {
+  name: string;
+  deviceName: string;
+  port: number;
+  deviceId: number;
+  /** 会话 id；没启动或启动失败时为空串。 */
+  sessionId: string;
+  /** 会话启动失败的原因；成功或未启动时为空串。 */
+  sessionError: string;
+}
+
+/** 批量新建设备时没建成的一台。 */
+export interface DeviceBatchFailed {
+  name: string;
+  /** conflict / invalid / bad-name / port-in-use / failed */
+  error: string;
+  message: string;
+}
+
+/** 批量新建设备的结果。conflicts 非空 = 整批都没建（设备名重复）。 */
+export interface DeviceBatchResult {
+  created: DeviceBatchCreated[];
+  failed: DeviceBatchFailed[];
+  conflicts: string[];
+}
+
 export interface Counters {
   emitted?: number;
   rejected?: number;
@@ -535,6 +587,13 @@ export interface ApiClient {
   configs(): Promise<ConfigEntry[]>;
   /** 新建一份配置；templateId 缺省是空骨架，其余取内置设备模板目录里的 id。 */
   createConfig(name: string, templateId?: string): Promise<number>;
+  /**
+   * 批量新建设备：一台一份配置，名字 = 前缀 + 序号，Device ID 恒为 0。
+   *
+   * <p>设备名重复整批拒绝（后端回 409，{@code conflicts} 列出撞上的名字），
+   * 不会留下半批设备。</p>
+   */
+  createDevicesBatch(params: DeviceBatchParams): Promise<DeviceBatchResult>;
   /** 删掉一台设备（软删，后端先停会话）；404 = 本来就没有。 */
   deleteConfig(name: string): Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */

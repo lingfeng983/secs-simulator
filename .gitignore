@@ -12,6 +12,10 @@ __pycache__/
 /build/
 package/
 
+# ---- 本机验证残留（临时后端工作目录、冒烟日志）----
+/.verify-work/
+/.live-work/
+
 # ---- native / runtime images ----
 # 只忽略仓库根下的 runtime/（jlink 产物）；不要写成 runtime/，
 # 那会连 secs-simulator-service/secs-runtime 模块的 Java 源码一起忽略掉。

@@ -56,6 +56,7 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
     configList: [],
     configTemplates: vi.fn().mockResolvedValue([]),
     bulkCreateSessions: vi.fn().mockResolvedValue({ created: [], failed: [] }),
+    createDevicesBatch: vi.fn().mockResolvedValue({ created: [], failed: [], conflicts: [] }),
     batchTrigger: vi.fn().mockResolvedValue({ ok: 2, fail: 0 }),
     batchReload: vi.fn().mockResolvedValue({ ok: 2, fail: 0 }),
     batchClose: vi.fn().mockResolvedValue({ ok: 2, fail: 0 }),

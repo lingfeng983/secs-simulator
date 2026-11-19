@@ -136,6 +136,44 @@ paths:
                 $ref: '#/components/schemas/SessionBulkResult'
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/v1/devices/bulk:
+    post:
+      tags: [configs]
+      summary: 批量新建设备（一台一份配置）
+      description: |
+        第 i 台的设备名与配置文件名都是「前缀 + 序号」，序号从 start 起逐台 +1；
+        Device ID 一律为 0；端口从 portBase 起逐台 +1。
+        设备名必须唯一：整批名字里只要有一个已存在，就一台都不建并回 409，
+        `conflicts` 列出撞上的文件名。
+        与 `POST /api/v1/sessions/bulk` 的区别：那个是「一份配置开多个会话」，
+        这里每台设备都有独立正文，清单里能分别编辑 / 重载 / 删除。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceBatchRequest'
+      responses:
+        '201':
+          description: 已建成本批设备（个别失败见 `failed`）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceBatchResult'
+        '409':
+          description: 设备名重复，整批未执行；`conflicts` 列出撞上的文件名
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceBatchResult'
+        '422':
+          description: 一台都没建成（逐台给原因，见 `failed`）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceBatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/log-level:
     get:
       tags: [system]
@@ -2206,6 +2244,65 @@ components:
         deviceId:
           type: integer
           description: 部署期覆盖：device-id
+    DeviceBatchRequest:
+      type: object
+      required: [prefix, count, portBase]
+      properties:
+        template:
+          type: string
+          description: 设备模板标识；缺省是空骨架
+        prefix:
+          type: string
+          description: 批次前缀；第 i 台的设备名 = 前缀 + (start + i − 1)。不能含空白、斜杠或引号
+        start:
+          type: integer
+          minimum: 0
+          default: 1
+          description: 起始序号（含）
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        portBase:
+          type: integer
+          minimum: 1
+          description: 第 i 台的端口 = portBase + i − 1
+        bindHost:
+          type: string
+          description: 监听/连接地址；缺省 0.0.0.0
+        passive:
+          type: boolean
+          default: true
+        startNow:
+          type: boolean
+          default: true
+          description: 建完是否立刻启动会话
+    DeviceBatchResult:
+      type: object
+      properties:
+        created:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, description: 配置文件名 }
+              deviceName: { type: string }
+              port: { type: integer }
+              deviceId: { type: integer, description: 批量新建恒为 0 }
+              sessionId: { type: string, description: 没启动或启动失败时为空串 }
+              sessionError: { type: string }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              error: { type: string }
+              message: { type: string }
+        conflicts:
+          type: array
+          description: 非空表示整批未执行（设备名重复）
+          items: { type: string }
     SessionBulkRequest:
       type: object
       required: [config, count]

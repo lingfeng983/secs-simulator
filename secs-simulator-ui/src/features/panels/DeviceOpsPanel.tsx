@@ -10,7 +10,7 @@ import type { PanelBaseProps } from './types';
 import { DEFAULT_REGION } from '../../state/useRegions';
 import { STATE_FILTER_ORDER, openTargetOf, useDeviceRows } from './deviceOpsRows';
 import { deviceOpsColumns } from './deviceOpsColumns';
-import { CreateDeviceModal, parseBatchNumbers, type CreateDeviceDraft } from './CreateDeviceModal';
+import { CreateDeviceModal, batchDeviceName, parseBatchNumbers, type CreateDeviceDraft } from './CreateDeviceModal';
 import { SyncConfigModal } from './SyncConfigModal';
 
 /**
@@ -33,7 +33,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
     name: '', host: '0.0.0.0', port: '5010', deviceId: '0',
     passive: 'true', templateId: 'etch', region: DEFAULT_REGION, newRegion: '',
     startNow: true,
-    batch: false, count: '5', prefix: 'dev-', portBase: '5100', deviceIdBase: '0',
+    batch: false, count: '5', prefix: 'dev-', start: '1', portBase: '5100',
   });
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string>('');
@@ -200,7 +200,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       count: '5',
       prefix: 'dev-',
       portBase: String(port),
-      deviceIdBase: '0',
+      start: '1',
     });
     setCreateOpen(true);
   };
@@ -242,11 +242,14 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   };
 
   /**
-   * 批量新建设备：按模板建（或复用）一份基础配置，再走 /sessions/bulk 逐台递增开多台。
+   * 批量新建设备：一台一份独立配置，设备名 = 批次前缀 + 序号。
    *
-   * <p>第 i 台的端口/Device ID 是运行期覆盖，会话 id 由服务端生成，都不写回配置文件——
-   * 一批设备共用一份配置本体（单元、变量、事件都一致）。基础配置名带模板 id，
-   * 同「前缀+模板」的批次复用同一份，不同模板互不覆盖。</p>
+   * <p>与「一份配置开多个会话」的旧做法不同，这里每台都有正文，
+   * 清单里能分别编辑 / 重载 / 删除。名字先整批查重：只要有一个已存在就
+   * 一台都不建（后端回 409 并列出撞上的名字），避免留下半批设备让人自己收拾。</p>
+   *
+   * <p>Device ID 一律为 0：同一批设备是同一角色，逐台编 device-id 只会让
+   * 现场对着主机侧配置多改一遍。</p>
    */
   const createBatchDevices = async (draft: CreateDeviceDraft) => {
     if (backend.client === null || backend.client === undefined) {
@@ -254,10 +257,10 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
     }
     const numbers = parseBatchNumbers(draft);
     if (numbers === null) {
-      setCreateError('数量、起始端口、Device ID 起始都需要是整数');
+      setCreateError('数量、起始序号、起始端口都需要是整数');
       return;
     }
-    const { count, prefix, portBase, deviceIdBase } = numbers;
+    const { count, prefix, start, portBase } = numbers;
     if (count < 1 || count > 100) {
       setCreateError('数量需要是 1–100 之间的整数');
       return;
@@ -266,77 +269,81 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       setCreateError('批次前缀不能为空，且不能含空白、斜杠或引号');
       return;
     }
-    if (portBase < 1 || portBase + count - 1 > 65535) {
-      setCreateError(`起始端口需要在 1–${65536 - count} 之间（${count} 台逐台递增）`);
+    if (start < 0) {
+      setCreateError('起始序号需要是非负整数');
       return;
     }
-    if (deviceIdBase < 0 || deviceIdBase + count - 1 > 32767) {
-      setCreateError(`Device ID 起始需要在 0–${32768 - count} 之间（${count} 台逐台递增）`);
+    if (portBase < 1 || portBase + count - 1 > 65535) {
+      setCreateError(`起始端口需要在 1–${65536 - count} 之间（${count} 台逐台递增）`);
       return;
     }
     if (draft.templateId === '') {
       setCreateError('请选择设备模板');
       return;
     }
-    /* 会话 id 由服务端生成（ses_ ULID），批量重建不再有"同名 id"冲突；
-       真正要避的是基础配置名撞车，下面按模板 id 拼名即可 */
-    /* 基础配置名带模板 id：同模板+同前缀的批次复用同一份，不同模板互不覆盖 */
-    const stem = prefix.replace(/[^\w.-]+/g, '-').replace(/[._-]+$/, '');
-    const baseName = `${stem === '' ? 'batch' : stem}-${draft.templateId}-base.json`;
-    const bindHost = draft.host.trim() === '' ? '0.0.0.0' : draft.host.trim();
+    /* 本地先查一遍重名：让用户在弹框里就改前缀，不用等一次往返才看到红字 */
+    const existingNames = new Set([
+      ...configList.map((entry) => entry.name.toLowerCase()),
+      ...sessions.map((session) => (session.config ?? '').toLowerCase()),
+    ]);
+    const conflicts = Array.from({ length: count }, (_, index) => batchDeviceName(prefix, start, index))
+      .filter((name) => existingNames.has(`${name}.json`.toLowerCase()));
+    if (conflicts.length > 0) {
+      setCreateError(`设备名已被占用：${conflicts.slice(0, 5).join('、')}${conflicts.length > 5 ? ` 等 ${conflicts.length} 台` : ''}；换一个前缀或起始序号`);
+      return;
+    }
     setCreateError('');
     setBatchBusy(true);
     setBatchProgress('批量新建…');
     try {
-      const freshConfigs = await backend.client.configs();
-      const exists = freshConfigs.some((entry) => entry.name === baseName)
-        || configList.some((entry) => entry.name === baseName);
-      if (!exists) {
-        const status = await backend.client.createConfig(baseName, draft.templateId);
-        if (status !== 201 && status !== 200) {
-          setCreateError(`按模板创建基础配置失败（HTTP ${status}）`);
-          return;
-        }
-        /* 被动模式与监听地址写进基础配置；端口/Device ID 由批量接口逐台覆盖 */
-        const snapshot = await backend.readConfig(baseName);
-        if (snapshot !== null) {
-          try {
-            const root = JSON.parse(snapshot.text) as Record<string, unknown>;
-            const session = root.session !== null && typeof root.session === 'object'
-              ? root.session as Record<string, unknown>
-              : {};
-            session.passive = draft.passive === 'true';
-            session.bindHost = bindHost;
-            root.session = session;
-            await backend.saveConfig(baseName, JSON.stringify(root, null, 2), null);
-          } catch {
-            /* 模板原文不是合法 JSON 时由后续创建报错 */
-          }
-        }
-      }
-      const result = await backend.bulkCreateSessions({
-        config: baseName,
+      const result = await backend.createDevicesBatch({
+        template: draft.templateId,
+        prefix,
+        start,
         count,
         portBase,
-        deviceIdBase,
-        bindHost,
+        bindHost: draft.host.trim() === '' ? '0.0.0.0' : draft.host.trim(),
+        passive: draft.passive === 'true',
+        startNow: draft.startNow,
       });
-      await backend.refreshConfigs();
       if (result === null) {
-        /* 失败详情已由 bulkCreateSessions 自己提示；弹框留着改参数重试 */
+        /* 请求本身失败（后端不可达等）已由 createDevicesBatch 提示 */
+        return;
+      }
+      if (result.conflicts.length > 0) {
+        const shown = result.conflicts.slice(0, 5).join('、');
+        const tail = result.conflicts.length > 5 ? ` 等 ${result.conflicts.length} 台` : '';
+        setCreateError(`设备名已被占用：${shown}${tail}；一台都没有创建，换一个前缀或起始序号`);
         return;
       }
       const region = draft.newRegion.trim() === '' ? draft.region : draft.newRegion.trim();
       if (region !== '') {
         regions?.addRegion(region);
-        /* 区域按配置名归属：一批设备共用一份基础配置，逐台 id 在这里没有意义 */
-        regions?.setDeviceRegion(baseName, region);
+        /* 区域按配置名归属：每台一份配置，逐台记 */
+        for (const item of result.created) {
+          regions?.setDeviceRegion(item.name, region);
+        }
+      }
+      if (result.created.length === 0) {
+        const first = result.failed[0];
+        setCreateError(first === undefined
+          ? '一台都没有创建'
+          : `一台都没有创建：${first.name} ${first.message}`);
+        return;
       }
       setCreateOpen(false);
-      const failedNote = result.failed.length > 0 ? `，${result.failed.length} 台失败` : '';
+      await backend.refreshConfigs();
+      const parts = [`已批量新建设备 ${result.created.length} 台`];
+      if (result.failed.length > 0) {
+        parts.push(`${result.failed.length} 台失败`);
+      }
+      const notStarted = result.created.filter((item) => item.sessionError !== '').length;
+      if (notStarted > 0) {
+        parts.push(`${notStarted} 台已保存但没启动`);
+      }
       notifier.success(
-        `已批量新建设备 ${result.created.length} 台${failedNote}`,
-        `配置 ${baseName}`,
+        parts.join('，'),
+        `${batchDeviceName(prefix, start, 0)} … ${batchDeviceName(prefix, start, count - 1)}`,
       );
     } finally {
       setBatchBusy(false);

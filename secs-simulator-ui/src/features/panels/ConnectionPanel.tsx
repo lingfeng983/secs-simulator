@@ -22,7 +22,7 @@ export function ConnectionPanel({ backend, sessionId, configName }: PanelBasePro
       confirmOnSave={{
         title: '保存连接参数并重启会话？',
         message: '端口 / 绑定地址 / Device ID 改完要按新参数重建会话：端口会重新监听，'
-          + '当前连接会断开，钉值、计划启用态、周期进度等运行状态全部清空。',
+          + '当前连接会断开，手动设定的变量、计划启用态、周期进度等运行状态全部清空。',
         confirmLabel: '保存并重启会话',
       }}
     >
@@ -30,7 +30,7 @@ export function ConnectionPanel({ backend, sessionId, configName }: PanelBasePro
         <>
           <p className="hint">
             这段是 HSMS 连接参数。<b>保存后会按新参数重启会话</b>：端口重新监听、当前连接断开，
-            钉值 / 计划启用态 / 周期进度这些运行状态全部清空（设备启动着保存会先问一句）。
+            手动设定的变量 / 计划启用态 / 周期进度这些运行状态全部清空（设备启动着保存会先问一句）。
           </p>
           <SessionForm root={root} edit={edit} />
         </>

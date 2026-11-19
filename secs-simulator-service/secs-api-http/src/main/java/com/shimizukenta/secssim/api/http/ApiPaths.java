@@ -44,6 +44,14 @@ final class ApiPaths {
     /** 配置目录。 */
     static final String CONFIGS = "/api/v1/configs";
 
+    /**
+     * 批量新建设备（一台一份配置，名字 = 前缀 + 序号）。
+     *
+     * <p>与 {@link #SESSIONS_BULK}（一份配置开多个会话）不同：这里每台设备
+     * 都有独立正文，清单里能分别编辑 / 重载 / 删除。</p>
+     */
+    static final String DEVICES_BULK = "/api/v1/devices/bulk";
+
     /** 单份配置前缀。 */
     static final String CONFIG_PREFIX = "/api/v1/configs/";
 

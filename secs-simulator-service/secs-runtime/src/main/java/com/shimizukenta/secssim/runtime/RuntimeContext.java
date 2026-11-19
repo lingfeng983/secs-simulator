@@ -6,6 +6,7 @@ import java.util.List;
 import com.shimizukenta.secssim.api.http.ApiContext;
 import com.shimizukenta.secssim.api.http.ConfigOutcome;
 import com.shimizukenta.secssim.api.http.ConfigResult;
+import com.shimizukenta.secssim.api.http.DeviceBatch;
 import com.shimizukenta.secssim.api.http.ParamTemplateSaved;
 import com.shimizukenta.secssim.api.http.SessionCreateRequest;
 import com.shimizukenta.secssim.api.http.SessionCreated;
@@ -737,6 +738,16 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
     public ConfigResult createConfig(String name, String templateId) {
         ConfigResult result = this.api.createConfig(name, templateId);
         this.announceConfig(name, "create", result);
+        return result;
+    }
+
+    @Override
+    public DeviceBatch.Result createDevicesBatch(DeviceBatch.Request request) {
+        DeviceBatch.Result result = this.api.createDevicesBatch(request);
+        /* 逐台通知：别处开着的清单页要能一台一台地冒出来，而不是等下一次轮询 */
+        for (DeviceBatch.Created created : result.created()) {
+            this.announceConfig(created.name(), "create", ConfigResult.ok());
+        }
         return result;
     }
 

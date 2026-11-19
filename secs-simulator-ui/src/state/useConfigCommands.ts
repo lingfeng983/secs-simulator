@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from 'react';
 import type {
   ApiClient, ConfigProblems, ConfigSaveResult, ConfigSectionApplyResult, ConfigSectionName,
-  ConfigSectionSaveResult, ConfigTemplateEntry, ConfigTextSnapshot,
+  ConfigSectionSaveResult, ConfigTemplateEntry, ConfigTextSnapshot, DeviceBatchParams, DeviceBatchResult,
 } from '../api';
 import { effectNote } from '../shared/lib/configSections';
 import type { Notifier } from './useToasts';
@@ -47,6 +47,31 @@ export function useConfigCommands({
       } catch (error) {
         notifierRef.current.error('新建配置失败', (error as Error).message);
         return 0;
+      }
+    },
+    [client, refreshConfigs],
+  );
+
+  /**
+   * 批量新建设备：一台一份配置，名字 = 前缀 + 序号。
+   *
+   * <p>不在这里弹成功提示：调用方还要处理"设备名重复"这种整批拒绝的情形
+   * （`conflicts` 非空），由它决定说哪一句。</p>
+   */
+  const createDevicesBatch = useCallback(
+    async (params: DeviceBatchParams): Promise<DeviceBatchResult | null> => {
+      if (client === null) {
+        return null;
+      }
+      try {
+        return await client.createDevicesBatch(params);
+      } catch (error) {
+        notifierRef.current.error('批量新建失败', (error as Error).message);
+        return null;
+      } finally {
+        /* 建到了没有、建了几台，都要让清单重新取一遍：
+           整批被拒时清单没变，重取一次也不贵 */
+        await refreshConfigs();
       }
     },
     [client, refreshConfigs],
@@ -207,10 +232,10 @@ export function useConfigCommands({
 
   return useMemo(
     () => ({
-      createConfig, deleteConfig, readConfig, validateConfig, saveConfig,
+      createConfig, createDevicesBatch, deleteConfig, readConfig, validateConfig, saveConfig,
       saveConfigSections, applyConfigSections, configTemplates,
     }),
-    [createConfig, deleteConfig, readConfig, validateConfig, saveConfig,
+    [createConfig, createDevicesBatch, deleteConfig, readConfig, validateConfig, saveConfig,
       saveConfigSections, applyConfigSections, configTemplates],
   );
 }

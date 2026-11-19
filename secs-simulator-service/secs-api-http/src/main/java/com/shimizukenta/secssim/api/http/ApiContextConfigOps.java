@@ -116,6 +116,31 @@ public interface ApiContextConfigOps {
     }
 
     /**
+     * 批量新建设备：一台设备一份配置，名字是「批次前缀 + 序号」。
+     *
+     * <p>与 {@code POST /api/v1/sessions/bulk}（一份配置开多个会话）不是同一件事：
+     * 这里每台设备都有独立的正文，清单里能分别编辑 / 重载 / 删除。
+     * 重名一律整批拒绝——不允许建到一半才发现撞名。</p>
+     *
+     * @param request 模板、前缀、起始序号、台数、端口段与启动开关
+     * @return 逐台结果；{@code conflicts} 非空表示整批未执行
+     */
+    default DeviceBatch.Result createDevicesBatch(DeviceBatch.Request request) {
+        return new DeviceBatch.Result(java.util.List.of(), java.util.List.of(),
+                java.util.List.of("当前形态不支持批量新建设备"));
+    }
+
+    /**
+     * 删一份配置：批量新建失败回滚用（建到一半失败时，把已经建出来的删掉）。
+     *
+     * @param name 文件名
+     * @return 结果
+     */
+    default ConfigResult deleteConfigQuietly(String name) {
+        return this.deleteConfig(name);
+    }
+
+    /**
      * 删除一份配置（= 从设备清单里删掉一台设备）。
      *
      * <p>实现方要先停掉这台设备的会话再删：配置没了、端口还在监听，

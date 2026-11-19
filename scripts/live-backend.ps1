@@ -1,4 +1,4 @@
-# Live integration-test backend launcher (temp helper).
+﻿# Live integration-test backend launcher (temp helper).
 $root = 'E:/ai/secs-simulator'
 $cp = (Get-Content (Join-Path $root 'secs-simulator-service/secs-cli/cp.txt') -Raw).Trim()
 # 模块 target/classes 前置：cp.txt 里是 .m2 的已安装 jar（可能是旧版），

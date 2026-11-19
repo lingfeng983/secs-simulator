@@ -263,43 +263,240 @@ public final class ConfigStore {
         } catch (ConfigException e) {
             return ConfigResult.notFound(e.getMessage());
         }
+        return this.createFromText(name, rewriteIdentity(text, stem, stem), templateId);
+    }
+
+    /**
+     * 按模板新建一台设备，设备名与配置文件名可以不同。
+     *
+     * <p>批量新建要的正是这个：文件名是「前缀+序号」（清单里的唯一键），
+     * 设备名也是「前缀+序号」，但两者都取自同一份模板正文，
+     * {@code session.id} 还要跟着文件名走。</p>
+     *
+     * <p>连接参数按参数覆盖，{@code deviceId} 由调用方给（批量新建恒为 0）。
+     * 覆盖只写进这份配置正文——它就是这台设备自己的定义，不像
+     * {@code SessionOverrides} 那样只在运行期生效。</p>
+     *
+     * @param name       配置文件名（{@code dev-1.json}）
+     * @param templateId 设备模板标识
+     * @param deviceName 设备名（{@code equipment.name}）；空串取文件名主名
+     * @param port       HSMS 端口（1–65535）
+     * @param bindHost   监听/连接地址；空串按 {@code 0.0.0.0}
+     * @param passive    是否被动监听
+     * @param deviceId   device-id（0–32767）
+     * @return 结果
+     */
+    public ConfigResult createNamed(String name, String templateId, String deviceName,
+                                    int port, String bindHost, boolean passive, int deviceId) {
+        String stem;
+        try {
+            stem = stemOf(name);
+        } catch (ConfigException e) {
+            return ConfigResult.notFound(e.getMessage());
+        }
+        if (this.repository.findDevice(stem).isPresent()) {
+            return ConfigResult.conflict("已经有同名的配置了: " + name);
+        }
+        String text = DeviceTemplates.json(templateId, name).orElse(null);
+        if (text == null) {
+            return ConfigResult.invalid(List.of(
+                    "未知模板: " + templateId + "（可用: " + DeviceTemplates.ids() + "）"));
+        }
+        String wanted = deviceName == null || deviceName.isBlank() ? stem : deviceName.trim();
+        String patched = rewriteConnection(text, stem, wanted, port, bindHost, passive, deviceId);
+        return this.createFromText(name, patched, templateId);
+    }
+
+    /**
+     * 换掉正文里的身份字段：{@code session.id} 与 {@code equipment.name}。
+     *
+     * @param text       正文
+     * @param sessionId  session.id
+     * @param deviceName equipment.name
+     * @return 新正文；解析不了时原样返回，交给后续校验报错
+     */
+    private static String rewriteIdentity(String text, String sessionId, String deviceName) {
         try {
             JsonHub root = JsonHub.fromJson(text);
-            if (root.isObject()) {
-                JsonHubBuilder b = JsonHub.getBuilder();
-                List<JsonObjectPair> pairs = new ArrayList<>();
-                for (JsonString key : root.keySet()) {
-                    String field = key.unescaped();
-                    if ("session".equals(field) && root.get(field).isObject()) {
-                        JsonHub session = root.get(field);
-                        List<JsonObjectPair> sessionPairs = new ArrayList<>();
-                        for (JsonString sessionKey : session.keySet()) {
-                            String nameKey = sessionKey.unescaped();
-                            sessionPairs.add("id".equals(nameKey)
-                                    ? b.pair("id", stem)
-                                    : b.pair(nameKey, session.get(nameKey)));
-                        }
-                        pairs.add(b.pair("session", b.object(sessionPairs)));
-                    } else if ("equipment".equals(field) && root.get(field).isObject()) {
-                        JsonHub equipment = root.get(field);
-                        List<JsonObjectPair> equipmentPairs = new ArrayList<>();
-                        for (JsonString equipmentKey : equipment.keySet()) {
-                            String nameKey = equipmentKey.unescaped();
-                            equipmentPairs.add("name".equals(nameKey)
-                                    ? b.pair("name", stem)
-                                    : b.pair(nameKey, equipment.get(nameKey)));
-                        }
-                        pairs.add(b.pair("equipment", b.object(equipmentPairs)));
-                    } else {
-                        pairs.add(b.pair(field, root.get(field)));
-                    }
-                }
-                text = b.object(pairs).toJson();
+            if (!root.isObject()) {
+                return text;
             }
+            JsonHubBuilder b = JsonHub.getBuilder();
+            List<JsonObjectPair> pairs = new ArrayList<>();
+            for (JsonString key : root.keySet()) {
+                String field = key.unescaped();
+                if ("session".equals(field) && root.get(field).isObject()) {
+                    JsonHub session = root.get(field);
+                    List<JsonObjectPair> sessionPairs = new ArrayList<>();
+                    for (JsonString sessionKey : session.keySet()) {
+                        String nameKey = sessionKey.unescaped();
+                        sessionPairs.add("id".equals(nameKey)
+                                ? b.pair("id", sessionId)
+                                : b.pair(nameKey, session.get(nameKey)));
+                    }
+                    pairs.add(b.pair("session", b.object(sessionPairs)));
+                } else if ("equipment".equals(field) && root.get(field).isObject()) {
+                    JsonHub equipment = root.get(field);
+                    List<JsonObjectPair> equipmentPairs = new ArrayList<>();
+                    for (JsonString equipmentKey : equipment.keySet()) {
+                        String nameKey = equipmentKey.unescaped();
+                        equipmentPairs.add("name".equals(nameKey)
+                                ? b.pair("name", deviceName)
+                                : b.pair(nameKey, equipment.get(nameKey)));
+                    }
+                    pairs.add(b.pair("equipment", b.object(equipmentPairs)));
+                } else {
+                    pairs.add(b.pair(field, root.get(field)));
+                }
+            }
+            return b.object(pairs).toJson();
         } catch (RuntimeException e) {
             /* 原样交给校验报错 */
+            return text;
         }
-        return this.createFromText(name, text, templateId);
+    }
+
+    /**
+     * 换掉连接参数：{@code session} 段的 id / port / bindHost / passive / deviceId。
+     *
+     * <p>缺哪个键就补哪个键，已有键原位替换——不重排其它字段，
+     * 也不把配置里没写的键变成"不存在"。</p>
+     *
+     * @param text       正文
+     * @param sessionId  session.id
+     * @param deviceName equipment.name
+     * @param port       端口
+     * @param bindHost   绑定地址
+     * @param passive    是否被动
+     * @param deviceId   device-id
+     * @return 新正文；解析不了时原样返回，交给后续校验报错
+     */
+    static String rewriteConnection(String text, String sessionId, String deviceName,
+                                    int port, String bindHost, boolean passive, int deviceId) {
+        try {
+            JsonHub root = JsonHub.fromJson(text);
+            if (!root.isObject()) {
+                return text;
+            }
+            JsonHubBuilder b = JsonHub.getBuilder();
+            String host = bindHost == null || bindHost.isBlank() ? "0.0.0.0" : bindHost.trim();
+            JsonHub session = root.get("session");
+            if (session == null || !session.isObject()) {
+                session = b.emptyObject();
+            }
+            /* 先按原顺序改写已有键，再补上模板里没写的键：
+               模板骨架都带这五个字段，补键只会发生在自定义模板上 */
+            JsonHub newSession = withSessionFields(session, b, sessionId, port, host, passive, deviceId);
+            JsonHub equipment = root.get("equipment");
+            JsonHub newEquipment = equipment == null || !equipment.isObject()
+                    ? b.object(List.of(b.pair("name", deviceName)))
+                    : withStringField(equipment, b, "name", deviceName);
+            List<JsonObjectPair> pairs = new ArrayList<>();
+            boolean sessionDone = false;
+            boolean equipmentDone = false;
+            for (JsonString key : root.keySet()) {
+                String field = key.unescaped();
+                if ("session".equals(field)) {
+                    pairs.add(b.pair("session", newSession));
+                    sessionDone = true;
+                } else if ("equipment".equals(field)) {
+                    pairs.add(b.pair("equipment", newEquipment));
+                    equipmentDone = true;
+                } else {
+                    pairs.add(b.pair(field, root.get(field)));
+                }
+            }
+            if (!sessionDone) {
+                pairs.add(0, b.pair("session", newSession));
+            }
+            if (!equipmentDone) {
+                pairs.add(b.pair("equipment", newEquipment));
+            }
+            return b.object(pairs).toJson();
+        } catch (RuntimeException e) {
+            /* 原样交给校验报错 */
+            return text;
+        }
+    }
+
+    /**
+     * 用一个字符串值替换对象里的某个键，其余键序与内容原样保留。
+     *
+     * @param object 对象
+     * @param b      构造器
+     * @param field  键名
+     * @param value  新值
+     * @return 新对象；原对象没有这个键时补在末尾
+     */
+    private static JsonHub withStringField(JsonHub object, JsonHubBuilder b, String field, String value) {
+        List<JsonObjectPair> pairs = new ArrayList<>();
+        boolean replaced = false;
+        for (JsonString key : object.keySet()) {
+            String name = key.unescaped();
+            if (field.equals(name)) {
+                pairs.add(b.pair(name, value));
+                replaced = true;
+            } else {
+                pairs.add(b.pair(name, object.get(name)));
+            }
+        }
+        if (!replaced) {
+            pairs.add(b.pair(field, value));
+        }
+        return b.object(pairs);
+    }
+
+    /** 按原键序改写 {@code session} 段的五个连接字段，缺的补在末尾。 */
+    private static JsonHub withSessionFields(JsonHub session, JsonHubBuilder b, String sessionId,
+                                             int port, String host, boolean passive, int deviceId) {
+        List<JsonObjectPair> pairs = new ArrayList<>();
+        boolean id = false;
+        boolean portDone = false;
+        boolean hostDone = false;
+        boolean passiveDone = false;
+        boolean deviceDone = false;
+        for (JsonString key : session.keySet()) {
+            String field = key.unescaped();
+            switch (field) {
+                case "id" -> {
+                    pairs.add(b.pair("id", sessionId));
+                    id = true;
+                }
+                case "port" -> {
+                    pairs.add(b.pair("port", port));
+                    portDone = true;
+                }
+                case "bindHost" -> {
+                    pairs.add(b.pair("bindHost", host));
+                    hostDone = true;
+                }
+                case "passive" -> {
+                    pairs.add(b.pair("passive", passive));
+                    passiveDone = true;
+                }
+                case "deviceId" -> {
+                    pairs.add(b.pair("deviceId", deviceId));
+                    deviceDone = true;
+                }
+                default -> pairs.add(b.pair(field, session.get(field)));
+            }
+        }
+        if (!id) {
+            pairs.add(0, b.pair("id", sessionId));
+        }
+        if (!portDone) {
+            pairs.add(b.pair("port", port));
+        }
+        if (!hostDone) {
+            pairs.add(b.pair("bindHost", host));
+        }
+        if (!passiveDone) {
+            pairs.add(b.pair("passive", passive));
+        }
+        if (!deviceDone) {
+            pairs.add(b.pair("deviceId", deviceId));
+        }
+        return b.object(pairs);
     }
 
     /**

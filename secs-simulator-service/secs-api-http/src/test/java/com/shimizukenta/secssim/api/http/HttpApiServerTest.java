@@ -38,6 +38,7 @@ class HttpApiServerTest {
     private String base;
     private final List<String> triggered = new ArrayList<>();
     private final List<String> alarms = new ArrayList<>();
+    private final List<String> batchRequests = new ArrayList<>();
     private TriggerOutcome outcome = TriggerOutcome.OK;
     private final List<String> created = new ArrayList<>();
     private final List<String> disconnected = new ArrayList<>();
@@ -237,6 +238,29 @@ class HttpApiServerTest {
             }
 
             @Override
+            public DeviceBatch.Result createDevicesBatch(DeviceBatch.Request request) {
+                HttpApiServerTest.this.batchRequests.add(request.prefix()
+                        + "|" + request.start() + "|" + request.count() + "|" + request.portBase());
+                if ("taken-".equals(request.prefix())) {
+                    /* 重名整批拒绝：一台都不建 */
+                    return new DeviceBatch.Result(List.of(), List.of(),
+                            List.of("taken-1.json"));
+                }
+                if (request.prefix().contains("/")) {
+                    /* 与运行时同一条判据：前缀不能变成路径。桩里只验 HTTP 层把它映射成 400 */
+                    return new DeviceBatch.Result(List.of(), List.of(), List.of(),
+                            List.of("批次前缀不能含空白、斜杠或引号"));
+                }
+                List<DeviceBatch.Created> created = new ArrayList<>();
+                for (int i = 0; i < request.count(); i++) {
+                    String name = request.prefix() + (request.start() + i) + ".json";
+                    created.add(new DeviceBatch.Created(name, request.prefix() + (request.start() + i),
+                            request.portBase() + i, 0, "ses_" + i, ""));
+                }
+                return new DeviceBatch.Result(created, List.of(), List.of());
+            }
+
+            @Override
             public SessionOutcome closeSession(String sessionId) {
                 return "missing".equals(sessionId) ? SessionOutcome.UNKNOWN_SESSION : SessionOutcome.OK;
             }
@@ -337,6 +361,68 @@ class HttpApiServerTest {
         assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/not-a-number", null).statusCode());
     }
 
+    /* ---------------- 批量新建设备 ---------------- */
+
+    @Test
+    void bulkCreateDevicesNamesThemByPrefixAndSequence() throws Exception {
+        String body = "{\"template\":\"etch\",\"prefix\":\"dev-\",\"start\":3,\"count\":3,"
+                + "\"portBase\":5100,\"startNow\":true}";
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/devices/bulk"))
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)),
+                null);
+
+        assertEquals(201, response.statusCode(), response.body());
+        /* 名字 = 前缀 + 序号，序号从 start 起连续；Device ID 一律 0 */
+        assertTrue(response.body().contains("\"name\":\"dev-3.json\""), response.body());
+        assertTrue(response.body().contains("\"name\":\"dev-5.json\""), response.body());
+        assertTrue(response.body().contains("\"deviceName\":\"dev-3\""), response.body());
+        assertTrue(response.body().contains("\"deviceId\":0"), response.body());
+        assertEquals(List.of("dev-|3|3|5100"), this.batchRequests,
+                "前缀/起始序号/台数/起始端口应原样交给运行时");
+    }
+
+    @Test
+    void bulkCreateDevicesRejectsTheWholeBatchOnDuplicateName() throws Exception {
+        String body = "{\"template\":\"etch\",\"prefix\":\"taken-\",\"start\":1,\"count\":2,"
+                + "\"portBase\":5200}";
+        HttpResponse<String> response = send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/devices/bulk"))
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)),
+                null);
+
+        /* 重名不是"建一部分再报错"：整批回 409，一台都不建 */
+        assertEquals(409, response.statusCode(), response.body());
+        assertTrue(response.body().contains("\"created\":[]"), response.body());
+        assertTrue(response.body().contains("\"conflicts\":[\"taken-1.json\"]"), response.body());
+    }
+
+    @Test
+    void bulkCreateDevicesRejectsBadParameters() throws Exception {
+        String missingPrefix = "{\"template\":\"etch\",\"count\":2,\"portBase\":5300}";
+        assertEquals(400, bulkCreate(missingPrefix).statusCode(), "前缀必填");
+        assertEquals(400, bulkCreate("{\"prefix\":\"d-\",\"count\":0,\"portBase\":5300}").statusCode(),
+                "台数越界");
+        assertEquals(400, bulkCreate("{\"prefix\":\"d-\",\"count\":2}").statusCode(), "端口必填");
+        assertEquals(400, bulkCreate("{\"prefix\":\"d-\",\"count\":2,\"portBase\":70000}").statusCode(),
+                "端口越界");
+        /* 前缀带斜杠会让"文件名"跑出配置目录：参数错就回 400（不是 409 的"名字被占"），
+           且必须把原因带回来，不能只有状态码 */
+        HttpResponse<String> badPrefix = bulkCreate(
+                "{\"prefix\":\"dev/1\",\"count\":2,\"portBase\":5300}");
+        assertEquals(400, badPrefix.statusCode(), badPrefix.body());
+        assertTrue(badPrefix.body().contains("\"problems\":[\""), badPrefix.body());
+        /* 非 POST 不是"参数写错"，而是端点不接受这个方法 */
+        assertEquals(405, get("/api/v1/devices/bulk", null).statusCode());
+    }
+
+    private HttpResponse<String> bulkCreate(String body) throws Exception {
+        return send(
+                HttpRequest.newBuilder(URI.create(this.base + "/api/v1/devices/bulk"))
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)),
+                null);
+    }
+
     @Test
     void unknownSubResourceIs404Not400() throws Exception {
         /* 已删的 v1 端点（实体编辑 + 手动触发）与任何未知子资源都按「端点不存在」
@@ -402,24 +488,27 @@ class HttpApiServerTest {
 
     @Test
     void alarmAcceptsPostAndPassesParams() throws Exception {
+        /* v2 用方法表达方向：POST 置位；文本与类别走 query（v1 的 set 参数已不存在） */
         HttpResponse<String> response = post(
-                "/api/v1/sessions/s1/alarm/1001?set=false&text=HOT&category=2", null);
+                "/api/v2/devices/s1/runtime/alarm/1001?text=HOT&category=2", null);
         assertEquals(202, response.statusCode(), response.body());
-        assertEquals(List.of("s1:1001:false:HOT:2"), this.alarms);
+        assertEquals(List.of("s1:1001:true:HOT:2"), this.alarms);
     }
 
     @Test
     void alarmRejectsBadParameters() throws Exception {
-        assertEquals(400, post("/api/v1/sessions/s1/alarm/0", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/alarm/x", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/alarm/1001?category=8", null).statusCode());
-        assertEquals(400, post("/api/v1/sessions/s1/alarm/1001?category=x", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/0", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/x", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/1001?category=8", null).statusCode());
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/1001?category=x", null).statusCode());
+        /* SECS-II 的 A 类型只允许 US-ASCII，中文文本在入口就拒 */
+        assertEquals(400, post("/api/v2/devices/s1/runtime/alarm/1001?text=%E9%AB%98", null).statusCode());
     }
 
     @Test
     void alarmMapsSessionState() throws Exception {
-        assertEquals(404, post("/api/v1/sessions/missing/alarm/1001", null).statusCode());
-        assertEquals(409, post("/api/v1/sessions/closed/alarm/1001", null).statusCode());
+        assertEquals(404, post("/api/v2/devices/missing/runtime/alarm/1001", null).statusCode());
+        assertEquals(409, post("/api/v2/devices/closed/runtime/alarm/1001", null).statusCode());
     }
 
     @Test
@@ -717,7 +806,8 @@ class HttpApiServerTest {
 
     @Test
     void auditsMutatingOperationsWithActorAndRole() throws Exception {
-        assertEquals(202, post("/api/v1/sessions/s1/ceid/2001", null).statusCode());
+        /* 手动触发已迁 v2：审计动作名仍是 trigger-ceid，目标换成设备语义 */
+        assertEquals(202, post("/api/v2/devices/s1/runtime/ceid/2001", null).statusCode());
         assertTrue(this.auditEntries.stream().anyMatch(entry ->
                 entry.contains("local:admin:trigger-ceid:s1:ceid=2001 outcome=OK")), this.auditEntries.toString());
 

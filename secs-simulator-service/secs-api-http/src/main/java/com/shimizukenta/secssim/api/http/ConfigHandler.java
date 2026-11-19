@@ -260,6 +260,132 @@ final class ConfigHandler extends HttpSupport {
         this.deviceRuntime.handleConfigRevisionsV2(ex);
     }
 
+    /**
+     * POST /api/v1/devices/bulk：批量新建设备，一台一份配置。
+     *
+     * <p>体形如 {@code {"template":"etch","prefix":"dev-","start":1,"count":5,
+     * "portBase":5100,"bindHost":"0.0.0.0","passive":true,"startNow":true}}。
+     * 第 i 台的设备名与配置文件名都是「前缀 + 序号」（序号从 {@code start} 起），
+     * device-id 一律 0；端口从 {@code portBase} 起逐台 +1。</p>
+     *
+     * <p>设备名唯一：整批名字里只要有一个已经存在，就<b>一台都不建</b>并回 409，
+     * {@code conflicts} 列出撞上的名字。建到一半才发现重名，会留下半批设备
+     * 让人自己收拾；宁可整批重来，让用户改前缀或起始序号。</p>
+     */
+    void createDevicesBulk(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            if (!requireRole(ex, ApiRole.VIEWER)) {
+                return;
+            }
+            respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
+            return;
+        }
+        if (!requireRole(ex, ApiRole.OPERATOR)) {
+            return;
+        }
+
+        String body = readBody(ex);
+        if (body == null) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-body\"}");
+            return;
+        }
+
+        DeviceBatch.Request request;
+        try {
+            com.shimizukenta.jsonhub.JsonHub root =
+                    com.shimizukenta.jsonhub.JsonHub.fromJson(body);
+            if (!root.isObject()) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
+                return;
+            }
+            String templateId = optionalString(root, "template");
+            String prefix = optionalString(root, "prefix");
+            Integer start = optionalInt(root, "start", n -> n >= 0);
+            Integer count = optionalInt(root, "count", n -> n >= 1 && n <= 100);
+            Integer portBase = optionalInt(root, "portBase", n -> n >= 1 && n <= 65535);
+            if (prefix == null || prefix.isBlank() || count == null || portBase == null) {
+                respond(ex, 400, "{\"ok\":false,\"error\":\"bad-request\","
+                        + "\"message\":\"prefix / count(1..100) / portBase 都必填\"}");
+                return;
+            }
+            com.shimizukenta.jsonhub.JsonHub passiveNode = root.get("passive");
+            boolean passive = passiveNode == null || passiveNode.optionalBoolean().orElse(true);
+            com.shimizukenta.jsonhub.JsonHub startNowNode = root.get("startNow");
+            boolean startNow = startNowNode == null || startNowNode.optionalBoolean().orElse(true);
+            String bindHost = optionalString(root, "bindHost");
+            request = new DeviceBatch.Request(templateId, prefix, start == null ? 1 : start,
+                    count, portBase, bindHost, passive, startNow);
+        } catch (RuntimeException e) {
+            respond(ex, 400, "{\"ok\":false,\"error\":\"bad-json\"}");
+            return;
+        }
+
+        DeviceBatch.Result result = this.context.createDevicesBatch(request);
+        if (result.hasProblems()) {
+            /* 入参不合法（前缀带斜杠、台数越界…）是调用方的错，回 400。
+               不能走 409：那是「名字已被占用」的语义，会让用户去改一个没问题的地方 */
+            audit(ex, "device-bulk-create", request.prefix(), "bad-request");
+            respond(ex, 400, bulkJson(result));
+            return;
+        }
+        if (result.hasConflicts()) {
+            audit(ex, "device-bulk-create", request.prefix(),
+                    "conflict=" + String.join(",", result.conflicts()));
+            respond(ex, 409, bulkJson(result));
+            return;
+        }
+        audit(ex, "device-bulk-create", request.prefix(),
+                "created=" + result.created().size() + " failed=" + result.failed().size());
+        /* 一台都没建成不是 201：调用方看 created 为空会以为"至少建了一些" */
+        int status = result.created().isEmpty() ? 422 : 201;
+        respond(ex, status, bulkJson(result));
+    }
+
+    /** 批量新建的结果 JSON。 */
+    private static String bulkJson(DeviceBatch.Result result) {
+        StringBuilder sb = new StringBuilder(128);
+        sb.append("{\"created\":[");
+        for (int i = 0; i < result.created().size(); i++) {
+            DeviceBatch.Created item = result.created().get(i);
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"name\":\"").append(json(item.name()))
+                    .append("\",\"deviceName\":\"").append(json(item.deviceName()))
+                    .append("\",\"port\":").append(item.port())
+                    .append(",\"deviceId\":").append(item.deviceId())
+                    .append(",\"sessionId\":\"").append(json(item.sessionId()))
+                    .append("\",\"sessionError\":\"").append(json(item.sessionError()))
+                    .append("\"}");
+        }
+        sb.append("],\"failed\":[");
+        for (int i = 0; i < result.failed().size(); i++) {
+            DeviceBatch.Failed item = result.failed().get(i);
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"name\":\"").append(json(item.name()))
+                    .append("\",\"error\":\"").append(json(item.error()))
+                    .append("\",\"message\":\"").append(json(item.message()))
+                    .append("\"}");
+        }
+        sb.append("],\"conflicts\":[");
+        for (int i = 0; i < result.conflicts().size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(json(result.conflicts().get(i))).append('"');
+        }
+        sb.append("],\"problems\":[");
+        for (int i = 0; i < result.problems().size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(json(result.problems().get(i))).append('"');
+        }
+        return sb.append("]}").toString();
+    }
+
 
     /**
      * 单份配置的读取、校验、保存与删除。

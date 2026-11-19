@@ -59,6 +59,8 @@ export interface MockState {
   queries: string[];
   /** 已被删除（软删）的配置文件名：列表里不再出现，用来验"删设备"这条路径。 */
   deletedConfigs: string[];
+  /** 批量新建出来的配置文件名：列表里要能跟着出现。 */
+  createdConfigs: string[];
 }
 
 function initialState(): MockState {
@@ -103,6 +105,7 @@ function initialState(): MockState {
     calls: [],
     queries: [],
     deletedConfigs: [],
+    createdConfigs: [],
   };
 }
 
@@ -400,10 +403,46 @@ export async function mockApi(page: Page): Promise<MockState> {
       return ok({ configs: [
         { name: 'line1.json', sizeBytes: CONFIG_TEXT.length, modifiedMs: 1, template: 'etch' },
         { name: 'line2.json', sizeBytes: CONFIG_TEXT.length, modifiedMs: 2, template: 'bare' },
+        ...[...state.createdConfigs].map((name) => ({
+          name, sizeBytes: CONFIG_TEXT.length, modifiedMs: 3, template: 'etch',
+        })),
       ].filter((entry) => !state.deletedConfigs.includes(entry.name)) });
     }
     if (path === '/api/v1/configs' && method === 'POST') {
       return ok({ ok: true }, 201);
+    }
+    if (path === '/api/v1/devices/bulk' && method === 'POST') {
+      const body = request.postDataJSON() as {
+        prefix?: string; start?: number; count?: number; portBase?: number; startNow?: boolean;
+      } | null;
+      /* 夹具照真后端的规则来：名字 = 前缀 + 序号（序号从 start 起），Device ID 恒为 0，
+         设备名重复整批拒绝（一台都不建） */
+      const prefix = body?.prefix ?? 'dev-';
+      const start = body?.start ?? 1;
+      const count = body?.count ?? 1;
+      const portBase = body?.portBase ?? 5100;
+      const names = Array.from({ length: count }, (_, index) => `${prefix}${start + index}.json`);
+      const existing = ['line1.json', 'line2.json', ...state.createdConfigs, ...state.deletedConfigs];
+      const conflicts = names.filter((name) => existing.includes(name));
+      if (conflicts.length > 0) {
+        return ok({ created: [], failed: [], conflicts }, 409);
+      }
+      state.createdConfigs.push(...names);
+      const created = names.map((name, index) => {
+        const stem = name.replace(/\.json$/, '');
+        const sessionId = body?.startNow === false ? '' : `ses_bulk${state.sessions.length + index + 1}`;
+        if (sessionId !== '') {
+          state.sessions.push({
+            id: sessionId, config: name, device: stem.toUpperCase(),
+            controlState: 'OFFLINE', state: 'OPEN', port: portBase + index,
+          });
+        }
+        return {
+          name, deviceName: stem, port: portBase + index, deviceId: 0,
+          sessionId, sessionError: '',
+        };
+      });
+      return ok({ created, failed: [], conflicts: [] }, 201);
     }
     if (/^\/api\/v1\/configs\/[^/]+$/.test(path) && method === 'DELETE') {
       const name = decodeURIComponent(path.split('/').pop() ?? '');

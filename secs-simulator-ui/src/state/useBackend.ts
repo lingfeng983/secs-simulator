@@ -17,6 +17,8 @@ import {
   type ConfigTextSnapshot,
   type EventPlanView,
   type Health,
+  type DeviceBatchParams,
+  type DeviceBatchResult,
   type HostSimTarget,
   type OverviewRow,
   type PreviewData,
@@ -116,6 +118,13 @@ export interface BackendController {
   setLogLevel: (level: string) => Promise<boolean>;
   /** 新建一份配置；templateId 缺省是空骨架。返回 HTTP 状态码。 */
   createConfig: (name: string, templateId?: string) => Promise<number>;
+  /**
+   * 批量新建设备：一台一份配置，名字 = 前缀 + 序号，Device ID 恒为 0。
+   *
+   * <p>设备名重复时整批拒绝（`conflicts` 非空、`created` 为空），
+   * 不会留下半批设备。</p>
+   */
+  createDevicesBatch: (params: DeviceBatchParams) => Promise<DeviceBatchResult | null>;
   /** 删掉一台设备（软删，后端先停会话）。返回 HTTP 状态码：200 删掉了，404 本来就没有。 */
   deleteConfig: (name: string) => Promise<number>;
   /** 内置设备模板目录（新建配置的选型列表）。 */
