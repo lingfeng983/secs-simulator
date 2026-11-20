@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelBaseProps } from '../panels/types';
 import { Panel } from '../../shared/ui/Panel';
 import { Modal } from '../../shared/ui/Modal';
@@ -368,6 +368,7 @@ export function HostListPage({
         quickDevices={quickDevices}
         onPickDevice={pickQuickDevice}
         regionNames={regions?.names ?? [DEFAULT_REGION]}
+        existing={hosts.hosts}
         busy={busy}
         onClose={() => setCreateOpen(false)}
         onCreate={async ({ region, newRegion, ...request }) => {
@@ -380,8 +381,14 @@ export function HostListPage({
               regions?.addRegion(target);
               regions?.setHostRegion(hostId, target);
             }
+            /* 建完留在清单里：一次要建好几台主机，跳进详情页反而挡路（2026-11-20 用户反馈）。
+               新主机已经在刷新后的列表里，要看细节点行尾「详情」。 */
             setCreateOpen(false);
-            goTo?.(`host-open:${hostId}`);
+            const named = request.name?.trim() ?? '';
+            notifier.success(
+              named === '' ? '已新建主机' : `已新建主机「${named}」`,
+              `${request.host}:${request.port}${request.connect === false ? ' · 未连接' : ' · 已连接'}`,
+            );
           } catch (e) {
             setError((e as Error).message);
           } finally {
@@ -428,6 +435,7 @@ function CreateHostModal({
   quickDevices,
   onPickDevice,
   regionNames,
+  existing,
   busy,
   onClose,
   onCreate,
@@ -441,6 +449,8 @@ function CreateHostModal({
     name: string; host: string; port: number | null; deviceId: number;
   } | null>;
   regionNames: readonly string[];
+  /** 已在册的主机：名称不能重名，同一个 IP 的端口不能重复。 */
+  existing: readonly HostV2[];
   busy: boolean;
   onClose: () => void;
   onCreate: (request: {
@@ -460,6 +470,33 @@ function CreateHostModal({
   const [quickId, setQuickId] = useState('');
   const [picking, setPicking] = useState(false);
   const selectedTemplate = templates.find((item) => item.id === templateId);
+
+  /* 每次打开都先给一组"不撞车"的默认值：名称不与已有主机重名、端口避开
+     同一 IP 上已占用的（查重规则见下面 nameError / targetError）。 */
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      const takenNames = new Set(existing.map((item) => item.name.trim().toLowerCase()));
+      let suggestion = 'host';
+      for (let index = 2; takenNames.has(suggestion.toLowerCase()); index += 1) {
+        suggestion = `host-${index}`;
+      }
+      const takenTargets = new Set(existing.map((item) => item.target.trim()));
+      let freePort = Number(port);
+      if (!Number.isInteger(freePort) || freePort < 1 || freePort > 65535) {
+        freePort = 5000;
+      }
+      while (takenTargets.has(`${host.trim()}:${freePort}`) && freePort < 65535) {
+        freePort += 1;
+      }
+      if (takenNames.has(name.trim().toLowerCase())) {
+        setName(suggestion);
+      }
+      setPort(String(freePort));
+    }
+    wasOpen.current = open;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, existing]);
 
   /** 选一台设备：把名称/目标/端口/Device ID 一次填好，之后仍可手改。 */
   const applyQuickDevice = async (sessionId: string) => {
@@ -482,7 +519,23 @@ function CreateHostModal({
     }
   };
 
-  const valid = host.trim() !== '' && Number(port) >= 1 && Number(port) <= 65535;
+  /* 建之前就把两种撞车挡在弹框里（2026-11-20 用户要求）：
+     1) 名称不能重复——清单里两行同名的"哪台是哪台"分不出来；
+     2) 同一个 IP 上端口不能重复——同一个地址同一端口建两条链路没有意义。 */
+  const trimmedName = name.trim();
+  const hostKey = host.trim();
+  const portNumber = Number(port);
+  const portOk = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const targetKey = `${hostKey}:${portNumber}`;
+  const nameClash = existing.find((item) => item.name.trim().toLowerCase() === trimmedName.toLowerCase());
+  const targetClash = existing.find((item) => item.target.trim() === targetKey);
+  const nameError = trimmedName === ''
+    ? '主机名称不能为空'
+    : nameClash !== undefined ? `名称「${trimmedName}」已被占用，换一个` : '';
+  const targetError = hostKey !== '' && portOk && targetClash !== undefined
+    ? `同一个 IP 的端口不能重复：${targetKey} 已被「${targetClash.name}」占用`
+    : '';
+  const valid = hostKey !== '' && portOk && nameError === '' && targetError === '';
 
   return (
     <Modal
@@ -496,10 +549,11 @@ function CreateHostModal({
             type="button"
             className="primary"
             disabled={busy || !valid}
+            title={valid ? '创建这台主机（留在清单里，不跳转）' : (nameError || targetError || '名称、目标地址、端口都要填对')}
             onClick={() => onCreate({
-              name: name.trim() === '' ? undefined : name.trim(),
-              host: host.trim(),
-              port: Number(port),
+              name: trimmedName === '' ? undefined : trimmedName,
+              host: hostKey,
+              port: portNumber,
               deviceId: Number(deviceId) || 0,
               template: selectedTemplate,
               connect: connectNow,
@@ -541,20 +595,34 @@ function CreateHostModal({
           </select>
         </label>
         <label className="field modal-field">
-          <FieldLabel text="名称" help="实例列表里显示的名字；多台主机各起一个好认的。" />
-          <input value={name} onChange={(event) => setName(event.target.value)} />
+          <FieldLabel text="名称" help="实例列表里显示的名字；不能与已有主机重名，多台主机各起一个好认的。" />
+          <input
+            value={name}
+            aria-label="主机名称"
+            aria-invalid={nameError !== ''}
+            onChange={(event) => setName(event.target.value)}
+          />
+          {nameError !== '' && <span className="modal-field-error">{nameError}</span>}
         </label>
         <label className="field modal-field">
           <FieldLabel
             text="目标地址"
-            help="设备或第三方模拟器的 IP / 主机名；清空则禁用创建。目标与设备列表无关，可连续新建多台，多台可指向同一地址（先连上的保持「已连接」，后来者停在「连接失败 · 目标已有主机」，互不影响）。"
+            help="设备或第三方模拟器的 IP / 主机名；清空则禁用创建。同一个 IP 上端口不能重复：同一地址同一端口只能有一台主机。"
           />
           <input value={host} onChange={(event) => setHost(event.target.value)} />
         </label>
         <label className="field modal-field">
-          <FieldLabel text="端口" help="目标设备的 HSMS 端口（1–65535）。" />
-          <input type="number" min={1} max={65535} value={port}
-            onChange={(event) => setPort(event.target.value)} />
+          <FieldLabel text="端口" help="目标设备的 HSMS 端口（1–65535）。同一个 IP 上的端口不能与已有主机重复。" />
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={port}
+            aria-label="端口"
+            aria-invalid={targetError !== ''}
+            onChange={(event) => setPort(event.target.value)}
+          />
+          {targetError !== '' && <span className="modal-field-error">{targetError}</span>}
         </label>
         <label className="field modal-field">
           <FieldLabel text="Device ID" help="目标设备的 HSMS Device ID（0–32767），两侧必须一致。" />

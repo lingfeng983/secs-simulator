@@ -149,17 +149,27 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
 
   const stateLabel = cycle === null ? '' : cycle.state === 'RUNNING' ? '运行中' : cycle.state === 'FINISHED' ? '已完成' : '停止';
   const tone = cycle?.state === 'RUNNING' ? 'ok' : cycle?.state === 'FINISHED' ? 'info' : 'muted';
-  const valueState = cycle === null || !cycle.hasCycle
+  /* 2026-11-20 用户反馈：周期没跑起来时，「停止 / 待启动（值冻结）/ 已发片内事件 0 条 /
+     （设备离线：先上线再启动）」这一串只是在念"什么都没发生"，占版面还把按钮挤到
+     视线外。所以只有真有事可说时才出状态行：跑起来了、跑完了、或者已经发过片内事件。
+     停止态且一条没发过 = 不显示（此时「启动周期」可点、「停止周期」置灰，状态自明）。 */
+  const showState = cycle !== null && cycle.hasCycle
+    && (cycle.state === 'RUNNING' || cycle.state === 'FINISHED' || cycle.firedCount > 0);
+  /* 状态徽标已经说了"运行中/已完成"，详情里不再重复那个词 */
+  const stateText = cycle === null
     ? ''
     : cycle.state === 'RUNNING'
-      ? `运行中 · 第 ${cycle.waferIndex + 1} 片 · 相位 ${(cycle.phaseMs / 1000).toFixed(1)} 秒`
-      : cycle.state === 'FINISHED' ? '已完成（值冻结在末相位）' : '待启动（值冻结）';
+      ? `第 ${cycle.waferIndex + 1} 片 · 相位 ${(cycle.phaseMs / 1000).toFixed(1)} 秒 · 进度 ${cycle.waferIndex + 1}/${cycle.totalWafers} 片 · 已发片内事件 ${cycle.firedCount} 条`
+      : cycle.state === 'FINISHED'
+        ? `值冻结在末相位 · 共 ${cycle.totalWafers} 片 · 已发片内事件 ${cycle.firedCount} 条`
+        : `已发片内事件 ${cycle.firedCount} 条`;
 
   return (
     <Panel
       id="panel-cycle-run"
       title="运行卡"
       headless
+      /* 按钮落在内容下方（面板脚注行），不再和状态挤在同一行 */
       actions={
         <>
           <button
@@ -192,21 +202,12 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
         <p className="hint">
           这份配置还没有 cycle 段：到配置区「工艺周期」页插入一个周期并保存（需重启设备）后即可启动。
         </p>
-      ) : (
+      ) : showState ? (
         <p className="cycle-run-state">
-          <span className="state-pill" data-tone={tone}>{stateLabel}</span>
-          <span className="hint-inline">{valueState}</span>
-          {/* 没跑起来的周期没有"进度"可言：写着 1/25 会让人以为已经出过片 */}
-          {cycle.state === 'RUNNING' && (
-            <span className="hint-inline">进度 {cycle.waferIndex + 1}/{cycle.totalWafers} 片</span>
-          )}
-          {cycle.state === 'FINISHED' && (
-            <span className="hint-inline">共 {cycle.totalWafers} 片</span>
-          )}
-          <span className="hint-inline">已发片内事件 {cycle.firedCount} 条</span>
-          {!online && <span className="hint-inline">（设备离线：先上线再启动）</span>}
+          {cycle.state !== 'STOPPED' && <span className="state-pill" data-tone={tone}>{stateLabel}</span>}
+          <span className="hint-inline">{stateText}</span>
         </p>
-      )}
+      ) : null}
     </Panel>
   );
 }

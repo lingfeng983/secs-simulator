@@ -108,6 +108,16 @@
   top: calc(100% + 8px);
 }
 
+/* 行内校验错误（名称重名 / 端口重复）：挂在控件列下方，标题列留空，
+   两列栅格不被撑乱；错误出现时该行自动变成"标题 + 控件 + 一行红字"。 */
+.modal-field-error {
+  grid-column: 2;
+  margin-top: -0.15rem;
+  color: var(--danger);
+  font-size: calc(11.5px * var(--font-scale));
+  line-height: 1.45;
+}
+
 @media (max-width: 640px) {
   /* 窄屏：标题在上、控件在下，仍是一行一个配置项 */
   .modal-form .modal-field {
@@ -117,6 +127,10 @@
 
   .modal-field-label {
     text-align: left;
+  }
+
+  .modal-field-error {
+    grid-column: 1;
   }
 }
 

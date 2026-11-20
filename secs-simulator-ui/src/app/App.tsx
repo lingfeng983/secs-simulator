@@ -60,8 +60,10 @@ const SINGLE_TABLE_PAGES: ReadonlySet<string> = new Set([
   'workbench', 'hosts', 'host-templates', 'templates', 'svid-templates', 'system',
 ]);
 
-/** 2.x/3.0 早期的消息子页 hash：页面已下线，命中时自动拉开右侧监控抽屉。 */
-const LEGACY_MONITOR_HASH = /^#\/(?:device\/[^/]+\/(?:runtime\/)?messages|hosts\/[^/]+\/runtime\/monitor)(?:[?#]|$)/;
+/** 2.x/3.0 早期的消息子页 hash：页面已下线，命中时自动拉开右侧监控抽屉。
+ *  注意只认 2.x 的无区写法（`#/device/{id}/messages`）——3.0 运行区现在有
+ *  真正的「消息发送」页（`runtime/messages`），进那页不该弹抽屉。 */
+const LEGACY_MONITOR_HASH = /^#\/(?:device\/[^/]+\/messages|hosts\/[^/]+\/runtime\/monitor)(?:[?#]|$)/;
 
 /** 常驻标签：任何时候都留着，保证关完标签后还有地方可去。 */
 const WORKBENCH_TAB: AppTab = { id: 'workbench', label: '设备清单', hash: '#/workbench' };

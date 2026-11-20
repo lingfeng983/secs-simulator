@@ -35,9 +35,10 @@ export type DeviceConfigPage =
 /** 设备运行区子页：当前运行（仅本次有效）。
  *  定义类编辑已全部上收配置区，运行区只留"要动手"的页。 */
 export type DeviceRuntimePage =
-  | 'plans'     // 事件执行：计划启停 + 本设备实时事件
-  | 'cycle'     // 工艺周期：运行态启停 + 片内事件台账（2026-11-17 运行区补齐）
-  | 'manual';   // 手动与压测：SML 发送 + 压测 + 报警置位/清除
+  | 'plans'      // 事件执行：计划启停 + 本设备实时事件
+  | 'cycle'      // 工艺周期：运行态启停 + 片内事件台账（2026-11-17 运行区补齐）
+  | 'messages'   // 消息发送：手动 SML + 压测发送（2026-11-20 由「手动与压测」拆出）
+  | 'alarms';    // 报警风暴：活动报警 + 置位/清除 + 风暴（2026-11-20 单独成页）
 
 export type DeviceZone = 'config' | 'runtime';
 export type DevicePage = DeviceConfigPage | DeviceRuntimePage;
@@ -48,8 +49,14 @@ export const DEVICE_CONFIG_PAGES: readonly DeviceConfigPage[] = [
 /* 运行区只留"要动手"的页：启停/发送/压测/报警。实时状态在实例头，
    报文监控统一收进右侧抽屉，不再单独列 status / messages 两个子页。 */
 export const DEVICE_RUNTIME_PAGES: readonly DeviceRuntimePage[] = [
-  'plans', 'cycle', 'manual',
+  'plans', 'cycle', 'messages', 'alarms',
 ];
+
+/** 旧运行区子页名 → 新页（2026-11-20「手动与压测」拆成两页后的一次性迁移）。 */
+const LEGACY_RUNTIME_PAGE: Record<string, DeviceRuntimePage> = {
+  manual: 'messages',
+  send: 'messages',
+};
 
 /** 主机配置区子页（连接参数并入概览，不再单列一页）。 */
 export type HostConfigPage =
@@ -92,7 +99,8 @@ export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
 export const DEVICE_RUNTIME_PAGE_LABELS: Record<DeviceRuntimePage, string> = {
   plans: '事件执行',
   cycle: '工艺周期',
-  manual: '手动与压测',
+  messages: '消息发送',
+  alarms: '报警风暴',
 };
 export const HOST_CONFIG_PAGE_LABELS: Record<HostConfigPage, string> = {
   overview: '概览',
@@ -123,7 +131,8 @@ export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
 export const DEVICE_RUNTIME_PAGE_NOTES: Record<DeviceRuntimePage, string> = {
   plans: '计划启停等运行态设置；改动仅本次运行有效。',
   cycle: '工艺周期运行态：启停、当前片号/相位/进度与片内事件的发送记录。',
-  manual: '手动 SML 发送、压测发送与报警置位/清除；本页不保留活动报警与终端消息的历史，是否到达看设备「消息」页的 S5F1/S5F2、S10F3/S10F4。',
+  messages: '手动 SML 发送与压测发送（服务端循环）；本页不保留收发历史，是否到达看右侧消息监控。',
+  alarms: '报警置位/清除与报警风暴；风暴只压主机侧处理能力，历史 S5F1/S5F2 看右侧消息监控。',
 };
 export const HOST_CONFIG_PAGE_NOTES: Record<HostConfigPage, string> = {
   overview: '主机身份与目标；保存后需「使设置生效」。',
@@ -156,11 +165,12 @@ const LEGACY_DEVICE_PAGE: Record<string, [DeviceZone, DevicePage]> = {
   ceids: ['config', 'events'],
   reports: ['config', 'events'],
   events: ['config', 'plans'],
-  alarms: ['runtime', 'manual'],
+  alarms: ['runtime', 'alarms'],
   svids: ['config', 'svids'],
   /* 报文监控已并入右侧抽屉：旧消息深链回落到运行区首页，由 App 顺手拉开抽屉。 */
   messages: ['runtime', 'plans'],
-  send: ['runtime', 'manual'],
+  send: ['runtime', 'messages'],
+  manual: ['runtime', 'messages'],
   connection: ['config', 'connection'],
   structure: ['config', 'structure'],
   config: ['config', 'document'],
@@ -192,7 +202,10 @@ export function parseHash(hash: string, legacyTab?: string): Route {
            要继续走下面的 LEGACY_DEVICE_PAGE 映射。 */
         const zone = parts[2];
         const known = zone === 'config' ? DEVICE_CONFIG_PAGES : DEVICE_RUNTIME_PAGES;
-        const page = known.find((id) => id === parts[3]) ?? known[0];
+        /* 旧运行区子页名（manual）按别名迁到新页，其余非法值收口到该区首页 */
+        const page = known.find((id) => id === parts[3])
+          ?? (zone === 'runtime' ? LEGACY_RUNTIME_PAGE[parts[3]] : undefined)
+          ?? known[0];
         return { name: 'device', sessionId, zone, page };
       }
       /* 2.x 旧深链：#/device/{id}/{page} → 一次性映射 */

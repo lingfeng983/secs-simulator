@@ -39,7 +39,8 @@ const DEVICE_CONFIG: ReadonlyArray<[string, string]> = [
 const DEVICE_RUNTIME: ReadonlyArray<[string, string]> = [
   ['事件执行', 'events'],
   ['工艺周期', 'cycle-run'],
-  ['手动与压测', 'send'],
+  ['消息发送', 'send'],
+  ['报警风暴', 'alarms'],
 ];
 
 const HOST_CONFIG: ReadonlyArray<[string, string]> = [

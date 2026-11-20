@@ -294,11 +294,13 @@ export function DevicePage({
         {zone === 'runtime' && !isConfigOnly && page === 'cycle' && (
           <CycleRuntimePanel key={sessionId} {...baseProps} />
         )}
-        {zone === 'runtime' && !isConfigOnly && page === 'manual' && (
-          <div className="panel-stack">
-            <SendPanel key={sessionId} {...baseProps} />
-            <AlarmsPanel key={sessionId + ':alarms'} {...baseProps} />
-          </div>
+        {/* 2026-11-20：原来的「手动与压测」一页拆成两页——
+            「消息发送」只发报文（手动 + 压测），「报警风暴」单独成页。 */}
+        {zone === 'runtime' && !isConfigOnly && page === 'messages' && (
+          <SendPanel key={sessionId} {...baseProps} />
+        )}
+        {zone === 'runtime' && !isConfigOnly && page === 'alarms' && (
+          <AlarmsPanel key={sessionId} {...baseProps} />
         )}
       </div>
     </div>

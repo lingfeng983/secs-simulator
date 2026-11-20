@@ -200,18 +200,23 @@ test('运行区·工艺周期：运行卡轮询 + 启动/停止（§2.4 M4）', 
   await page.goto('/#/device/line1/runtime/cycle');
   const run = page.locator('#panel-cycle-run');
   await expect(run).toBeVisible();
-  await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();
-  /* 停机时没有「进度」：显示 1/25 会让人以为已经出过片，只在 RUNNING 时给进度。 */
-  await expect(run).toContainText('已发片内事件 0 条');
+  /* 2026-11-20 用户反馈：停止态且一条片内事件都没发过时，不再摆
+     「停止 / 待启动（值冻结）/ 已发片内事件 0 条 /（设备离线…）」这串描述——
+     只留底部的启动/停止按钮（启停状态由按钮可点与否自明）。 */
+  await expect(run.locator('.state-pill')).toHaveCount(0);
+  await expect(run).not.toContainText('待启动');
+  await expect(run).not.toContainText('已发片内事件');
 
   await run.getByRole('button', { name: '启动周期' }).click();
   await expect.poll(() => state.cycle.state, { timeout: 5_000 }).toBe('RUNNING');
   await expect(run.locator('.state-pill', { hasText: '运行中' })).toBeVisible();
   await expect(run).toContainText('第 1 片');
   await expect(run).toContainText('进度 1/25 片');
+  await expect(run).toContainText('已发片内事件');
 
   await run.getByRole('button', { name: '停止周期' }).click();
-  await expect(run.locator('.state-pill', { hasText: '停止' })).toBeVisible();
+  /* 停下后（且没发过片内事件）状态行整行收起，回到只有按钮的形态 */
+  await expect(run.locator('.state-pill')).toHaveCount(0);
 });
 
 test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色', async ({ page }) => {
@@ -281,9 +286,9 @@ test('实时消息监控抽屉：单对象切换 + 报文折叠 + 收发配色',
   await expect(drawer).toHaveCount(0);
 });
 
-test('运行区·手动操作：发送 SML / 压测 / 报警置位清除 / 报警风暴', async ({ page }) => {
-  const state = await mockApi(page);
-  await page.goto('/#/device/line1/runtime/manual');
+test('运行区·消息发送：发送 SML / 压测发送', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/#/device/line1/runtime/messages');
 
   const send = page.locator('#panel-send');
   await expect(send).toBeVisible();
@@ -293,6 +298,12 @@ test('运行区·手动操作：发送 SML / 压测 / 报警置位清除 / 报�
 
   await send.getByRole('button', { name: '压测发送' }).click();
   await expect(page.locator('.toast').first()).toBeVisible();
+});
+
+test('运行区·报警风暴：活动报警 / 置位清除 / 报警风暴', async ({ page }) => {
+  const state = await mockApi(page);
+  /* 2026-11-20 起「报警风暴」是独立页签，不再和消息发送同页 */
+  await page.goto('/#/device/line1/runtime/alarms');
 
   const alarms = page.locator('#panel-alarms');
   await expect(alarms).toBeVisible();

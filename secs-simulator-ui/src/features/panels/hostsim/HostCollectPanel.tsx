@@ -115,6 +115,7 @@ function CollectPlanTable({
   onLoad,
   onDelete,
   onToggle,
+  onViewChart,
   busy,
   selection,
   toolbarEnd,
@@ -126,6 +127,8 @@ function CollectPlanTable({
   onLoad: (plan: CollectPlan) => void;
   onDelete: (id: string) => void;
   onToggle: (plan: CollectPlan) => void;
+  /** 运行区：弹窗查看该配置已采集的数据曲线。 */
+  onViewChart: (plan: CollectPlan) => void;
   busy: boolean;
   selection?: {
     selected: ReadonlySet<string>;
@@ -203,17 +206,26 @@ function CollectPlanTable({
             (() => {
               const engaged = collectorEngaged(planState(row));
               return (
-                <button
-                  type="button"
-                  className={engaged ? 'danger' : 'primary'}
-                  disabled={busy}
-                  onClick={() => onToggle(row)}
-                  title={engaged
-                    ? '停止这一份采集（同一台主机上其它计划照常在采）'
-                    : '下发该配置并启动采集'}
-                >
-                  {engaged ? '停止' : '启动'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={engaged ? 'danger' : 'primary'}
+                    disabled={busy}
+                    onClick={() => onToggle(row)}
+                    title={engaged
+                      ? '停止这一份采集（同一台主机上其它计划照常在采）'
+                      : '下发该配置并启动采集'}
+                  >
+                    {engaged ? '停止' : '启动'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onViewChart(row)}
+                    title="弹窗查看该配置已采集的数据曲线"
+                  >
+                    查看曲线
+                  </button>
+                </>
               );
             })()
           )}
@@ -360,8 +372,9 @@ const EMPTY_FORM: CollectPlanForm = {
  * 数据采集（S1F3 轮询）。
  *
  * <p>配置区只管配置库：列表 + 新增/编辑弹窗 + 删除。运行区同一份列表提供
- * 状态列、单按钮启停与批量启停；数据曲线按配置折叠，点「查看曲线」才展示。
- * 新增/编辑弹窗在本机在线设备可用时用 SVID 多选与 CEID 单选，否则回退手动输入。</p>
+ * 状态列、单按钮启停与批量启停；曲线在操作列点「查看曲线」弹窗里看，
+ * 启停的反馈只落在状态列与顶部状态条上。新增/编辑弹窗在本机在线设备可用时
+ * 用 SVID 多选与 CEID 单选，否则回退手动输入。</p>
  */
 export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
@@ -373,7 +386,8 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CollectPlanForm>(EMPTY_FORM);
-  const [viewingPlanId, setViewingPlanId] = useState<string | null>(null);
+  /** 操作列「查看曲线」打开的配置 id；null = 曲线弹窗关闭。 */
+  const [chartPlanId, setChartPlanId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batch, setBatch] = useState<{ action: 'start' | 'stop'; done: number; total: number } | null>(null);
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
@@ -442,7 +456,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
       await api.setHostInstanceCollector(hostId, planConfig(plan));
       await api.hostInstanceCollectorCommand(hostId, true, plan.id);
       await loadState();
-      setNotice(`已下发并启动「${plan.name}」`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -484,9 +497,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
     await loadState();
     setBatch(null);
     setBatchResult({ succeeded, skipped, failed });
-    if (succeeded > 0) {
-      setNotice(`已启动 ${succeeded} 份采集计划`);
-    }
   };
 
   /** 批量停止：逐份停掉选中且正在采/待命的计划，其余跳过。 */
@@ -523,9 +533,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
     await loadState();
     setBatch(null);
     setBatchResult({ succeeded, skipped, failed });
-    if (succeeded > 0) {
-      setNotice(`已停止 ${succeeded} 份采集计划`);
-    }
   };
 
   const toggleRow = (id: string) => {
@@ -676,6 +683,12 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
   const totalErrors = runningPlans.reduce((sum, item) => sum + (item.decodeErrors ?? 0), 0);
   const batchBusy = batch !== null;
 
+  /* 曲线弹窗的数据：按配置 id 找回方案与已采序列 */
+  const chartPlan = chartPlanId === null
+    ? null
+    : plans.find((plan) => plan.id === chartPlanId) ?? null;
+  const chartCharts = chartPlan === null ? [] : chartsFor(chartPlan);
+
   /* 运行页没配置时只留一张空态卡：表格空行 + 状态行 + 曲线空行合成一句 */
   const runtimeEmpty = !readOnly && plans.length === 0;
 
@@ -706,22 +719,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
       {error !== '' && <p className="inline-note danger">{error}</p>}
       {notice !== '' && <p className="inline-note">{notice}</p>}
 
-      {/* 配置区只管配置库：S1F3 的下发与启停在运行区「数据采集」页 */}
-      {readOnly && (
-        <p className="hint">
-          这里保存的是<b>采集配置库</b>（落 config.db，重启后端也不丢），保存本身<b>不会下发</b>。
-          下发与启停在运行区「数据采集」页。
-          {' · '}
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => goTo?.(`host-page:${hostId}:runtime:collect`)}
-          >
-            去下发 →
-          </button>
-        </p>
-      )}
-
       <CollectPlanTable
         mode={readOnly ? 'config' : 'runtime'}
         plans={plans}
@@ -736,6 +733,7 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
             void startPlan(plan);
           }
         }}
+        onViewChart={(plan) => setChartPlanId(plan.id)}
         busy={busy || batchBusy}
         selection={readOnly
           ? undefined
@@ -797,56 +795,51 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
         </div>
       )}
 
-      {!readOnly && (
-        <section className="panel-section block">
-          <div className="section-head">
-            <h2 style={{ margin: 0 }}>采集曲线</h2>
-            <span className="hint-inline">按配置折叠，点「查看曲线」才展示</span>
-          </div>
-          {plans.map((plan) => {
-            const open = viewingPlanId === plan.id;
-            const planSvids = parseIdList(plan.svids);
-            const planCharts = chartsFor(plan);
-            return (
-              <section key={plan.id} className="panel-section">
-                <div className="section-head">
-                  <h3>{plan.name} <span className="mono hint-inline">CEID {plan.startCeid}/{plan.stopCeid} · {plan.intervalMs}ms</span></h3>
-                  <button type="button" onClick={() => setViewingPlanId(open ? null : plan.id)}>
-                    {open ? '收起曲线' : '查看曲线'}
-                  </button>
-                </div>
-                {open && (planCharts.length === 0
-                  ? <p className="hint">还没有该配置的采集数据；「启动」并等几秒后再看。</p>
-                  : (
-                    <div className="collector-charts">
-                      {planCharts.map((chart) => (
-                        <div className="collector-chart collector-chart-large" key={chart.svid}>
-                          <div className="collector-chart-head">
-                            <span className="mono">{chart.svid}</span>
-                            <span>{chart.series.owner}</span>
-                            {(chart.series.unit ?? '') !== '' && <span className="hint-inline">{chart.series.unit}</span>}
-                            <span className="spacer" />
-                            <span className="hint-inline">
-                              {chart.series.avg.length} 点 · 最近{' '}
-                              {chart.series.avg.length > 0 ? chart.series.avg[chart.series.avg.length - 1].toFixed(2) : '—'}
-                            </span>
-                          </div>
-                          <VariableChart
-                            series={chart.series}
-                            fromMs={chart.fromMs}
-                            bucketMs={chart.bucketMs}
-                            height={200}
-                            eventLabel="事件"
-                          />
-                        </div>
-                      ))}
+      {/* 曲线弹窗：操作列「查看曲线」打开，采集器每轮询一轮就多一个点，实时更新 */}
+      <Modal
+        open={chartPlan !== null}
+        title={chartPlan === null ? '查看曲线' : `查看曲线 · ${chartPlan.name}`}
+        onClose={() => setChartPlanId(null)}
+        width="min(880px, 94vw)"
+      >
+        {chartPlan !== null && (chartCharts.length === 0
+          ? (
+            <p className="hint">
+              还没有该配置的采集数据；先在列表点「启动」并等几秒，曲线会实时出现在这里。
+            </p>
+          )
+          : (
+            <>
+              <p className="hint">
+                启动 CEID {chartPlan.startCeid} / 停止 CEID {chartPlan.stopCeid} · 周期 {chartPlan.intervalMs}ms ·
+                {' '}{chartCharts.length} 个变量 · 实时更新
+              </p>
+              <div className="collector-charts">
+                {chartCharts.map((chart) => (
+                  <div className="collector-chart collector-chart-large" key={chart.svid}>
+                    <div className="collector-chart-head">
+                      <span className="mono">{chart.svid}</span>
+                      <span>{chart.series.owner}</span>
+                      {(chart.series.unit ?? '') !== '' && <span className="hint-inline">{chart.series.unit}</span>}
+                      <span className="spacer" />
+                      <span className="hint-inline">
+                        {chart.series.avg.length} 点 · 最近{' '}
+                        {chart.series.avg.length > 0 ? chart.series.avg[chart.series.avg.length - 1].toFixed(2) : '—'}
+                      </span>
                     </div>
-                  ))}
-              </section>
-            );
-          })}
-        </section>
-      )}
+                    <VariableChart
+                      series={chart.series}
+                      fromMs={chart.fromMs}
+                      bucketMs={chart.bucketMs}
+                      height={200}
+                      eventLabel="事件"
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
+          ))}
+      </Modal>
 
       <Modal
         open={modalOpen}

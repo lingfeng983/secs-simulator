@@ -196,6 +196,17 @@
   padding-bottom: 0;
 }
 
+/* 内容为空时内容区不占位：卡片只剩一条底部操作行（例：「运行卡」在停止态
+ * 没有可说的状态，只留启动/停止两个按钮），避免"一行字 + 一大段空白 + 按钮"。 */
+.panel--footed > .panel-body:empty {
+  display: none;
+}
+
+.panel--footed > .panel-body:empty + .panel-foot {
+  margin-top: 0;
+  border-top: none;
+}
+
 .panel-foot-status {
   color: var(--muted);
   font-size: var(--fs-body);

@@ -105,13 +105,16 @@ describe('3.0 two-zone routes', () => {
   });
 
   it('routes removed pages to the zone home', () => {
-    /* 运行区不再单独展示消息监控，旧书签不能落到一个没有渲染分支的 page 上。 */
+    /* 3.0 运行区现在有真正的「消息发送」页（runtime/messages）：
+       这条不再是"已下线"，而是能落地的页。 */
     expect(parseHash('#/device/line1/runtime/messages')).toEqual({
       name: 'device',
       sessionId: 'line1',
       zone: 'runtime',
-      page: 'plans',
+      page: 'messages',
     });
+    /* 2.x 的无区写法 `#/device/{id}/messages` 是旧的「报文监控」页：
+       报文监控已并入右侧抽屉，这里仍回落到运行区首页（App 顺手拉开抽屉）。 */
     expect(parseHash('#/device/line1/messages')).toEqual({
       name: 'device',
       sessionId: 'line1',
@@ -125,11 +128,18 @@ describe('3.0 two-zone routes', () => {
       zone: 'runtime',
       page: 'plans',
     });
+    /* 「手动与压测」已拆成「消息发送」+「报警风暴」：旧 manual 深链迁到消息发送 */
     expect(parseHash('#/device/line1/runtime/manual')).toEqual({
       name: 'device',
       sessionId: 'line1',
       zone: 'runtime',
-      page: 'manual',
+      page: 'messages',
+    });
+    expect(parseHash('#/device/line1/runtime/alarms')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'alarms',
     });
     /* 主机连接页与手动操作页已删除；实时状态页也已下线（状态在实例头） */
     expect(parseHash('#/hosts/h1/config/connection')).toEqual({

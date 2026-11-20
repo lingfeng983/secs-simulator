@@ -119,13 +119,16 @@ test('新建主机：模板套用方案，实例目标信息仍由自己填', as
   await expect(dialog).toContainText('产线 A 方案');
   await expect(dialog.getByLabel('名称')).toHaveValue('host');
   await expect(dialog.getByLabel('目标地址')).toHaveValue('127.0.0.1');
-  await expect(dialog.getByLabel('端口')).toHaveValue('5000');
+  /* 默认端口避开同一 IP 上已被占用的 5000（夹具里 host-1 就是 127.0.0.1:5000） */
+  await expect(dialog.getByLabel('端口', { exact: true })).toHaveValue('5001');
 
   await dialog.getByRole('button', { name: '创建' }).click();
   await expect.poll(() => state.hosts.length).toBe(3);
   /* 模板里 1 份 Trace + 1 份采集方案被复制进新主机的方案库 */
   await expect.poll(() => state.hostPlans.length).toBe(2);
-  await expect(page.locator('.host-page')).toBeVisible();
+  /* 2026-11-20 起建完留在清单里（不再自动跳详情页） */
+  await expect(page).toHaveURL(/#\/hosts$/);
+  await expect(page.locator('#panel-hosts-v2 tbody tr')).toHaveCount(3);
 });
 
 test('操作栏带目标端点；新建主机可从已启动设备快速填入', async ({ page }) => {
@@ -155,12 +158,31 @@ test('新建主机：默认值即可创建，清空目标地址才禁用', async
   await openHosts(page);
   await page.locator('#panel-hosts-v2').getByRole('button', { name: '＋ 新建主机' }).click();
   const dialog = page.getByRole('dialog');
-  /* 默认名称 host / 默认地址 127.0.0.1：打开即可创建 */
+  /* 默认名称 host / 默认地址 127.0.0.1（端口自动避开已占用）：打开即可创建 */
   await expect(dialog.getByRole('button', { name: '创建' })).toBeEnabled();
   await dialog.getByLabel('目标地址').fill('');
   await expect(dialog.getByRole('button', { name: '创建' })).toBeDisabled();
   await dialog.getByLabel('目标地址').fill('10.0.0.9');
-  await dialog.getByLabel('端口').fill('7000');
+  await dialog.getByLabel('端口', { exact: true }).fill('7000');
+  await expect(dialog.getByRole('button', { name: '创建' })).toBeEnabled();
+  await dialog.getByRole('button', { name: '取消' }).click();
+});
+
+test('新建主机：名称不能重名、同一个 IP 的端口不能重复', async ({ page }) => {
+  await openHosts(page);
+  await page.locator('#panel-hosts-v2').getByRole('button', { name: '＋ 新建主机' }).click();
+  const dialog = page.getByRole('dialog');
+
+  /* 与夹具里的 host-1（127.0.0.1:5000）撞名 + 撞端口：两条红字都出，创建不可点 */
+  await dialog.getByLabel('名称').fill('产线 A 主机');
+  await dialog.getByLabel('端口', { exact: true }).fill('5000');
+  await expect(dialog).toContainText('已被占用');
+  await expect(dialog).toContainText('同一个 IP 的端口不能重复');
+  await expect(dialog.getByRole('button', { name: '创建' })).toBeDisabled();
+
+  /* 换个名字、换个端口就能建 */
+  await dialog.getByLabel('名称').fill('走查主机');
+  await dialog.getByLabel('端口', { exact: true }).fill('5002');
   await expect(dialog.getByRole('button', { name: '创建' })).toBeEnabled();
   await dialog.getByRole('button', { name: '取消' }).click();
 });
@@ -176,17 +198,17 @@ test('新建主机：「立即连接」默认开；关掉只建实例不建链',
   await expect(dialog.getByLabel('立即连接')).toBeChecked();
   await dialog.getByRole('button', { name: '创建' }).click();
   await expect.poll(() => state.hosts.find((host) => host.id === 'host-3')?.open).toBe(true);
-  /* 创建成功后界面自动跳到新主机详情；等它落定再回清单，否则跳转会把路由抢回去 */
-  await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-3');
+  /* 2026-11-20 起建完留在清单里：新主机直接出现在表格里，要看细节点「详情」 */
+  await expect(page).toHaveURL(/#\/hosts$/);
+  await expect(panel.locator('tbody tr')).toHaveCount(3);
 
   /* 关掉开关：只建实例，停在断开态，之后可从列表再连 */
-  await openHosts(page);
   await panel.getByRole('button', { name: '＋ 新建主机' }).click();
   dialog = page.getByRole('dialog');
   await dialog.getByLabel('立即连接').uncheck();
   await dialog.getByRole('button', { name: '创建' }).click();
   await expect.poll(() => state.hosts.length).toBe(4);
-  await expect(page.locator('.host-page')).toHaveAttribute('data-host', 'host-4');
+  await expect(panel.locator('tbody tr')).toHaveCount(4);
   const idle = state.hosts.find((host) => host.id === 'host-4');
   expect(idle?.open).toBe(false);
   expect(idle?.phase).toBe('DISCONNECTED');

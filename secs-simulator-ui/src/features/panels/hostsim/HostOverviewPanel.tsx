@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
+import { FieldLabel } from '../../../shared/ui/FieldLabel';
 import type { CollectorState } from '../../../api';
 import { parseIdList, useCollectPlans, useTracePlans } from '../../../state/hostPlans';
 import type { PanelArgs } from './hostPanelShared';
@@ -190,39 +191,29 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
           </div>
         )}
 
-        <div className="cfg-section">
-          <div className="form-row">
-            <label className="field field-wide">
-              名称
-              <input value={name} disabled={readOnly}
-                onChange={(event) => setName(event.target.value)} />
-            </label>
-          </div>
-          <div className="form-row">
-            <label className="field">
-              目标地址
-              <input value={host_} disabled={readOnly}
-                onChange={(event) => setHost_(event.target.value)} />
-            </label>
-            <label className="field">
-              端口
-              <input type="number" min={1} max={65535} value={port} disabled={readOnly}
-                onChange={(event) => setPort(event.target.value)} />
-            </label>
-          </div>
-          <div className="form-row">
-            <label className="field">
-              Device ID
-              <input type="number" min={0} value={deviceId} disabled={readOnly}
-                onChange={(event) => setDeviceId(event.target.value)} />
-            </label>
-          </div>
-
-          {/* 说明贴在字段下方：名称热生效、目标要重建；不再横在卡片标题右侧撑宽视线 */}
-          <p className="hint">
-            名称不参与建链，保存后立即生效、不会中断连接；目标地址 / 端口 / Device ID 改动需要重建链路，
-            保存后点「使设置生效」才生效（正在跑的 Trace / 采集会中断）。
-          </p>
+        {/* 一行一个配置项、标题列对齐（.modal-field 栅格）；说明收进标题悬浮气泡，
+            表单不再被"名称整行 + 三行宽窄不一"撑得参差不齐 */}
+        <div className="cfg-section modal-form">
+          <label className="field modal-field">
+            <FieldLabel text="名称" help="主机的显示名，不参与建链：保存后立即生效，不会中断连接。" />
+            <input value={name} disabled={readOnly} aria-label="主机名称"
+              onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label className="field modal-field">
+            <FieldLabel text="目标地址" help="设备 HSMS 服务器的 IP / 主机名；改动保存后要点「使设置生效」重建链路（正在跑的 Trace / 采集会中断）。" />
+            <input value={host_} disabled={readOnly} aria-label="目标地址"
+              onChange={(event) => setHost_(event.target.value)} />
+          </label>
+          <label className="field modal-field">
+            <FieldLabel text="端口" help="设备 HSMS 监听端口（1-65535）；改动保存后要点「使设置生效」重建链路。" />
+            <input type="number" min={1} max={65535} value={port} disabled={readOnly} aria-label="端口"
+              onChange={(event) => setPort(event.target.value)} />
+          </label>
+          <label className="field modal-field">
+            <FieldLabel text="Device ID" help="会话级 Device ID，须与设备侧一致；改动保存后要点「使设置生效」重建链路。" />
+            <input type="number" min={0} value={deviceId} disabled={readOnly} aria-label="Device ID"
+              onChange={(event) => setDeviceId(event.target.value)} />
+          </label>
 
           {!readOnly && (
             <div className="editor-foot">

@@ -106,11 +106,14 @@ describe('DevicePage 骨架', () => {
     }
   });
 
-  it('未启动的设备也有运行区的两页，不因状态少一页', () => {
+  it('未启动的设备也有运行区的全部页，不因状态少一页', () => {
     const html = renderDevice('plans', 'runtime');
     const tabs = html.slice(html.indexOf('subtabs'), html.indexOf('tab-page'));
     expect(tabs).toContain('事件执行');
-    expect(tabs).toContain('手动与压测');
+    /* 「手动与压测」2026-11-20 拆成两页：消息发送 + 报警风暴 */
+    expect(tabs).toContain('消息发送');
+    expect(tabs).toContain('报警风暴');
+    expect(tabs).not.toContain('手动与压测');
     /* 运行数据等启动后才有：在页面内容区里说明，而不是整页换掉 */
     expect(html).toContain('tab-page');
     expect(html).toContain('这台设备还没有启动');

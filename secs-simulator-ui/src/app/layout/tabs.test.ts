@@ -21,7 +21,7 @@ describe('顶部页面标签', () => {
   it('设备与主机按对象建标签，子页切换不新开标签', () => {
     expect(tabIdForRoute({ name: 'device', sessionId: 'line1', zone: 'config', page: 'overview' }))
       .toBe('device:line1');
-    expect(tabIdForRoute({ name: 'device', sessionId: 'line1', zone: 'runtime', page: 'manual' }))
+    expect(tabIdForRoute({ name: 'device', sessionId: 'line1', zone: 'runtime', page: 'messages' }))
       .toBe('device:line1');
     expect(tabIdForRoute({ name: 'host', hostId: 'host-1', zone: 'runtime', page: 'trace' }))
       .toBe('host:host-1');

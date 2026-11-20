@@ -1,12 +1,11 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Panel } from '../../../shared/ui/Panel';
 import { DataTable, type Column } from '../../../shared/ui/DataTable';
-import { SmlResult } from '../../../shared/ui/SmlResult';
 import { Modal } from '../../../shared/ui/Modal';
 import { MultiSelect } from '../../../shared/ui/MultiSelect';
 import { EmptyState } from '../../../shared/ui/EmptyState';
 import { VariableChart } from '../../charts/VariableChart';
-import type { ApiClient, Catalog, CatalogSvid, HostV2, SentMessageResult } from '../../../api';
+import type { ApiClient, Catalog, CatalogSvid, HostV2 } from '../../../api';
 import {
   DEFAULT_TRACE_DRAFT,
   parseIdList,
@@ -112,6 +111,7 @@ function TracePlanTable({
   onLoad,
   onDelete,
   onToggleRun,
+  onViewChart,
   busy,
   toolbarEnd,
 }: {
@@ -125,6 +125,8 @@ function TracePlanTable({
   onLoad: (plan: TracePlan) => void;
   onDelete: (id: string) => void;
   onToggleRun: (plan: TracePlan) => void;
+  /** 运行区：弹窗查看该方案已收到的 S6F1 参数曲线。 */
+  onViewChart: (plan: TracePlan) => void;
   busy: boolean;
   /** 表格工具条右端的动作（新增方案、批量启停这类页面级动作落在这里）。 */
   toolbarEnd?: ReactNode;
@@ -199,6 +201,13 @@ function TracePlanTable({
                 : '向设备下发 S2F23 开始采样'}
             >
               {running ? '停止' : '启动'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewChart(row)}
+              title="弹窗查看该方案已收到的 S6F1 参数曲线"
+            >
+              查看曲线
             </button>
           </div>
         );
@@ -306,20 +315,21 @@ interface TracePlanForm extends TraceDraft {
  *
  * <p>配置区只管方案库：列表 + 新增/编辑弹窗 + 删除。运行区同一份方案列表
  * 提供状态列与启停（启动 = 下发 S2F23 开始采样，停止 = 该 TRID 下发 TOTSMP=0），
- * 并支持勾选多行批量启停；数据曲线按方案折叠，点「查看曲线」才计算绘制。</p>
+ * 并支持勾选多行批量启停；曲线在操作列点「查看曲线」弹窗里看，启停的反馈
+ * 只落在状态列与按钮两态上，不再展示下发报文。</p>
  */
 export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages = [] }: PanelArgs): JSX.Element {
   const host = hosts.find(hostId);
   const [plans, setPlans] = useTracePlans(hostId);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<SentMessageResult | null>(null);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<TracePlanForm>({
     trid: '1', dsper: '1000', totsmp: '100', repgsz: '1', svids: '1001, 1003', name: '',
   });
-  const [viewingTrid, setViewingTrid] = useState<number | null>(null);
+  /** 操作列「查看曲线」打开的方案 id；null = 曲线弹窗关闭。 */
+  const [chartPlanId, setChartPlanId] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [progress, setProgress] = useState('');
   const [batch, setBatch] = useState<BatchSummary | null>(null);
@@ -408,7 +418,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
     setBusy(true);
     setError('');
     try {
-      setResult(await requireClient(client).sendHostV2(hostId, sml));
+      await requireClient(client).sendHostV2(hostId, sml);
       if (trids.length > 0) {
         markManual(trids, started);
       }
@@ -541,7 +551,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
           continue;
         }
         try {
-          setResult(await activeClient.sendHostV2(hostId, planSml(plan, start ? plan.totsmp : 0)));
+          await activeClient.sendHostV2(hostId, planSml(plan, start ? plan.totsmp : 0));
           markManual([plan.trid], start);
           okCount += 1;
         } catch (e) {
@@ -563,6 +573,14 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
 
   /* 目录还没读回来时按"不可用"渲染手动输入，避免弹窗先闪一下控件 */
   const svidChoices = lookup?.catalog?.svids ?? null;
+
+  /* 曲线弹窗的数据：按方案 id 找回方案，再按 TRID 找回已归组的 S6F1 序列 */
+  const chartPlan = chartPlanId === null
+    ? null
+    : plans.find((plan) => plan.id === chartPlanId) ?? null;
+  const chartGroup = chartPlan === null
+    ? undefined
+    : groups.find((item) => item.trid === chartPlan.trid);
 
   const batchBar = (
     <span className="row-actions">
@@ -618,21 +636,6 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
         title={readOnly ? 'Trace 设置（S2F23 方案库）' : 'Trace 采集（S2F23 → S6F1）'}
         headless
       >
-        {/* 配置区只管方案库：保存不下发，开始采样在运行区——说清楚，省得"保存了怎么没数据" */}
-        {readOnly && (
-          <p className="hint">
-            这里保存的是<b>方案库</b>（落 config.db，重启后端也不丢），保存本身<b>不会下发</b>。
-            真正开始 / 停止采样在运行区「Trace 采集」页。
-            {' · '}
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => goTo?.(`host-page:${hostId}:runtime:trace`)}
-            >
-              去下发 →
-            </button>
-          </p>
-        )}
         {host.open && !readOnly && host.phase !== 'CONNECTED' && (
           <p className="problems">主机还没连接,先到实例头点「连接」。</p>
         )}
@@ -647,6 +650,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
           onLoad={openEdit}
           onDelete={(id) => setPlans((previous) => previous.filter((plan) => plan.id !== id))}
           onToggleRun={toggleRun}
+          onViewChart={(plan) => setChartPlanId(plan.id)}
           busy={busy}
           /* 页面级动作下移到表格工具条右侧：一页只剩"一行操作 + 一张表" */
           toolbarEnd={readOnly
@@ -675,59 +679,7 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
             )}
           </>
         )}
-
-        {!readOnly && result !== null && (
-          <SmlResult
-            header={`发送 ${host.id}  S${result.stream}F${result.function}${result.wbit ? ' W' : ''}`}
-            result={result}
-            peerLabel="设备"
-          />
-        )}
       </Panel>
-
-      {!readOnly && (
-        <Panel id="panel-host-trace-charts" title="S6F1 参数趋势" headless>
-          {plans.map((plan) => {
-            const open = viewingTrid === plan.trid;
-            const group = groups.find((item) => item.trid === plan.trid);
-            return (
-              <section key={plan.id} className="panel-section">
-                <div className="section-head">
-                  <h3>{plan.name} <span className="mono hint-inline">TRID {plan.trid} · {plan.dsper}ms</span></h3>
-                  <button type="button" onClick={() => setViewingTrid(open ? null : plan.trid)}>
-                    {open ? '收起曲线' : '查看曲线'}
-                  </button>
-                </div>
-                {open && (group === undefined
-                  ? <p className="hint">该 TRID 还没有收到 S6F1 报文；先「启动」并等设备上报。</p>
-                  : (
-                    <div className="collector-charts">
-                      {group.series.map((item) => (
-                        <div className="collector-chart collector-chart-large" key={item.svid}>
-                          <div className="collector-chart-head">
-                            <span className="mono">{item.svid}</span>
-                            <span>{item.label}</span>
-                            <span className="spacer" />
-                            <span className="hint-inline">
-                              {item.v.length} 点 · 最近 {item.v.length > 0 ? item.v[item.v.length - 1].toFixed(2) : '—'}
-                            </span>
-                          </div>
-                          <VariableChart
-                            series={{ svid: item.svid, owner: item.label, unit: '', min: item.v, max: item.v, avg: item.v }}
-                            fromMs={item.t.length > 0 ? item.t[0] : Date.now()}
-                            bucketMs={item.bucketMs}
-                            height={170}
-                            eventLabel="事件"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-              </section>
-            );
-          })}
-        </Panel>
-      )}
         </>
       )}
 
@@ -764,6 +716,49 @@ export function HostTracePanel({ hostId, hosts, readOnly, client, goTo, messages
           采样周期按毫秒填写；下发 S2F23 时转成 DSPER 的 hhmmss 六位整秒格式（不足 1 秒按 1 秒）。
           总样本数填 0 = 不限；停止时该 TRID 下发 TOTSMP=0 提前终止。
         </p>
+      </Modal>
+
+      {/* 曲线弹窗：操作列「查看曲线」打开，S6F1 到一条画一条，随报文实时更新 */}
+      <Modal
+        open={chartPlan !== null}
+        title={chartPlan === null ? '查看曲线' : `查看曲线 · ${chartPlan.name}`}
+        onClose={() => setChartPlanId(null)}
+        width="min(880px, 94vw)"
+      >
+        {chartPlan !== null && (chartGroup === undefined
+          ? (
+            <p className="hint">
+              该方案还没有收到 S6F1 报文；先在列表点「启动」并等设备上报，曲线会实时出现在这里。
+            </p>
+          )
+          : (
+            <>
+              <p className="hint">
+                TRID {chartPlan.trid} · 采样周期 {chartPlan.dsper}ms · 共 {chartGroup.series.length} 个变量 · 随报文实时更新
+              </p>
+              <div className="collector-charts">
+                {chartGroup.series.map((item) => (
+                  <div className="collector-chart collector-chart-large" key={item.svid}>
+                    <div className="collector-chart-head">
+                      <span className="mono">{item.svid}</span>
+                      <span>{item.label}</span>
+                      <span className="spacer" />
+                      <span className="hint-inline">
+                        {item.v.length} 点 · 最近 {item.v.length > 0 ? item.v[item.v.length - 1].toFixed(2) : '—'}
+                      </span>
+                    </div>
+                    <VariableChart
+                      series={{ svid: item.svid, owner: item.label, unit: '', min: item.v, max: item.v, avg: item.v }}
+                      fromMs={item.t.length > 0 ? item.t[0] : Date.now()}
+                      bucketMs={item.bucketMs}
+                      height={170}
+                      eventLabel="事件"
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
+          ))}
       </Modal>
     </div>
   );
