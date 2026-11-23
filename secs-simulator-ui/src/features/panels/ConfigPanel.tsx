@@ -12,7 +12,7 @@ import type { PanelBaseProps } from './types';
  * 配置编辑器面板。
  *
  * <p>只编辑<b>原始 JSON 文本</b>，逐字节保真。结构化字段已经分别放到
- * 「连接」（session）与「结构」（equipment / templates）页——同一份配置
+ * 「链接配置」（session）与「结构配置」（equipment）等专项页——同一份配置
  * 不该有两个互相不知道对方改过什么的表单入口。</p>
  */
 export function ConfigPanel({ backend, sessionId, configName: configNameOverride, notifier }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
@@ -264,90 +264,12 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
       id="panel-config"
       title={configName === '' ? '配置编辑器' : configName}
       headless
-      /* 与「连接」「结构」等结构化编辑页一致：重新载入/校验/保存固定在卡片右上，
-         不埋到长编辑器底部；「目录内配置」也收进这条工具栏，不再单独悬在底部。 */
-      actionsAt="top"
       status={
         <>
           <span className="state-pill" data-tone="muted">目录内配置 {configList.length}</span>
           {configName === ''
             ? <span className="state-pill" data-tone="muted">未打开</span>
             : dirty ? <span className="state-pill" data-tone="warn">有未保存改动</span> : undefined}
-        </>
-      }
-      actions={
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              /* 有未保存改动时重新载入 = 丢草稿，先确认 */
-              if (dirty) {
-                setDiscardReloadOpen(true);
-                return;
-              }
-              void reloadConfig();
-            }}
-            disabled={configName === '' || busy}
-            title="丢掉本地改动，重新拉磁盘上的原文"
-          >
-            重新载入
-          </button>
-          <button
-            type="button"
-            onClick={() => void onValidate()}
-            disabled={configName === '' || busy}
-            title="只做校验，不写文件：确认改动能不能编译"
-          >
-            校验
-          </button>
-          <span className="action-sep" aria-hidden="true" />
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => importRef.current?.click()}
-            title="导入 JSON：从本地文件读入草稿（只进编辑器，仍需校验/保存）"
-            aria-label="导入 JSON"
-          >
-            <Icon name="upload" size={15} />
-          </button>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => void exportJson()}
-            disabled={draft.trim() === ''}
-            title="导出 JSON：把当前草稿存成文件（可选择保存位置）"
-            aria-label="导出 JSON"
-          >
-            <Icon name="download" size={15} />
-          </button>
-          <span className="action-sep" aria-hidden="true" />
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void onSave()}
-            disabled={configName === '' || busy}
-            title="校验通过后整份写回，不会写一半"
-          >
-            保存
-          </button>
-          <input
-            ref={importRef}
-            type="file"
-            accept=".json,application/json,text/plain"
-            style={{ display: 'none' }}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file === undefined) {
-                return;
-              }
-              void file.text().then((text) => {
-                setDraft(text);
-                setProblems([]);
-                setNotice(`已导入 ${file.name}（未保存，请先校验）`);
-              });
-            }}
-          />
         </>
       }
     >
@@ -408,9 +330,54 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
       ) : (
         <>
           {notice !== '' && <p className="inline-note">{notice}</p>}
+          {/* 重新载入 / 校验 / 导入导出 / 保存 / 查看差异 收进同一行工具条（2026-11-20），
+              不再拆在面板头与编辑区上方两处 */}
           <div className="config-toolbar">
-            <span className="hint-inline">只编辑原文；连接 / 设备结构 / 模板请到左侧「连接」「结构」子页。</span>
+            <span className="hint-inline">只编辑原文；分段编辑到「链接配置」「结构配置」等子页。</span>
             <span className="spacer" />
+            <button
+              type="button"
+              onClick={() => {
+                /* 有未保存改动时重新载入 = 丢草稿，先确认 */
+                if (dirty) {
+                  setDiscardReloadOpen(true);
+                  return;
+                }
+                void reloadConfig();
+              }}
+              disabled={busy}
+              title="丢掉本地改动，重新拉磁盘上的原文"
+            >
+              重新载入
+            </button>
+            <button
+              type="button"
+              onClick={() => void onValidate()}
+              disabled={busy}
+              title="只做校验，不写文件：确认改动能不能编译"
+            >
+              校验
+            </button>
+            <span className="action-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => importRef.current?.click()}
+              title="导入 JSON：从本地文件读入草稿（只进编辑器，仍需校验/保存）"
+              aria-label="导入 JSON"
+            >
+              <Icon name="upload" size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => void exportJson()}
+              disabled={draft.trim() === ''}
+              title="导出 JSON：把当前草稿存成文件（可选择保存位置）"
+              aria-label="导出 JSON"
+            >
+              <Icon name="download" size={15} />
+            </button>
             <button
               type="button"
               className={showDiff ? 'active' : undefined}
@@ -422,6 +389,33 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
             >
               {showDiff ? '收起差异' : '查看差异'}
             </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void onSave()}
+              disabled={busy}
+              title="校验通过后整份写回，不会写一半"
+            >
+              保存
+            </button>
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,application/json,text/plain"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file === undefined) {
+                  return;
+                }
+                void file.text().then((text) => {
+                  setDraft(text);
+                  setProblems([]);
+                  setNotice(`已导入 ${file.name}（未保存，请先校验）`);
+                });
+              }}
+            />
           </div>
           <JsonEditor
             value={draft}

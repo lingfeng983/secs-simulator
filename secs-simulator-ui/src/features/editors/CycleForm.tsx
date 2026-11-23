@@ -21,7 +21,7 @@ type Edit = (mutate: (root: JsonObject) => void) => void;
  * <p>事件在构建期按片展开成普通的时间触发计划——所以这里配 3 条、跑 25 片，
  * 编译出来就是 75 条计划；界面上写清这个乘法，避免有人以为只发 3 条。</p>
  */
-export function CycleForm({ root, edit, readOnly = false }: {
+export function CycleForm({ root, edit, readOnly = false, onSave, busy }: {
   root: JsonObject;
   edit: Edit;
   /**
@@ -30,6 +30,9 @@ export function CycleForm({ root, edit, readOnly = false }: {
    * （2026-11-18 用户要求：运行区要看到周期配置，不可编辑）。
    */
   readOnly?: boolean;
+  /** 「保存」按钮（配置区设备页传 save；模板编辑器/只读视图不传则不显示）。 */
+  onSave?: () => Promise<void> | void;
+  busy?: boolean;
 }): JSX.Element {
   const cycle = isJsonObject(root.cycle) ? root.cycle : null;
   const ceidChoices = collectCeids(root);
@@ -163,23 +166,44 @@ export function CycleForm({ root, edit, readOnly = false }: {
 
   return (
     <div className="cfg-section">
+      {/* 标题行右侧一行放「+ 周期事件」与「保存」（2026-11-21 用户要求）；
+          「移除周期段」按钮已删——删整段去「全量配置」页改原文。 */}
       <div className="template-head">
         <h3>
           <HintTitle text={`时间轴只有一条：曲线用片内相位（每片从 0 重放），事件用片内偏移；时长误差只改变片长，不移动片内事件位置。${hasEventPlans ? '下面的「事件计划」里的周期触发不会自动转成片内事件：片内重复请写在上面这张表，事件计划留给周期外的异常路径（启动一次、条件触发、事件后跟随）。' : ''}`}>
             工艺周期（cycle）
           </HintTitle>
         </h3>
-        <button
-          type="button"
-          onClick={() => edit((draft) => {
-            delete draft.cycle;
-          })}
-        >
-          移除周期段
-        </button>
+        <div className="template-actions">
+          {typeof events !== 'string' && (
+            <button
+              type="button"
+              onClick={() => edit((draft) => {
+                const target = objectField(draft, 'cycle');
+                const items = Array.isArray(target.events) ? (target.events as JsonObject[]) : [];
+                items.push({ atMs: 1_000, ceid: ceidChoices[0]?.svid ?? 0 });
+                target.events = items;
+              })}
+            >
+              + 周期事件
+            </button>
+          )}
+          {onSave !== undefined && (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy === true}
+              title="整份周期定义（时长/片数/片内事件）配置完点一次保存，只提交 cycle 段"
+              onClick={() => void onSave()}
+            >
+              保存
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="form-row">
+      {/* 与标题行拉开一段距离（2026-11-21 用户反馈上下太挤） */}
+      <div className="form-row" style={{ marginTop: '1.1rem' }}>
         <label className="field field-cell">
           <span className="field-cell-name">周期时长 ms</span>
           <NumberField
@@ -214,19 +238,6 @@ export function CycleForm({ root, edit, readOnly = false }: {
           />
           每片用不同噪声
         </label>
-        {typeof events !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'cycle');
-              const items = Array.isArray(target.events) ? (target.events as JsonObject[]) : [];
-              items.push({ atMs: 1_000, ceid: ceidChoices[0]?.svid ?? 0 });
-              target.events = items;
-            })}
-          >
-            + 周期事件
-          </button>
-        )}
       </div>
 
       <datalist id="cfg-cycle-ceid-options">
@@ -290,11 +301,6 @@ export function CycleForm({ root, edit, readOnly = false }: {
               </button>
             </div>
           ))}
-          <p className="hint">
-            编译期会按片展开：{count > 0 ? count : '?'} 片 × {events.length} 条 =
-            {count > 0 ? ` ${count * events.length} ` : ' ? '}
-            条触发计划。同一 CEID 在片内出现多次是允许的（每次都会上报）。
-          </p>
         </>
       )}
 

@@ -40,8 +40,9 @@ interface SvidRow {
  * 设备 · 配置区 · 变量配置（SVID 定义）。
  *
  * <p>全局 SVID 与各单元 SVID 合在一张表里，按行「编辑」弹窗改基本信息与值定义；
- * 弹窗「确定」写入本页草稿，「保存」后相关会话自动重载。「从模板库填入」
- * 把库里那条变化逻辑深拷贝进来，之后改库不影响这里。</p>
+ * 「从模板库填入」把库里那条变化逻辑深拷贝进来，之后改库不影响这里。
+ * 2026-11-20 起新建/编辑弹窗确认、删除确认都直接保存落盘（svids 段），
+ * 页面顶部不再有保存/校验/重新载入按钮。</p>
  */
 export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { backend, sessionId, configName } = props;
@@ -54,10 +55,11 @@ export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; co
       panelId="panel-svid-config"
       sections={['svids']}
       title="变量配置（SVID 定义）"
+      actions="none"
     >
-      {({ root, edit }) => (
+      {({ root, edit, save }) => (
         isJsonObject(root.equipment)
-          ? <SvidTable equipment={root.equipment} edit={edit} library={paramLibrary.entries} />
+          ? <SvidTable equipment={root.equipment} edit={edit} library={paramLibrary.entries} onMutated={() => void save()} />
           : <MissingEquipment edit={edit} />
       )}
     </ConfigEditShell>
@@ -177,10 +179,12 @@ function rangeText(item: JsonObject): string {
   return `${min ?? '−∞'} ~ ${max ?? '+∞'}`;
 }
 
-export function SvidTable({ equipment, edit, library }: {
+export function SvidTable({ equipment, edit, library, onMutated }: {
   equipment: JsonObject;
   edit: Edit;
   library: ParamTemplate[];
+  /** 每次改动落进草稿后回调（设备页传 save，模板编辑器不传仍是纯草稿）。 */
+  onMutated?: () => void;
 }): JSX.Element {
   const rows = rowsOf(equipment);
   const firstUnit = indexedObjects(equipment.units)[0]?.[1] ?? GLOBAL;
@@ -228,6 +232,7 @@ export function SvidTable({ equipment, edit, library }: {
       }
     });
     setEditing(null);
+    onMutated?.();
   };
 
   return (
@@ -239,12 +244,12 @@ export function SvidTable({ equipment, edit, library }: {
         rowKey={(row) => row.key}
         searchPlaceholder="搜索名称 / 绝对 id / 所属"
         searchText={(row) => `${row.name} ${row.absId} ${row.scopeLabel}`}
-        emptyText="还没有变量。点「＋ 新建变量」添加；单元本身在「结构」页维护。"
+        emptyText="还没有变量。点「＋ 新建变量」添加；单元本身在「结构配置」页维护。"
         toolbarEnd={
           <button
             type="button"
             className="primary"
-            title="没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。"
+            title="没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构配置」页的号段规划里改。变化随工艺周期启停：停止时冻结，启动后从第 0 片起跑。"
             onClick={() => setEditing({ scope: firstUnit, index: null })}
           >
             ＋ 新建变量
@@ -253,7 +258,7 @@ export function SvidTable({ equipment, edit, library }: {
       />
       <p className="hint">
         没配值定义的变量按内置默认曲线取值；值定义四选一：常量 / 曲线 / 表达式 / 按片。
-        单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构」页的号段规划里改。
+        单元变量的绝对 id = 单元起点 + offset，起点与步长在「结构配置」页的号段规划里改。
       </p>
 
       {editing !== null && (editing.index === null || editingRow !== undefined) && (
@@ -292,6 +297,7 @@ export function SvidTable({ equipment, edit, library }: {
             edit((draft) => {
               svidListIn(draft, deleting.scope)?.splice(deleting.index, 1);
             });
+            onMutated?.();
           }
           setDeleting(null);
         }}

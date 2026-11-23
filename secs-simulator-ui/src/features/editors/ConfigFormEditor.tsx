@@ -2,8 +2,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ParamTemplate } from '../../api/paramTemplates';
 import { SourceEditor } from './SourceEditor';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
-import { FieldLabel, HintTitle } from '../../shared/ui/FieldLabel';
-import { Collapsible } from '../../shared/ui/Collapsible';
+import { HintTitle } from '../../shared/ui/FieldLabel';
 import {
   booleanField,
   collectCeids,
@@ -21,11 +20,11 @@ import {
   type TriggerType,
 } from './templateConfig';
 import { ConfigItemModal } from './ConfigItemModal';
-import { SectionHead, type Edit } from './ConfigFormParts';
+import { SectionHead, SessionField, type Edit } from './ConfigFormParts';
 import { EquipmentForm } from './EquipmentFormSections';
 
-export { FormGridHead, FormRow, nextId, SectionHead } from './ConfigFormParts';
-export { EquipmentForm, GlobalCeidsForm, stringListOf, unitsOf } from './EquipmentFormSections';
+export { FormGridHead, FormRow, nextId, SectionHead, SessionField } from './ConfigFormParts';
+export { EquipmentForm, stringListOf, unitsOf } from './EquipmentFormSections';
 
 interface ConfigFormEditorProps {
   /** 配置原文；结构化编辑永远从这份文本出发。 */
@@ -180,48 +179,16 @@ export function SessionForm({ root, edit }: { root: JsonObject; edit: Edit }): J
         </SessionField>
       </div>
 
-      {/* 高级项默认收起：超时与 Trace 容量是"真机调优"才动的旋钮，
-          不跟常用参数抢一屏。两组之间用一条分隔线区分。 */}
-      <Collapsible
-        title="高级：HSMS 超时与 Trace 容量"
-        hint="超时单位是秒，留空走协议层默认值；Trace 留空时默认同时 1 条、每条最多 10 个 SVID。改动只进本页草稿，保存后生效。"
-        defaultOpen={false}
-      >
+      {/* 2026-11-21 用户要求：高级项不再折叠，直接平铺展示。两组之间用一条分隔线区分。 */}
+      <div style={{ borderTop: '1px solid var(--line)', marginTop: '1rem', paddingTop: '0.9rem' }}>
         <h3 className="session-subhead" style={{ marginTop: 0 }}>HSMS 超时（秒，留空用协议默认）</h3>
         <TimeoutFields session={session} set={set} />
-        <div style={{ borderTop: '1px solid var(--line)', marginTop: '0.75rem', paddingTop: '0.75rem' }}>
-          <h3 className="session-subhead" style={{ marginTop: 0 }}>Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）</h3>
-          <TraceFields session={session} set={set} />
-        </div>
-      </Collapsible>
+      </div>
+      <div style={{ borderTop: '1px solid var(--line)', marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+        <h3 className="session-subhead" style={{ marginTop: 0 }}>Trace 容量（留空用默认：同时 1 条 / 每条 ≤10 SVID）</h3>
+        <TraceFields session={session} set={set} />
+      </div>
     </div>
-  );
-}
-
-/** 一行"标题 + 控件"：标题列对齐；说明默认不展示，悬浮/聚焦在标题上时出气泡。 */
-export function SessionField({ label, help, required = false, span, compact = false, children }: {
-  label: string;
-  help: string;
-  /** 必填项：标题后加红色星号（比"点了确定才弹一条横幅"更好用）。 */
-  required?: boolean;
-  /** 在栅格容器里横跨的列数；普通表单里忽略。 */
-  span?: 1 | 2 | 3;
-  /** 短数字字段：连标题一起限制宽度，别在 500px 弹窗里拉成一条长条。 */
-  compact?: boolean;
-  children: ReactNode;
-}): JSX.Element {
-  const style: CSSProperties = {};
-  if (span !== undefined) {
-    style.gridColumn = `span ${span}`;
-  }
-  if (compact) {
-    style.maxWidth = '22rem';
-  }
-  return (
-    <label className="field modal-field" style={style}>
-      <FieldLabel text={label} help={help} required={required} />
-      {children}
-    </label>
   );
 }
 
@@ -333,7 +300,14 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
   afterEvent: '事件后（afterEvent）',
 };
 
-export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+/**
+ * 事件计划列表（events.plans）。
+ *
+ * <p>2026-11-20：「事件发送」三项（每秒事件上限 / 两个 W 位）搬到「结构配置」页的
+ * 设备全局里（{@link EquipmentForm}），本页只管计划本身；新建/编辑弹窗确认、
+ * 删除都直接落盘（设备页传 {@code onMutated}，模板编辑器不传仍是纯草稿）。</p>
+ */
+export function EventsForm({ root, edit, onMutated }: { root: JsonObject; edit: Edit; /** 每次改动落进草稿后回调。 */ onMutated?: () => void }): JSX.Element {
   const [editing, setEditing] = useState<{ index: number | null; draft: JsonObject } | undefined>(undefined);
   const events = isJsonObject(root.events) ? root.events : null;
   const ceidChoices = useMemo(() => collectCeids(root), [root]);
@@ -344,14 +318,17 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
         <SectionHead title="事件计划列表">
           <button
             type="button"
-            onClick={() => edit((draft) => {
-              draft.events = { maxPerSec: 20, plans: [] };
-            })}
+            onClick={() => {
+              edit((draft) => {
+                draft.events = { maxPerSec: 20, plans: [] };
+              });
+              onMutated?.();
+            }}
           >
             插入 events 段
           </button>
         </SectionHead>
-        <p className="hint">这份配置还没有 events 段（S6F11 的 W 位、事件计划）。</p>
+        <p className="hint">这份配置还没有 events 段（事件计划）。</p>
       </div>
     );
   }
@@ -564,42 +541,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
         </button>
       </SectionHead>
 
-      {/* 这三项是 events 段的发送口径，不是某一条计划：放在列表上方一行，
-          与计划逐条配置区分开（列表才是本页主体）。 */}
-      <div className="form-row">
-        <span className="template-label">事件发送</span>
-        <label className="field field-cell">
-          <span className="field-cell-name">每秒事件上限</span>
-          <NumberField
-            value={numberField(events, 'maxPerSec')}
-            integer
-            onCommit={(next) => edit((draft) => {
-              objectField(draft, 'events').maxPerSec = next;
-            })}
-          />
-        </label>
-        <label className="check-inline">
-          <input
-            type="checkbox"
-            checked={booleanField(events, 's6f11Wbit')}
-            onChange={(event) => edit((draft) => {
-              objectField(draft, 'events').s6f11Wbit = event.target.checked;
-            })}
-          />
-          S6F11 带 W 位
-        </label>
-        <label className="check-inline">
-          <input
-            type="checkbox"
-            checked={booleanField(events, 's6f1Wbit')}
-            onChange={(event) => edit((draft) => {
-              objectField(draft, 'events').s6f1Wbit = event.target.checked;
-            })}
-          />
-          S6F1 带 W 位
-        </label>
-      </div>
-
+      {/* 这三项是 events 段的发送口径，已在「结构配置」页的设备全局里维护（2026-11-20 搬家）。 */}
       <datalist id="cfg-ceid-options">
         {ceidChoices.map((choice) => (
           <option key={choice.svid} value={choice.svid}>
@@ -611,7 +553,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
       {typeof plans === 'string' ? (
         <p className="problems">events.plans {plans}</p>
       ) : plans.length === 0 ? (
-        <p className="hint">还没有事件计划：点右上角「+ 事件计划」新增一条，新增/修改都只写进本页草稿。</p>
+        <p className="hint">还没有事件计划：点右上角「＋ 新建事件计划」新增一条，确认后立即保存。</p>
       ) : (
         <table className="effects-table" aria-label="事件计划列表">
           <thead>
@@ -657,12 +599,15 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
                       </button>
                       <button
                         type="button"
-                        onClick={() => edit((draft) => {
-                          const target = objectField(draft, 'events').plans;
-                          if (Array.isArray(target)) {
-                            (target as unknown[]).splice(index, 1);
-                          }
-                        })}
+                        onClick={() => {
+                          edit((draft) => {
+                            const target = objectField(draft, 'events').plans;
+                            if (Array.isArray(target)) {
+                              (target as unknown[]).splice(index, 1);
+                            }
+                          });
+                          onMutated?.();
+                        }}
                       >
                         删除
                       </button>
@@ -706,6 +651,7 @@ export function EventsForm({ root, edit }: { root: JsonObject; edit: Edit }): JS
               }
             });
             setEditing(undefined);
+            onMutated?.();
           }}
         >
           {(item, mutate) => planFields(item, mutate)}

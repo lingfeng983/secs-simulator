@@ -85,14 +85,14 @@ export const HOST_RUNTIME_PAGES: readonly HostRuntimePage[] = [
 
 export const DEVICE_CONFIG_PAGE_LABELS: Record<DeviceConfigPage, string> = {
   overview: '概览',
-  connection: '连接',
-  structure: '结构',
+  connection: '链接配置',
+  structure: '结构配置',
   svids: '变量配置',
   context: '晶圆属性',
   events: '事件与报告',
   cycle: '工艺周期',
   plans: '事件计划',
-  document: '配置原文',
+  document: '全量配置',
   constants: '设备常量',
   revisions: '版本历史',
 };
@@ -117,15 +117,15 @@ export const HOST_RUNTIME_PAGE_LABELS: Record<HostRuntimePage, string> = {
 /** 子页签悬浮说明（SubTabs note）：一句话说清这页管什么。 */
 export const DEVICE_CONFIG_PAGE_NOTES: Record<DeviceConfigPage, string> = {
   overview: '设备身份与模板选择；保存后需重启生效。',
-  connection: 'HSMS 连接参数（session 段）：地址、端口、模式。',
-  structure: '设备名/号段/单元的整体模型编辑；保存后需重启生效。',
-  svids: '状态变量（SVID）定义与各自的值来源：写入配置草稿，校验后保存。',
+  connection: 'HSMS 链接参数（session 段）：地址、端口、模式。',
+  structure: '设备全局与单元结构；设备全局点「保存」生效，单元增删立即保存。',
+  svids: '状态变量（SVID）定义与各自的值来源：新建/编辑/删除确认后立即保存。',
   context: '晶圆属性（LOTID/RCPID/PPID/WAFERID）：随片变化，报告里按 ctx.名 引用。',
   events: '事件（CEID）与报告（RPT）定义：报告可引用 SVID / 设备常量 / 晶圆属性。',
   cycle: '工艺周期：一片 wafer 的节拍与片内事件；值随周期启停，运行卡随设备启动。',
   plans: '事件计划：周期外的异常路径（触发规则），启动/停止在运行区「事件执行」。',
-  document: '配置原文 JSON 与版本 diff。',
-  constants: '设备常量（ECV）定义：写入配置草稿，校验后保存。',
+  document: '全量配置 JSON 与版本 diff。',
+  constants: '设备常量（ECV）定义：新建/编辑/删除确认后立即保存。',
   revisions: '配置版本历史与回看。',
 };
 export const DEVICE_RUNTIME_PAGE_NOTES: Record<DeviceRuntimePage, string> = {

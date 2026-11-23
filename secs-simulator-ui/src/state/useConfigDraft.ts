@@ -44,7 +44,7 @@ export interface SaveRestartConfirm {
  *
  * <p>2026-11-18「按页保存、按段生效」：页面通过 {@code sections} 声明自己拥有
  * 哪几段，保存只提交这些段；脏状态也分两级——本页脏、其它页还有脏。
- * 不传 {@code sections} 时仍是整份保存（「配置原文」页的场景）。</p>
+ * 不传 {@code sections} 时仍是整份保存（「全量配置」页的场景）。</p>
  */
 export interface ConfigDraftState {
   configName: string;
@@ -274,23 +274,31 @@ export function useConfigDraft(
     if (!backend.sessions.some((session) => session.id === sessionId)) {
       return '已保存：设备未启动，下次启动按新配置生效';
     }
-    setNotice(`已保存（${sectionLabels(changed)}），正在应用到设备…`);
-    const applied = await backend.applyConfigSections(sessionId, changed);
+    /* 2026-11-21 用户要求：结构改动不热应用——设备继续跑旧模型，重启设备后才换新结构。
+       其余段（throttle 这类 hot 段）照常应用。 */
+    const live = changed.filter((section) => section !== 'structure');
+    const structureDeferred = live.length !== changed.length;
+    if (live.length === 0) {
+      return '已保存：结构改动在设备重启后生效';
+    }
+    setNotice(`已保存（${sectionLabels(live)}），正在应用到设备…`);
+    const applied = await backend.applyConfigSections(sessionId, live);
     if (applied === null || configNameRef.current !== targetName) {
       return '';
     }
-    if (applied.status === 200) {
-      return effectNote(applied.effect ?? effect, applied.reset, applied.pinsDropped, applied.plansKept);
-    }
-    /* 文件已经落盘、但设备没生效：这是最容易被误判成"已上线"的状态，必须留在页面上 */
-    return `已保存到文件，但设备未生效（${sectionLabelOf(changed)}）：${applied.detail === '' ? applied.error : applied.detail}`;
+    const note = applied.status === 200
+      ? effectNote(applied.effect ?? effect, applied.reset, applied.pinsDropped, applied.plansKept)
+      /* 文件已经落盘、但设备没生效：这是最容易被误判成"已上线"的状态，必须留在页面上 */
+      : `已保存到文件，但设备未生效（${sectionLabelOf(live)}）：${applied.detail === '' ? applied.error : applied.detail}`;
+    const parts = [note, structureDeferred ? '结构改动在设备重启后生效' : ''].filter((part) => part !== '');
+    return parts.join('；');
   };
 
   /**
    * 保存被守卫拦下：把后端给的原因翻成"该怎么做"。
    *
-   * <p>常量覆盖是唯一可以确认后重试的；结构与周期引用必须先改设备状态
-   * （下线 / 停止周期），所以只提示、不提供"强行保存"。</p>
+   * <p>常量覆盖是唯一可以确认后重试的；周期引用冲突必须先停止周期，
+   * 所以只提示、不提供"强行保存"。</p>
    */
   const handleGuard = (targetName: string, error: string, detail: string, owned: readonly ConfigSectionName[]) => {
     if (error === 'ecv-overwrite') {
@@ -301,10 +309,6 @@ export function useConfigDraft(
         confirmLabel: '覆盖并保存',
         danger: true,
       });
-      return;
-    }
-    if (error === 'not-offline') {
-      setNotice(`没有保存：${detail === '' ? '设备在线时不能改单元结构，先下线再保存' : detail}`);
       return;
     }
     if (error === 'cycle-running-guard') {

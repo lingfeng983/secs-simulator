@@ -35,16 +35,18 @@ export const CONFIG_SECTION_NAMES: readonly ConfigSectionName[] = [
  * 页面 → 拥有的段。
  *
  * <p>配置区每个页签对应哪几段只在这里写一次：面板声明它、页签上给未保存
- * 改动点小圆点，都用这一份。`document`（配置原文）拥有整份，不在此表里。</p>
+ * 改动点小圆点，都用这一份。`document`（全量配置）拥有整份，不在此表里。
+ * 2026-11-20 起「事件发送」三项（maxPerSec / 两个 W 位）在「结构配置」页的
+ * 设备全局里维护，throttle 段随之归结构页。</p>
  */
 export const PAGE_SECTIONS: Readonly<Record<string, readonly ConfigSectionName[]>> = {
   connection: ['session'],
-  structure: ['structure'],
+  structure: ['structure', 'throttle'],
   svids: ['svids'],
   context: ['context'],
   events: ['ceids', 'reports'],
   cycle: ['cycle'],
-  plans: ['plans', 'throttle'],
+  plans: ['plans'],
   constants: ['constants'],
 };
 

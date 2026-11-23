@@ -3,10 +3,12 @@ import { ConfigEditShell } from './ConfigEditShell';
 import { EquipmentForm } from '../editors/ConfigFormEditor';
 
 /**
- * 设备 · 结构：配置里的 equipment 段（单元 / 号段 / 设备名）。
+ * 设备 · 结构配置：配置里的 equipment 全局（号段规划 / 事件发送）与单元。
  *
- * <p>增删单元、改 unitId 属于结构变更：后端要求设备不在线（守卫 A），
- * 外壳会先查一次控制状态，在线时直接禁用保存并说明原因。</p>
+ * <p>设备全局是一张表单 + 「保存」按钮（只提交 structure 与 throttle 两段，
+ * throttle 是 2026-11-20 从「事件计划」页搬来的事件发送三项）；单元是列表，
+ * 新增弹窗确认、行内修改与删除都立即保存。2026-11-21 起设备启动中也可以保存：
+ * 改动落盘但不热应用，重启设备后才生效。</p>
  */
 export function StructurePanel({ backend, sessionId, configName }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   return (
@@ -15,10 +17,19 @@ export function StructurePanel({ backend, sessionId, configName }: PanelBaseProp
       sessionId={sessionId}
       configName={configName}
       panelId="panel-structure"
-      title="结构"
-      sections={['structure']}
+      title="结构配置"
+      sections={['structure', 'throttle']}
+      actions="none"
     >
-      {({ root, edit }) => <EquipmentForm root={root} edit={edit} />}
+      {({ root, edit, save, busy }) => (
+        <EquipmentForm
+          root={root}
+          edit={edit}
+          onMutated={() => void save()}
+          onSave={() => save()}
+          busy={busy}
+        />
+      )}
     </ConfigEditShell>
   );
 }

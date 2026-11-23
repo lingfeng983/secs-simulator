@@ -10,11 +10,10 @@ import type { CycleRuntimeView } from '../../api';
 /**
  * 设备 · 配置区 · 工艺周期（2026-11-16 计划生命周期重设计 §2.4/M4）。
  *
- * <p>这一页只管<b>定义</b>：节拍参数 + 片内事件（写配置草稿），以及按这份
- * 草稿重放出来的预览图。周期的启停、片号/相位/进度与片内事件的发送台账
- * 都在运行区「工艺周期」页（{@link import('./CycleRuntimePanel').CycleRuntimePanel}）——
- * 配置区不再放运行卡：同一组按钮在两个区各出现一次，最容易让人在
- * "改配置"的时候顺手把周期停了。</p>
+ * <p>这一页只管<b>定义</b>：节拍参数 + 片内事件，以及按这份草稿重放出来的
+ * 预览图。周期的启停、片号/相位/进度与片内事件的发送台账都在运行区
+ * 「工艺周期」页。2026-11-21：顶部不再有重新载入/校验，「+ 周期事件」与
+ * 「保存」并排放在标题行右侧，整份周期定义配置完点一次保存。</p>
  *
  * <p>预览只取工艺周期的片内事件，与「事件计划」页的计划触发无关。</p>
  */
@@ -28,8 +27,11 @@ export function CyclePanel(props: PanelBaseProps & { sessionId?: string; configN
       panelId="panel-cycle"
       sections={['cycle']}
       title="周期参数与片内事件"
+      actions="none"
     >
-      {({ root, edit, text }) => <CycleEditor root={root} edit={edit} text={text} backend={backend} />}
+      {({ root, edit, text, save, busy }) => (
+        <CycleEditor root={root} edit={edit} text={text} backend={backend} onSave={() => save()} busy={busy} />
+      )}
     </ConfigEditShell>
   );
 }
@@ -213,19 +215,17 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
 }
 
 /** 周期参数 + 片内事件（编辑走配置草稿）；周期预览只取片内事件标记。 */
-function CycleEditor({ root, edit, text, backend }: {
+function CycleEditor({ root, edit, text, backend, onSave, busy }: {
   root: JsonObject;
   edit: (mutate: (root: JsonObject) => void) => void;
   text: string;
   backend: PanelBaseProps['backend'];
+  onSave: () => Promise<void> | void;
+  busy: boolean;
 }): JSX.Element {
   return (
     <>
-      <p className="hint">
-        本页改的是<b>定义</b>（片长、片数、片内事件）。周期什么时候启停、跑到第几片、
-        已发了哪些片内事件，都在运行区「工艺周期」页看和操作。
-      </p>
-      <CycleForm root={root} edit={edit} />
+      <CycleForm root={root} edit={edit} onSave={onSave} busy={busy} />
       <DraftPreviewCard
         backend={backend}
         root={root}

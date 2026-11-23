@@ -32,7 +32,8 @@ interface ConstantRow {
  *
  * <p>equipment.constants：S2F13 查询 / S2F15 写入的 ECID 清单，一张表列出，
  * 按行弹窗编辑。主机写 S2F15 后值会写回配置正文并升一个版本；这里改的是
- * 「初始定义」，保存后需重载生效。</p>
+ * 「初始定义」。2026-11-20 起新建/编辑弹窗确认、删除确认都直接保存落盘
+ * （constants 段），页面顶部不再有保存/校验/重新载入按钮。</p>
  */
 export function ConstantsConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { backend, sessionId, configName } = props;
@@ -44,10 +45,11 @@ export function ConstantsConfigPanel(props: PanelBaseProps & { sessionId?: strin
       panelId="panel-constants-config"
       sections={['constants']}
       title="设备常量（ECV）"
+      actions="none"
     >
-      {({ root, edit }) => (
+      {({ root, edit, save }) => (
         isJsonObject(root.equipment)
-          ? <ConstantsTable equipment={root.equipment} edit={edit} />
+          ? <ConstantsTable equipment={root.equipment} edit={edit} onMutated={() => void save()} />
           : <MissingEquipment edit={edit} />
       )}
     </ConfigEditShell>
@@ -67,7 +69,7 @@ function valueText(item: JsonObject): string {
   return value === undefined ? '—' : String(value);
 }
 
-export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
+export function ConstantsTable({ equipment, edit, onMutated }: { equipment: JsonObject; edit: Edit; /** 每次改动落进草稿后回调（设备页传 save，模板编辑器不传仍是纯草稿）。 */ onMutated?: () => void }): JSX.Element {
   const raw = Array.isArray(equipment.constants) ? (equipment.constants as unknown[]) : [];
   const rows: ConstantRow[] = raw.flatMap((item, index) => (isJsonObject(item) ? [{ index, item }] : []));
   /** 正在编辑的下标；null = 新建；undefined = 弹窗关闭。 */
@@ -153,6 +155,7 @@ export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edi
               }
             });
             setEditing(undefined);
+            onMutated?.();
           }}
         />
       )}
@@ -180,6 +183,7 @@ export function ConstantsTable({ equipment, edit }: { equipment: JsonObject; edi
             edit((draft) => {
               constantsIn(draft).splice(deleting.index, 1);
             });
+            onMutated?.();
           }
           setDeleting(null);
         }}

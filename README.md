@@ -490,8 +490,8 @@ npm --prefix secs-simulator-ui run test:e2e:real
 页面清单：工作台（KPI 读数条 + 「设备与会话」一张表，读数与生命周期操作同行）、设备页十个子页
 （事件、报告、事件编排、报警、状态变量、连接、结构、配置 JSON、发送、消息监视）、
 主机模拟（实例 / 消息发送（含压测） / S6F1 采集 / S1F3 采集 / 消息监控）、模板管理、审计。
-运行时的增删改不写回配置，重载会话后按配置恢复；配置层的修改在「连接」「结构」或「配置」页保存，
-相关会话自动重载。
+运行时的增删改不写回配置，重载会话后按配置恢复；配置层的修改在「链接配置」「结构配置」
+或「全量配置」页保存，按段生效（结构改动在设备重启后生效）。
 
 前端源码按职责分层：
 
@@ -588,6 +588,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 - [ADR 0016 · 目录与分层收敛](docs/adr/0016-layout-and-layer-consolidation.md)
 - [ADR 0018 · 内网工具全放行](docs/adr/0018-intranet-open-access.md) — 监听 0.0.0.0、移除 Host/Origin 防护（2026-11-14）
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
+- [3.4.0 发布说明](docs/reports/release-notes-3.4.0.md) — 功能版：配置区分段保存与行内确认即落盘、三个页签改名（链接配置/结构配置/全量配置）、结构改动不再要求先停设备、事件与报告页合并成三张表
 - [3.3.0 发布说明](docs/reports/release-notes-3.3.0.md) — 功能版：批量新建设备改为一台一份配置（名字=前缀+序号、Device ID 恒 0、重名整批拒绝）、CI 恢复绿、界面文案门禁清零
 - [3.2.0 发布说明](docs/reports/release-notes-3.2.0.md) — 功能版：说明文字全量悬浮化、新建设备弹框批量模式、新建主机「立即连接」开关
 - [3.1.0 发布说明](docs/reports/release-notes-3.1.0.md) — 功能版：一台主机并发多份 S1F3 采集计划、桌面版可用性修复与打包冒烟门禁

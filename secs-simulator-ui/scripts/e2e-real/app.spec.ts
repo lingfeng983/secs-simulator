@@ -24,15 +24,15 @@ test.skip(process.env.E2E_REAL_URL === undefined, '需要 E2E_REAL_URL 指向真
  */
 const DEVICE_CONFIG: ReadonlyArray<[string, string]> = [
   ['概览', 'overview'],
-  ['连接', 'connection'],
-  ['结构', 'structure'],
+  ['链接配置', 'connection'],
+  ['结构配置', 'structure'],
   ['设备常量', 'constants-config'],
   ['晶圆属性', 'context-config'],
   ['变量配置', 'svid-config'],
   ['事件与报告', 'ceid-report-config'],
   ['工艺周期', 'cycle'],
   ['事件计划', 'plan-config'],
-  ['配置原文', 'config'],
+  ['全量配置', 'config'],
   ['版本历史', 'revisions'],
 ];
 
@@ -265,10 +265,10 @@ test('设备 · 事件执行：计划启停可来回切换', async ({ page }) =>
   }
 });
 
-test('设备 · 配置原文：自动载入本设备配置且无多余提示', async ({ page }) => {
+test('设备 · 全量配置：自动载入本设备配置且无多余提示', async ({ page }) => {
   await page.goto('/#/workbench');
   await gotoDevice(page);
-  await openDevicePage(page, 'config', '配置原文', 'config');
+  await openDevicePage(page, 'config', '全量配置', 'config');
   await expect(
     page.locator('#panel-config textarea').or(page.locator('#panel-config .config-editor')).first(),
   ).toBeVisible({ timeout: 15_000 });

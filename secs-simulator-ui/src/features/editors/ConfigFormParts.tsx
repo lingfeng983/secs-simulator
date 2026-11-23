@@ -1,7 +1,40 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import { FieldLabel } from '../../shared/ui/FieldLabel';
 import { numberField, type JsonObject } from './templateConfig';
 
 export type Edit = (mutate: (root: JsonObject) => void) => void;
+
+/**
+ * 一行"标题 + 控件"：标题列对齐；说明默认不展示，悬浮/聚焦在标题上时出气泡。
+ *
+ * <p>原来在 ConfigFormEditor 里，2026-11-20 下沉到这里：EquipmentFormSections
+ * 的弹窗也要用，放在那边会跟 ConfigFormEditor 形成模块循环。</p>
+ */
+export function SessionField({ label, help, required = false, span, compact = false, children }: {
+  label: string;
+  help: string;
+  /** 必填项：标题后加红色星号（比"点了确定才弹一条横幅"更好用）。 */
+  required?: boolean;
+  /** 在栅格容器里横跨的列数；普通表单里忽略。 */
+  span?: 1 | 2 | 3;
+  /** 短数字字段：连标题一起限制宽度，别在 500px 弹窗里拉成一条长条。 */
+  compact?: boolean;
+  children: ReactNode;
+}): JSX.Element {
+  const style: CSSProperties = {};
+  if (span !== undefined) {
+    style.gridColumn = `span ${span}`;
+  }
+  if (compact) {
+    style.maxWidth = '22rem';
+  }
+  return (
+    <label className="field modal-field" style={style}>
+      <FieldLabel text={label} help={help} required={required} />
+      {children}
+    </label>
+  );
+}
 
 export function SectionHead({ title, children }: { title: string; children?: ReactNode }): JSX.Element {
   return (
@@ -68,7 +101,7 @@ export function SourceEditorLegend({ text = false }: { text?: boolean }): JSX.El
         上方摘要会显示「未配置（按默认值）」，运行期用内置默认）；
         <b>模板库</b>下拉从已存模板复制一段值定义。
         {text ? '文本属性没有表达式形态。' : ''}
-        改完点「确定」只进草稿，保存后才写回配置文件。
+        设备配置页点「确定」后立即保存生效；模板编辑器在保存模板时写回。
       </p>
     </>
   );

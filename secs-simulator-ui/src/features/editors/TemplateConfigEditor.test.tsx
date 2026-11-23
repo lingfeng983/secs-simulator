@@ -25,7 +25,7 @@ describe('TemplateConfigEditor', () => {
     const html = render('overview');
     const nav = html.slice(html.indexOf('subtabs'), html.indexOf('template-config-content'));
     let position = -1;
-    for (const label of ['概览', '连接', '结构', '设备常量', '晶圆属性', '变量配置', '事件与报告', '事件计划', '配置原文']) {
+    for (const label of ['概览', '链接配置', '结构配置', '设备常量', '晶圆属性', '变量配置', '事件与报告', '事件计划', '全量配置']) {
       const next = nav.indexOf(`>${label}<`);
       expect(next, label).toBeGreaterThan(position);
       position = next;

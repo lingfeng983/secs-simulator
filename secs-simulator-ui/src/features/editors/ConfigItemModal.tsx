@@ -46,7 +46,7 @@ export function ConfigItemModal({ title, initial, problemOf, problemBanner = tru
     <Modal
       open
       title={title}
-      hint="「确定」只改到本页草稿，点页面底部的「保存」后才写入配置；取消或 Esc 不留痕迹。"
+      hint="「确定」确认修改：设备配置页立即保存生效，模板编辑器随后随模板保存；取消或 Esc 不留痕迹。"
       onClose={onClose}
       width="min(920px, 92vw)"
       footer={

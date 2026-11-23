@@ -485,13 +485,6 @@ function DeviceOverviewPanel({
           <tr><th>大小 / 修改时间</th><td className="mono">
             {config ? `${config.sizeBytes} B` : '—'}{config ? ` · ${new Date(config.modifiedMs).toLocaleString()}` : ''}
           </td></tr>
-          <tr>
-            <th>自动连接</th>
-            <td>
-              <span className="badge tone-muted">后端未提供</span>
-              {' '}设备侧后端没有自动连接开关；连接参数在「连接」页修改，保存后需重启设备。
-            </td>
-          </tr>
         </tbody>
       </table>
       <p className="hint">
@@ -605,7 +598,7 @@ function DeviceRevisionsPanel({
         </div>
       )}
       {revisions.length === 0 && error === '' ? (
-        <p className="hint">还没有版本记录;在「配置原文」保存一次就会留一个版本(每设备保留最近 200 版)。</p>
+        <p className="hint">还没有版本记录;在「全量配置」保存一次就会留一个版本(每设备保留最近 200 版)。</p>
       ) : (
         <table className="effects-table">
           <thead>
@@ -651,7 +644,7 @@ function DeviceRevisionsPanel({
                           </p>
                           <p>
                             <b>回滚限制：</b>后端没有提供版本回滚或历史原文端点。要恢复旧内容，
-                            需从部署侧导出该版本原文，在「配置原文」页粘贴后保存。
+                            需从部署侧导出该版本原文，在「全量配置」页粘贴后保存。
                           </p>
                         </div>
                       </td>

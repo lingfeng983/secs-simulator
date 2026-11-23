@@ -304,7 +304,7 @@ export function TemplatePage({ backend, notifier }: PanelBaseProps): JSX.Element
                       </SessionField>
                     )}
                     {creating && templates.length === 0 && (
-                      <p className="hint">当前没有可复制的模板，已从空白骨架开始；在「配置原文」页可导入 JSON，其它页签可直接改。填好模板 id 后保存即可创建。</p>
+                      <p className="hint">当前没有可复制的模板，已从空白骨架开始；在「全量配置」页可导入 JSON，其它页签可直接改。填好模板 id 后保存即可创建。</p>
                     )}
                     {builtin && <p className="hint">内置模板不能覆盖，修改后会另存为自定义模板。</p>}
                   </>

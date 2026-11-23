@@ -38,7 +38,8 @@ interface ContextRow {
  * 取值器与 SVID 共用同一套 source，文本可以直接是字符串。</p>
  *
  * <p>报告里用 {@code ctx.<名>} 引用，例如 {@code ["ctx.LOTID", "ctx.WAFERID", "TEMP"]}；
- * 编译期会检查名字是否存在，写错了在「校验」时就会报。</p>
+ * 编译期会检查名字是否存在，写错了在「校验」时就会报。
+ * 2026-11-20 起新建/编辑弹窗确认、删除确认都直接保存落盘（context 段）。</p>
  */
 export function ContextConfigPanel(props: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
   const { backend, sessionId, configName } = props;
@@ -50,10 +51,11 @@ export function ContextConfigPanel(props: PanelBaseProps & { sessionId?: string;
       panelId="panel-context-config"
       sections={['context']}
       title="晶圆属性（context）"
+      actions="none"
     >
-      {({ root, edit }) => (
+      {({ root, edit, save }) => (
         Array.isArray(root.context) || root.context === undefined
-          ? <ContextTable root={root} edit={edit} />
+          ? <ContextTable root={root} edit={edit} onMutated={() => void save()} />
           : <p className="problems">context 必须是数组</p>
       )}
     </ConfigEditShell>
@@ -67,7 +69,7 @@ function contextIn(draft: JsonObject): JsonObject[] {
   return draft.context as JsonObject[];
 }
 
-export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+export function ContextTable({ root, edit, onMutated }: { root: JsonObject; edit: Edit; /** 每次改动落进草稿后回调（设备页传 save，模板编辑器不传仍是纯草稿）。 */ onMutated?: () => void }): JSX.Element {
   const raw = Array.isArray(root.context) ? (root.context as unknown[]) : [];
   const rows: ContextRow[] = raw.flatMap((item, index) => (isJsonObject(item) ? [{ index, item }] : []));
   /** 正在编辑的下标；null = 新建；undefined = 弹窗关闭。 */
@@ -147,6 +149,7 @@ export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): 
               }
             });
             setEditing(undefined);
+            onMutated?.();
           }}
         />
       )}
@@ -174,6 +177,7 @@ export function ContextTable({ root, edit }: { root: JsonObject; edit: Edit }): 
             edit((draft) => {
               contextIn(draft).splice(deleting.index, 1);
             });
+            onMutated?.();
           }
           setDeleting(null);
         }}

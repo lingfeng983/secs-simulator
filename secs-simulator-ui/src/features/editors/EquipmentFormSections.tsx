@@ -1,6 +1,8 @@
-import { RefDropdownSelect, type RefChoice } from './RefDropdownSelect';
+import { useState } from 'react';
 import { NumberField, TextField } from '../../shared/ui/CommitFields';
 import { HintTitle } from '../../shared/ui/FieldLabel';
+import { ConfigItemModal } from './ConfigItemModal';
+import { SessionField } from './ConfigFormParts';
 import {
   booleanField,
   isJsonObject,
@@ -14,12 +16,19 @@ import { FormGridHead, FormRow, SectionHead, nextId, type Edit } from './ConfigF
 
 /* ---------- 设备 ---------- */
 
-export function EquipmentForm({ root, edit, onPreviewSvid }: {
+export function EquipmentForm({ root, edit, onPreviewSvid, onMutated, onSave, busy }: {
   root: JsonObject;
   edit: Edit;
   onPreviewSvid?: (svid: number) => void;
+  /** 每次改动落进草稿后回调：单元增删改确认后立即保存（设备页传 save）。 */
+  onMutated?: () => void;
+  /** 设备全局表单的保存按钮（设备页传 save；模板编辑器不传则不显示按钮）。 */
+  onSave?: () => Promise<void> | void;
+  busy?: boolean;
 }): JSX.Element {
   const equipment = isJsonObject(root.equipment) ? root.equipment : null;
+  /* 「新增单元」弹窗：undefined = 关闭；null = 新建。 */
+  const [addingUnit, setAddingUnit] = useState<boolean | undefined>(undefined);
 
   if (equipment === null) {
     return (
@@ -27,13 +36,16 @@ export function EquipmentForm({ root, edit, onPreviewSvid }: {
         <SectionHead title="设备">
           <button
             type="button"
-            onClick={() => edit((draft) => {
-              draft.equipment = {
-                name: 'DEV-01',
-                idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 },
-                units: [],
-              };
-            })}
+            onClick={() => {
+              edit((draft) => {
+                draft.equipment = {
+                  name: 'DEV-01',
+                  idSpace: { svidBase: 1000, ceidBase: 2000, reportBase: 3000, svidStride: 100, ceidStride: 100, reportStride: 100 },
+                  units: [],
+                };
+              });
+              onMutated?.();
+            }}
           >
             插入 equipment 段
           </button>
@@ -44,22 +56,36 @@ export function EquipmentForm({ root, edit, onPreviewSvid }: {
   }
 
   const units = readObjectArray(equipment, 'units', 'equipment');
-  const svidsOk = typeof units !== 'string';
   const idSpace = objectField(equipment, 'idSpace');
   const unitSvidBase = numberField(idSpace, 'svidBase') ?? 1000;
   const unitSvidStride = numberField(idSpace, 'svidStride') ?? 100;
+  const existingUnits = typeof units === 'string' ? [] : units;
 
   return (
     <div className="cfg-section">
       <div className="template-head">
         <h3>
-          <HintTitle text="这里只管号段规划与单元标识。变量、设备常量、事件与报告分别到「变量配置」「设备常量」「事件与报告」页维护。">
+          <HintTitle text="这里只管号段规划、事件发送口径与单元标识。变量、设备常量、事件与报告分别到「变量配置」「设备常量」「事件与报告」页维护。">
             设备全局
           </HintTitle>
         </h3>
+        {onSave !== undefined && (
+          <div className="template-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy === true}
+              title='保存设备全局（号段规划 + 事件发送）与单元改动，只提交这两段；设备启动中保存的重启设备后生效'
+              onClick={() => void onSave()}
+            >
+              保存
+            </button>
+          </div>
+        )}
       </div>
 
       <IdSpaceForm equipment={equipment} edit={edit} />
+      <EventThrottleForm root={root} edit={edit} />
 
       <div className="template-head" style={{ marginTop: '1.25rem' }}>
         <h3>
@@ -68,35 +94,24 @@ export function EquipmentForm({ root, edit, onPreviewSvid }: {
           </HintTitle>
         </h3>
         {typeof units !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
-              const index = list.length + 1;
-              list.push({
-                unitId: nextId(list, 'unitId', 1),
-                name: `CH${index}`,
-                injectUnitId: index === 1,
-                svids: [],
-                reports: [],
-                ceids: [],
-              });
-              target.units = list;
-            })}
-          >
-            + 单元
-          </button>
+          <div className="template-actions">
+            <button
+              type="button"
+              onClick={() => setAddingUnit(true)}
+            >
+              + 新增单元
+            </button>
+          </div>
         )}
       </div>
       <p className="hint">
-        单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID）；单元里的变量、报告、事件
-        到「变量配置」「事件与报告」页维护，避免同一份数据在几个地方填。
+        单元只保留标识信息（unitId / 名称 / 是否自动注入 UNIT_ID），新增、修改与删除都立即保存；
+        单元里的变量、报告、事件到「变量配置」「事件与报告」页维护，避免同一份数据在几个地方填。
       </p>
       {typeof units === 'string' ? (
         <p className="problems">equipment.units {units}</p>
       ) : units.length === 0 ? (
-        <p className="hint">还没有单元，点「+ 单元」添加第一台腔体/工位。</p>
+        <p className="hint">还没有单元，点「+ 新增单元」添加第一台腔体/工位。</p>
       ) : (
         units.map((unit, index) => (
           <UnitCard
@@ -104,13 +119,138 @@ export function EquipmentForm({ root, edit, onPreviewSvid }: {
             unit={unit}
             index={index}
             edit={edit}
+            onMutated={onMutated}
             onPreviewSvid={onPreviewSvid}
             unitSvidBase={unitSvidBase}
             unitSvidStride={unitSvidStride}
           />
         ))
       )}
+
+      {addingUnit === true && (
+        <AddUnitModal
+          existing={existingUnits}
+          onClose={() => setAddingUnit(undefined)}
+          onSubmit={(unit) => {
+            edit((draft) => {
+              const target = objectField(draft, 'equipment');
+              const list = Array.isArray(target.units) ? (target.units as JsonObject[]) : [];
+              list.push({ unitId: unit.unitId, name: unit.name, injectUnitId: unit.injectUnitId, svids: [], reports: [], ceids: [] });
+              target.units = list;
+            });
+            setAddingUnit(undefined);
+            onMutated?.();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** 事件发送口径（events 段的三个全局项）：2026-11-20 从「事件计划」页搬到这里。 */
+function EventThrottleForm({ root, edit }: { root: JsonObject; edit: Edit }): JSX.Element {
+  const events = isJsonObject(root.events) ? root.events : null;
+  return (
+    <div className="template-card">
+      <div className="template-card-head">
+        <span className="template-label">
+          <HintTitle text="这三项是 events 段的发送口径，不是某一条计划的参数；随「保存」一起提交。">
+            事件发送
+          </HintTitle>
+        </span>
+      </div>
+      <div className="form-row">
+        <label className="field field-cell">
+          <span className="field-cell-name">每秒事件上限</span>
+          <NumberField
+            value={events === null ? undefined : numberField(events, 'maxPerSec')}
+            integer
+            onCommit={(next) => edit((draft) => {
+              objectField(draft, 'events').maxPerSec = next;
+            })}
+          />
+        </label>
+        <label className="check-inline">
+          <input
+            type="checkbox"
+            checked={booleanField(events ?? {}, 's6f11Wbit')}
+            onChange={(event) => edit((draft) => {
+              objectField(draft, 'events').s6f11Wbit = event.target.checked;
+            })}
+          />
+          S6F11 带 W 位
+        </label>
+        <label className="check-inline">
+          <input
+            type="checkbox"
+            checked={booleanField(events ?? {}, 's6f1Wbit')}
+            onChange={(event) => edit((draft) => {
+              objectField(draft, 'events').s6f1Wbit = event.target.checked;
+            })}
+          />
+          S6F1 带 W 位
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** 新增单元弹窗：只填标识三件套，确认即保存（变量/报告/事件到各自专项页配）。 */
+function AddUnitModal({ existing, onClose, onSubmit }: {
+  existing: readonly JsonObject[];
+  onClose: () => void;
+  onSubmit: (unit: JsonObject) => void;
+}): JSX.Element {
+  const index = existing.length + 1;
+  const problemOf = (item: JsonObject): string => {
+    const unitId = numberField(item, 'unitId');
+    if (unitId === undefined) {
+      return 'unitId 不能为空';
+    }
+    if (existing.some((unit) => numberField(unit, 'unitId') === unitId)) {
+      return `unitId ${unitId} 已被其他单元使用`;
+    }
+    if (stringField(item, 'name').trim() === '') {
+      return '单元名不能为空';
+    }
+    return '';
+  };
+  return (
+    <ConfigItemModal
+      title="新增单元"
+      initial={{ unitId: nextId(existing, 'unitId', 1), name: `CH${index}`, injectUnitId: index === 1 }}
+      problemOf={problemOf}
+      onClose={onClose}
+      onSubmit={onSubmit}
+    >
+      {(item, mutate) => (
+        <div className="session-fields">
+          <SessionField label="unitId" required help="单元编号，设备内不能重复；报告里的 UNIT_ID 用它。">
+            <NumberField
+              value={numberField(item, 'unitId')}
+              integer
+              onCommit={(next) => mutate((target) => { target.unitId = next; })}
+            />
+          </SessionField>
+          <SessionField label="单元名" required help="报告与事件引用用「单元名.槽位名」限定归属，例如 CH1.TEMP。">
+            <TextField
+              value={stringField(item, 'name')}
+              onCommit={(next) => mutate((target) => { target.name = next; })}
+            />
+          </SessionField>
+          <SessionField label="报告自动带 UNIT_ID" help="缺省第一个单元开启：开启时该单元必须定义 UNIT_ID 槽位。">
+            <label className="check-inline">
+              <input
+                type="checkbox"
+                checked={booleanField(item, 'injectUnitId', true)}
+                onChange={(event) => mutate((target) => { target.injectUnitId = event.target.checked; })}
+              />
+              {booleanField(item, 'injectUnitId', true) ? '报告自动带 UNIT_ID' : '不自动带'}
+            </label>
+          </SessionField>
+        </div>
+      )}
+    </ConfigItemModal>
   );
 }
 
@@ -229,115 +369,6 @@ function reserveOf(root: JsonObject): unknown[] {
   return idSpace.reserve as unknown[];
 }
 
-export function GlobalCeidsForm({ equipment, edit }: { equipment: JsonObject; edit: Edit }): JSX.Element {
-  const list = readObjectArray(equipment, 'globalCeids', 'equipment');
-
-  return (
-    <div className="template-card">
-      <div className="template-card-head">
-        <span className="template-label">全局 CEID（跨单元报告要写「单元名.报告名」）</span>
-        {typeof list !== 'string' && (
-          <button
-            type="button"
-            onClick={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              const items = Array.isArray(target.globalCeids) ? (target.globalCeids as JsonObject[]) : [];
-              items.push({
-                id: nextId(items, 'id', 1001),
-                name: `GLOBAL_EVENT_${items.length + 1}`,
-                reports: [],
-              });
-              target.globalCeids = items;
-            })}
-          >
-            + 全局 CEID
-          </button>
-        )}
-      </div>
-      {typeof list === 'string' ? (
-        <p className="problems">equipment.globalCeids {list}</p>
-      ) : list.length === 0 ? (
-        <p className="hint">没有全局 CEID。</p>
-      ) : (
-        <>
-          <FormGridHead columns={['绝对 id', '名称', '引用（勾选引用）']} />
-          {list.map((item, index) => (
-          <FormRow
-            key={index}
-            cols={3}
-            onRemove={() => edit((draft) => {
-              const target = objectField(draft, 'equipment');
-              if (Array.isArray(target.globalCeids)) {
-                (target.globalCeids as unknown[]).splice(index, 1);
-              }
-            })}
-          >
-            <label className="field field-cell">
-              <span className="field-cell-name">绝对 id</span>
-              <NumberField
-                value={numberField(item, 'id')}
-                integer
-                onCommit={(next) => edit((draft) => {
-                  globalCeidsOf(draft)[index].id = next;
-                })}
-              />
-            </label>
-            <label className="field field-cell">
-              <span className="field-cell-name">名称</span>
-              <TextField
-                value={stringField(item, 'name')}
-                onCommit={(next) => edit((draft) => {
-                  globalCeidsOf(draft)[index].name = next;
-                })}
-              />
-            </label>
-            <RefDropdownSelect
-              label="引用报告"
-              align="right"
-              choices={globalReportChoices(equipment)}
-              values={stringListOf(item, 'reports')}
-              onChange={(next) => edit((draft) => {
-                globalCeidsOf(draft)[index].reports = next;
-              })}
-              emptyHint="还没有任何单元报告；先到单元里建报告"
-            />
-          </FormRow>
-          ))}
-          </>
-      )}
-    </div>
-  );
-}
-
-function globalCeidsOf(root: JsonObject): JsonObject[] {
-  const target = objectField(root, 'equipment');
-  const items = target.globalCeids;
-  return Array.isArray(items) ? (items as JsonObject[]) : [];
-}
-
-/** 全部单元报告的「单元名.报告名」清单（全局 CEID 引用候选）。 */
-function globalReportChoices(equipment: JsonObject): RefChoice[] {
-  const units = readObjectArray(equipment, 'units', 'equipment');
-  if (typeof units === 'string') {
-    return [];
-  }
-  const out: RefChoice[] = [];
-  for (const unit of units) {
-    const unitName = stringField(unit, 'name');
-    const reports = readObjectArray(unit, 'reports', 'unit');
-    if (typeof reports === 'string') {
-      continue;
-    }
-    for (const report of reports) {
-      const slot = stringField(report, 'slot');
-      if (slot !== '') {
-        out.push({ value: `${unitName}.${slot}` });
-      }
-    }
-  }
-  return out;
-}
-
 export function stringListOf(item: JsonObject, key: string): string[] {
   const value = item[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -348,10 +379,12 @@ export function unitsOf(root: JsonObject): JsonObject[] {
   return Array.isArray(units) ? (units as JsonObject[]) : [];
 }
 
-function UnitCard({ unit, index, edit, onPreviewSvid, unitSvidBase, unitSvidStride }: {
+function UnitCard({ unit, index, edit, onMutated, onPreviewSvid, unitSvidBase, unitSvidStride }: {
   unit: JsonObject;
   index: number;
   edit: Edit;
+  /** 单元增删改都立即保存（设备页传 save；模板编辑器不传仍是纯草稿）。 */
+  onMutated?: () => void;
   onPreviewSvid?: (svid: number) => void;
   unitSvidBase: number;
   unitSvidStride: number;
@@ -363,6 +396,7 @@ function UnitCard({ unit, index, edit, onPreviewSvid, unitSvidBase, unitSvidStri
         mutate(target);
       }
     });
+    onMutated?.();
   };
 
   /* 本单元的 SVID 段起点(与 collectSvids 同一套默认值),供值来源预览换算绝对 id */
@@ -402,9 +436,12 @@ function UnitCard({ unit, index, edit, onPreviewSvid, unitSvidBase, unitSvidStri
         </label>
         <button
           type="button"
-          onClick={() => edit((draft) => {
-            unitsOf(draft).splice(index, 1);
-          })}
+          onClick={() => {
+            edit((draft) => {
+              unitsOf(draft).splice(index, 1);
+            });
+            onMutated?.();
+          }}
         >
           删除单元
         </button>

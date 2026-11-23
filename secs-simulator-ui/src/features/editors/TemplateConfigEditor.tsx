@@ -37,7 +37,7 @@ export function TemplateConfigEditor({ text, onChange, page, onSelect, backend, 
   const renderContent = () => {
     if (page === 'document') return <JsonEditor value={text} onChange={onChange} ariaLabel="模板 JSON 原文" />;
     if (!parsed.ok) {
-      return <p className="problems">配置原文不是合法 JSON，请到「配置原文」页修正：{parsed.error}</p>;
+      return <p className="problems">配置原文不是合法 JSON，请到「全量配置」页修正：{parsed.error}</p>;
     }
     const root = parsed.config.root;
     switch (page) {

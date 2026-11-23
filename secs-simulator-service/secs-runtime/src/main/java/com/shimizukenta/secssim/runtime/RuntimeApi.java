@@ -705,20 +705,10 @@ final class RuntimeApi {
 
         List<SessionRuntime> using = this.sessionsUsing(name);
 
-        /* 守卫 A：结构变更必须「下线」。
-           口径按设备自身的启停算：只要会话端口开着（state = OPEN/OPENING），
-           模型变化就会整会话重建——对操作员来说等于静默重启设备，所以一律拦下。
-           只看 GEM 控制状态是不够的：主机连上但没发 S1F17 时也是 OFFLINE，
-           那会儿放行等于让设备在跑的时候被换掉模型。 */
-        if (changed.contains(ConfigSection.STRUCTURE)) {
-            for (SessionRuntime session : using) {
-                if (sessionOn(session)) {
-                    return new SectionsSave(409, sectionsError("not-offline",
-                            "设备已启动（" + session.id() + "）：改单元结构前先停止设备"));
-                }
-            }
-        }
-
+        /* 2026-11-21 用户要求：结构段不再要求先停设备——随时可保存落盘，
+           运行中的设备继续跑旧模型，applySections 对启动中的设备跳过 structure
+           （前端据此提示"重启设备后生效"），不再有 not-offline 守卫。
+           只保留守卫 B：运行中周期正在引用的 SVID / 晶圆属性仍禁改。 */
         /* 守卫 B：被运行中周期引用的 SVID / 晶圆属性禁改 */
         for (SessionRuntime session : using) {
             if (session instanceof HsmsSessionRuntime hsms && hsms.cycleRunning()) {

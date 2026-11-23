@@ -589,8 +589,8 @@ test('设备模板页：每行都有编辑，编辑器与校验/保存全在弹�
   await expect(dialog.getByRole('button', { name: '导入 JSON' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: '导出 JSON' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: '另存为模板' })).toBeEnabled();
-  /* 配置原文收进了页签里的 JSON 编辑器，弹框默认停在概览 */
-  await dialog.getByRole('tab', { name: '配置原文' }).click();
+  /* 全量配置（原「配置原文」）收进了页签里的 JSON 编辑器，弹框默认停在概览 */
+  await dialog.getByRole('tab', { name: '全量配置' }).click();
   await expect(dialog.getByLabel('模板 JSON 原文')).toBeVisible();
   await dialog.getByRole('button', { name: '取消' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
