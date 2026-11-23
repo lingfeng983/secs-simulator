@@ -43,16 +43,18 @@ export interface SaveRestartConfirm {
  * 切页不再重新读盘，别的页面未保存的改动不会因为切走一次就消失。</p>
  *
  * <p>2026-11-18「按页保存、按段生效」：页面通过 {@code sections} 声明自己拥有
- * 哪几段，保存只提交这些段；脏状态也分两级——本页脏、其它页还有脏。
+ * 哪几段，保存只提交这些段；本页脏由 {@code dirty} 表达（页签小圆点）。
  * 不传 {@code sections} 时仍是整份保存（「全量配置」页的场景）。</p>
  */
 export interface ConfigDraftState {
   configName: string;
+  /** 草稿载入状态：idle / loading / ready / missing（文件读不到）。 */
+  status: 'idle' | 'loading' | 'ready' | 'missing';
   text: string;
+  /** 磁盘基线原文（整份保存页的差异视图用）。 */
+  baselineText: string;
   /** 本页拥有并改过的段 */
   dirty: boolean;
-  /** 属于别的页面、且尚未保存的段 */
-  dirtyElsewhere: readonly ConfigSectionName[];
   busy: boolean;
   problems: string[];
   notice: string;
@@ -125,13 +127,6 @@ export function useConfigDraft(
   const dirtyHere = ownedSections.length > 0
     ? snapshot.parseable && changedSections(snapshot.current, snapshot.baseline, scope).length > 0
     : snapshot.text !== snapshot.baselineText;
-  const dirtyElsewhere = ownedSections.length > 0
-    ? changedSections(
-      snapshot.current,
-      snapshot.baseline,
-      CONFIG_SECTION_NAMES.filter((section) => !ownedSections.includes(section)),
-    )
-    : [];
 
   const setText = (next: string) => {
     setDraftText(configName, next);
@@ -242,6 +237,8 @@ export function useConfigDraft(
       setProblems([]);
       markAllSaved(targetName);
       await refreshModifiedMs(targetName);
+      /* 目录里的文件大小/修改时间要跟着变，否则概览与清单还挂着旧值 */
+      await backendRef.current.refreshConfigs();
       setNotice('');
     } else if (result.status === 422) {
       setProblems(result.problems);
@@ -365,9 +362,10 @@ export function useConfigDraft(
 
   return {
     configName,
+    status: snapshot.status,
     text: snapshot.text,
+    baselineText: snapshot.baselineText,
     dirty: dirtyHere,
-    dirtyElsewhere,
     busy,
     problems,
     notice,

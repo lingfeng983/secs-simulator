@@ -51,7 +51,6 @@ export function ContextConfigPanel(props: PanelBaseProps & { sessionId?: string;
       panelId="panel-context-config"
       sections={['context']}
       title="晶圆属性（context）"
-      actions="none"
     >
       {({ root, edit, save }) => (
         Array.isArray(root.context) || root.context === undefined

@@ -5,42 +5,44 @@ import { JsonEditor } from '../../shared/ui/JsonEditor';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { Panel } from '../../shared/ui/Panel';
 import { Icon } from '../../shared/ui/Icon';
+import { DraftConfirmModal } from './ConfigEditShell';
+import { useConfigDraft } from '../../state/useConfigDraft';
 import type { ConfigTemplateEntry } from '../../api';
 import type { PanelBaseProps } from './types';
 
 /**
- * 配置编辑器面板。
+ * 「全量配置」面板：整份 JSON 原文的编辑入口。
  *
- * <p>只编辑<b>原始 JSON 文本</b>，逐字节保真。结构化字段已经分别放到
- * 「链接配置」（session）与「结构配置」（equipment）等专项页——同一份配置
- * 不该有两个互相不知道对方改过什么的表单入口。</p>
+ * <p>只编辑<b>原始 JSON 文本</b>，逐字节保真。结构化字段分别放到「链接配置」
+ * 「结构配置」等专项页——同一份配置不该有两个互相不知道对方改过什么的表单入口。</p>
+ *
+ * <p>2026-11-23：草稿改用 {@link useConfigDraft}（`sections` 不传 = 整份保存），
+ * 与结构化页共用同一个草稿仓库。以前这里自己管一份 `draft/baseline/loadedMs`：
+ * 在这页改的内容结构化页看不见，两边各用自己的 `modifiedMs` 做 If-Match，
+ * 后保存的一方只会拿到 409。现在两页看到的是同一份草稿、同一条基线。</p>
  */
 export function ConfigPanel({ backend, sessionId, configName: configNameOverride, notifier }: PanelBaseProps & { sessionId?: string; configName?: string }): JSX.Element {
-  const { configList, refreshConfigs, configTemplates } = backend;
+  const { configList, configTemplates } = backend;
 
-  const [configName, setConfigName] = useState('');
-  const [draft, setDraft] = useState('');
-  const [baseline, setBaseline] = useState('');
-  /** 打开/重载时的文件修改时间快照:保存时经 If-Match 带回,防双窗口互相覆盖。 */
-  const [loadedMs, setLoadedMs] = useState<number | null>(null);
-  const [problems, setProblems] = useState<string[]>([]);
-  const [notice, setNotice] = useState('');
+  /** 用户在这页新建/切到的配置名；空串 = 跟随设备自己的配置。 */
+  const [opened, setOpened] = useState('');
   const [newName, setNewName] = useState('');
   const [newTemplate, setNewTemplate] = useState('bare');
   const [templates, setTemplates] = useState<ConfigTemplateEntry[]>([]);
-  const [busy, setBusy] = useState(false);
+  /** 这页自己的提示（新建 / 导入 / 删除），与草稿的保存提示分开。 */
+  const [localNotice, setLocalNotice] = useState('');
   /** 差异视图:叠加在上面,不改当前编辑器 */
   const [showDiff, setShowDiff] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
+  /** 用户确认"配置已被删掉、编辑器关掉"的那一份：避免目录轮询反复弹窗。 */
+  const [dismissed, setDismissed] = useState('');
+  const [deletedOpen, setDeletedOpen] = useState(false);
 
   /** 新建选中的模板说明；目录取不到时为空串。 */
   const templateHint = useMemo(
     () => templates.find((entry) => entry.id === newTemplate)?.description ?? '',
     [templates, newTemplate],
   );
-  /** 新建/重载会丢掉未保存改动时，先走确认框而不是 window.confirm。 */
-  const [discardNewOpen, setDiscardNewOpen] = useState(false);
-  const [discardReloadOpen, setDiscardReloadOpen] = useState(false);
 
   /* 模板目录取一次就够：它来自后端代码里的常量。
      依赖 configTemplates（其本身依赖 client）而不是整个 backend——
@@ -64,49 +66,57 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
     };
   }, [configTemplates]);
 
-  /* 自动打开本设备的配置:进了设备页·配置就该直接看到这台设备的配置,
-     不再让用户自己挑文件。
-     会话列表或配置列表没就绪就等下一拍;演示会话没有来源时,
-     目录里只有一份配置就用那一份,多份则保持空态让人新建。
-     sessionId 由设备页显式传入:全局 activeSession 在 effect 里切换,
-     首次渲染时还是上一台设备,靠它会打开"上一个设备"的配置。 */
+  /* 打开哪一份：用户刚新建/选中的优先，其次设备自己的配置，
+     最后"目录里只有一份就用那一份"（演示会话的兜底）。
+     sessionId 由设备页显式传入：全局 activeSession 在 effect 里切换，
+     首次渲染时还是上一台设备，靠它会打开"上一个设备"的配置。 */
   const activeSessionId = sessionId ?? backend.activeSession;
   const sessionConfig = backend.sessions.find((session) => session.id === activeSessionId)?.config ?? '';
-  /* 显式配置名：数据库里还没启动的设备没有会话行，设备页直接给配置文件名 */
   const explicitConfig = sessionConfig === ''
     && configNameOverride !== undefined
     && configList.some((entry) => entry.name === configNameOverride)
     ? configNameOverride
     : '';
   const fallbackConfig = sessionConfig === '' && explicitConfig === '' && configList.length === 1 ? configList[0].name : '';
-  const targetConfig = sessionConfig !== '' ? sessionConfig : (explicitConfig !== '' ? explicitConfig : fallbackConfig);
+  const targetConfig = opened !== '' ? opened : (sessionConfig !== '' ? sessionConfig : (explicitConfig !== '' ? explicitConfig : fallbackConfig));
+
+  /* 不传 sections = 整份保存：这条路径本来就写在 useConfigDraft 里，
+     以前只是没人用，配置原文页自己又实现了一遍。 */
+  const draft = useConfigDraft(backend, activeSessionId, targetConfig === '' ? undefined : targetConfig);
+  const configName = draft.configName;
+  const dirty = draft.dirty;
+  const busy = draft.busy;
+  /** 被删掉且用户已确认关闭：这一份不再显示编辑器。 */
+  const closed = dismissed !== '' && dismissed === configName;
+  const missing = draft.status === 'missing';
+
+  /* 配置列表变了以后，如果当前打开的配置已经被删掉：
+     没有改动就直接关；有改动则弹确认，避免把草稿静默丢掉。 */
   useEffect(() => {
-    if (configName !== '' || targetConfig === '' || !configList.some((entry) => entry.name === targetConfig)) {
+    if (configName === '' || configList.length === 0) {
       return;
     }
-    setBusy(true);
-    void backend.readConfig(targetConfig).then((snapshot) => {
-      if (snapshot !== null) {
-        setConfigName(targetConfig);
-        setDraft(snapshot.text);
-        setBaseline(snapshot.text);
-        setLoadedMs(snapshot.modifiedMs);
-        setProblems([]);
-      }
-      setBusy(false);
-    });
-    // 只在"会话配置名/目录"就绪时自动开一次;configName 变化后不再抢
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetConfig, configList]);
-
-  /** 编辑区里的内容相对磁盘有没有变。 */
-  const dirty = draft !== baseline;
+    if (configList.some((entry) => entry.name === configName)) {
+      /* 配置又回来了（或被换掉）：重置"已确认"标记 */
+      setDismissed('');
+      return;
+    }
+    if (dismissed === configName) {
+      return;
+    }
+    if (dirty) {
+      setDeletedOpen(true);
+      return;
+    }
+    setDismissed(configName);
+    setLocalNotice('配置已不存在，编辑器已关闭');
+  }, [configList, configName, dirty, dismissed]);
 
   /** 导出草稿：能弹保存位置就弹；提示里说清文件去了哪，用户不用猜下载目录。 */
   const exportJson = async () => {
     const result = await saveTextFile(
       configName === '' ? 'config.json' : configName,
-      draft,
+      draft.text,
       'application/json;charset=utf-8',
     );
     const hint = saveHint(result);
@@ -117,169 +127,56 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
 
   /* 差异视图的行集：折叠长段未改动，现场几百行的配置只看改动附近 */
   const diffBlocks = useMemo(
-    () => (dirty ? foldUnchanged(diffLines(baseline, draft)) : []),
-    [baseline, draft, dirty],
+    () => (dirty ? foldUnchanged(diffLines(draft.baselineText, draft.text)) : []),
+    [draft.baselineText, draft.text, dirty],
   );
 
-  /** 当前配置被别处删掉、且草稿有未保存改动时，先让用户确认再关闭。 */
-  const [deletedConfigOpen, setDeletedConfigOpen] = useState(false);
-  /** 用户已经选择"先留着草稿"：别再被 5 秒一次的目录轮询反复弹窗。 */
-  const deletedConfigDismissedRef = useRef(false);
-
-  /* 配置列表变了以后，如果当前打开的配置已经被删掉：
-     没有改动就直接关；有改动则弹确认，避免把草稿静默丢掉。 */
-  useEffect(() => {
-    if (configName === '' || configList.some((entry) => entry.name === configName)) {
-      /* 配置又回来了（或被换掉）：重置"已确认"标记 */
-      deletedConfigDismissedRef.current = false;
-      return;
-    }
-    if (deletedConfigDismissedRef.current) {
-      return;
-    }
-    if (dirty) {
-      setDeletedConfigOpen(true);
-      return;
-    }
-    setConfigName('');
-    setDraft('');
-    setBaseline('');
-    setLoadedMs(null);
-    setProblems([]);
-    setNotice('配置已不存在，编辑器已关闭');
-  }, [configList, configName, dirty]);
-
-  /** 丢掉本地改动，重新拉磁盘上的原文。 */
-  const reloadConfig = async () => {
-    if (configName === '') {
-      return;
-    }
-    setBusy(true);
-    try {
-      const snapshot = await backend.readConfig(configName);
-      if (snapshot === null) {
-        return;
-      }
-      setDraft(snapshot.text);
-      setBaseline(snapshot.text);
-      setLoadedMs(snapshot.modifiedMs);
-      setProblems([]);
-      setNotice(`已重新载入 ${configName}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** 只校验不落盘：用户想确认改动能不能编译，不该被迫先覆盖一份能用的配置。 */
-  const onValidate = async () => {
-    if (configName === '') {
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await backend.validateConfig(configName, draft);
-      if (result === null) {
-        return;
-      }
-      setProblems(result.problems);
-      setNotice(result.valid ? '校验通过' : '校验未通过');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onSave = async () => {
-    if (configName === '') {
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await backend.saveConfig(configName, draft, loadedMs);
-      if (result === null) {
-        return;
-      }
-      if (result.status === 200) {
-        setProblems([]);
-        setBaseline(draft);
-        /* 拿一份新的修改时间快照,下一次保存的 If-Match 才对得上 */
-        const fresh = await backend.readConfig(configName);
-        if (fresh !== null) {
-          setLoadedMs(fresh.modifiedMs);
-        }
-        setNotice(`已保存 ${configName}，相关会话已按新配置重启`);
-        void refreshConfigs();
-      } else {
-        setProblems(result.problems);
-        setNotice(
-          result.status === 422
-            ? '保存被拒：配置有问题，文件没有改动'
-            : result.status === 409
-              ? '保存被拒：配置在编辑期间被其他窗口修改过，未覆盖——点「重新载入」拿到最新内容再改'
-              : `保存失败（HTTP ${result.status}）`,
-        );
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** 新建：让后端生成一份能直接编译的骨架。 */
+  /** 新建：让后端生成一份能直接编译的骨架，然后切到它。 */
   const createNewConfig = async () => {
     const name = newName.trim();
     if (name === '') {
       return;
     }
     if (!name.toLowerCase().endsWith('.json')) {
-      setNotice('文件名必须以 .json 结尾');
+      setLocalNotice('文件名必须以 .json 结尾');
       return;
     }
-
-    setBusy(true);
-    try {
-      const status = await backend.createConfig(name, newTemplate);
-      if (status !== 201) {
-        return;
-      }
-      const snapshot = await backend.readConfig(name);
-      if (snapshot === null) {
-        return;
-      }
-      setConfigName(name);
-      setDraft(snapshot.text);
-      setBaseline(snapshot.text);
-      setLoadedMs(snapshot.modifiedMs);
-      setProblems([]);
-      setNotice(
-        newTemplate === 'bare'
-          ? `已新建 ${name}，改完点「保存」才会写入文件`
-          : `已新建 ${name}（内置模板: ${newTemplate}），照着改参数后点「保存」`,
-      );
-    } finally {
-      setBusy(false);
+    const status = await backend.createConfig(name, newTemplate);
+    if (status !== 201) {
+      return;
     }
+    setOpened(name);
+    setLocalNotice(
+      newTemplate === 'bare'
+        ? `已新建 ${name}，改完点「保存」才会写入文件`
+        : `已新建 ${name}（内置模板: ${newTemplate}），照着改参数后点「保存」`,
+    );
   };
 
   return (
     <Panel
       id="panel-config"
-      title={configName === '' ? '配置编辑器' : configName}
+      title={configName === '' || closed || missing ? '配置编辑器' : configName}
       headless
       status={
         <>
           <span className="state-pill" data-tone="muted">目录内配置 {configList.length}</span>
-          {configName === ''
+          {configName === '' || closed || missing
             ? <span className="state-pill" data-tone="muted">未打开</span>
             : dirty ? <span className="state-pill" data-tone="warn">有未保存改动</span> : undefined}
         </>
       }
     >
+      <DraftConfirmModal draft={draft} />
 
-      {configName === '' ? (
+      {configName === '' || closed || missing ? (
         <div className="empty-state">
           <p className="empty-text">
-            {sessionConfig === ''
-              ? '这台设备没有配置文件来源（演示会话或手动建立的会话）。'
-              : `还没打开 ${sessionConfig}。`}
+            {missing
+              ? `读不到 ${configName}：文件可能已被删除。`
+              : sessionConfig === ''
+                ? '这台设备没有配置文件来源（演示会话或手动建立的会话）。'
+                : `还没打开 ${sessionConfig}。`}
           </p>
           <p className="empty-hint">
             可以从设备模板新建一份（刻蚀腔 / CVD / 测试机都是能直接编译的起点），
@@ -312,14 +209,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
               <button
                 type="button"
                 className="primary"
-                onClick={() => {
-                  /* 新建会替换编辑器里的草稿：dirty 时先确认，别静默丢改动 */
-                  if (dirty) {
-                    setDiscardNewOpen(true);
-                    return;
-                  }
-                  void createNewConfig();
-                }}
+                onClick={() => void createNewConfig()}
                 disabled={newName.trim() === '' || busy}
               >
                 新建并打开
@@ -329,7 +219,9 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
         </div>
       ) : (
         <>
-          {notice !== '' && <p className="inline-note">{notice}</p>}
+          {(draft.notice !== '' || localNotice !== '') && (
+            <p className="inline-note">{draft.notice !== '' ? draft.notice : localNotice}</p>
+          )}
           {/* 重新载入 / 校验 / 导入导出 / 保存 / 查看差异 收进同一行工具条（2026-11-20），
               不再拆在面板头与编辑区上方两处 */}
           <div className="config-toolbar">
@@ -337,14 +229,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
             <span className="spacer" />
             <button
               type="button"
-              onClick={() => {
-                /* 有未保存改动时重新载入 = 丢草稿，先确认 */
-                if (dirty) {
-                  setDiscardReloadOpen(true);
-                  return;
-                }
-                void reloadConfig();
-              }}
+              onClick={() => void draft.reload()}
               disabled={busy}
               title="丢掉本地改动，重新拉磁盘上的原文"
             >
@@ -352,7 +237,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
             </button>
             <button
               type="button"
-              onClick={() => void onValidate()}
+              onClick={() => void draft.validate()}
               disabled={busy}
               title="只做校验，不写文件：确认改动能不能编译"
             >
@@ -372,7 +257,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
               type="button"
               className="icon-btn"
               onClick={() => void exportJson()}
-              disabled={draft.trim() === ''}
+              disabled={draft.text.trim() === ''}
               title="导出 JSON：把当前草稿存成文件（可选择保存位置）"
               aria-label="导出 JSON"
             >
@@ -392,7 +277,7 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
             <button
               type="button"
               className="primary"
-              onClick={() => void onSave()}
+              onClick={() => void draft.save()}
               disabled={busy}
               title="校验通过后整份写回，不会写一半"
             >
@@ -410,18 +295,17 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
                   return;
                 }
                 void file.text().then((text) => {
-                  setDraft(text);
-                  setProblems([]);
-                  setNotice(`已导入 ${file.name}（未保存，请先校验）`);
+                  draft.setText(text);
+                  setLocalNotice(`已导入 ${file.name}（未保存，请先校验）`);
                 });
               }}
             />
           </div>
           <JsonEditor
-            value={draft}
+            value={draft.text}
             onChange={(next) => {
-              setDraft(next);
-              setProblems([]);
+              draft.setText(next);
+              setLocalNotice('');
             }}
             ariaLabel="配置 JSON 原文"
           />
@@ -456,9 +340,9 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
             </section>
           )}
 
-          {problems.length > 0 && (
+          {draft.problems.length > 0 && (
             <ul className="problems">
-              {problems.map((problem, index) => (
+              {draft.problems.map((problem, index) => (
                 <li key={index}>{problem}</li>
               ))}
             </ul>
@@ -466,48 +350,20 @@ export function ConfigPanel({ backend, sessionId, configName: configNameOverride
         </>
       )}
       <ConfirmModal
-        open={deletedConfigOpen}
+        open={deletedOpen}
         title="配置已被删除"
         danger
         confirmLabel="丢弃草稿并关闭"
-        message={`${configName} 已不在配置目录里（可能被其他窗口删除）。编辑器里还有未保存的改动，关闭会丢掉它们；也可以先点「导出 JSON」备份。`}
+        message={`${configName} 已不在配置目录里（可能被其他窗口删除）。编辑器里还有未保存的改动，关闭后刷新页面就会丢掉；也可以先点「导出 JSON」备份。`}
         onClose={() => {
-          setDeletedConfigOpen(false);
-          deletedConfigDismissedRef.current = true;
-          setNotice('配置已被删除：草稿还在编辑器里，可先「导出 JSON」备份');
+          setDeletedOpen(false);
+          setDismissed(configName);
+          setLocalNotice('配置已被删除：草稿还在编辑器里，可先「导出 JSON」备份');
         }}
         onConfirm={() => {
-          setDeletedConfigOpen(false);
-          setConfigName('');
-          setDraft('');
-          setBaseline('');
-          setLoadedMs(null);
-          setProblems([]);
-          setNotice('配置已不存在，编辑器已关闭');
-        }}
-      />
-      <ConfirmModal
-        open={discardReloadOpen}
-        title="丢弃未保存的改动"
-        danger
-        confirmLabel="丢弃并重新载入"
-        message={`${configName} 有未保存的改动，重新载入会丢掉它们。继续？`}
-        onClose={() => setDiscardReloadOpen(false)}
-        onConfirm={() => {
-          setDiscardReloadOpen(false);
-          void reloadConfig();
-        }}
-      />
-      <ConfirmModal
-        open={discardNewOpen}
-        title="丢弃未保存的改动"
-        danger
-        confirmLabel="丢弃并新建"
-        message={configName === '' ? '当前草稿还没有保存，新建会丢掉它。继续？' : `${configName} 有未保存的改动，新建会丢掉。继续？`}
-        onClose={() => setDiscardNewOpen(false)}
-        onConfirm={() => {
-          setDiscardNewOpen(false);
-          void createNewConfig();
+          setDeletedOpen(false);
+          setDismissed(configName);
+          setLocalNotice('配置已不存在，编辑器已关闭');
         }}
       />
     </Panel>

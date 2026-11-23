@@ -58,8 +58,6 @@ export interface Preferences {
   autoscroll: boolean;
   /** 报文面板是否暂停接收（只冻结显示，不影响服务端）。 */
   pauseStream: boolean;
-  /** 预览图表模式。 */
-  chartMode: 'canvas' | 'uplot' | 'multi';
   /** 预览窗口（毫秒）。 */
   windowMs: number;
   /** 基础字号（px）。写进 --font，并按比例缩放根字号。 */
@@ -90,7 +88,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sidebarWidth: SIDEBAR_DEFAULT_W,
   autoscroll: true,
   pauseStream: false,
-  chartMode: 'canvas',
   windowMs: 60_000,
   fontSize: 13,
   layout: 'wide',
@@ -173,7 +170,7 @@ export function resolveTheme(
 }
 
 /**
- * 界面偏好：主题、密度、当前面板、图表模式……这些都要跨刷新保留。
+ * 界面偏好：主题、密度、当前面板、预览时间窗……这些都要跨刷新保留。
  *
  * <p>没有它的话，用户每次刷新页面都要重新选一遍面板、
  * 重新拉一次时间窗——这种"每次都要重做"的摩擦最消磨耐心。</p>

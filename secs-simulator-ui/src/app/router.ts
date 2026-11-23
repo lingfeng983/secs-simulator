@@ -208,9 +208,12 @@ export function parseHash(hash: string, legacyTab?: string): Route {
           ?? known[0];
         return { name: 'device', sessionId, zone, page };
       }
-      /* 2.x 旧深链：#/device/{id}/{page} → 一次性映射 */
+      /* 2.x 旧深链：#/device/{id}/{page} → 一次性映射。
+         不认识的子页名必须落到**仍然存在**的页：以前兜底值是 `catalog`，
+         那个页签早就删了，DevicePage 一个分支都匹配不上，页面只剩页签、
+         下面全空，看起来像坏了。 */
       const legacy = parts[2] ?? 'ceids';
-      const mapped = LEGACY_DEVICE_PAGE[legacy] ?? ['runtime', 'catalog'];
+      const mapped = LEGACY_DEVICE_PAGE[legacy] ?? ['runtime', 'plans'];
       return { name: 'device', sessionId, zone: mapped[0], page: mapped[1] };
     }
     if (parts[0] === 'hostsim') {

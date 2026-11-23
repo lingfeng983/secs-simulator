@@ -19,7 +19,6 @@ export function ConnectionPanel({ backend, sessionId, configName }: PanelBasePro
       panelId="panel-connection"
       title="链接配置"
       sections={['session']}
-      actions="none"
       /* 这段改的是监听口，保存一定重建会话：设备启动着时先问一句 */
       confirmOnSave={{
         title: '保存链接参数并重启会话？',

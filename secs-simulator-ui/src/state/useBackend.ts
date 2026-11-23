@@ -19,7 +19,6 @@ import {
   type Health,
   type DeviceBatchParams,
   type DeviceBatchResult,
-  type HostSimTarget,
   type OverviewRow,
   type PreviewData,
   type SentMessageResult,
@@ -43,11 +42,31 @@ const INTERVAL = {
   session: 2000,
   /** 报警 / 终端消息 / 目录 / 事件：2 秒。 */
   sessionDetail: 2000,
+  /**
+   * 不在设备页时的明细节奏。
+   *
+   * <p>目录（catalog）与事件计划只有设备页在读，但命令面板的「查看 SVID」
+   * 也从目录里取条目——完全停掉会让用户在工作台按 Ctrl+K 找不到 SVID。
+   * 所以不是停，而是降到 20 秒：数据还新鲜，后端少干 9 成的活。</p>
+   */
+  sessionDetailIdle: 20_000,
   /** 审计：低频。 */
   audit: 5000,
   /** 配置目录：低频。 */
   config: 5000,
 } as const;
+
+/** useBackend 的可选行为开关。 */
+export interface BackendOptions {
+  /**
+   * 当前路由是不是"要看会话明细"的设备页。
+   *
+   * <p>明细轮询按页面需要：设备页 2 秒一拉，其余页面降到
+   * {@link INTERVAL.sessionDetailIdle}。缺省 true（保持旧行为，测试与
+   * 单页用法都不受影响）。</p>
+   */
+  sessionDetailHot?: boolean;
+}
 
 /**
  * 控制器返回的东西。
@@ -64,9 +83,6 @@ export interface BackendController {
   /** 当前选中的会话；所有面板共用它。 */
   activeSession: string;
   setActiveSession: (id: string) => void;
-  /** 当前 CEID；设备目录里点"填入"会改它。 */
-  ceid: number;
-  setCeid: (ceid: number) => void;
 
   catalog: Catalog | null;
   eventPlans: EventPlanView[];
@@ -164,10 +180,6 @@ export interface BackendController {
   /** 拉整台设备的曲线(全部 SVID + 事件标记),用于"事件串起来"的预览。 */
   /** 手动发送一条 SML；返回发送结果。 */
   sendSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
-  openHostSim: (sessionId: string, target?: HostSimTarget) => Promise<void>;
-  closeHostSim: (sessionId: string) => Promise<void>;
-  /** 以主机角色发送 SML；返回发送结果。 */
-  sendHostSml: (sessionId: string, sml: string) => Promise<SentMessageResult | null>;
 
   /** 工作台聚合(v6):每台设备的速率/计数一览。 */
   overview: OverviewRow[];
@@ -194,13 +206,19 @@ export interface BackendController {
  * 页面切到后台就整体暂停，回到前台立刻补一次。原来五个定时器各打各的请求，
  * 互相错开还容易撞在一起，界面上看着"一顿一顿的"。</p>
  */
-export function useBackend(client: ApiClient | null, notifier: Notifier): BackendController {
+export function useBackend(
+  client: ApiClient | null,
+  notifier: Notifier,
+  options?: BackendOptions,
+): BackendController {
+  /* 明细轮询的热度：设备页才需要 2 秒级的目录/事件刷新 */
+  const sessionDetailHot = options?.sessionDetailHot ?? true;
+
   const [health, setHealth] = useState<Health | null>(null);
   /** 后端不可达时的最后错误；空串 = 正常。全局横幅靠它。 */
   const [backendError, setBackendError] = useState('');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState('');
-  const [ceid, setCeid] = useState(2001);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
@@ -334,7 +352,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
         void refreshSessions();
       }
       if (now >= due.detail) {
-        due.detail = now + INTERVAL.sessionDetail;
+        due.detail = now + (sessionDetailHot ? INTERVAL.sessionDetail : INTERVAL.sessionDetailIdle);
         void refreshSessionDetail(activeSession);
       }
       if (now >= due.audit) {
@@ -368,7 +386,7 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [client, activeSession, refreshSessions, refreshSessionDetail, audit.refresh, refreshConfigs, serverOps.refreshOverview]);
+  }, [client, activeSession, sessionDetailHot, refreshSessions, refreshSessionDetail, audit.refresh, refreshConfigs, serverOps.refreshOverview]);
 
   /* 选中的会话必须真实存在 */
   useEffect(() => {
@@ -459,8 +477,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       sessions,
       activeSession,
       setActiveSession,
-      ceid,
-      setCeid,
       catalog,
       eventPlans,
       auditEntries: audit.entries,
@@ -493,7 +509,6 @@ export function useBackend(client: ApiClient | null, notifier: Notifier): Backen
       health,
       sessions,
       activeSession,
-      ceid,
       catalog,
       eventPlans,
       audit.entries,

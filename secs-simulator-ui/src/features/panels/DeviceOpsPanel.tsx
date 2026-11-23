@@ -129,11 +129,29 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
       return;
     }
     setBatchBusy(true);
+    /* 端口从起始值往后找第一个空闲的：硬算「起始端口 + 序号」会撞上没参与
+       同步的设备——它们也在用同一段端口，撞了只有启动时才发现。 */
+    const usedPorts = new Set<number>([
+      ...overview.map((row) => row.port),
+      ...Object.values(configPorts),
+    ]);
+    let cursor = syncPortBase;
+    const takePort = (): number => {
+      while (usedPorts.has(cursor)) {
+        cursor += 1;
+      }
+      const port = cursor;
+      usedPorts.add(port);
+      cursor += 1;
+      return port;
+    };
     let done = 0;
+    const failed: { name: string; reason: string }[] = [];
     try {
       for (let index = 1; index < ids.length; index += 1) {
         const target = sessions.find((item) => item.id === ids[index]);
         const targetConfig = target?.config ?? '';
+        const label = target?.device !== undefined && target.device !== '' ? target.device : ids[index];
         if (target === undefined || targetConfig === '' || targetConfig === sourceConfig) {
           continue;
         }
@@ -144,7 +162,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
             ? root.session as Record<string, unknown>
             : {};
           session.id = target.id;
-          session.port = syncPortBase + index;
+          session.port = takePort();
           session.deviceId = syncDeviceBase + index;
           root.session = session;
           const equipment = root.equipment !== null && typeof root.equipment === 'object'
@@ -154,18 +172,42 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
           root.equipment = equipment;
           const text = JSON.stringify(root, null, 2);
           const validation = await backend.validateConfig(targetConfig, text);
-          if (validation === null || !validation.valid) {
+          if (validation === null) {
+            failed.push({ name: label, reason: '校验没有返回结果（后端不可达？）' });
+            continue;
+          }
+          if (!validation.valid) {
+            failed.push({
+              name: label,
+              reason: validation.problems.slice(0, 2).join('；') || '校验未通过',
+            });
             continue;
           }
           const saved = await backend.saveConfig(targetConfig, text, null);
           if (saved !== null && saved.status === 200) {
             done += 1;
+          } else {
+            failed.push({ name: label, reason: `保存失败（HTTP ${saved === null ? '无响应' : saved.status}）` });
           }
-        } catch {
-          /* 单台失败继续下一台 */
+        } catch (error) {
+          /* 单台失败继续下一台，但原因必须报出来：只报"已同步 N 台"会让人
+             以为其余也成功了 */
+          failed.push({ name: label, reason: (error as Error).message });
         }
       }
-      notifier.success(`已同步 ${done} 台设备`, `源配置：${source.id}；只改了会话 id/端口/设备号/名称`);
+      if (done > 0) {
+        notifier.success(`已同步 ${done} 台设备`, `源配置：${source.id}；只改了会话 id/端口/设备号/名称`);
+        await backend.refreshConfigs();
+      }
+      if (failed.length > 0) {
+        const shown = failed.slice(0, 3).map((item) => `${item.name}：${item.reason}`).join('；');
+        const tail = failed.length > 3 ? `；另有 ${failed.length - 3} 台` : '';
+        notifier.warn(
+          `${failed.length} 台没有同步成功`,
+          `${shown}${tail}。这些设备仍在用原配置`,
+        );
+        return;
+      }
       setSyncOpen(false);
     } finally {
       setBatchBusy(false);

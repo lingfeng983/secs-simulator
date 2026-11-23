@@ -45,7 +45,6 @@ export function ConstantsConfigPanel(props: PanelBaseProps & { sessionId?: strin
       panelId="panel-constants-config"
       sections={['constants']}
       title="设备常量（ECV）"
-      actions="none"
     >
       {({ root, edit, save }) => (
         isJsonObject(root.equipment)

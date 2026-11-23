@@ -19,7 +19,6 @@ export function StructurePanel({ backend, sessionId, configName }: PanelBaseProp
       panelId="panel-structure"
       title="结构配置"
       sections={['structure', 'throttle']}
-      actions="none"
     >
       {({ root, edit, save, busy }) => (
         <EquipmentForm

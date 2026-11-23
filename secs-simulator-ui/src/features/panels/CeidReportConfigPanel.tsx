@@ -53,7 +53,6 @@ export function CeidReportConfigPanel(props: PanelBaseProps & { sessionId?: stri
       panelId="panel-ceid-report-config"
       sections={['ceids', 'reports']}
       title="事件与报告（CEID / RPT 定义）"
-      actions="none"
     >
       {({ root, edit, save }) => (
         isJsonObject(root.equipment)

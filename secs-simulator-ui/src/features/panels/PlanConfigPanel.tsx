@@ -23,7 +23,6 @@ export function PlanConfigPanel(props: PanelBaseProps & { sessionId?: string; co
       panelId="panel-plan-config"
       sections={['plans']}
       title="事件计划"
-      actions="none"
     >
       {({ root, edit, text, save }) => (
         <PlanEditor root={root} edit={edit} text={text} backend={backend} onMutated={() => void save()} />

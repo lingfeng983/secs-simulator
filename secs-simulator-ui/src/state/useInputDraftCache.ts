@@ -16,6 +16,9 @@ import { useEffect, useRef } from 'react';
 
 const STORE_KEY = 'secs.ui.input-drafts.v1';
 
+/** 写入 localStorage 的防抖窗口：连打一串字只落一次盘。 */
+const FLUSH_DELAY_MS = 300;
+
 type DraftPage = Record<string, string>;
 type DraftStore = Record<string, DraftPage>;
 
@@ -136,6 +139,44 @@ export function useInputDraftCache(scopeKey: string): void {
   const restoring = useRef(false);
   /** 控件 key 的缓存：键入路径只查表，DOM 结构变化时整体失效。 */
   const keyCache = useRef<{ root: HTMLElement; keys: Map<DraftElement, string> } | null>(null);
+  /**
+   * 控件首次出现时的值（按 scope + key）。
+   *
+   * <p>只用来判断"这个字段还被用户改着吗"：值回到初始值就把草稿条目删掉。
+   * 否则用户改一下再改回去，条目会永久留在 localStorage 里，下次回填还会
+   * 把已经不需要的值重新塞回控件。</p>
+   */
+  const baseline = useRef<Map<string, string>>(new Map());
+  /** 待落盘的改动：防抖期间攒在这里，攒够 300 ms 或页面要走了才写一次。 */
+  const pending = useRef<Map<string, { scope: string; key: string; value: string }>>(new Map());
+  const flushTimer = useRef<number | null>(null);
+
+  /** 把 pending 合并进 localStorage。一次读一次写，不是每个按键一次。 */
+  const flush = (): void => {
+    if (flushTimer.current !== null) {
+      window.clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
+    if (pending.current.size === 0) {
+      return;
+    }
+    const store = readStore();
+    for (const { scope, key, value } of pending.current.values()) {
+      const page = store[scope] ?? {};
+      if (value === '') {
+        delete page[key];
+      } else {
+        page[key] = value;
+      }
+      if (Object.keys(page).length === 0) {
+        delete store[scope];
+      } else {
+        store[scope] = page;
+      }
+    }
+    pending.current.clear();
+    writeStore(store);
+  };
 
   const keysFor = (root: HTMLElement): Map<DraftElement, string> => {
     const cached = keyCache.current;
@@ -167,12 +208,16 @@ export function useInputDraftCache(scopeKey: string): void {
       if (key === undefined) {
         return;
       }
-      touched.current.add(`${scope}::${key}`);
-      const store = readStore();
-      const page = store[scope] ?? {};
-      page[key] = readValue(element);
-      store[scope] = page;
-      writeStore(store);
+      const id = `${scope}::${key}`;
+      touched.current.add(id);
+      const value = readValue(element);
+      /* 改回初始值 = 这个字段没改过：把条目去掉，别让它永久占位 */
+      const initial = baseline.current.get(id);
+      pending.current.set(id, { scope, key, value: initial === value ? '' : value });
+      if (flushTimer.current !== null) {
+        return;
+      }
+      flushTimer.current = window.setTimeout(flush, FLUSH_DELAY_MS);
     };
     document.addEventListener('input', onEdit, true);
     document.addEventListener('change', onEdit, true);
@@ -186,15 +231,24 @@ export function useInputDraftCache(scopeKey: string): void {
       attributes: true,
       attributeFilter: ['aria-label', 'name', 'id', 'placeholder', 'type', 'data-draft-key', 'data-draft-skip'],
     });
+    /* 关页面 / 切到后台前先把攒着的改动落盘：否则最后 300 ms 的输入会丢 */
+    const onLeave = () => flush();
+    window.addEventListener('pagehide', onLeave);
+    document.addEventListener('visibilitychange', onLeave);
     return () => {
       document.removeEventListener('input', onEdit, true);
       document.removeEventListener('change', onEdit, true);
+      window.removeEventListener('pagehide', onLeave);
+      document.removeEventListener('visibilitychange', onLeave);
       observer.disconnect();
+      flush();
     };
   }, []);
 
   useEffect(() => {
     touched.current.clear();
+    /* 换页前先把上一页攒着的改动写掉：防抖窗口不能跨页生效 */
+    flush();
     const scope = scopeRef.current;
     const restore = () => {
       const root = document.querySelector<HTMLElement>('.content');
@@ -203,7 +257,11 @@ export function useInputDraftCache(scopeKey: string): void {
       }
       const page = readStore()[scope] ?? {};
       for (const [element, key] of keysFor(root)) {
-        if (touched.current.has(`${scope}::${key}`)) {
+        const id = `${scope}::${key}`;
+        if (!baseline.current.has(id)) {
+          baseline.current.set(id, readValue(element));
+        }
+        if (touched.current.has(id)) {
           continue;
         }
         const saved = page[key];

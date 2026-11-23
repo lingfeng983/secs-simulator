@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { ApiClient, EventPlanView, HostSimTarget, SentMessageResult } from '../api';
+import type { ApiClient, EventPlanView, SentMessageResult } from '../api';
 import type { Notifier } from './useToasts';
 
 /** 发送结果的统一摘要：回复/超时/已发送三态，外加耗时。 */
@@ -93,57 +93,8 @@ export function useDeviceOps({ client, notifier, activeSession, refreshSessionDe
     [client],
   );
 
-  /** 以主机角色手动发送一条 SML；失败只提示，返回 null。 */
-  const sendHostSml = useCallback(
-    async (sessionId: string, sml: string): Promise<SentMessageResult | null> => {
-      if (client === null) {
-        return null;
-      }
-      try {
-        const result = await client.sendHostSml(sessionId, sml);
-        const { summary, detail } = sentSummary(result);
-        notifierRef.current.success(summary, detail);
-        return result;
-      } catch (error) {
-        notifierRef.current.error('主机模拟发送失败', (error as Error).message);
-        return null;
-      }
-    },
-    [client],
-  );
-
-  const openHostSim = useCallback(
-    async (sessionId: string, target?: HostSimTarget) => {
-      if (client === null) {
-        return;
-      }
-      const status = await client.openHostSim(sessionId, target).catch(() => 0);
-      if (status === 201) {
-        notifierRef.current.success(target === undefined ? '主机模拟器已连接' : '主机模拟器已连接（远程）');
-      } else if (status === 409) {
-        notifierRef.current.error('连接失败', '设备已有主机连接，或模拟器已开启');
-      } else {
-        notifierRef.current.error(`主机模拟器连接失败（HTTP ${status}）`);
-      }
-      await refreshSessionDetail(sessionId);
-    },
-    [client, refreshSessionDetail],
-  );
-
-  const closeHostSim = useCallback(
-    async (sessionId: string) => {
-      if (client === null) {
-        return;
-      }
-      await client.closeHostSim(sessionId).catch(() => 0);
-      notifierRef.current.info('主机模拟器已断开');
-      await refreshSessionDetail(sessionId);
-    },
-    [client, refreshSessionDetail],
-  );
-
   return useMemo(
-    () => ({ setAlarm, toggleEvent, sendSml, sendHostSml, openHostSim, closeHostSim }),
-    [setAlarm, toggleEvent, sendSml, sendHostSml, openHostSim, closeHostSim],
+    () => ({ setAlarm, toggleEvent, sendSml }),
+    [setAlarm, toggleEvent, sendSml],
   );
 }

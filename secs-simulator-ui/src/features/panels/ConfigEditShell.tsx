@@ -3,7 +3,6 @@ import { Panel } from '../../shared/ui/Panel';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
 import { editDocument, isJsonObject, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
 import { useConfigDraft, type DraftConfirm } from '../../state/useConfigDraft';
-import { sectionLabels } from '../../shared/lib/configSections';
 import type { ConfigSectionName } from '../../api';
 import type { BackendController } from '../../state/useBackend';
 
@@ -21,20 +20,18 @@ export interface ConfigEditContext {
   busy: boolean;
 }
 
-/** 顶部动作组：默认三个全给；'save' 只留保存；'none' 全收（行内动作直接保存的页面）。 */
-export type ShellActions = 'save-validate-reload' | 'save' | 'none';
-
 /**
- * 配置区结构化编辑页的公共外壳：草稿载入 / 校验 / 保存 / 重新载入，
+ * 配置区结构化编辑页的公共外壳：草稿载入 / 保存 / 校验提示，
  * 加上「原文不是合法 JSON」与「无配置来源」两个兜底。
  *
- * <p>变量 / 事件与报告 / 事件计划 / 设备常量四个专项页共用同一套纪律：
+ * <p>变量 / 事件与报告 / 事件计划 / 设备常量等专项页共用同一套纪律：
  * 原文是唯一事实来源，表单改动经 editDocument 写回草稿，保存走
  * useConfigDraft 的统一路径（保存后相关会话自动重载）。</p>
  *
  * <p>2026-11-20：页面上不再常驻「本页有未保存改动 / 其它页 N 段未保存」
- * 提示（未保存与否由页签小圆点表达）；行内动作直接保存的页面传
- * {@code actions="none"}，弹窗确认后由页面自己调 {@code save()}。</p>
+ * 提示（未保存与否由页签小圆点表达）。2026-11-23：外壳不再提供顶部动作组——
+ * 所有调用方都已经改由页面自己在表单末尾/标题行放「保存」、行内动作确认后
+ * 直接调 {@code save()}；「重新载入 / 校验」只属于「全量配置」页。</p>
  */
 export function ConfigEditShell({
   backend,
@@ -44,7 +41,6 @@ export function ConfigEditShell({
   title,
   sections,
   confirmOnSave,
-  actions = 'save-validate-reload',
   children,
 }: {
   backend: BackendController;
@@ -56,13 +52,11 @@ export function ConfigEditShell({
   title: string;
   /**
    * 本页拥有哪些配置段（2026-11-18 按页保存）：保存只提交这些段、只让它们生效。
-   * 不传 = 整份保存（配置原文页的场景，那个页面不走这个外壳）。
+   * 不传 = 整份保存（「全量配置」页的场景，那个页面不走这个外壳）。
    */
   sections?: readonly ConfigSectionName[];
   /** 设备启动中保存会打断运行时的二次确认（连接页用：保存要重建会话）。 */
   confirmOnSave?: { title: string; message: string; confirmLabel: string };
-  /** 顶部动作组（2026-11-20）：默认 重新载入/校验/保存；'save' 只留保存；'none' 全收。 */
-  actions?: ShellActions;
   /** 拿到解析后的根对象与编辑函数；非法 JSON 时不会调用。 */
   children: (context: ConfigEditContext) => ReactNode;
 }): JSX.Element {
@@ -79,7 +73,7 @@ export function ConfigEditShell({
     }
   };
 
-  const save = () => draft.save();
+  const save = (): Promise<void> => draft.save();
 
   return (
     <Panel
@@ -92,31 +86,6 @@ export function ConfigEditShell({
           ? <span className="state-pill" data-tone="muted">无配置来源</span>
           : undefined
       }
-      actions={actions === 'none'
-        ? undefined
-        : (
-          <>
-            {actions === 'save-validate-reload' && (
-              <button type="button" onClick={() => void draft.reload()} disabled={draft.busy || draft.configName === ''}>
-                重新载入
-              </button>
-            )}
-            {actions === 'save-validate-reload' && (
-              <button type="button" onClick={() => void draft.validate()} disabled={draft.busy || draft.configName === ''}>
-                校验
-              </button>
-            )}
-            <button
-              type="button"
-              className="primary"
-              onClick={() => void draft.save()}
-              disabled={draft.busy || draft.configName === ''}
-              title={sections === undefined ? undefined : `只保存并生效：${sectionLabels(sections)}`}
-            >
-              保存
-            </button>
-          </>
-        )}
     >
       <DraftConfirmModal draft={draft} />
       {draft.configName === '' ? (

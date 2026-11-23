@@ -129,6 +129,9 @@ export function JsonEditor({ value, onChange, ariaLabel }: JsonEditorProps): JSX
           className="config-editor"
           spellCheck={false}
           wrap="off"
+          /* 原文已经有自己的草稿仓库（configDraftStore）：输入缓存再存一份，
+             既白占 localStorage，又会在回填时和草稿打架 */
+          data-draft-skip=""
           value={value}
           onChange={(event) => {
             setError('');

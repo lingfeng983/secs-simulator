@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createClient, readApiBase, saveApiBase, type WireMessage } from '../api';
 import { inDesktopShell, tauriInvoke, type ShellConnection } from '../shared/lib/tauri';
@@ -27,8 +27,6 @@ import { useRegions } from '../state/useRegions';
 import { TabBar, type TabCloseMode } from './layout/TabBar';
 import { GeneralSettingsModal } from './layout/GeneralSettingsModal';
 import { nextTabAfterClose, canonicalizeDeviceTabs, deviceTabLabel, tabIdForRoute, upsertTab, type AppTab } from './layout/tabs';
-import { WorkbenchPage } from '../features/pages/WorkbenchPage';
-import { DevicePage as DevicePageView } from '../features/pages/DevicePage';
 import {
   DEVICE_CONFIG_PAGES,
   DEVICE_CONFIG_PAGE_LABELS,
@@ -37,13 +35,33 @@ import {
   HOST_CONFIG_PAGE_LABELS,
   HOST_RUNTIME_PAGE_LABELS,
 } from './router';
-import { HostListPage } from '../features/pages/HostListPage';
-import { HostDetailPage } from '../features/pages/HostDetailPage';
-import { HostTemplatePage } from '../features/pages/HostTemplatePage';
-import { SystemPage } from '../features/pages/SystemPage';
-import { TemplatePage } from '../features/pages/TemplatePage';
-import { SvidTemplatePage } from '../features/pages/SvidTemplatePage';
 import { MessageMonitorDrawer, type MonitorScope, type MonitorTarget } from '../features/panels/MessageMonitorDrawer';
+
+/* ---------- 路由级分包 ----------
+   每个页面按需加载：首屏只带外壳（顶栏 / 导航 / 页签 / 轮询），
+   主机侧面板、模板编辑器、曲线图表这些重量级组件等到真的打开那一页才下载。
+   以前是单包 562 kB，改完之后首屏只剩外壳那一份。 */
+const WorkbenchPage = lazy(() => import('../features/pages/WorkbenchPage')
+  .then((module) => ({ default: module.WorkbenchPage })));
+const DevicePageView = lazy(() => import('../features/pages/DevicePage')
+  .then((module) => ({ default: module.DevicePage })));
+const HostListPage = lazy(() => import('../features/pages/HostListPage')
+  .then((module) => ({ default: module.HostListPage })));
+const HostDetailPage = lazy(() => import('../features/pages/HostDetailPage')
+  .then((module) => ({ default: module.HostDetailPage })));
+const HostTemplatePage = lazy(() => import('../features/pages/HostTemplatePage')
+  .then((module) => ({ default: module.HostTemplatePage })));
+const SystemPage = lazy(() => import('../features/pages/SystemPage')
+  .then((module) => ({ default: module.SystemPage })));
+const TemplatePage = lazy(() => import('../features/pages/TemplatePage')
+  .then((module) => ({ default: module.TemplatePage })));
+const SvidTemplatePage = lazy(() => import('../features/pages/SvidTemplatePage')
+  .then((module) => ({ default: module.SvidTemplatePage })));
+
+/** 分包加载中的占位：外壳与页签都还在，只把内容区留白，不闪整页。 */
+function PageLoading(): JSX.Element {
+  return <p className="hint" style={{ padding: '24px' }}>正在载入页面…</p>;
+}
 
 /** SSE 类型化通知的保留条数(事件流 feed 用)。 */
 const MAX_LIVE_EVENTS = 200;
@@ -110,9 +128,11 @@ export function App(): JSX.Element {
   const { preferences, update, resolvedTheme } = usePreferences();
   /* 后端地址改变时整页重载，这里只需按当前地址建一次客户端 */
   const client = useMemo(() => createClient(), []);
-  const backend = useBackend(client, notifier);
-
   const [route, navigate] = useRoute(preferences.activeTab);
+  /* 明细轮询按页面需要：设备页才 2 秒一拉目录与事件计划，其余页面降到 20 秒
+     （命令面板的「查看 SVID」也从目录取条目，所以不是完全停掉）。 */
+  const backend = useBackend(client, notifier, { sessionDetailHot: route.name === 'device' });
+
   const hostV2 = useHostsV2(client);
   /* 稳定引用：SSE 回调的依赖数组里不能放每次渲染都新建的 hostV2 对象 */
   const applyHostPhase = hostV2.applyPhase;
@@ -308,14 +328,11 @@ export function App(): JSX.Element {
           navigate({ name: 'templates' });
           return;
         default: {
-          /* 设备能力 id → 当前设备对应子页（命令面板只传 catalog） */
+          /* 认不出的面板 id：有当前设备就去运行区首页，否则回工作台。
+             不再有 `catalog` 这类历史别名——它们只会把点错的东西带到别的页。 */
           const sessionId = backend.activeSession;
           if (sessionId !== '') {
-            const mapped: Record<string, [DeviceZone, DevicePage]> = {
-              catalog: ['config', 'events'],
-            };
-            const hit = mapped[id] ?? ['runtime', 'plans'];
-            navigate({ name: 'device', sessionId, zone: hit[0], page: hit[1] });
+            navigate({ name: 'device', sessionId, zone: 'runtime', page: 'plans' });
           } else {
             navigate({ name: 'workbench' });
           }
@@ -409,7 +426,9 @@ export function App(): JSX.Element {
         label: `${session.id} · 配置区`,
         group: '设备',
         keywords: [session.id, 'config'],
-        run: () => goTo(`device-open:${session.id}`),
+        /* 「配置区」就要落到配置区：以前这里复用 `device-open:`（默认落运行区），
+           按文案点进来却是运行区，是最容易被当成"页面坏了"的那种错位。 */
+        run: () => goTo(`device-zone:${session.id}:config`),
       });
       items.push({
         id: `device-page:${session.id}:runtime`,
@@ -475,23 +494,9 @@ export function App(): JSX.Element {
       },
     );
 
-    /* 目录里的 CEID / SVID 直接变成命令：不用先找设备再翻目录 */
-    for (const ceid of backend.catalog?.ceids ?? []) {
-      items.push({
-        id: `ceid:${ceid.ceid}`,
-        /* 这个动作只是把 CEID 填进输入框，不触发上报；文案必须说清，免得误操作 */
-        label: `填入 CEID ${ceid.ceid}${ceid.slot ? ` · ${ceid.slot}` : ''}`,
-        group: '设备目录',
-        hint: ceid.owner,
-        keywords: ['ceid', String(ceid.ceid), ceid.slot ?? ''],
-        run: () => {
-          backend.setCeid(ceid.ceid);
-          goTo('sessions');
-          notifier.info(`已把 CEID 填成 ${ceid.ceid}`);
-        },
-      });
-    }
-
+    /* 目录里的 SVID 直接变成命令：不用先找设备再翻目录。
+       CEID 那条命令已删：它只把值写进 `backend.ceid`，而那个全局状态在
+       事件编排改版后就没有任何界面在读——点了等于什么都没发生。 */
     for (const svid of backend.catalog?.svids ?? []) {
       items.push({
         id: `svid:${svid.svid}`,
@@ -499,12 +504,20 @@ export function App(): JSX.Element {
         group: '设备目录',
         hint: svid.unit,
         keywords: ['svid', String(svid.svid), svid.slot ?? ''],
-        run: () => goTo('catalog'),
+        run: () => {
+          const sessionId = backend.activeSession;
+          if (sessionId === '') {
+            goTo('workbench');
+            return;
+          }
+          /* 以前落到 `catalog`，映射表把它指到「事件与报告」——SVID 要去变量配置页 */
+          goTo(`device-page:${sessionId}:config:svids`);
+        },
       });
     }
 
     return items;
-  }, [backend, goTo, notifier, preferences.density, preferences.sidebarCollapsed, preferences.theme, resolvedTheme, update]);
+  }, [backend, goTo, preferences.density, preferences.sidebarCollapsed, preferences.theme, resolvedTheme, update]);
 
   /* ---------- 快捷键 ---------- */
 
@@ -739,20 +752,22 @@ export function App(): JSX.Element {
           )}
 
           <main className={`content${SINGLE_TABLE_PAGES.has(route.name) ? ' content--table-page' : ''}`}>
-            {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
-            {route.name === 'device' && (
-              <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />
-            )}
-            {route.name === 'hosts' && <HostListPage {...panelProps} hosts={hostV2} />}
-            {route.name === 'host' && (
-              <HostDetailPage {...panelProps} hosts={hostV2} hostId={route.hostId} zone={route.zone} page={route.page} />
-            )}
-            {route.name === 'host-templates' && (
-              <HostTemplatePage {...panelProps} hosts={hostV2} />
-            )}
-            {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
-        {route.name === 'templates' && <TemplatePage {...panelProps} />}
-        {route.name === 'svid-templates' && <SvidTemplatePage {...panelProps} />}
+            <Suspense fallback={<PageLoading />}>
+              {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}
+              {route.name === 'device' && (
+                <DevicePageView {...panelProps} sessionId={route.sessionId} zone={route.zone} page={route.page} />
+              )}
+              {route.name === 'hosts' && <HostListPage {...panelProps} hosts={hostV2} />}
+              {route.name === 'host' && (
+                <HostDetailPage {...panelProps} hosts={hostV2} hostId={route.hostId} zone={route.zone} page={route.page} />
+              )}
+              {route.name === 'host-templates' && (
+                <HostTemplatePage {...panelProps} hosts={hostV2} />
+              )}
+              {route.name === 'system' && <SystemPage {...panelProps} page={route.page} />}
+              {route.name === 'templates' && <TemplatePage {...panelProps} />}
+              {route.name === 'svid-templates' && <SvidTemplatePage {...panelProps} />}
+            </Suspense>
           </main>
         </div>
       </div>

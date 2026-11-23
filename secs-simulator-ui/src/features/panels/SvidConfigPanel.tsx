@@ -55,7 +55,6 @@ export function SvidConfigPanel(props: PanelBaseProps & { sessionId?: string; co
       panelId="panel-svid-config"
       sections={['svids']}
       title="变量配置（SVID 定义）"
-      actions="none"
     >
       {({ root, edit, save }) => (
         isJsonObject(root.equipment)

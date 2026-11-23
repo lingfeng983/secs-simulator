@@ -88,7 +88,8 @@ test('配置区·配置原文：JSON 高亮、格式化、校验、保存、导�
   await expect(panel.getByText('校验通过')).toBeVisible();
 
   await panel.getByRole('button', { name: '保存' }).click();
-  await expect(panel.getByText(/已保存 line1\.json/)).toBeVisible();
+  /* 整份保存成功后只在右下角提示：页面内不再重复写一句"已保存" */
+  await expect(page.locator('.toast').first()).toContainText('已保存 line1.json');
 
   /* 导出走保存对话框（Chromium 无 API 时回落下载） */
   const downloadPromise = page.waitForEvent('download');
@@ -110,12 +111,13 @@ test('配置区·配置原文：改了再重新载入要确认丢改动', async 
   await expect(panel.getByText('有未保存改动')).toBeVisible();
 
   await panel.getByRole('button', { name: '重新载入' }).click();
-  await expect(page.getByRole('dialog')).toContainText('丢弃未保存的改动');
+  /* 确认框由草稿统一提供（与结构化页同一套文案） */
+  await expect(page.getByRole('dialog')).toContainText('放弃未保存的改动');
   await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
   await expect(panel.locator('textarea.config-editor')).toHaveValue('{"draft":true}');
 
   await panel.getByRole('button', { name: '重新载入' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: /丢弃/ }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '放弃并重新载入' }).click();
   await expect(panel.locator('textarea.config-editor')).toHaveValue(/schemaVersion/);
 });
 

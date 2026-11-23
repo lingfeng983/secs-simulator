@@ -27,7 +27,6 @@ export function CyclePanel(props: PanelBaseProps & { sessionId?: string; configN
       panelId="panel-cycle"
       sections={['cycle']}
       title="周期参数与片内事件"
-      actions="none"
     >
       {({ root, edit, text, save, busy }) => (
         <CycleEditor root={root} edit={edit} text={text} backend={backend} onSave={() => save()} busy={busy} />

@@ -51,8 +51,6 @@ function makeBackend(overrides: Partial<BackendController> = {}): BackendControl
       { id: 'dev-a', state: 'OPEN', controlState: 'ONLINE', device: 'DEV-A', units: 1, lastError: '', counters: { emitted: 3, s9Replies: 2 } },
       { id: 'dev-b', state: 'OPEN', controlState: 'COMMUNICATING', device: 'DEV-B', units: 2, lastError: '', counters: {} },
     ],
-    ceid: 2001,
-    setCeid: () => undefined,
     configList: [],
     configTemplates: vi.fn().mockResolvedValue([]),
     bulkCreateSessions: vi.fn().mockResolvedValue({ created: [], failed: [] }),

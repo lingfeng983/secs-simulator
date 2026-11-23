@@ -86,6 +86,17 @@ describe('3.0 two-zone routes', () => {
     });
   });
 
+  it('falls unknown 2.x sub-page names to the runtime home', () => {
+    /* 兜底值曾是已删除的 `catalog` 页：DevicePage 一个分支都匹配不上，
+       页面只剩页签、下面全空。未知子页名必须落到仍然存在的页。 */
+    expect(parseHash('#/device/line1/whatever')).toEqual({
+      name: 'device',
+      sessionId: 'line1',
+      zone: 'runtime',
+      page: 'plans',
+    });
+  });
+
   it('parses hosts list and host detail routes', () => {
     expect(parseHash('#/hosts')).toEqual({ name: 'hosts' });
     expect(parseHash('#/hosts/host-1/config/overview')).toEqual({

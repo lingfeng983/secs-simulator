@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { setRuntimeApiBase, setRuntimeApiFailure } from '../api';
 import { inDesktopShell, tauriInvoke, type ShellConnection } from '../shared/lib/tauri';
-import 'uplot/dist/uPlot.min.css';
 import './App.css';
 
 const container = document.getElementById('root');

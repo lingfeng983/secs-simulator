@@ -7,18 +7,15 @@
  */
 
 import type {
-  ApiClient, CollectorConfigInput, CollectorState, SentMessageResult,
+  ApiClient, CollectorConfigInput, CollectorState,
 } from './types';
-import { apiUrl, commandStatus, LONG_REQUEST_TIMEOUT_MS, parseCollectorResult, readJson, request } from './base';
+import { apiUrl, parseCollectorResult, readJson, request } from './base';
 
 type HostSimApi = Pick<
   ApiClient,
   | 'hostInstanceCollector'
   | 'setHostInstanceCollector'
   | 'hostInstanceCollectorCommand'
-  | 'openHostSim'
-  | 'closeHostSim'
-  | 'sendHostSml'
   | 'collectorState'
   | 'setCollector'
   | 'collectorCommand'
@@ -61,34 +58,6 @@ export const hostSimApi: HostSimApi = {
       throw new Error(parsed.error ?? text.slice(0, 200));
     }
     return parsed;
-  },
-  async openHostSim(sessionId, target) {
-    return commandStatus(await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), {
-      method: 'POST',
-      headers: target === undefined ? undefined : { 'Content-Type': 'application/json; charset=utf-8' },
-      body: target === undefined ? undefined : JSON.stringify({ target }),
-    }, LONG_REQUEST_TIMEOUT_MS));
-  },
-  async closeHostSim(sessionId) {
-    return commandStatus(
-      await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim`), { method: 'DELETE' }),
-    );
-  },
-  async sendHostSml(sessionId, sml) {
-    const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/send`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: sml,
-    }, LONG_REQUEST_TIMEOUT_MS);
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`${response.status} ${text.slice(0, 300)}`);
-    }
-    try {
-      return JSON.parse(text) as SentMessageResult;
-    } catch {
-      throw new Error('响应不是合法 JSON');
-    }
   },
   async collectorState(sessionId) {
     /* 不吞错:采集器状态拿不到时调用方要能提示"后端不支持/不可达" */

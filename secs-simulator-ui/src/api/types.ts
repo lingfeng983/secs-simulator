@@ -382,13 +382,6 @@ export interface CollectorState {
   collectors?: CollectorPlanState[];
 }
 
-/** 主机模拟连接目标;remote 为 true 时连这个地址而不是本机。 */
-export interface HostSimTarget {
-  host: string;
-  port: number;
-  deviceId: number;
-}
-
 /** 目录里的一个 CEID（绝对 ID + 语义）。 */
 export interface CatalogCeid {
   ceid: number;
@@ -642,12 +635,6 @@ export interface ApiClient {
   /** 按实例 id 手动启停采集器；planId 给定时只动那一份采集计划。 */
   hostInstanceCollectorCommand(hostId: string, start: boolean, planId?: string): Promise<{ ok: boolean; error?: string }>;
 
-  /** 打开主机模拟器连接;target 给定时连远程 SECS（schema v6）。 */
-  openHostSim(sessionId: string, target?: HostSimTarget): Promise<number>;
-  /** 关闭主机模拟器连接。 */
-  closeHostSim(sessionId: string): Promise<number>;
-  /** 以主机角色发送 SML。 */
-  sendHostSml(sessionId: string, sml: string): Promise<SentMessageResult>;
   /** 工作台聚合（schema v6）。 */
   overview(): Promise<OverviewRow[]>;
   /** 服务端压测（schema v6）。 */
