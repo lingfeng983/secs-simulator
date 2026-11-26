@@ -162,6 +162,15 @@ function Test-NativeBackend {
     $outFile = Join-Path $work 'stdout.txt'
     $errFile = Join-Path $work 'stderr.txt'
 
+    # Git Bash 启动的 PowerShell 会同时带 Path/PATH/path 三个键，PS 5.1 的
+    # Start-Process 构造子进程环境字典时按大小写敏感判重，直接抛
+    #「已添加项。字典中的关键字:"Path"」。这里先合并成一个键再启动。
+    foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
+        if ($name -ieq 'path' -and $name -cne 'Path') {
+            [Environment]::SetEnvironmentVariable($name, $null)
+        }
+    }
+
     $process = Start-Process -FilePath $Exe `
         -ArgumentList @('--mode=integrated', '--port=0', "--work-dir=$work") `
         -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
