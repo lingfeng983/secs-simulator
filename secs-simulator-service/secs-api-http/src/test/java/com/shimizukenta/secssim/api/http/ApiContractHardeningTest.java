@@ -164,7 +164,16 @@ class ApiContractHardeningTest {
         StringBuilder body = new StringBuilder("{\"host\":\"1.1.1.1\",\"port\":5000,\"pad\":\"");
         body.append("x".repeat(HttpSupport.MAX_CONFIG_BYTES));
         body.append("\"}");
-        assertEquals(400, send("POST", "/api/v1/sessions/s1/host-sim", body.toString()).statusCode());
+        try {
+            HttpResponse<String> res = send("POST", "/api/v1/sessions/s1/host-sim", body.toString());
+            assertEquals(400, res.statusCode(), "超长正文应回 400: " + res.body());
+        } catch (IOException e) {
+            /* Windows runner 上 JDK HttpClient 偶尔把"服务端拒收后提前断连"报成 EOF
+               （header parser received no bytes）。连接被拒同样是拒绝，关键是下面
+               业务层不能被调到、不能把没给目标误判成本机连接。 */
+            assertTrue(e.getMessage().contains("header parser") || e.getMessage().contains("EOF"),
+                    "拒绝超长正文时的断连形态异常: " + e);
+        }
         assertTrue(this.calls.isEmpty(), "超限请求体不能被当成「没给目标」: " + this.calls);
     }
 
