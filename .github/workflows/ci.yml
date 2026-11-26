@@ -81,6 +81,14 @@ jobs:
           $dist = Join-Path $env:GITHUB_WORKSPACE 'secs-simulator-ui/dist'
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Set-Content -Path (Join-Path $dist 'index.html') -Value '<!doctype html><title>placeholder</title>' -Encoding utf8
+      # tauri.conf.json 的 bundle.resources 指向 src-tauri/resources，该目录被 .gitignore
+      # 排除、只在 package.ps1 打包时填充；cargo check 仍要求路径存在，否则 build.rs 直接报错。
+      - name: 占位后端 resources（仅供 cargo check）
+        shell: pwsh
+        run: |
+          $res = Join-Path $env:GITHUB_WORKSPACE 'secs-simulator-gui/src-tauri/resources'
+          New-Item -ItemType Directory -Force -Path $res | Out-Null
+          Set-Content -Path (Join-Path $res '.placeholder') -Value 'placeholder for cargo check' -Encoding utf8
       # windows runner 自带 Rust 工具链（Cargo.toml 要求 rust-version 1.90，runner 版本更新）
       - name: cargo check
         run: cargo check --locked
