@@ -25,9 +25,14 @@ class ArchitectureTest {
             "com.shimizukenta.secssim.cli.."
     };
 
+    /*
+     * 只排除测试类，不排除 jar：mvn test 的依赖是 target/classes 目录，
+     * mvn verify 的依赖是各模块 jar。排除 jar 会让 verify 下只导进 runtime
+     * 自己的类，规则大面积空转、哨兵也误报（2026-11-26 native verify 实证）。
+     * importPackages 已把范围限定在 com.shimizukenta，第三方 jar 不会混进来。
+     */
     private static final JavaClasses MAIN_CLASSES = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_JARS)
             .importPackages("com.shimizukenta");
 
     /**

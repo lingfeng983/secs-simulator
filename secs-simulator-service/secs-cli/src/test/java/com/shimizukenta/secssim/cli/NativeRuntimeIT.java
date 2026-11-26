@@ -157,7 +157,8 @@ class NativeRuntimeIT {
 
         /* 演示设备 JSON 已降级为测试资产（ADR-0019：启动不自动开会话），
            用 --config 显式导入并启动一台 etch */
-        Path demoConfig = Path.of("..", "..", "secs-runtime", "target", "classes",
+        /* failsafe 的 basedir 是 secs-cli，上一级才是 secs-simulator-service */
+        Path demoConfig = Path.of("..", "secs-runtime", "target", "classes",
                 "defaults", "demo-etch.json").toAbsolutePath().normalize();
         assumeTrue(Files.isRegularFile(demoConfig), "skip: demo-etch.json not built: " + demoConfig);
 
@@ -204,7 +205,7 @@ class NativeRuntimeIT {
             /* B1：会话 id 是服务端生成的 ses_ ULID，配置名只记在 config 字段 */
             String sessionId = sessionIdOf(sessions.body());
             assertTrue(sessionId != null && sessionId.startsWith("ses_"), sessions.body());
-            assertTrue(sessions.body().contains("\"config\":\"etch-01.json\""), sessions.body());
+            assertTrue(sessions.body().contains("\"config\":\"demo-etch.json\""), sessions.body());
             assertTrue(sessions.body().contains("\"state\":\"OPEN\""), sessions.body());
             assertTrue(sessions.body().contains("\"units\":2"), sessions.body());
 
@@ -263,7 +264,7 @@ class NativeRuntimeIT {
     }
 
     private static String hsnsBase(int httpPort, String sessionId) {
-        /* etch-01 是第一个演示会话，监听 --hsms-port 指定的端口；
+        /* demo-etch 是 --config 导入的演示会话，监听 --hsms-port 指定的端口；
            手动触发走 v2 运行时端点（v1 的 ceid 端点已删） */
         return "http://127.0.0.1:" + httpPort + "/api/v2/devices/" + sessionId + "/runtime/ceid/2001";
     }

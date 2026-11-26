@@ -713,9 +713,12 @@ test('区域分组：设备可改区域，左侧菜单按区域归类', async ({
   await page.goto('/');
   const panel = page.locator('#panel-sessions');
 
-  /* 通过筛选框的「＋ 新建区域」建一个区域（会弹一次输入框） */
-  page.once('dialog', (dialog) => void dialog.accept('A 区'));
+  /* 通过筛选框的「＋ 新建区域」建一个区域：走受控弹窗，不再是 window.prompt */
   await panel.getByLabel('按区域筛选设备').selectOption('__new__');
+  const regionDialog = page.getByRole('dialog', { name: '新建区域' });
+  await expect(regionDialog).toBeVisible();
+  await regionDialog.getByLabel('区域名称').fill('A 区');
+  await regionDialog.getByRole('button', { name: '创建' }).click();
   await expect(panel.getByLabel('按区域筛选设备').locator('option', { hasText: 'A 区' })).toHaveCount(1);
 
   /* 回到全部区域，把 LINE1 归到新区域：侧栏随即出现该分组 */
