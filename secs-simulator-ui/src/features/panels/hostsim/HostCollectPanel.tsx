@@ -16,6 +16,7 @@ import type {
   PreviewSeries,
 } from '../../../api';
 import { parseIdList, planId, useCollectPlans, type CollectPlan } from '../../../state/hostPlans';
+import { useVisibilityInterval } from '../../../state/useVisibilityInterval';
 import { ceidFromS6f11 } from '../../../shared/lib/smlValues';
 import { hostOfTarget } from '../../../shared/lib/format';
 import { requireClient, type PanelArgs } from './hostPanelShared';
@@ -395,7 +396,6 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
   const [catalogFailed, setCatalogFailed] = useState(false);
   /** 目录可用时是否走「高级：手输」；目录不可用则强制手输。 */
   const [manualFields, setManualFields] = useState(false);
-  const timerRef = useRef<number | null>(null);
   /** 目录只读一次；关闭/重开弹窗后旧请求的结果直接丢弃。 */
   const catalogSeq = useRef(0);
   /** 只处理本次打开页面之后到达的报文，避免历史补拉把采集器反复启动。 */
@@ -413,6 +413,8 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
       /* 实例不存在/后端不可达:保持现状 */
     }
   };
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
 
   useEffect(() => {
     /* 配置区只管方案定义：不下发、不采集，也就不需要运行态轮询。 */
@@ -420,15 +422,11 @@ export function HostCollectPanel({ hostId, hosts, readOnly, client, goTo, messag
       return;
     }
     void loadState();
-    const timer = window.setInterval(() => void loadState(), 2_000);
-    timerRef.current = timer;
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearInterval(timerRef.current);
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostId, client, readOnly]);
+
+  /* 运行态轮询：后台标签页暂停、恢复可见补跑（N6） */
+  useVisibilityInterval(() => void loadStateRef.current(), 2_000, !readOnly);
 
   /** 取某条配置对应的那份采集器状态（没下发过的配置没有状态）。 */
   const stateOf = (plan: CollectPlan): CollectorPlanState | null =>

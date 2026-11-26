@@ -67,6 +67,7 @@ paths:
       description: |
         使用 `POST /api/v1/ticket` 的一次性票据；不接受长期 token 查询参数。
         事件名：`message`（报文）、`heartbeat`（时间戳）。
+        票据在连接建立时即被消费：若因慢池满返回 503，该票已失效，重连须重新取票。
       parameters:
         - name: ticket
           in: query
@@ -78,6 +79,10 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        '401':
+          description: 票据无效/已消费/过期（重新 POST /api/v1/ticket）
+        '503':
+          description: 慢连接池已满（票据已消费，重连须重新取票）
   /api/v1/sessions:
     get:
       tags: [sessions]
@@ -210,14 +215,42 @@ paths:
   /api/v1/sessions/{id}:
     delete:
       tags: [sessions]
-      summary: 关闭并移除会话
+      summary: 断开设备链路（3.0 起不再移除会话；废弃兼容别名）
+      deprecated: true
+      description: |
+        3.0 起语义是「断链不删实体」：内部转成 POST /api/v2/devices/{id}/link/disconnect。
+        设备不再从列表消失——模型、钉值、计划启用态、目录编辑全部保留，
+        只是端口释放、可随时再连。响应带 `Deprecation: true` 与
+        `Sunset: Wed, 30 Jun 2027 00:00:00 GMT` 头，body 的 hint 直接给出替代端点。
+        要销毁会话（清运行态）用 DELETE /api/v2/devices/{id}；
+        删除设备实体用 DELETE /api/v1/configs/{name}。
       parameters:
         - $ref: '#/components/parameters/SessionId'
       responses:
         '200':
-          description: 已关闭
+          description: 已断链（phase=DISCONNECTED；带 Deprecation/Sunset 响应头）
+          headers:
+            Deprecation:
+              schema: { type: string }
+              description: 固定 true，提示客户端迁移
+            Sunset:
+              schema: { type: string }
+              description: 废弃移除时间（HTTP 日期）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, phase, hint]
+                properties:
+                  ok: { type: boolean }
+                  phase: { type: string, enum: [DISCONNECTED] }
+                  hint:
+                    type: string
+                    description: 迁移提示，固定指向 POST /api/v2/devices/{id}/link/disconnect
+        '400':
+          description: bad-session-id（路径里没有合法会话 id）
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: unknown-session
   /api/v1/sessions/{id}/reload:
     post:
       tags: [sessions]
@@ -624,6 +657,29 @@ paths:
         '200': { description: 已停止 }
         '404': { description: 主机模拟未开启（host-sim-not-open） }
         '409': { description: 还没有采集配置（collector-not-configured，原因在 message） }
+  /api/v2/devices/{id}:
+    delete:
+      tags: [devices]
+      summary: 销毁会话（释放端口、清运行态；设备实体与配置保留）
+      description: |
+        端口释放、会话从注册表移除、运行态编辑清理；设备实体与配置正文保留，
+        之后再「启动设备」会按配置重建一个新的会话。只断链走
+        POST /api/v2/devices/{id}/link/disconnect；删除设备实体走 DELETE /api/v1/configs/{name}。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 已销毁
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, destroyed]
+                properties:
+                  ok: { type: boolean }
+                  destroyed: { type: boolean }
+        '404': { description: 设备没有在跑（error=device-not-running） }
+        '502': { description: 销毁失败（error=destroy-failed） }
   /api/v2/devices/{id}/config/revisions:
     get:
       tags: [devices]
@@ -862,6 +918,56 @@ paths:
         '404': { description: 设备不存在 }
         '409': { description: 设备离线 }
         '502': { description: 发送失败（链路/对端拒绝，重试或检查连接） }
+  /api/v2/devices/{id}/apply-sections:
+    post:
+      tags: [devices]
+      summary: 把刚落盘的配置段应用到这台设备（分段生效，2026-11-18）
+      description: |
+        请求体 {"sections":["plans","throttle"]}，段名与分段保存
+        （PUT /api/v1/configs/{name}/sections）响应的 changed 一一对应。
+        服务端以磁盘内容为准重新编译，再按段最小应用：只改事件计划 → 未改动的计划
+        保留启用态；设备模型段变化才做全量热重置；连接段（session）变化直接转重载
+        （断链重建，运行态全清）。sections 为空时幂等返回 200（effect=hot、changed=[]）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sections]
+              properties:
+                sections:
+                  type: array
+                  items: { type: string }
+                  description: 变化段名（来自分段保存响应的 changed）
+      responses:
+        '200':
+          description: 已应用（changed/reset/preserved 描述影响面）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, effect, changed, reset, preserved, plansKept, pinsDropped]
+                properties:
+                  ok: { type: boolean }
+                  effect: { type: string, description: 影响级别（hot=热应用 / reconnect=断链重建 等） }
+                  changed: { type: array, items: { type: string } }
+                  reset: { type: array, items: { type: string }, description: 本次被重置的运行态项 }
+                  preserved: { type: array, items: { type: string }, description: 本次被保留的运行态项 }
+                  plansKept: { type: integer, description: 保留启用态的计划数 }
+                  pinsDropped: { type: integer, description: 被丢弃的钉值数 }
+        '400': { description: bad-body（请求体非法）/ bad-section（未知配置段） }
+        '404': { description: 设备不存在（error=unknown-session） }
+        '405': { description: 方法不是 POST }
+        '409': { description: 'not-reloadable（演示会话无配置来源）/ not-running（未启动或正在重启）/ reconnect-failed（连接参数已保存但重建会话失败）' }
+        '422':
+          description: 重编译校验失败，未应用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
+        '500': { description: 应用失败（error=apply-failed） }
   /api/v2/devices/{id}/cycle:
     get:
       tags: [devices]
@@ -1396,6 +1502,61 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HostSimCommandResult' }
+  /api/v1/host-sims/{hostId}/burst:
+    get:
+      tags: [host-sims]
+      summary: 主机级压测进度 / 最近一次结果（与会话级 /sessions/{id}/burst 同形）
+      description: |
+        压测是后台任务：POST 受理后回 202，用这里的 GET 轮询进度与统计。
+        该主机没跑过压测时回 `{"ok":true,"running":false,"accepted":false}`。
+      parameters:
+        - $ref: '#/components/parameters/HostId'
+      responses:
+        '200':
+          description: 运行中给 running/count/startedAt；已结束给最近一次完整统计
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BurstStatus' }
+        '404': { description: unknown-host }
+    post:
+      tags: [host-sims]
+      summary: 主机级压测（以主机角色循环发送；远程主机也能压）
+      description: |
+        与会话级 POST /api/v1/sessions/{id}/burst 同形：同一条报文/事件在服务端
+        循环发送，后台执行，受理即回 202（accepted/running 与全 0 统计），真实统计
+        随后用 GET 取；同一主机同时只允许一个压测。主机模拟页的「压测发送」用它，
+        对端不在本进程的远程主机也能压。kind=message 需要 sml；kind=ceid 需要 ceid；
+        kind=alarm 交替置位/清除。count 上限 5000，intervalMs 上限 60000。
+      parameters:
+        - $ref: '#/components/parameters/HostId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [message, ceid, alarm] }
+                count: { type: integer, minimum: 1, maximum: 5000, default: 1 }
+                intervalMs: { type: integer, minimum: 0, maximum: 60000, default: 0 }
+                sml: { type: string, description: kind=message 必填 }
+                ceid: { type: integer, minimum: 1, description: kind=ceid 必填 }
+                alid: { type: integer, minimum: 1, description: kind=alarm 必填 }
+                text: { type: string }
+                category: { type: integer, minimum: 1, maximum: 7, default: 4 }
+      responses:
+        '202':
+          description: 后台已受理（accepted=true，统计字段为 0，随后用 GET 取）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BurstResult' }
+        '400': { description: bad-body / bad-request / unknown-kind / count-out-of-range / interval-out-of-range / missing-sml / missing-ceid / missing-alid }
+        '404': { description: unknown-host }
+        '405': { description: 方法不是 GET/POST }
+        '409': { description: 同一主机已有压测在跑（burst-running / burst-busy） }
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/messages:
     get:
       tags: [messages]
@@ -1667,6 +1828,73 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigProblems' }
+  /api/v1/configs/{name}/sections:
+    put:
+      tags: [configs]
+      summary: 按段保存配置（分段保存，2026-11-18；支持 If-Match 并发保护）
+      description: |
+        请求体 {"sections":{"cycle":{...}}}，每段只带该页自己的节点。
+        服务端按段替换、整份编译、跑守卫后落盘，响应回实际变化的段（changed）
+        与影响级别（effect）；changed 可直接喂给
+        POST /api/v2/devices/{id}/apply-sections 做分段生效。
+        内容没变时幂等返回 200（changed=[]，不 +1 版本）。
+        守卫：运行中周期引用的 SVID / 晶圆属性禁改（409 conflicts）；
+        常量覆盖需要确认（409 error=ecv-overwrite + warnings，确认后带
+        ?confirmOverwrite=1 重试）。结构段可随时保存，运行中的设备继续跑旧模型。
+        If-Match 带回 GET /api/v1/configs/{name} 的 modifiedMs 做并发保护，
+        不一致时回 409 error=revision-conflict；If-Match 非法时按"不检查"处理。
+      parameters:
+        - $ref: '#/components/parameters/ConfigName'
+        - name: If-Match
+          in: header
+          required: false
+          schema: { type: string }
+          description: GET 响应里的 modifiedMs；与当前不一致时回 409（revision-conflict）
+        - name: confirmOverwrite
+          in: query
+          required: false
+          schema: { type: string }
+          description: 置 1/true（或只写 ?confirmOverwrite）= 已确认覆盖运行时常量，跳过守卫 C 的二次确认
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sections]
+              properties:
+                sections:
+                  type: object
+                  description: 段名 → 该段的配置节点（只带要改的段）
+      responses:
+        '200':
+          description: 已落盘（changed 为实际变化的段；内容没变时为空数组且不 +1 版本）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, revision, modifiedMs, changed, effect, warnings]
+                properties:
+                  ok: { type: boolean }
+                  revision: { type: integer, description: 保存后的配置版本号 }
+                  modifiedMs: { type: integer, format: int64, description: 落盘后的修改时间（下次 If-Match 用） }
+                  changed: { type: array, items: { type: string } }
+                  effect: { type: string, description: 影响级别（hot 等） }
+                  warnings: { type: array, items: { type: object }, description: 常量覆盖提示（守卫 C） }
+        '400': { description: bad-path / bad-body / bad-sections（payload 形状非法）/ not-found（名字非法） }
+        '404': { description: 配置不存在（error=not-found） }
+        '405': { description: 方法不是 PUT }
+        '409':
+          description: |
+            三类冲突：error=revision-conflict（If-Match 不一致，未落盘）；
+            conflicts 列出运行中周期引用的禁改项（守卫 B）；
+            error=ecv-overwrite + warnings（常量覆盖，带 confirmOverwrite=1 重试）。
+        '422':
+          description: 整份编译/校验失败，未落盘
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigProblems' }
+        '500': { description: 写盘失败（error=save-failed） }
   /api/v1/configs/{name}/validate:
     post:
       tags: [configs]

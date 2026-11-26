@@ -1,0 +1,6 @@
+{
+ "reader": "local_file_slice",
+ "final_url": "file:secs-simulator-ui/src/state/useServerOps.ts#L60-L95",
+ "text": "      try {\n        await client.burst(sessionId, request);\n      } catch (error) {\n        /* 409 = 该会话已有一个压测在跑：接着轮询那一轮，而不是报错 */\n        if ((error as { status?: number }).status !== 409) {\n          throw error;\n        }\n      }\n\n      /* 服务端预算是 5 分钟；这里给 1 分钟底 + 请求本身的理论时长，最多 6 分钟 */\n      const deadline = Date.now() + Math.min(\n        6 * 60_000,\n        60_000 + request.count * (request.intervalMs ?? 0),\n      );\n\n      for (;;) {\n        await new Promise((resolve) => setTimeout(resolve, 500));\n        const status = await client.burstStatus(sessionId);\n        if (status.running !== true) {\n          return {\n            sent: status.sent ?? 0,\n            failed: status.failed ?? 0,\n            durationMs: status.durationMs ?? 0,\n            latencyP50: status.latencyP50 ?? 0,\n            latencyP95: status.latencyP95 ?? 0,\n            latencyMax: status.latencyMax ?? 0,\n          };\n        }\n        if (Date.now() > deadline) {\n          throw new Error('压测仍未结束（服务端可能仍在执行，可稍后重试或查看服务端日志）');\n        }\n      }\n    },\n    [client],\n  );\n",
+ "title": "secs-simulator-ui/src/state/useServerOps.ts"
+}

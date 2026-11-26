@@ -143,12 +143,19 @@ export function MessageMonitorDrawer({
     return () => window.clearInterval(timer);
   }, [open]);
 
+  /* N5：载入更早——临时放宽挂载行数上限；过滤条件变化时归零 */
+  const [extraRows, setExtraRows] = useState(0);
+  useEffect(() => {
+    setExtraRows(0);
+  }, [direction, sf, keyword, activeKey, clearAfter]);
+
   /* 暂停时冻结一份快照，不跟着 SSE 继续滚 */
   if (!paused) {
     frozenRef.current = messages;
   }
   const source = paused ? frozenRef.current : messages;
-  const maxAt = source.length > 0 ? Math.max(...source.map((message) => message.at)) : 0;
+  /* reduce 代替 Math.max(...map)：5000 条缓冲展开成参数会爆栈，且并入 useMemo 不再每次渲染重算 */
+  const maxAt = useMemo(() => source.reduce((max, message) => Math.max(max, message.at), 0), [source]);
   const cutoff = nowMs - windowMin * 60_000;
 
   const filtered = useMemo(() => source.filter((message) => {
@@ -190,24 +197,30 @@ export function MessageMonitorDrawer({
     return true;
   }), [source, clearAfter, cutoff, activeTarget, direction, sf, keyword]);
 
+  /* 收发计数并入 useMemo：不在渲染体里每次全量循环 */
+  const { recvCount, sentCount } = useMemo(() => {
+    let recv = 0;
+    let sentN = 0;
+    for (const message of filtered) {
+      const sent = message.perspective === 'host'
+        ? message.direction === 'in'
+        : message.direction === 'out';
+      if (sent) {
+        sentN += 1;
+      } else {
+        recv += 1;
+      }
+    }
+    return { recvCount: recv, sentCount: sentN };
+  }, [filtered]);
+
+  const rowLimit = MAX_ROWS + extraRows;
+  const visible = filtered.length > rowLimit ? filtered.slice(-rowLimit) : filtered;
+
   /* 收起时也把上面的 Hook 全部跑完：条件 return 放在 useMemo 之后，
      否则「收起 → 展开」会多出一个 Hook，React 直接报 Rendered more hooks。 */
   if (!open) {
     return null;
-  }
-
-  const visible = filtered.length > MAX_ROWS ? filtered.slice(-MAX_ROWS) : filtered;
-  let recvCount = 0;
-  let sentCount = 0;
-  for (const message of filtered) {
-    const sent = message.perspective === 'host'
-      ? message.direction === 'in'
-      : message.direction === 'out';
-    if (sent) {
-      sentCount += 1;
-    } else {
-      recvCount += 1;
-    }
   }
 
   const rowKey = (message: WireMessage, index: number): string =>
@@ -329,6 +342,9 @@ export function MessageMonitorDrawer({
           <button type="button" onClick={() => setPaused((previous) => !previous)}>{paused ? '继续' : '暂停'}</button>
           <button type="button" onClick={() => setClearAfter(maxAt)} title="清掉当前画面，只显示之后的新报文">清理</button>
           <button type="button" onClick={() => { setDirection('all'); setSf(''); setKeyword(''); setClearAfter(0); }}>重置</button>
+          {filtered.length > visible.length && (
+            <button type="button" onClick={() => setExtraRows((previous) => previous + MAX_ROWS)} title="多显示更早的报文">载入更早</button>
+          )}
         </div>
       </div>
 

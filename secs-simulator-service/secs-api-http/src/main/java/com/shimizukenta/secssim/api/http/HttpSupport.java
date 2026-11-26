@@ -453,7 +453,7 @@ abstract class HttpSupport {
         LAST_STATUS.remove();
     }
 
-    /** 回 JSON 正文。 */
+    /** 回 JSON 正文。405 统一带 Allow 头由调用方补充（方法分发处最清楚允许哪些方法）。 */
     protected static void respond(HttpExchange ex, int status, String body) throws IOException {
         LAST_STATUS.set(status);
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);

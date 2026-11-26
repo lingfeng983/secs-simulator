@@ -96,7 +96,8 @@ public final class TemplateRepository {
                 st.setLong(8, now);
                 st.executeUpdate();
             } catch (SQLException e) {
-                if (e.getMessage() != null && e.getMessage().contains("PRIMARY")) {
+                /* 与 ConfigRepository 同一判据：扩展错误码优先，报文匹配只兜底 */
+                if (ConfigRepository.isUniqueViolation(e)) {
                     throw StoreException.conflict("已经有同 id 的模板: " + id);
                 }
                 throw new StoreException("新建模板失败: " + e.getMessage(), e);
@@ -167,18 +168,22 @@ public final class TemplateRepository {
     /**
      * 播种一枚模板（迁移 / 启动用）：已存在同 id 的行直接跳过。
      *
+     * <p>存在性检查<b>不带软删过滤</b>：INSERT 撞的是全表主键，若只查未删除行，
+     * 同 id 的软删行会让检查放行、INSERT 必然 PRIMARY KEY 失败，每次启动播种都报错。
+     * 软删行保持删除状态（用户删掉的模板不因播种复活）。</p>
+     *
      * @param id          模板 id
      * @param label       名称
      * @param description 说明
      * @param builtin     是否内置（只读）
      * @param body        正文
-     * @return true = 本次播种；false = 已存在被跳过
+     * @return true = 本次播种；false = 已存在（含软删）被跳过
      */
     public boolean seed(String id, String label, String description, boolean builtin, String body) {
         long now = System.currentTimeMillis();
         return this.db.writeConfig(connection -> {
             try (PreparedStatement check = connection.prepareStatement(
-                    "SELECT 1 FROM device_template WHERE id=? AND deleted_at IS NULL")) {
+                    "SELECT 1 FROM device_template WHERE id=?")) {
                 check.setString(1, id);
                 try (ResultSet rs = check.executeQuery()) {
                     if (rs.next()) {

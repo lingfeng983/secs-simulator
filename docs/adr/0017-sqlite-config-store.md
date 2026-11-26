@@ -120,3 +120,11 @@ ADR 0015 当时否决 SQLite 的具体理由是：
 - 幂等演练：迁移跑两次，设备与模板不重复；`saveDocument` 用旧 revision 并发写，只成功一个，另一个回 409。
 - **S2F15 演练**：主机写一批 ECV 后，界面**不出现**「配置待生效」横幅，版本历史**不新增**快照，`device_link.config_revision` 与 `config_document.revision` 相等；写盘失败时整批不生效并回 EAC=2。
 - 备份演练：WAL 有未 checkpoint 写入时执行 `VACUUM INTO`，备份库能独立打开且行数与主库一致。
+
+## 后记（2026-11-24）
+
+本 ADR 已接受，正文保持原样。落地现状注记：
+
+- `ConfigMigrator` 与 `--migrate-config` 已从代码中移除（2.x JSON 一次性迁移链路不再存在），
+  正文/验收中涉及迁移演练、`legacy/` 归档的条目按历史记录阅读，不代表当前代码仍有该能力。
+- 正文提及的投影表未实现，运行态直接读写 `runtime.db` 相应表，无投影层。

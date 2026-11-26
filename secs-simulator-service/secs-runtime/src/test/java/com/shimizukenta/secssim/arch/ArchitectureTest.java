@@ -30,6 +30,79 @@ class ArchitectureTest {
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_JARS)
             .importPackages("com.shimizukenta");
 
+    /**
+     * 哨兵：导入器必须真的看见类（评审 2026-11-24 F-ARCH-1）。
+     *
+     * <p>ArchUnit 用 ASM 解析 class 文件；JDK 升级后旧 ASM 会静默跳过所有类，
+     * 叠加各规则的 allowEmptyShould(true)，整套门禁会空转全绿。这里断言
+     * 导入总量与各关键包非空，让"门禁自己失效"变成显式失败。</p>
+     */
+    @Test
+    void importerActuallySeesClasses() {
+        org.junit.jupiter.api.Assertions.assertTrue(MAIN_CLASSES.size() > 300,
+                "导入类数异常偏少（" + MAIN_CLASSES.size() + "）：ASM 版本可能与 JDK 不匹配，分层规则正在空转");
+        for (String pkg : new String[] {
+                "com.shimizukenta.secssim.core..",
+                "com.shimizukenta.secssim.app..",
+                "com.shimizukenta.secssim.api..",
+                "com.shimizukenta.secssim.runtime..",
+                "com.shimizukenta.secssim.store.." }) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MAIN_CLASSES.that(com.tngtech.archunit.base.DescribedPredicate.alwaysTrue())
+                            .that(com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage(pkg))
+                            .isEmpty(),
+                    "关键包为空: " + pkg + "（classpath 或导入器异常）");
+        }
+    }
+
+    /** app 不得反向依赖装配层/适配器/存储（此前只写在 POM 注释里，评审 2026-11-24 补门禁）。 */
+    @Test
+    void appNeverDependsOnOuterLayersOrStore() {
+        noClasses()
+                .that().resideInAPackage("com.shimizukenta.secssim.app..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "com.shimizukenta.secssim.api..",
+                        "com.shimizukenta.secssim.runtime..",
+                        "com.shimizukenta.secssim.cli..",
+                        "com.shimizukenta.secssim.store..")
+                .check(MAIN_CLASSES);
+    }
+
+    /** api-http 只认 app 的接口，不得直接依赖装配层与存储。 */
+    @Test
+    void apiNeverDependsOnRuntimeOrStore() {
+        noClasses()
+                .that().resideInAPackage("com.shimizukenta.secssim.api..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "com.shimizukenta.secssim.runtime..",
+                        "com.shimizukenta.secssim.cli..",
+                        "com.shimizukenta.secssim.store..")
+                .check(MAIN_CLASSES);
+    }
+
+    /** store 只认识 json + JDBC（3.0 设计 §2.1），不得 import 任何 secssim 上层。 */
+    @Test
+    void storeNeverDependsOnUpperLayers() {
+        noClasses()
+                .that().resideInAPackage("com.shimizukenta.secssim.store..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "com.shimizukenta.secssim.core..",
+                        "com.shimizukenta.secssim.app..",
+                        "com.shimizukenta.secssim.api..",
+                        "com.shimizukenta.secssim.runtime..",
+                        "com.shimizukenta.secssim.cli..")
+                .check(MAIN_CLASSES);
+    }
+
+    /** hostsim 子包不得反向依赖 runtime 根包（ADR-0016；此前仅靠 package-private 兜底）。 */
+    @Test
+    void hostsimNeverDependsOnRuntimeRoot() {
+        noClasses()
+                .that().resideInAPackage("com.shimizukenta.secssim.runtime.hostsim..")
+                .should().dependOnClassesThat().resideInAPackage("com.shimizukenta.secssim.runtime")
+                .check(MAIN_CLASSES);
+    }
+
     @Test
     void coreNeverDependsOnOuterLayers() {
         noClasses()
@@ -78,6 +151,14 @@ class ArchitectureTest {
                 .check(MAIN_CLASSES);
     }
 
+    /**
+     * 新代码不用反射（java.lang.reflect）。
+     *
+     * <p>口径说明（评审 2026-11-24 P3）：store 的 {@code Class.forName("org.sqlite.JDBC")}
+     * 是 JDBC 驱动加载的惯用法，属条文豁免——本规则只查 java.lang.reflect 依赖，
+     * 不覆盖 Class.forName；store 也不在名单内。若将来要收紧，应同时覆盖
+     * java.lang.invoke 并为驱动加载写明豁免。</p>
+     */
     @Test
     void newCodeNeverUsesReflection() {
         noClasses()

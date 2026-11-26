@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '../../shared/ui/Panel';
 import { ApiError } from '../../api/base';
 import type { ActiveAlarm } from '../../api';
@@ -26,6 +26,9 @@ export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
   const [stormCount, setStormCount] = useState('100');
   const [stormInterval, setStormInterval] = useState('0');
   const [stormRunning, setStormRunning] = useState(false);
+  /* 卸载时中止风暴轮询，避免组件卸载后继续打后端、弹提示 */
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const { activeSession, client } = backend;
   const disabled = activeSession === '';
@@ -74,6 +77,9 @@ export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
       return;
     }
     setStormRunning(true);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const stats = await backend.burst(activeSession, {
         kind: 'alarm',
@@ -82,12 +88,14 @@ export function AlarmsPanel({ backend, notifier, liveEvents }: PanelBaseProps): 
         category: alarmCategory,
         count,
         intervalMs: Number.parseInt(stormInterval, 10) || 0,
-      });
+      }, controller.signal);
       notifier.info(`报警风暴完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
     } catch (error) {
       /* 409 = 后端互斥保护：同一设备已有一轮压测/风暴在跑，不是失败。
          译成可操作的提示，而不是抛 "409 Conflict" 这种资源加载错误。 */
-      if (error instanceof ApiError && error.status === 409) {
+      if ((error as Error).name === 'AbortError') {
+        /* 卸载/取消：静默退出 */
+      } else if (error instanceof ApiError && error.status === 409) {
         notifier.info('已有压测正在进行', '请等当前这一轮结束后再点「报警风暴」');
       } else {
         notifier.error(`报警风暴失败: ${(error as Error).message}`);

@@ -9,8 +9,8 @@ import com.shimizukenta.secssim.core.template.ExpressionException;
  * 把 {@link DataSource} 在某一时刻算成一个值。
  *
  * <p>整个 v7 值模型只有这一个求值函数：没有叠加层、没有效果队列、没有绑定图。
- * 同一个 {@code (source, 时刻)} 永远得到同一个结果，因此报文读取、曲线预览、
- * 历史回放三条路径不可能出现分歧。</p>
+ * 同一个 {@code (source, 时刻, 时钟状态)} 永远得到同一个结果，因此报文读取、曲线预览、
+ * 历史回放三条路径不可能出现分歧（生命周期时钟的启停/冻结是显式输入，不是隐藏状态）。</p>
  */
 public final class SourceEvaluator {
 
@@ -76,6 +76,10 @@ public final class SourceEvaluator {
             case DataSource.Text text -> text.value();
             case DataSource.CycleText text -> text.textAt(clock.indexAt(tMs));
             case DataSource.Const constant -> format(constant.value());
+            /* P2 现状说明（不改行为）：CurveSource / ExprSource / CycleNumber 等数值型来源
+               落到这里返回空串——Context 数值 source 会被静默编码成空 ASCII。
+               该配置属于 config 层校验职责（跨模块），core 保持现状；
+               待 config 层加「Context 项禁止数值型 source」校验后收紧。 */
             default -> "";
         };
     }

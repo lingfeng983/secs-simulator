@@ -652,10 +652,28 @@ public final class ConfigStore {
         } catch (ConfigException e) {
             throw new IOException(e.getMessage(), e);
         }
-        String text = this.repository.readDocument(key)
-                .map(ConfigRepository.DocumentView::body)
-                .orElseThrow(() -> new IOException("读不了配置 " + name + ": 设备不存在"));
+        /* 读改写要带版本基准（评审 2026-11-24 S3）：读与写之间用户可能保存了新正文，
+           无基准的覆盖会静默丢掉用户编辑。冲突时重读重算再试，最多 3 次；
+           仍冲突就放弃——S2F15 回失败比覆盖用户编辑好。 */
+        for (int attempt = 0; attempt < 3; attempt++) {
+            ConfigRepository.DocumentView doc = this.repository.readDocument(key)
+                    .orElseThrow(() -> new IOException("读不了配置 " + name + ": 设备不存在"));
+            String newBody = mergeConstants(name, doc.body(), constants);
+            try {
+                this.repository.updateConstants(key, newBody, doc.revision(), "device");
+                return;
+            } catch (StoreException e) {
+                if (e.kind() == StoreException.Kind.CONFLICT && attempt < 2) {
+                    Log.warn("常量回写遇到并发编辑，重读重试 " + name + "（第 " + (attempt + 1) + " 次）");
+                    continue;
+                }
+                throw new IOException("常量落库失败: " + e.getMessage(), e);
+            }
+        }
+    }
 
+    /** 把常量快照合并进配置正文（只动 equipment.constants，其余逐字保留）；解析失败拒绝覆盖。 */
+    private static String mergeConstants(String name, String text, Map<Integer, EquipmentConstantDef> constants) throws IOException {
         JsonHub root;
         try {
             root = JsonHub.fromJson(text);
@@ -691,12 +709,7 @@ public final class ConfigStore {
             String field = key2.unescaped();
             rootPairs.add(b.pair(field, "equipment".equals(field) ? newEquipment : root.get(field)));
         }
-
-        try {
-            this.repository.updateConstants(key, b.object(rootPairs).prettyPrint(), "device");
-        } catch (StoreException e) {
-            throw new IOException("常量落库失败: " + e.getMessage(), e);
-        }
+        return b.object(rootPairs).prettyPrint();
     }
 
     /**

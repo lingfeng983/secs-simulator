@@ -64,11 +64,12 @@ function Find-MavenArtifact {
     return $null
 }
 
-# 版本只有一个来源：secs-simulator-service/pom.xml。tauri.conf.json / Cargo.toml 必须跟它是
-# 同一个字符串，否则安装包文件名、应用版本与服务端 jar 会悄悄对不上（三处各写各的是最典型的漂移）。
-$version = (Select-String -Path (Join-Path $service 'pom.xml') -Pattern '<version>([^<]+)</version>' |
-    Select-Object -First 1).Matches.Groups[1].Value
-if ([string]::IsNullOrWhiteSpace($version)) { throw '无法从 pom.xml 读到版本号' }
+# 版本只有一个来源：secs-simulator-service/pom.xml。tauri.conf.json / Cargo.toml / 两个 package.json
+# 必须跟它是同一个字符串，否则安装包文件名、应用版本与服务端 jar 会悄悄对不上（各写各的是最典型的漂移）。
+# pom 解析限定顶层 project/version（第一个 <version> 可能是 parent 或依赖的版本，正则脆弱——评审 P3）。
+$pomXml = [xml](Get-Content (Join-Path $service 'pom.xml') -Raw)
+$version = $pomXml.project.version
+if ([string]::IsNullOrWhiteSpace($version)) { throw '无法从 pom.xml 读到顶层 project/version' }
 
 $confPath = Join-Path $gui 'src-tauri/tauri.conf.json'
 $cargoPath = Join-Path $gui 'src-tauri/Cargo.toml'
@@ -85,6 +86,15 @@ if ($cargoVersion -ne $version) {
 }
 
 Write-Host "--- version: $version（pom.xml / tauri.conf.json / Cargo.toml 一致）---"
+
+# 两个 package.json 也纳入校验（评审 P3：此前不在同步链里，npm 包版本会悄悄漂移）
+foreach ($pkg in @((Join-Path $ui 'package.json'), (Join-Path $gui 'package.json'))) {
+    $pkgVersion = (Get-Content $pkg -Raw | ConvertFrom-Json).version
+    if ($pkgVersion -ne $version) {
+        throw "版本不一致: $pkg=$pkgVersion, pom.xml=$version（改 package.json 的 version 与 pom 对齐）"
+    }
+}
+Write-Host "--- version: ui/gui package.json 亦一致 ---"
 
 # ---- 前端产物（安装程序内置；Linux 包由服务端 --web-root 同源托管）----
 function Build-FrontendIfNeeded {
@@ -103,7 +113,39 @@ function Build-FrontendIfNeeded {
     if (-not (Test-Path (Join-Path $web 'index.html'))) {
         throw "缺少前端产物: $web（先运行 secs-simulator-ui/scripts/build.ps1，或去掉 -SkipFrontend）"
     }
+    if ($SkipFrontend) {
+        Test-ArtifactFreshness -Artifact (Join-Path $web 'index.html') -SourceDir (Join-Path $ui 'src') -Label '前端 dist'
+    }
     return $web
+}
+
+# ---- Skip 开关的产物新鲜度检查：只警告，不阻断 ----
+# -SkipNative / -SkipFrontend 只查产物存在，同版本旧产物会悄悄进包（dim08 评审 P2）。
+# 这里拿产物 mtime 对比「git HEAD 提交时间」与「源码目录最新 mtime」的较大者；
+# 产物更旧就 Write-Warning 提示可能是旧代码，仍继续打包（冒烟/门禁兜运行正确性）。
+function Test-ArtifactFreshness {
+    param([string]$Artifact, [string]$SourceDir, [string]$Label)
+    if (-not (Test-Path $Artifact)) { return }  # 存在性由各调用方负责
+    try {
+        $baseline = [datetime]::MinValue
+        # git HEAD 时间：失败（无 git / 非仓库）就只靠源码 mtime
+        $head = & git -C $root log -1 --format=%ct 2>$null
+        if ($LASTEXITCODE -eq 0 -and "$head" -match '^\d+$') {
+            $baseline = [DateTimeOffset]::FromUnixTimeSeconds([long]"$head").LocalDateTime
+        }
+        if (Test-Path $SourceDir) {
+            $newest = Get-ChildItem $SourceDir -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notmatch '[\\/](target|node_modules|dist)[\\/]' } |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($newest -and $newest.LastWriteTime -gt $baseline) { $baseline = $newest.LastWriteTime }
+        }
+        $mtime = (Get-Item $Artifact).LastWriteTime
+        if ($baseline -gt [datetime]::MinValue -and $mtime -lt $baseline) {
+            Write-Warning "$Label 可能陈旧：产物 $Artifact（$mtime）早于源码/最近提交（$baseline）。建议去掉对应 -Skip 开关重建。"
+        }
+    } catch {
+        Write-Warning "无法校验 $Label 新鲜度（$($_.Exception.Message)），继续打包。"
+    }
 }
 
 # ---- 原生镜像冒烟：exe 必须能自己起来并回 JSON 健康检查 ----
@@ -182,6 +224,9 @@ function Invoke-WindowsPackage {
         }
     }
     if (-not (Test-Path $exe)) { throw "缺少原生镜像: $exe（先构建，或去掉 -SkipNative）" }
+    if ($SkipNative) {
+        Test-ArtifactFreshness -Artifact $exe -SourceDir $service -Label '原生镜像 secs-sim.exe'
+    }
 
     # 冒烟放在拷贝进 resources 之前：坏 exe 在这里就拦住，不用等 tauri build 跑完
     Test-NativeBackend -Exe $exe

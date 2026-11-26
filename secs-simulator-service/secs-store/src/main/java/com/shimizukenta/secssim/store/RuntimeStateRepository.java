@@ -485,11 +485,12 @@ public final class RuntimeStateRepository {
     public long cleanupOrphans(Collection<String> liveDeviceIds) {
         String placeholders = String.join(",", java.util.Collections.nCopies(
                 Math.max(1, liveDeviceIds.size()), "?"));
-        long total = 0;
-        for (String table : new String[] {
-                "device_link", "runtime_svid_pin", "runtime_plan_state", "runtime_plan_override",
-                "runtime_catalog_edit", "runtime_host_report" }) {
-            total += this.db.writeRuntime(connection -> {
+        /* 七张表合到一个写事务：中途失败不再留下"清了一半"的状态（原本靠下次启动重跑收敛） */
+        return this.db.writeRuntime(connection -> {
+            long total = 0;
+            for (String table : new String[] {
+                    "device_link", "runtime_svid_pin", "runtime_plan_state", "runtime_plan_override",
+                    "runtime_catalog_edit", "runtime_host_report", "plan_execution" }) {
                 String sql = liveDeviceIds.isEmpty()
                         ? "DELETE FROM " + table
                         : "DELETE FROM " + table + " WHERE device_id NOT IN (" + placeholders + ")";
@@ -498,27 +499,13 @@ public final class RuntimeStateRepository {
                     for (String id : liveDeviceIds) {
                         st.setString(i++, id);
                     }
-                    return (long) st.executeUpdate();
+                    total += st.executeUpdate();
                 } catch (SQLException e) {
                     throw new StoreException("清理 " + table + " 残留失败: " + e.getMessage(), e);
                 }
-            });
-        }
-        total += this.db.writeRuntime(connection -> {
-            String sql = liveDeviceIds.isEmpty()
-                    ? "DELETE FROM plan_execution"
-                    : "DELETE FROM plan_execution WHERE device_id NOT IN (" + placeholders + ")";
-            try (PreparedStatement st = connection.prepareStatement(sql)) {
-                int i = 1;
-                for (String id : liveDeviceIds) {
-                    st.setString(i++, id);
-                }
-                return (long) st.executeUpdate();
-            } catch (SQLException e) {
-                throw new StoreException("清理台账残留失败: " + e.getMessage(), e);
             }
+            return total;
         });
-        return total;
     }
 
     /** 清空某设备的运行态编辑（reload 语义；M2 接线）。 */

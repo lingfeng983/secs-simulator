@@ -51,7 +51,7 @@ class LifecycleCycleClockTest {
 
         assertEquals(LifecycleCycleClock.State.FINISHED, clock.state());
         assertEquals(2, clock.indexAt(99_999L), "停在末槽");
-        assertEquals(10_000L, clock.phaseAt(99_999L), "冻结在末相位 = 末片整长（修掉相位无界，P1-1）");
+        assertEquals(9_999L, clock.phaseAt(99_999L), "冻结在末相位 = 末片右开端点 duration - 1（修掉相位无界，P1-1）");
         assertEquals(30_000L, clock.elapsedAt(99_999L), "ABSOLUTE 冻结在整段结束时刻");
     }
 
@@ -75,6 +75,6 @@ class LifecycleCycleClockTest {
 
         assertEquals(1_234L, clock.phaseAt(1_234L), "无 cycle 段：相位 = 绝对时刻（D12，3.1 行为不变）");
         clock.finish(99_999L);
-        assertEquals(86_400_000L, clock.phaseAt(99_999L), "24h 后 FINISHED 冻结（修掉相位无界）");
+        assertEquals(86_399_999L, clock.phaseAt(99_999L), "24h 后 FINISHED 冻结在右开端点 duration - 1（修掉相位无界）");
     }
 }

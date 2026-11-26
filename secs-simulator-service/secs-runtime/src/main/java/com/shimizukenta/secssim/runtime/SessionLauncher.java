@@ -219,7 +219,11 @@ public final class SessionLauncher {
             } catch (RuntimeException e) {
                 this.sources.remove(id);
                 opened.close();
-                Log.error("重载会话 " + id + " 失败（新会话已关闭）: " + source.configName(), e);
+                /* 旧会话在上面 close(id) 时已经关了：注册失败不能只关新会话就走，
+                   否则设备凭空消失（评审 2026-11-24 R1）。用上一次成功的快照拉回，
+                   与 rebuildInPlace 的补偿路径一致。 */
+                restore(id, source, source.lastGood(), e);
+                Log.error("重载会话 " + id + " 失败（新会话已关闭，尝试恢复旧会话）: " + source.configName(), e);
                 throw e;
             }
             Log.info("会话 " + id + " 已重建（连接标识变化，主机需重连）");

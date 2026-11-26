@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useVisibilityInterval } from '../../state/useVisibilityInterval';
 import type { PanelBaseProps } from './types';
 import { Panel } from '../../shared/ui/Panel';
 import { ConfigEditShell } from './ConfigEditShell';
@@ -55,18 +56,34 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
   const [busy, setBusy] = useState(false);
   const loadedRef = useRef(false);
   const loadingRef = useRef(false);
+  /* 代次守卫：切设备/卸载后旧请求的结果不再落 state */
+  const generationRef = useRef(0);
 
   useEffect(() => {
+    generationRef.current += 1;
     if (deviceId === '') {
       setLoaded(true);
       loadedRef.current = true;
+    }
+    return () => { generationRef.current += 1; };
+  }, [deviceId, backend.client]);
+
+  /* N6：1.5 秒轮询走 visibility hook（后台标签页跳过，回页立即补拉一次）。
+     回调走 ref，切设备不重启定时器；cancelled 改由 generationRef 表达。 */
+  useVisibilityInterval(() => {
+    if (deviceId === '') {
       return;
     }
-    let cancelled = false;
-    const load = async () => {
+    /* 评审 F8：上一帧未返回时跳过本次轮询（8s 超时下避免并发叠加） */
+    if (loadingRef.current) {
+      return;
+    }
+    loadingRef.current = true;
+    const generation = generationRef.current;
+    void (async () => {
       try {
         const view = await backend.client?.cycle(deviceId) ?? null;
-        if (!cancelled) {
+        if (generationRef.current === generation) {
           setCycle(view);
           setLoaded(true);
           loadedRef.current = true;
@@ -74,33 +91,16 @@ export function CycleRunCard({ backend, notifier, deviceId }: {
       } catch {
         /* 评审 F2：单次轮询失败保留上一帧快照——一次超时不该把运行中的卡片
            打回「设备未启动」；真正的未启动由 client 的 404→null 表达 */
-        if (!cancelled && !loadedRef.current) {
+        if (generationRef.current === generation && !loadedRef.current) {
           setCycle(null);
           setLoaded(true);
           loadedRef.current = true;
         }
-      }
-    };
-    const guardedLoad = async () => {
-      /* 评审 F8：上一帧未返回时跳过本次轮询（8s 超时下避免并发叠加） */
-      if (loadingRef.current) {
-        return;
-      }
-      loadingRef.current = true;
-      try {
-        await load();
       } finally {
         loadingRef.current = false;
       }
-    };
-    void guardedLoad();
-    const timer = window.setInterval(() => void guardedLoad(), 1_500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId, backend.client]);
+    })();
+  }, 1_500);
 
   const session = backend.sessions.find((item) => item.id === deviceId);
   const online = session !== undefined && session.controlState === 'ONLINE';

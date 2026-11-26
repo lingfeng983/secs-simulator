@@ -16,9 +16,6 @@ type HostSimApi = Pick<
   | 'hostInstanceCollector'
   | 'setHostInstanceCollector'
   | 'hostInstanceCollectorCommand'
-  | 'collectorState'
-  | 'setCollector'
-  | 'collectorCommand'
 >;
 
 export const hostSimApi: HostSimApi = {
@@ -59,35 +56,5 @@ export const hostSimApi: HostSimApi = {
     }
     return parsed;
   },
-  async collectorState(sessionId) {
-    /* 不吞错:采集器状态拿不到时调用方要能提示"后端不支持/不可达" */
-    const body = await readJson<Partial<CollectorState>>(
-      await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`)),
-    );
-    return {
-      configured: body.configured ?? false,
-      running: body.running ?? false,
-      armed: body.armed ?? false,
-      collectors: Array.isArray(body.collectors) ? body.collectors : [],
-    };
-  },
-  async setCollector(sessionId, config: CollectorConfigInput) {
-    /* 先读 text 再按内容判：readJson 会对 400 先抛，
-       后端给人看的 message 就丢了（用户只剩 "400 {...}"）。 */
-    const response = await request(apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(config),
-    });
-    const parsed = parseCollectorResult(await response.text());
-    return parsed.ok ? null : (parsed.error ?? '下发被后端拒绝');
-  },
-  async collectorCommand(sessionId, start) {
-    const response = await request(
-      apiUrl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/host-sim/collector/${start ? 'start' : 'stop'}`),
-      { method: 'POST' },
-    );
-    const parsed = parseCollectorResult(await response.text());
-    return parsed.ok ? null : (parsed.error ?? '采集器命令被后端拒绝');
-  },
+
 };

@@ -3,6 +3,7 @@ import type { ConfigTemplateEntry } from '../../api';
 import { Panel } from '../../shared/ui/Panel';
 import { DataTable } from '../../shared/ui/DataTable';
 import { ConfirmModal } from '../../shared/ui/ConfirmModal';
+import { Modal } from '../../shared/ui/Modal';
 import { saveHint } from '../../shared/lib/saveFile';
 import { DEVICE_STATUS_LABEL, deviceStatus, type DeviceStatus } from '../../shared/lib/deviceStatus';
 import { controlStateLabel } from '../../shared/lib/controlState';
@@ -26,6 +27,9 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
   const [stateFilter, setStateFilter] = useState<DeviceStatus | ''>('');
   /** 区域筛选：空串看全部，其余只看该区域的设备。 */
   const [regionFilter, setRegionFilter] = useState('');
+  /* 新建区域用受控弹框（评审 P3-9：window.prompt 无焦点圈定、样式脱离主题） */
+  const [newRegionOpen, setNewRegionOpen] = useState(false);
+  const [newRegionName, setNewRegionName] = useState('');
   /** 新增设备弹框：连接信息 + 模板 + 区域都在这一个框里填。 */
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -183,9 +187,18 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
             });
             continue;
           }
-          const saved = await backend.saveConfig(targetConfig, text, null);
+          /* 并发保护：先读目标配置的修改时间，保存时经 If-Match 带回；
+             期间被别的窗口改过会回 409，计入失败而不是静默整份覆盖 */
+          const targetSnapshot = await backend.readConfig(targetConfig);
+          if (targetSnapshot === null) {
+            failed.push({ name: label, reason: '读取目标配置失败（后端不可达？）' });
+            continue;
+          }
+          const saved = await backend.saveConfig(targetConfig, text, targetSnapshot.modifiedMs);
           if (saved !== null && saved.status === 200) {
             done += 1;
+          } else if (saved !== null && saved.status === 409) {
+            failed.push({ name: label, reason: '配置已被他人修改，请重新发起同步' });
           } else {
             failed.push({ name: label, reason: `保存失败（HTTP ${saved === null ? '无响应' : saved.status}）` });
           }
@@ -591,11 +604,7 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
                 onChange={(event) => {
                   const value = event.target.value;
                   if (value === '__new__') {
-                    const name = window.prompt('新区域名称')?.trim();
-                    if (name !== undefined && name !== '') {
-                      regions?.addRegion(name);
-                      setRegionFilter(name);
-                    }
+                    setNewRegionOpen(true);
                     return;
                   }
                   setRegionFilter(value);
@@ -764,6 +773,43 @@ export function DeviceOpsPanel({ backend, notifier, goTo, regions }: PanelBasePr
           void removeDevices(configs);
         }}
       />
+
+      <Modal
+        open={newRegionOpen}
+        title="新建区域"
+        onClose={() => { setNewRegionOpen(false); setNewRegionName(''); }}
+        footer={
+          <>
+            <button type="button" onClick={() => { setNewRegionOpen(false); setNewRegionName(''); }}>取消</button>
+            <button
+              type="button"
+              className="primary"
+              disabled={newRegionName.trim() === ''}
+              onClick={() => {
+                const name = newRegionName.trim();
+                if (name !== '') {
+                  regions?.addRegion(name);
+                  setRegionFilter(name);
+                }
+                setNewRegionOpen(false);
+                setNewRegionName('');
+              }}
+            >
+              创建
+            </button>
+          </>
+        }
+      >
+        <label className="field">
+          <span>区域名称</span>
+          <input
+            value={newRegionName}
+            onChange={(event) => setNewRegionName(event.target.value)}
+            placeholder="例如：A 区"
+            autoFocus
+          />
+        </label>
+      </Modal>
 
     </Panel>
   );

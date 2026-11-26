@@ -74,7 +74,6 @@ public final class HttpApiServer {
      * <p>JDK 的 HttpServer 是<b>每连接一个任务</b>：连接在 keep-alive 空闲期仍然占着
      * 执行线程。浏览器一个域名就是 6 条连接，几条连接一开，固定线程池就全被"空转"占住——
      * 这比慢请求更隐蔽。虚拟线程在等 socket 时卸载载体线程，正好对路；
-            false;
      */
     private static final boolean VIRTUAL_THREADS =
             !"false".equalsIgnoreCase(System.getProperty("secssim.http.virtual"));
@@ -454,10 +453,10 @@ public final class HttpApiServer {
         }
 
         respond(ex, 200, "{\"ok\":true"
-                + ",\"version\":\"" + json(this.context.version()) + "\""
-                + ",\"mode\":\"" + json(this.context.mode()) + "\""
-                + ",\"user\":\"" + json(principal.name()) + "\""
-                + ",\"role\":\"" + json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
+                + ",\"version\":\"" + HttpSupport.json(this.context.version()) + "\""
+                + ",\"mode\":\"" + HttpSupport.json(this.context.mode()) + "\""
+                + ",\"user\":\"" + HttpSupport.json(principal.name()) + "\""
+                + ",\"role\":\"" + HttpSupport.json(principal.role().name().toLowerCase(Locale.ROOT)) + "\""
                 + ",\"uptimeMs\":" + uptime
                 + extra
                 + "}");
@@ -775,40 +774,11 @@ public final class HttpApiServer {
                 action, target, detail);
     }
 
-    /** 回 JSON 正文。 */
+    /** 回 JSON 正文。委托 {@link HttpSupport#respond}，让访问日志能读到 LAST_STATUS。 */
     private static void respond(HttpExchange ex, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
-        ex.sendResponseHeaders(status, bytes.length);
-        try (OutputStream out = ex.getResponseBody()) {
-            out.write(bytes);
-        }
-    }
-
-    /** JSON 字符串转义；控制字符一律转成 \\u00XX，避免拼出非法帧。 */
-    private static String json(String value) {
-        if (value == null) {
-            return "";
-        }
-
-        StringBuilder sb = new StringBuilder(value.length() + 8);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '\\' -> sb.append("\\\\");
-                case '"' -> sb.append("\\\"");
-                case '\r' -> sb.append("\\r");
-                case '\n' -> sb.append("\\n");
-                case '\t' -> sb.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        sb.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-                }
-            }
-        }
-        return sb.toString();
+        /* 以前这里自己 sendResponseHeaders，不写 HttpSupport.LAST_STATUS——
+           health/shutdown/静态资源/慢池 503/兜底 500 的访问日志状态码恒为 0，
+           取证时"他拿到了什么"对这些路径失效。统一走 HttpSupport（评审 P3-1）。 */
+        HttpSupport.respond(ex, status, body);
     }
 }

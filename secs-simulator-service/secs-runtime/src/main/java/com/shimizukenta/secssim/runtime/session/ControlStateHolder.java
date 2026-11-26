@@ -53,9 +53,10 @@ final class ControlStateHolder {
     /**
      * 迁移控制状态。
      *
-     * @param next 新状态
+     * <p>synchronized：check-then-set 原子化（评审 2026-11-24 P3-7）——两条线程
+     * 并发迁移同一状态时只发一次通知；不同状态的迁移按进入顺序串行发布。</p>
      */
-    void change(EquipmentControlState next) {
+    synchronized void change(EquipmentControlState next) {
         if (this.state == next) {
             return;
         }

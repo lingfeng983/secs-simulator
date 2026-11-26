@@ -76,3 +76,10 @@
 - 前端：`tsc --noEmit` 无错误；Vitest 17 个文件 119 条通过；Playwright 36 条通过
   （截图回归 37 条按设计跳过）；`vite build` 产出 CSS 68.16 kB / JS 384.56 kB。
 - 详见 [重构验收报告](../reports/refactor-2026-11-09.md)。
+
+## 后记（2026-11-24）
+
+本 ADR 已接受，正文保持原样。落地现状注记：`hostsim → session` 的单向依赖目前由
+package-private 可见性 + 编译器守护（`runtime/hostsim` 拿不到 `runtime` 根包的
+package-private 类型，反向引用直接编译失败）；配套的 ArchUnit 规则已于本轮补上，
+两条防线共同生效，正文「包边界能被 ArchUnit 与编译错误守住」的表述与现状一致。

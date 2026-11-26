@@ -19,8 +19,14 @@ final class SessionSender {
 
     /** 回一句 secondary（S1F2 / S2F14 / S10F4 ...）。 */
     void reply(SecsMessage primary, int stream, int function, Secs2 body) {
+        /* close 会把 communicator 置 null（SessionLifecycle）：在途报文撞上关闭窗口
+           时安静丢弃，而不是抛 NPE 刷错误日志（评审 2026-11-24 P3）。 */
+        var communicator = this.host.communicator;
+        if (communicator == null) {
+            return;
+        }
         try {
-            this.host.communicator.send(primary, stream, function, false, body);
+            communicator.send(primary, stream, function, false, body);
         } catch (SecsException | InterruptedException e) {
             this.record(e);
         }
@@ -28,8 +34,12 @@ final class SessionSender {
 
     /** 发一帧主动报文（S6F11 / S6F1 ...）。 */
     void send(int stream, int function, boolean wbit, Secs2 body) {
+        var communicator = this.host.communicator;
+        if (communicator == null) {
+            return;
+        }
         try {
-            this.host.communicator.send(stream, function, wbit, body);
+            communicator.send(stream, function, wbit, body);
         } catch (SecsException | InterruptedException e) {
             this.record(e);
         }

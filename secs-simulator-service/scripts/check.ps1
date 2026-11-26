@@ -54,9 +54,10 @@ function Invoke-Step {
 
 Invoke-Step 'mvn -B test' { & mvn -B test }
 
-# OpenAPI 重复键会让端点文档静默消失，属于"看不出来"的契约破坏；装了 Python 就查。
+# OpenAPI 重复键会让端点文档静默消失、path 增删不同步快照会让契约悄悄掉队，
+# 都属于"看不出来"的契约破坏；装了 Python 就查（check-openapi.py 默认含快照比对与注册前缀覆盖）。
 if (Get-Command python -ErrorAction SilentlyContinue) {
-    Invoke-Step 'python check-openapi.py' { & python (Join-Path $PSScriptRoot 'check-openapi.py') }
+    Invoke-Step 'python check-openapi.py（含 path 快照校验）' { & python (Join-Path $PSScriptRoot 'check-openapi.py') }
 } else {
     Write-Host ''
     Write-Host '--- openapi 校验 skipped（未找到 python）---'

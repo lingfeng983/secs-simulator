@@ -41,7 +41,8 @@ public final class Db implements AutoCloseable {
     private final Object runtimeWriterLock = new Object();
     private final LockHandle processLock;
     private final java.util.List<Path> schemaBackups;
-    private boolean closed;
+    /* volatile：读路径不持写锁，也要能看到 close 置位（写路径在各自写锁内检查） */
+    private volatile boolean closed;
 
     private Db(Path workDir, SQLiteDataSource configReader, SQLiteDataSource runtimeReader,
                Connection configWriter, Connection runtimeWriter, LockHandle processLock,
@@ -146,6 +147,9 @@ public final class Db implements AutoCloseable {
             st.execute("PRAGMA journal_mode=WAL");
             st.execute("PRAGMA foreign_keys=ON");
             st.execute("PRAGMA busy_timeout=5000");
+            /* synchronous=NORMAL 的取舍：WAL 下掉电/系统崩溃可能丢最近几个已提交事务
+               （库本身不会损坏）；FULL 每次提交都 fsync WAL，会拖慢单写者的台账批写。
+               配置丢失可由用户重导、运行态本就可丢弃重建，故接受该风险。 */
             st.execute("PRAGMA synchronous=NORMAL");
         }
     }
@@ -203,6 +207,7 @@ public final class Db implements AutoCloseable {
      * 数量可控，保持现状更安全。</p>
      */
     public Connection readConfig() {
+        ensureOpen();
         try {
             Connection connection = this.configReader.getConnection();
             tune(connection);
@@ -214,6 +219,7 @@ public final class Db implements AutoCloseable {
 
     /** runtime.db 的读连接（用完必须 close）。 */
     public Connection readRuntime() {
+        ensureOpen();
         try {
             Connection connection = this.runtimeReader.getConnection();
             tune(connection);
@@ -233,6 +239,7 @@ public final class Db implements AutoCloseable {
      */
     public <T> T writeConfig(Function<Connection, T> work) {
         synchronized (this.configWriterLock) {
+            ensureOpen();
             return write(this.configWriter, work, "config.db");
         }
     }
@@ -246,7 +253,15 @@ public final class Db implements AutoCloseable {
      */
     public <T> T writeRuntime(Function<Connection, T> work) {
         synchronized (this.runtimeWriterLock) {
+            ensureOpen();
             return write(this.runtimeWriter, work, "runtime.db");
+        }
+    }
+
+    /** closed 后读写一律快速失败：给明确异常，而不是连接被抽走后的混乱 SQLException。 */
+    private void ensureOpen() {
+        if (this.closed) {
+            throw new IllegalStateException("存储已关闭（work-dir=" + this.workDir + "），不能再读写");
         }
     }
 
@@ -342,22 +357,35 @@ public final class Db implements AutoCloseable {
         }
     }
 
+    /**
+     * 关闭双库并释放进程锁。
+     *
+     * <p>先依次拿 config、runtime 两把写锁再关连接：与在途写事务互斥，
+     * 不会把写连接从事务脚下抽走。写路径各自只持一把写锁、从不嵌套获取
+     * 另一把（跨库两步写在两个独立事务里），所以这里同时持两把不会死锁。
+     * 拿锁顺序固定 config → runtime，与任何可能的多锁路径保持一致。
+     * closed 置位后 write/read 快速失败（见 {@link #ensureOpen}）。</p>
+     */
     @Override
-    public synchronized void close() {
-        if (this.closed) {
-            return;
+    public void close() {
+        synchronized (this.configWriterLock) {
+            synchronized (this.runtimeWriterLock) {
+                if (this.closed) {
+                    return;
+                }
+                this.closed = true;
+                try {
+                    this.configWriter.close();
+                } catch (SQLException e) {
+                    /* 关闭失败不影响停机 */
+                }
+                try {
+                    this.runtimeWriter.close();
+                } catch (SQLException e) {
+                    /* 同上 */
+                }
+                this.processLock.release();
+            }
         }
-        this.closed = true;
-        try {
-            this.configWriter.close();
-        } catch (SQLException e) {
-            /* 关闭失败不影响停机 */
-        }
-        try {
-            this.runtimeWriter.close();
-        } catch (SQLException e) {
-            /* 同上 */
-        }
-        this.processLock.release();
     }
 }

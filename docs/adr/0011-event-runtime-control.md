@@ -64,3 +64,11 @@
 - 前端每 2 秒轮询一次列表；切换后立即再拉一次，避免按钮状态滞后。
 - 触发规则在 JSON 里是扁平字段（`triggerType + 参数`），
   不是嵌套对象——HTTP 层用 `JsonHubBuilder` 拼对象时更直接。
+
+## 后记（2026-11-24）
+
+正文"重载后恢复配置里的启用状态"的口径已演化：3.0 起启用态存 runtime.db
+（`runtime_plan_state`），**整份重载 = 按配置恢复**——`enableSchedule` 全停后
+计划默认禁用（EventScheduler），由操作员手动逐条启动；分段保存（applySections）
+则保留未改动计划的启用态。"断开重连保留内存态"仍成立。详见评审修复日志
+fix-log-runtime.md 与 Bootstrap 装配注释（D4：启用态不跨重启回放）。

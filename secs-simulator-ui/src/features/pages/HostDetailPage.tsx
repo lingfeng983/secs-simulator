@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useVisibilityInterval } from '../../state/useVisibilityInterval';
 import type { PanelBaseProps } from '../panels/types';
 import {
   HOST_CONFIG_PAGES,
@@ -39,14 +40,10 @@ export function HostDetailPage({
   const [error, setError] = useState('');
 
   /* 详情页 2 秒轮询：相位/版本/计数都是活数据。
-     依赖只能挂 refresh 本身（useCallback 稳定），不能挂 hosts——那是每次 render
-     都会新建的对象，报文每 150 ms 冲刷一次就会把定时器反复清掉重建，2 秒永远不到期，
-     页面上的相位/重试次数就再也不刷新了。 */
+     N6：useVisibilityInterval——回调走 ref，不因 hosts 每次 render 重建而重启定时器；
+     后台标签页跳过，回页立即补拉一次。 */
   const refreshHosts = hosts.refresh;
-  useEffect(() => {
-    const timer = window.setInterval(() => void refreshHosts(), 2_000);
-    return () => window.clearInterval(timer);
-  }, [refreshHosts]);
+  useVisibilityInterval(() => void refreshHosts(), 2_000);
 
   if (host === null) {
     return (

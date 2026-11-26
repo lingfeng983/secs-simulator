@@ -25,7 +25,7 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
  * 运行时上下文：{@code ApiContext} 的门面，也是停机时统一关闭后台资源的入口。
  *
  * <p>原来这个类一千二百多行，同时管着健康信息、会话查询、运行时编辑、主机模拟器、
- * 压测线程池和配置读写。现在按"谁拥有状态"拆成四个：</p>
+ * 压测线程池和配置读写。现在按"谁拥有状态"拆成多个协作者：</p>
  *
  * <ul>
  *   <li>{@link RuntimeApi}——会话/配置/报文/审计的接口落地（无状态，只查对象调方法）</li>

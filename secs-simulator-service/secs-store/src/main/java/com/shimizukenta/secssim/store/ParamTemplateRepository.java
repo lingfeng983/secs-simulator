@@ -166,13 +166,16 @@ public final class ParamTemplateRepository {
     /**
      * 播种一枚内置模板（启动用）：已存在同 id 的行直接跳过。
      *
-     * @return true = 本次播种；false = 已存在被跳过
+     * <p>存在性检查不带软删过滤，理由同 {@link TemplateRepository#seed}：
+     * 软删同 id 行若被检查放行，INSERT 必然撞全表主键。</p>
+     *
+     * @return true = 本次播种；false = 已存在（含软删）被跳过
      */
     public boolean seed(String id, String name, String description, String body) {
         long now = System.currentTimeMillis();
         return this.db.writeConfig(connection -> {
             try (PreparedStatement check = connection.prepareStatement(
-                    "SELECT 1 FROM param_template WHERE id=? AND deleted_at IS NULL")) {
+                    "SELECT 1 FROM param_template WHERE id=?")) {
                 check.setString(1, id);
                 try (ResultSet rs = check.executeQuery()) {
                     if (rs.next()) {

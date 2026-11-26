@@ -194,6 +194,15 @@ final class StreamHandler extends HttpSupport {
     }
 
 
+    /** payload 是否为合法 JSON 对象（解析失败按非对象处理，不抛异常）。 */
+    private static boolean isJsonObject(String payload) {
+        try {
+            return com.shimizukenta.jsonhub.JsonHub.fromJson(payload).isObject();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     /**
      * 拼一帧 SSE。
      *
@@ -276,7 +285,9 @@ final class StreamHandler extends HttpSupport {
            按长度 ≤2 判空会把它当空对象，前端就永远看不到这个通知的内容 */
         if (payload.isEmpty() || payload.equals("{}")) {
             merged = head + "}";
-        } else if (payload.startsWith("{") && payload.endsWith("}")) {
+        } else if (payload.startsWith("{") && payload.endsWith("}") && isJsonObject(payload)) {
+            /* 首尾字符只是快筛：真正拆壳前用 JsonHub 校验是合法对象（评审 P3-2），
+               畸形 payload 走下面的通用分支，不会拼出非法 JSON 帧 */
             merged = head + "," + payload.substring(1);
         } else {
             merged = head + ",\"payload\":" + payload + "}";
@@ -386,7 +397,8 @@ final class StreamHandler extends HttpSupport {
                 }
 
                 if (frame == null) {
-                    frame = "event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n";                }
+                    frame = "event: heartbeat\ndata: " + System.currentTimeMillis() + "\n\n";
+                }
 
                 out.write(frame.getBytes(StandardCharsets.UTF_8));
                 out.flush();

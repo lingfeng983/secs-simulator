@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVisibilityInterval } from './useVisibilityInterval';
 import { apiUrl, readJson, request } from '../api/base';
 import { saveHint, saveTextFile } from '../shared/lib/saveFile';
 import { toCsv } from '../shared/lib/table';
@@ -115,9 +116,9 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 3000);
-    return () => window.clearInterval(timer);
   }, [refresh]);
+  /* N6：3 秒兜底轮询走 visibility hook，后台标签页不再空转 */
+  useVisibilityInterval(() => { void refresh(); }, 3000);
 
   /* plan-fired 是节流后的合并帧：只当刷新信号，明细仍从台账拉 */
   const lastNoticeAt = useRef(0);

@@ -1,0 +1,6 @@
+{
+ "reader": "local_file_slice",
+ "final_url": "file:secs-simulator-ui/src/state/useBackend.ts#L415-L450",
+ "text": "  const sessionCommands = useSessionCommands({ client, notifier, refreshSessions, refreshSessionDetail });\n\n  /**\n   * 保存配置后让相关会话生效：对每个运行中会话调一次重载。\n   *\n   * <p>sessions JSON 不带配置来源，界面无法精确匹配\"哪些会话用这份文件\"；\n   * 重载对每个会话都按<b>它自己的来源</b>重读——用的是同一份磁盘目录，\n   * 保存过的改动自然被带上；演示会话回 not-reloadable，被安静跳过。\n   * 连接标识没变的会话走热生效不断连，变化了才重建。</p>\n   */\n  const notifierRef = useRef(notifier);\n  notifierRef.current = notifier;\n  const reloadSessionsUsing = useCallback(\n    async (configName: string) => {\n      if (client === null) {\n        return;\n      }\n      /* 只重载用这份配置的会话。老版本 sessions JSON 没有 config 字段，\n         这时退回\"全部重载\"以保持行为不变。 */\n      const matched = configName === ''\n        ? []\n        : sessions.filter((session) => session.config === configName);\n      const targets = matched.length > 0 ? matched : sessions;\n\n      let hot = 0;\n      let failed = 0;\n      for (const session of targets) {\n        try {\n          const status = await client.reloadSession(session.id);\n          if (status === 200) {\n            hot += 1;\n          } else {\n            failed += 1;\n          }\n        } catch {\n          /* 单个会话重载失败不阻断其余，但要计数——全部失败还报\"已生效\"，",
+ "title": "secs-simulator-ui/src/state/useBackend.ts"
+}

@@ -26,7 +26,7 @@ SECS/GEM 多单元（multi-unit）设备模拟器。
 | `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |
 | `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |
 | `secs-core` | 领域模型、ID 规划、曲线、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |
-| `secs-store` | 持久化层：`config.db`（设备/主机/模板/计划动作/报告/报警）与 `runtime.db`（钉值/计划启用态/目录编辑/链路相位/执行台账），含 2.x JSON 的一次性迁移 | core + json + sqlite-jdbc |
+| `secs-store` | 持久化层：`config.db`（设备/主机/模板/计划动作/报告/报警）与 `runtime.db`（钉值/计划启用态/目录编辑/链路相位/执行台账） | json + sqlite-jdbc |
 | `secs-app` | 应用服务：会话、配置、日志、SML 文本层（`app.sml`） | core + json + protocol |
 | `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |
 | `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |
@@ -73,7 +73,7 @@ Project JDK 选 25（本机为 graalvm-25）。启动后界面在 `http://127.0.
 
 `-Pnative` 会构建原生镜像并在 `verify` 阶段用 failsafe 跑
 `NativeRuntimeIT`（API、SSE ticket、HSMS S1F1、S1F3、优雅停机）。
-日常门禁不覆盖原生链路；CI 里由夜间任务 `native-nightly.yml` 构建（非阻断），
+日常门禁不覆盖原生链路；CI 里由夜间任务 `native-nightly.yml` 构建（不在 PR 门禁路径上；夜间失败会红），
 发版前仍以本地 `-Pnative verify` 为准。
 
 ### 本地质量门禁
@@ -153,12 +153,12 @@ HTTP API（v1）。下表「原角色」是历史能力分级，仅作语义参�
 | `POST /api/v1/sessions` | operator | 新建会话，体为 `{"config":"demo"}` 或 `{"config":"设备.json"}`（201 / 400 / 409） |
 | `GET/PUT /api/v1/log-level` | viewer/operator | 读取 / 运行时切换日志级别（error/info/debug，切换记审计） |
 | `POST /api/v1/sessions/bulk` | operator | 批量新建：一份配置模板 + 数量/前缀/起始端口/device-id，逐台独立创建（201 全成、207 有失败并逐台给原因，可能全部失败） |
-| `DELETE /api/v1/sessions/{id}` | operator | 关闭并移除会话，端口立即解绑（200 / 404） |
+| `DELETE /api/v1/sessions/{id}` | operator | 断链不删实体（**已废弃**，建议 v2 `DELETE /api/v2/devices/{id}`），端口立即解绑（200 / 404） |
 | `POST /api/v1/sessions/{id}/reload` | operator | 按配置热重载（200 / 404 / 409 / 400） |
-| `POST /api/v1/sessions/{id}/ceid/{ceid}` | operator | 手动触发一次 S6F11（202 / 404 / 409） |
-| `POST /api/v1/sessions/{id}/alarm/{alid}?set=&text=&category=` | operator | 置位/清除 S5F1；`set` 默认 true，`category` 1..7（202 / 400 / 404 / 409） |
-| `GET /api/v1/sessions/{id}/alarms` | viewer | 当前活动报警（ALID / 类别 / 文本 / 置位时间） |
-| `GET /api/v1/sessions/{id}/terminal` | viewer | 最近 20 条终端消息（S10F3） |
+| `POST /api/v2/devices/{id}/runtime/ceid/{ceid}` | operator | （v2）手动触发一次采集事件上报 S6F11（202 / 400 / 404 / 409 / 502） |
+| `POST\|DELETE /api/v2/devices/{id}/runtime/alarm/{alid}` | operator | （v2）报警置位 / 清除 S5F1；`text`、`category`（1..7）经 query 或 JSON 体（202 / 400 / 404 / 409 / 502） |
+| `GET /api/v1/sessions/{id}/alarms` | viewer | 当前活动报警。**已废弃（Deprecation/Sunset 头）**，建议用 v2 `GET /api/v2/devices/{id}/runtime/alarms`；响应已收敛为 `{"alarms":[…],"hint":…}` 信封 |
+| `GET /api/v1/sessions/{id}/terminal` | viewer | 最近 20 条终端消息（S10F3）。**已废弃（Deprecation/Sunset 头）**，形状冻结、无 v2 替代端点 |
 | `GET /api/v1/sessions/{id}/catalog` | viewer | 设备目录：CEID / RPTID / SVID 的绝对 ID 与语义，按 ID 升序 |
 | `GET /api/v1/sessions/{id}/events` | viewer | 事件编排列表（计划 id / CEID / 触发规则 / 启用状态） |
 | `POST /api/v1/sessions/{id}/events/{planId}?enabled=` | operator | 运行时启用/禁用一个计划（200 / 400 / 404） |

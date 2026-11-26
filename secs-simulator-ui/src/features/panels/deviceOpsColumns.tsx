@@ -207,7 +207,7 @@ export function deviceOpsColumns({
               disabled={!started}
               onClick={() => void backend.reloadSession(row.id)}
               title={started
-                ? '重启：按配置文件重新装载，配置有问题时旧会话不受影响'
+                ? '重启：按配置文件重新装载，配置有问题时旧会话不受影响；注意整份重载会清掉钉值与计划启用态（分段保存才保留）'
                 : '设备没启动，先点「启动」；启动后这里就能重启'}
             >
               重启

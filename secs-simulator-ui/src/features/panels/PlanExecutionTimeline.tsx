@@ -150,14 +150,14 @@ export function PlanExecutionTimeline({
         />
       )}
 
-      {exec.error !== '' && <p className="hint" style={{ color: '#b42318' }}>执行记录读取失败：{exec.error}</p>}
+      {exec.error !== '' && <p className="hint" style={{ color: 'var(--danger)' }}>执行记录读取失败：{exec.error}</p>}
 
       <div style={{ marginTop: 10, maxHeight: 320, overflowY: 'auto' }}>
         {exec.rows.length === 0 && <p className="hint">{emptyText}</p>}
         {exec.rows.map((row) => (
           <div
             key={row.id}
-            style={{ ...rowStyle, borderLeftColor: row.status === 'FAILED' ? '#d92d20' : '#2563eb' }}
+            style={{ ...rowStyle, borderLeftColor: row.status === 'FAILED' ? 'var(--danger)' : 'var(--info)' }}
           >
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               <span className="mono hint-inline">{new Date(row.firedAt).toLocaleTimeString()}</span>
@@ -167,7 +167,7 @@ export function PlanExecutionTimeline({
               <span className="hint-inline">报文 {row.messages.length} 条</span>
               {row.dryRun && <span className="badge tone-warn">试跑</span>}
             </div>
-            {row.error !== '' && <div className="hint" style={{ color: '#b42318' }}>{row.error}</div>}
+            {row.error !== '' && <div className="hint" style={{ color: 'var(--danger)' }}>{row.error}</div>}
           </div>
         ))}
       </div>

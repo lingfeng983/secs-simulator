@@ -12,11 +12,7 @@ export interface ServerOps {
   /** 工作台聚合：每台设备的速率/计数一览。 */
   overview: OverviewRow[];
   refreshOverview: () => Promise<void>;
-  burst: (sessionId: string, request: BurstRequest) => Promise<BurstResult>;
-  collectorState: (sessionId: string) => Promise<CollectorState | null>;
-  /** 下发采集器配置；返回错误文案或 null。 */
-  saveCollector: (sessionId: string, config: CollectorConfigInput) => Promise<string | null>;
-  collectorCommand: (sessionId: string, start: boolean) => Promise<string | null>;
+  burst: (sessionId: string, request: BurstRequest, signal?: AbortSignal) => Promise<BurstResult>;
 }
 
 export function useServerOps(client: ApiClient | null): ServerOps {
@@ -52,9 +48,12 @@ export function useServerOps(client: ApiClient | null): ServerOps {
    * 显示"成功 0 / 失败 0"。</p>
    */
   const burst = useCallback(
-    async (sessionId: string, request: BurstRequest): Promise<BurstResult> => {
+    async (sessionId: string, request: BurstRequest, signal?: AbortSignal): Promise<BurstResult> => {
       if (client === null) {
         throw new Error('未连接后端');
+      }
+      if (signal?.aborted) {
+        throw new DOMException('已取消', 'AbortError');
       }
 
       try {
@@ -74,6 +73,10 @@ export function useServerOps(client: ApiClient | null): ServerOps {
 
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 500));
+        /* 调用方卸载/取消时停止轮询，不再继续打后端 */
+        if (signal?.aborted) {
+          throw new DOMException('已取消', 'AbortError');
+        }
         const status = await client.burstStatus(sessionId);
         if (status.running !== true) {
           return {
@@ -93,38 +96,8 @@ export function useServerOps(client: ApiClient | null): ServerOps {
     [client],
   );
 
-  const collectorState = useCallback(
-    async (sessionId: string): Promise<CollectorState | null> => {
-      if (client === null) {
-        return null;
-      }
-      return client.collectorState(sessionId);
-    },
-    [client],
-  );
-
-  const saveCollector = useCallback(
-    async (sessionId: string, config: CollectorConfigInput): Promise<string | null> => {
-      if (client === null) {
-        return '未连接后端';
-      }
-      return client.setCollector(sessionId, config);
-    },
-    [client],
-  );
-
-  const collectorCommand = useCallback(
-    async (sessionId: string, start: boolean): Promise<string | null> => {
-      if (client === null) {
-        return '未连接后端';
-      }
-      return client.collectorCommand(sessionId, start);
-    },
-    [client],
-  );
-
   return useMemo(
-    () => ({ overview, refreshOverview, burst, collectorState, saveCollector, collectorCommand }),
-    [overview, refreshOverview, burst, collectorState, saveCollector, collectorCommand],
+    () => ({ overview, refreshOverview, burst }),
+    [overview, refreshOverview, burst],
   );
 }

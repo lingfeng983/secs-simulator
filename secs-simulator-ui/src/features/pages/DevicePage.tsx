@@ -5,6 +5,7 @@ import { deviceStatus, DEVICE_STATUS_LABEL } from '../../shared/lib/deviceStatus
 import { diffLines, foldUnchanged } from '../../shared/lib/textDiff';
 import { isJsonObject, numberField, parseConfigDocument, type JsonObject } from '../editors/templateConfig';
 import { useDraftSnapshot } from '../../state/configDraftStore';
+import { useVisibilityInterval } from '../../state/useVisibilityInterval';
 import { EventsPanel } from '../panels/EventsPanel';
 import { CycleRuntimePanel } from '../panels/CycleRuntimePanel';
 import { AlarmsPanel } from '../panels/AlarmsPanel';
@@ -366,6 +367,7 @@ function useConfigFacts(backend: BackendController, configName: string): ConfigF
   /* backend 每两秒换一个对象；只把读盘函数放进 ref，避免每次轮询都重读文件 */
   const readRef = useRef(backend.readConfig);
   readRef.current = backend.readConfig;
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => {
     if (configName === '' || typeof readRef.current !== 'function') {
       setFacts(null);
@@ -387,13 +389,14 @@ function useConfigFacts(backend: BackendController, configName: string): ConfigF
       }
     };
     void load();
-    /* 配置区保存后这里要跟上，和周期运行卡同一节奏 */
-    const timer = window.setInterval(() => void load(), 5_000);
+    loadRef.current = load;
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      loadRef.current = null;
     };
   }, [configName]);
+  /* 配置区保存后这里要跟上，和周期运行卡同一节奏；后台标签页暂停（N6） */
+  useVisibilityInterval(() => loadRef.current?.(), 5_000, configName !== '');
   return facts;
 }
 

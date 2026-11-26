@@ -106,7 +106,10 @@ public final class CompiledCycleClock implements CycleClock {
 
     @Override
     public long phaseAt(long tMs) {
-        return tMs - this.startOf(this.indexAt(tMs));
+        int index = this.indexAt(tMs);
+        long phase = tMs - this.startOf(index);
+        // 相位契约 [0, duration)：负时刻钳到 0，超界时刻（t >= endMs）钳到末片右开端点 duration - 1。
+        return Math.max(0L, Math.min(phase, this.durationOf(index) - 1L));
     }
 
     /** ABSOLUTE 曲线无生命周期锚：就是绝对时刻本身。 */

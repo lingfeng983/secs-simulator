@@ -81,7 +81,9 @@ final class RuntimePersister {
      * 清空运行态编辑（钉值 / 计划覆盖 / 目录编辑）。
      *
      * <p>销毁与重载都要清：前者是「设备没了」，后者是「按配置恢复」。
-     * 计划启用态不清——那是用户明确的开关选择，断开重连后要保留。</p>
+     * 计划启用态不清——那是用户明确的开关选择，断开重连后要保留。
+     * 注意口径（D4）：保留仅限"断开重连"（内存态还在）；整份重载/重建走全停，
+     * 启用态不跨重启回放（Bootstrap 装配注释）。</p>
      */
     void clearEdits(String deviceId) {
         this.guard("清空运行态编辑", () -> this.state.clearRuntimeEdits(this.key(deviceId)));

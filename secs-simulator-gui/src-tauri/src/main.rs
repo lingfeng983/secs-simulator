@@ -81,12 +81,12 @@ fn main() {
                 Persisted::Remote { url } => Ok(ConnectionInfo { mode: "remote", url }),
                 Persisted::Local => spawn_local(app.handle())
                     .map(|(child, url)| {
-                        *state.backend.lock().unwrap() = Some(child);
+                        *state.backend.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(child);
                         ConnectionInfo { mode: "local", url }
                     }),
             };
             match resolved {
-                Ok(info) => *state.connection.lock().unwrap() = Some(info),
+                Ok(info) => *state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(info),
                 Err(error) => {
                     // 后端起不来也照常开窗口：界面显示「后端不可达」，可在「连接」里切远程
                     eprintln!("本机后端启动失败: {error}");
@@ -289,7 +289,9 @@ fn spawn_local(app: &tauri::AppHandle) -> Result<(Child, String), String> {
         .arg("--mode=integrated")
         .arg("--port=0")
         .arg(format!("--work-dir={}", work.display()));
+    #[cfg(windows)]
     {
+        // CREATE_NO_WINDOW：本机后端不弹控制台窗口（非 Windows 无此 API，见上方 Job Object 的双平台分支）
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
     }
@@ -387,7 +389,7 @@ fn switch_backend(
         // 否则切回本机会得到一个指向死进程的地址。
         let mut exited: Option<String> = None;
         let alive = {
-            let mut backend = state.backend.lock().unwrap();
+            let mut backend = state.backend.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             match backend.as_mut() {
                 Some(child) => match child.try_wait() {
                     Ok(None) => true,
@@ -405,11 +407,11 @@ fn switch_backend(
         };
         if let Some(reason) = exited {
             eprintln!("本机后端{reason}，重新拉起");
-            *state.backend.lock().unwrap() = None;
+            *state.backend.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         }
         if alive {
             // 后台还活着且当前就是本机：不折腾（避免白白重启设备会话）
-            if let Some(current) = state.connection.lock().unwrap().clone() {
+            if let Some(current) = state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
                 if current.mode == "local" {
                     return Ok(current);
                 }
@@ -417,10 +419,10 @@ fn switch_backend(
         }
         state.stop_backend();
         let (child, url) = spawn_local(&app)?;
-        *state.backend.lock().unwrap() = Some(child);
+        *state.backend.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(child);
         let next = ConnectionInfo { mode: "local", url };
         save_config(&app, &Persisted::Local)?;
-        *state.connection.lock().unwrap() = Some(next.clone());
+        *state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(next.clone());
         Ok(next)
     } else {
         let trimmed = target.trim().trim_end_matches('/').to_string();
@@ -428,7 +430,7 @@ fn switch_backend(
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err("只支持 http/https 地址".to_string());
         }
-        if let Some(current) = state.connection.lock().unwrap().clone() {
+        if let Some(current) = state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
             if current.mode == "remote" && current.url == trimmed {
                 return Ok(current);
             }
@@ -436,7 +438,7 @@ fn switch_backend(
         state.stop_backend();
         save_config(&app, &Persisted::Remote { url: trimmed.clone() })?;
         let next = ConnectionInfo { mode: "remote", url: trimmed };
-        *state.connection.lock().unwrap() = Some(next.clone());
+        *state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(next.clone());
         Ok(next)
     }
 }

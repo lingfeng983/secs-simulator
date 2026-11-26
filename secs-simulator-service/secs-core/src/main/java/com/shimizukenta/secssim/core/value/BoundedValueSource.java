@@ -120,7 +120,11 @@ public final class BoundedValueSource implements ValueSource {
                 case I2 -> new Bounds(-32_768.0, 32_767.0);
                 case I4 -> new Bounds(-2_147_483_648.0, 2_147_483_647.0);
                 case I8 -> new Bounds((double) Long.MIN_VALUE, Math.nextDown((double) Long.MAX_VALUE));
-                case F4, F8 -> new Bounds(-Double.MAX_VALUE, Double.MAX_VALUE);
+                /* F4 是 4 字节浮点：上界必须收到 Float 值域。用 Double.MAX_VALUE 放行
+                   1e100 这类值，越界就推迟到协议编码层——正是本类要消灭的失败模式。
+                   Float.MAX_VALUE 能被 double 精确表示，无需像 U8/I8 那样 nextDown。 */
+                case F4 -> new Bounds(-(double) Float.MAX_VALUE, (double) Float.MAX_VALUE);
+                case F8 -> new Bounds(-Double.MAX_VALUE, Double.MAX_VALUE);
                 case ASCII, BOOLEAN, BINARY -> null;
             };
         }

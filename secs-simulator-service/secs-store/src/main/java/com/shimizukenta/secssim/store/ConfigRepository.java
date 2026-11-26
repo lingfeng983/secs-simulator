@@ -194,8 +194,24 @@ public final class ConfigRepository {
      * @return 新版本号
      */
     public long updateConstants(String key, String newBody, String actor) {
+        return this.updateConstants(key, newBody, null, actor);
+    }
+
+    /**
+     * S2F15 常量回写（带乐观锁）：语义同 {@link #updateConstants(String, String, String)}，
+     * 但事务内先比对 revision——「读正文 → 改 constants → 回写」不是原子的，
+     * 读与写之间用户 saveDocument 提交的新正文不能被基于旧正文的 newBody 整体覆盖。
+     *
+     * @param key              设备 key
+     * @param newBody          只替换过 constants 子树的新正文
+     * @param expectedRevision 读到正文时的版本号；null 表示不校验（兼容旧调用方）
+     * @param actor            操作者（恒为设备侧）
+     * @return 新版本号
+     * @throws StoreException 版本冲突（CONFLICT，调用方应重读后重试）或设备不存在（NOT_FOUND）
+     */
+    public long updateConstants(String key, String newBody, Long expectedRevision, String actor) {
         String sha = ContentHash.sha256Hex(newBody);
-        String deviceId = this.db.writeConfig(unchecked(connection -> {
+        ConstantsUpdate updated = this.db.writeConfig(unchecked(connection -> {
             DeviceRow device = findLiveDevice(connection, key);
             long currentRevision;
             try (PreparedStatement st = connection.prepareStatement(
@@ -207,6 +223,10 @@ public final class ConfigRepository {
                     }
                     currentRevision = rs.getLong(1);
                 }
+            }
+            if (expectedRevision != null && expectedRevision != currentRevision) {
+                throw StoreException.conflict("常量回写基于 v" + expectedRevision
+                        + "，但配置已被修改到 v" + currentRevision + "，请重读后重试");
             }
             long next = currentRevision + 1;
             try (PreparedStatement st = connection.prepareStatement(
@@ -222,23 +242,20 @@ public final class ConfigRepository {
                 st.executeUpdate();
             }
             touchDevice(connection, device.id());
-            return device.id() + "|" + next;
+            return new ConstantsUpdate(device.id(), next);
         }));
-        int sep = deviceId.lastIndexOf('|');
-        String id = deviceId.substring(0, sep);
-        long revision = Long.parseLong(deviceId.substring(sep + 1));
         /* 追平运行版本；没有 device_link 行（设备未连接过）就跳过 */
         this.db.writeRuntime(connection -> {
             try (PreparedStatement st = connection.prepareStatement(
                     "UPDATE device_link SET config_revision=? WHERE device_id=?")) {
-                st.setLong(1, revision);
-                st.setString(2, id);
+                st.setLong(1, updated.revision());
+                st.setString(2, updated.deviceId());
                 return st.executeUpdate();
             } catch (SQLException e) {
                 throw new StoreException("追平运行版本失败: " + e.getMessage(), e);
             }
         });
-        return revision;
+        return updated.revision();
     }
 
     /** 按 key（设备名或设备 id）找未删除设备。 */
@@ -385,10 +402,13 @@ public final class ConfigRepository {
             if (doc.isEmpty()) {
                 continue;
             }
-            String fileName = device.name() + ".json";
+            String fileName = requireExportableName(device.name()) + ".json";
             try {
                 Path target = dir.resolve(fileName);
-                Path tmp = dir.resolve(fileName + ".tmp");
+                /* 临时名加随机后缀：固定 ".tmp" 名会让同目录并发导出互踩 */
+                Path tmp = dir.resolve(fileName + "."
+                        + Long.toHexString(java.util.concurrent.ThreadLocalRandom.current().nextLong())
+                        + ".tmp");
                 Files.writeString(tmp, doc.get().body(), StandardCharsets.UTF_8);
                 move(tmp, target);
                 count++;
@@ -397,6 +417,20 @@ public final class ConfigRepository {
             }
         }
         return count;
+    }
+
+    /**
+     * 导出文件名净化（与上层 ConfigStore.requireFileName 等价，store 层不能反向依赖它）：
+     * 设备名要拼进 {@code dir.resolve(...)}，含路径分隔符 / {@code ..} / 盘符的名字
+     * 会越界写到目录外——仓储可被绕过上层校验的调用方直接使用，这里必须自己挡。
+     */
+    private static String requireExportableName(String name) {
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.isEmpty() || trimmed.contains("/") || trimmed.contains("\\")
+                || trimmed.contains("..") || trimmed.contains(":")) {
+            throw new StoreException("设备名不能用作导出文件名（不能为空或带路径）: " + name);
+        }
+        return trimmed;
     }
 
     private static void move(Path from, Path to) throws IOException {
@@ -453,6 +487,10 @@ public final class ConfigRepository {
     }
 
     private record DeviceRow(String id, String name) {
+    }
+
+    /** updateConstants 跨事务传值：设备 id + 新版本号（record 替代旧的 "|" 字符串打包协议）。 */
+    private record ConstantsUpdate(String deviceId, long revision) {
     }
 
     /** key 解析：先按设备名精确命中，再按 id；都未命中抛 notFound。 */

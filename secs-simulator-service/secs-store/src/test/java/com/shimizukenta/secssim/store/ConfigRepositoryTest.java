@@ -93,6 +93,57 @@ class ConfigRepositoryTest {
         assertEquals(1, this.repo.listRevisions("line1", 50).size());
     }
 
+    /** P1-3：带 expectedRevision 的常量回写——读改写窗口内的用户编辑不能被覆盖。 */
+    @Test
+    void updateConstantsWithExpectedRevisionDetectsConcurrentEdit() {
+        setUp();
+        this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
+
+        /* 基于 v1 的回写正常成功 */
+        long v2 = this.repo.updateConstants("line1", BODY_V1 + " ", 1L, "device");
+        assertEquals(2, v2);
+
+        /* 模拟读改写窗口：设备侧读到 v2 后，用户 saveDocument 提交到 v3 */
+        long staleBase = 2L;
+        this.repo.saveDocument("line1", BODY_V1 + "//user", null, "test", "用户编辑");
+        StoreException e = assertThrows(StoreException.class,
+                () -> this.repo.updateConstants("line1", BODY_V1 + " ", staleBase, "device"));
+        assertEquals(StoreException.Kind.CONFLICT, e.kind());
+        /* 冲突不落笔：正文仍是用户编辑后的那份，版本停在 v3 */
+        assertEquals(BODY_V1 + "//user", this.repo.readDocument("line1").orElseThrow().body());
+        assertEquals(3L, this.repo.findDevice("line1").orElseThrow().revision());
+
+        /* expectedRevision=null 保持旧语义：不校验，兼容既有调用方 */
+        assertEquals(4L, this.repo.updateConstants("line1", BODY_V1 + "  ", "device"));
+    }
+
+    /** P2-3：带路径分隔符 / .. / 盘符的设备名不能越界写文件。 */
+    @Test
+    void exportRejectsPathBearingDeviceNames() throws Exception {
+        setUp();
+        for (String bad : new String[] {"../evil", "a/b", "a\\b", "C:evil", ".."}) {
+            this.repo.createDevice(bad, null, BODY_V1, true, "test");
+        }
+        Path out = this.workDir.resolve("exported");
+        StoreException e = assertThrows(StoreException.class, () -> this.repo.exportTo(out));
+        assertTrue(e.getMessage().contains("导出文件名"), e.getMessage());
+        assertFalse(Files.exists(this.workDir.resolve("evil.json")), "不得越界写到目录外");
+    }
+
+    /** P2-3：导出不再使用固定 .tmp 名；正常导出不留临时垃圾。 */
+    @Test
+    void exportUsesRandomizedTmpNameAndLeavesNoResidue() throws Exception {
+        setUp();
+        this.repo.createDevice("rand", null, BODY_V1, true, "test");
+        Path out = this.workDir.resolve("exported");
+        assertEquals(1, this.repo.exportTo(out));
+        assertEquals(1, this.repo.exportTo(out), "重复导出（覆盖）也应成功");
+        try (var files = Files.list(out)) {
+            List<String> names = files.map(p -> p.getFileName().toString()).toList();
+            assertEquals(List.of("rand.json"), names, "只应留下目标文件，不留 .tmp");
+        }
+    }
+
     @Test
     void revisionRetentionTrimsToTwoHundred() {
         setUp();

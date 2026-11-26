@@ -78,4 +78,26 @@ class ParamTemplateRepositoryTest {
                 () -> this.repo.saveCustom("ghost", "名", "", "{}"));
         assertEquals(StoreException.Kind.NOT_FOUND, e.kind());
     }
+
+    /** P2-2：软删同 id 行不能让播种撞 PRIMARY KEY；也不因播种复活。 */
+    @Test
+    void seedSkipsSoftDeletedRowWithoutPrimaryKeyFailure() {
+        setUp();
+
+        this.repo.createCustom("pt-x", "甲", "", "{}");
+        this.repo.deleteCustom("pt-x");
+        assertFalse(this.repo.seed("pt-x", "甲", "", "{}"), "软删同 id 行应被跳过而不是抛冲突");
+        assertTrue(this.repo.find("pt-x").isEmpty(), "播种不得复活软删行");
+    }
+
+    /** P2-2：内置模板被 pruneBuiltin 软删后，重启播种同样应跳过而不是失败。 */
+    @Test
+    void seedSkipsPrunedBuiltinRow() {
+        setUp();
+
+        assertTrue(this.repo.seed("builtin-x", "曲线", "", "{}"));
+        assertEquals(1, this.repo.pruneBuiltin(java.util.List.of()));
+        assertFalse(this.repo.seed("builtin-x", "曲线", "", "{}"));
+        assertTrue(this.repo.find("builtin-x").isEmpty());
+    }
 }

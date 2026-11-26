@@ -94,7 +94,8 @@ class CycleRunnerTest {
         rig.now.set(30_500L);
         rig.pump();
         assertEquals(CycleRunner.State.FINISHED, rig.runner.state(), "跑满 3 片自动 FINISHED");
-        assertEquals(10_000L, clock.phaseAt(99_999L), "值冻结在末相位 = 末片整长（审计 P1-1）");
+        assertEquals(9_999L, clock.phaseAt(99_999L),
+                "值冻结在末相位 = 末片右开端点 duration-1（评审 2026-11-24：相位契约 [0,duration)）");
         rig.pump();
         assertEquals(6, rig.fires.size(), "FINISHED 后不再发");
     }
@@ -171,7 +172,7 @@ class CycleRunnerTest {
         assertEquals(1, fires.size(), "末片 1999ms 的事件必须发出");
         assertEquals(2001, fires.get(0)[1]);
         assertEquals(CycleRunner.State.FINISHED, runner.state());
-        assertEquals(2_000L, clock.phaseAt(999_999L), "冻结在末相位");
+        assertEquals(1_999L, clock.phaseAt(999_999L), "冻结在末相位（右开端点 duration-1）");
     }
 
     @Test
@@ -189,12 +190,13 @@ class CycleRunnerTest {
 
         runner.pump();  // t=0：仍在跑
         assertEquals(LifecycleCycleClock.State.RUNNING, clock.state());
-        assertEquals(86_400_000L, clock.phaseAt(86_400_000L), "24h 内相位无界增长（3.1 行为）");
+        assertEquals(86_399_999L, clock.phaseAt(86_400_000L),
+                "相位钳在 [0,duration) 内（评审 2026-11-24：超界时刻钳到右开端点）");
 
         now.set(86_400_001L);
         runner.pump();  // t 已过 24h：时钟冻结
         assertEquals(LifecycleCycleClock.State.FINISHED, clock.state());
-        assertEquals(86_400_000L, clock.phaseAt(86_400_001L), "冻结在 24h（修掉相位无界）");
+        assertEquals(86_399_999L, clock.phaseAt(86_400_001L), "冻结在 24h 右开端点（修掉相位无界）");
         assertTrue(fires.isEmpty(), "没有 cycle 段：不产生片内事件");
     }
 

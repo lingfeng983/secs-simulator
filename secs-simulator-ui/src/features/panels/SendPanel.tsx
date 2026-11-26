@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SentMessageResult } from '../../api';
 import { Panel } from '../../shared/ui/Panel';
 import { PresetSelect } from '../../shared/ui/PresetSelect';
@@ -64,6 +64,9 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
   const [burstCount, setBurstCount] = useState('100');
   const [burstInterval, setBurstInterval] = useState('0');
   const [burstRunning, setBurstRunning] = useState(false);
+  /* 卸载时中止压测轮询：组件都没了就不该继续打后端、弹提示 */
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const { activeSession, catalog } = backend;
   const disabled = activeSession === '';
@@ -82,16 +85,21 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
       return;
     }
     setBurstRunning(true);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const stats = await backend.burst(activeSession, {
         kind: 'ceid',
         ceid,
         count,
         intervalMs: Number.parseInt(burstInterval, 10) || 0,
-      });
+      }, controller.signal);
       notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
     } catch (error) {
-      notifier.error(`压测失败: ${(error as Error).message}`);
+      if ((error as Error).name !== 'AbortError') {
+        notifier.error(`压测失败: ${(error as Error).message}`);
+      }
     } finally {
       setBurstRunning(false);
     }
@@ -110,17 +118,22 @@ export function SendPanel({ backend, notifier }: PanelBaseProps): JSX.Element {
     }
     setStressRunning(true);
     setStressResult(null);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const stats = await backend.burst(activeSession, {
         kind: 'message',
         sml: draft,
         count,
         intervalMs: Number.parseInt(stressInterval, 10) || 0,
-      });
+      }, controller.signal);
       setStressResult(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed} / 总耗时 ${stats.durationMs}ms / P50 ${stats.latencyP50}ms / P95 ${stats.latencyP95}ms`);
       notifier.info(`压测完成:成功 ${stats.sent} / 失败 ${stats.failed}`);
     } catch (burstError) {
-      notifier.error(`压测失败: ${(burstError as Error).message}`);
+      if ((burstError as Error).name !== 'AbortError') {
+        notifier.error(`压测失败: ${(burstError as Error).message}`);
+      }
     } finally {
       setStressRunning(false);
     }

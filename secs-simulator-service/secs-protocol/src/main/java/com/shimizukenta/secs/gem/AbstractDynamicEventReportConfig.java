@@ -91,9 +91,12 @@ public abstract class AbstractDynamicEventReportConfig implements DynamicEventRe
 		DynamicReport r = createReport(reportId, alias, vids);
 		/* 同一个 REPORTID 的「重新定义」是 S2F33 的合法用法（主机用它覆盖 VID 列表）。
 		   CopyOnWriteArraySet.add 对相等元素直接丢弃，这里必须先移除旧定义再放入新的，
-		   否则主机以为改成功了、设备发的仍是旧结构。 */
-		reports.remove(r);
-		reports.add(r);
+		   否则主机以为改成功了、设备发的仍是旧结构。remove+add 加同一把锁：
+		   两个并发重定义同一 ID 时，避免两次 remove 都先于 add 执行、集合里留下两条同 ID 定义。 */
+		synchronized ( reports ) {
+			reports.remove(r);
+			reports.add(r);
+		}
 		return r;
 	}
 	
@@ -161,9 +164,11 @@ public abstract class AbstractDynamicEventReportConfig implements DynamicEventRe
 	
 	private DynamicLink addLinkBySecs2(DynamicCollectionEvent ce, List<? extends Secs2> reports) {
 		DynamicLink link = createLink(ce, reports);
-		/* 同 CEID 的链接重定义同样覆盖旧定义（S2F35 的常用语义） */
-		links.remove(link);
-		links.add(link);
+		/* 同 CEID 的链接重定义同样覆盖旧定义（S2F35 的常用语义）；加锁保证 remove+add 原子，同报告重定义 */
+		synchronized ( links ) {
+			links.remove(link);
+			links.add(link);
+		}
 		return link;
 	}
 	
@@ -184,9 +189,11 @@ public abstract class AbstractDynamicEventReportConfig implements DynamicEventRe
 	@Override
 	public DynamicCollectionEvent addEnableCollectionEvent(CharSequence alias, long ceid) {
 		DynamicCollectionEvent ce = createCollectionEvent(alias, ceid);
-		/* 同 CEID 的使能项重定义：覆盖而不是静默丢弃 */
-		events.remove(ce);
-		events.add(ce);
+		/* 同 CEID 的使能项重定义：覆盖而不是静默丢弃；加锁保证 remove+add 原子，同报告重定义 */
+		synchronized ( events ) {
+			events.remove(ce);
+			events.add(ce);
+		}
 		return ce;
 	}
 	

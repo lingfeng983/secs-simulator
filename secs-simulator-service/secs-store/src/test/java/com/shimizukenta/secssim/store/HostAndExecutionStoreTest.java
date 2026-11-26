@@ -124,6 +124,63 @@ class HostAndExecutionStoreTest {
         }
     }
 
+    /**
+     * P1-1：设备销毁后在途 fire 计数 flush 重建 runtime_plan_state 行时，
+     * enabled 必须为 0——重建行不能被当成"已启用"复活计划。
+     */
+    @Test
+    void fireFlushRebuildsRowAsDisabled() throws Exception {
+        try (Db db = Db.open(this.workDir);
+             PlanExecutionRepository repo = new PlanExecutionRepository(db)) {
+            RuntimeStateRepository runtime = new RuntimeStateRepository(db);
+            runtime.savePlanState("devGone", "pg", true, null, "");
+            /* 设备销毁：对账清掉运行态行（cleanupOrphans 白名单不含该设备） */
+            runtime.cleanupOrphans(java.util.List.of());
+            assertTrue(runtime.planStates("devGone").isEmpty());
+
+            /* 在途 fire 计数随后 flush，重建行 */
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devGone", "pg", true, ""));
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devGone", "pg", false, "x"));
+            for (int waited = 0; waited < 40 && runtime.planStates("devGone").isEmpty(); waited++) {
+                Thread.sleep(50);
+            }
+            List<RuntimeStateRepository.PlanStateRow> rebuilt = runtime.planStates("devGone");
+            assertEquals(1, rebuilt.size(), "flush 应重建一行计数");
+            assertFalse(rebuilt.get(0).enabled(), "重建行 enabled 必须为 0，不能复活计划");
+            assertEquals(2, rebuilt.get(0).fireCount());
+            assertEquals(1, rebuilt.get(0).skippedCount());
+        }
+    }
+
+    /** P1-1 的正常路径回归：行已存在走 UPDATE 分支，enabled 不被 fire flush 改动。 */
+    @Test
+    void fireFlushDoesNotTouchEnabledOnExistingRow() throws Exception {
+        try (Db db = Db.open(this.workDir);
+             PlanExecutionRepository repo = new PlanExecutionRepository(db)) {
+            RuntimeStateRepository runtime = new RuntimeStateRepository(db);
+            /* 用户已禁用计划，行还在 */
+            runtime.savePlanState("devLive", "pl", false, null, "");
+
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devLive", "pl", true, ""));
+            for (int waited = 0; waited < 40
+                    && runtime.planStates("devLive").get(0).fireCount() == 0; waited++) {
+                Thread.sleep(50);
+            }
+            RuntimeStateRepository.PlanStateRow row = runtime.planStates("devLive").get(0);
+            assertEquals(1, row.fireCount());
+            assertFalse(row.enabled(), "UPDATE 分支不得把已禁用计划改回启用");
+
+            /* 启用态行同样不被改动 */
+            runtime.savePlanState("devLive", "pl", true, null, "");
+            repo.appendFire(new PlanExecutionRepository.FireRecord("devLive", "pl", true, ""));
+            for (int waited = 0; waited < 40
+                    && runtime.planStates("devLive").get(0).fireCount() < 2; waited++) {
+                Thread.sleep(50);
+            }
+            assertTrue(runtime.planStates("devLive").get(0).enabled());
+        }
+    }
+
     @Test
     void linkEventsAndOrphanCleanup() {
         try (Db db = Db.open(this.workDir)) {

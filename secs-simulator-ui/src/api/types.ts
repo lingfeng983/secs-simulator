@@ -641,12 +641,6 @@ export interface ApiClient {
   burst(sessionId: string, request: BurstRequest): Promise<BurstResult>;
   /** 压测进度/最近一次结果（服务端后台执行，POST 只回受理）。 */
   burstStatus(sessionId: string): Promise<BurstStatus>;
-  /** 主机模拟 S1F3 采集器状态与数据（schema v6）。 */
-  collectorState(sessionId: string): Promise<CollectorState | null>;
-  /** 下发采集器配置;返回错误文案或 null(成功)。 */
-  setCollector(sessionId: string, config: CollectorConfigInput): Promise<string | null>;
-  /** 手动启停采集器。 */
-  collectorCommand(sessionId: string, start: boolean): Promise<string | null>;
   /** v2:设备配置版本历史(config_revision 快照,新→旧)。 */
   configRevisions(name: string, limit?: number): Promise<Array<{
     revision: number; sha256: string; createdAt: number; createdBy: string; note: string;

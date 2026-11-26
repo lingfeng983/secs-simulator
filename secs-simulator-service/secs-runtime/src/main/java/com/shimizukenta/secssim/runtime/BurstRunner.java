@@ -462,7 +462,7 @@ final class BurstRunner {
                     }
                 }
             }
-            if (!pace(intervalMs, startedAt, i, deadline)) {
+            if (!pace(intervalMs, startedAt, i, deadline, cancelled)) {
                 stats.skipped = count - i - 1;
                 stats.aborted = true;
                 break;
@@ -493,8 +493,9 @@ final class BurstRunner {
                 + "}";
     }
 
-    /** 压测节奏：按起始时刻对齐间隔，且不越过总时长预算。 */
-    private static boolean pace(long intervalMs, long startedAt, int index, long deadline) {
+    /** 压测节奏：按起始时刻对齐间隔，且不越过总时长预算；长 sleep 分片以便及时响应取消（评审 P3-8）。 */
+    private static boolean pace(long intervalMs, long startedAt, int index, long deadline,
+                                BooleanSupplier cancelled) {
         if (intervalMs <= 0L) {
             return System.currentTimeMillis() < deadline;
         }
@@ -502,16 +503,23 @@ final class BurstRunner {
         if (nextAt >= deadline) {
             return false;
         }
-        long wait = nextAt - System.currentTimeMillis();
-        if (wait > 0L) {
+        /* 分片睡：整段 sleep 会让取消最多延迟一个 interval（可达 60s）；
+           每 250ms 醒来看一次取消标志，取消延迟收敛到亚秒级 */
+        while (true) {
+            if (cancelled.getAsBoolean()) {
+                return false;
+            }
+            long wait = nextAt - System.currentTimeMillis();
+            if (wait <= 0L) {
+                return true;
+            }
             try {
-                Thread.sleep(wait);
+                Thread.sleep(Math.min(wait, 250L));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
             }
         }
-        return true;
     }
 
     /** 可选整数：字段缺失时给默认值（JsonHub.get 对缺失键返回 null）。 */

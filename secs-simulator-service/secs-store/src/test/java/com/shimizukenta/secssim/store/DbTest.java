@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,6 +85,64 @@ class DbTest {
             assertTrue(Files.isRegularFile(lib), "本地库没有释放: " + lib);
             assertTrue(Files.size(lib) > 0);
         }
+    }
+
+    /** close 必须等在途写事务提交完，不能把写连接从事务脚下抽走（P1-2）。 */
+    @Test
+    void closeWaitsForInFlightWriteTransaction() throws Exception {
+        Db db = Db.open(workDir);
+        java.util.concurrent.CountDownLatch inTransaction = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch letCommit = new java.util.concurrent.CountDownLatch(1);
+        Thread writer = new Thread(() -> db.writeConfig(connection -> {
+            exec(connection, "CREATE TABLE probe_close (v INTEGER)");
+            exec(connection, "INSERT INTO probe_close VALUES (7)");
+            inTransaction.countDown();
+            try {
+                /* 事务保持打开，直到测试放行提交 */
+                assertTrue(letCommit.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("等待提交被中断", e);
+            }
+            return null;
+        }), "in-flight-writer");
+        writer.start();
+        assertTrue(inTransaction.await(10, java.util.concurrent.TimeUnit.SECONDS), "写事务应已开始");
+
+        Thread closer = new Thread(db::close, "closer");
+        closer.start();
+        /* close 已发起但事务未提交：closer 必须阻塞在写锁上 */
+        closer.join(300);
+        assertTrue(closer.isAlive(), "close 不应抢在在途写事务之前关连接");
+
+        letCommit.countDown();
+        writer.join(10_000);
+        closer.join(10_000);
+        assertFalse(writer.isAlive());
+        assertFalse(closer.isAlive());
+
+        /* 在途事务完整提交（没被 close 打断回滚）；关闭后进程锁已释放，可重开验证 */
+        try (Db reopened = Db.open(workDir);
+             var c = reopened.readConfig(); var st = c.createStatement();
+             var rs = st.executeQuery("SELECT COUNT(*) FROM probe_close")) {
+            assertTrue(rs.next());
+            assertEquals(1, rs.getInt(1), "在途事务的行应完整落库");
+        }
+    }
+
+    /** closed 后 write/read 快速失败，抛明确异常而不是混乱 SQLException（P1-2）。 */
+    @Test
+    void closedDbFailsFastWithClearException() throws Exception {
+        Db db = Db.open(workDir);
+        db.close();
+        db.close(); /* 幂等：重复 close 不抛 */
+
+        IllegalStateException w = assertThrows(IllegalStateException.class,
+                () -> db.writeConfig(connection -> null));
+        assertTrue(w.getMessage().contains("已关闭"), w.getMessage());
+        assertThrows(IllegalStateException.class, () -> db.writeRuntime(connection -> null));
+        assertThrows(IllegalStateException.class, db::readConfig);
+        assertThrows(IllegalStateException.class, db::readRuntime);
     }
 
     private static void exec(java.sql.Connection connection, String sql) {

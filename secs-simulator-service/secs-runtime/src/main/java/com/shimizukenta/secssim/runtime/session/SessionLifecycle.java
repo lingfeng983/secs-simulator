@@ -53,15 +53,6 @@ final class SessionLifecycle {
     private volatile SessionRuntime.LinkPhase linkPhase = SessionRuntime.LinkPhase.STOPPED;
     private volatile BiConsumer<String, SessionRuntime.LinkPhase> linkListener;
 
-    /**
-     * 上次触发事件的时间点。
-     *
-     * <p>目前只由 ticker 线程写，但语义上跨"调度/手动触发"两条路径，
-     * 加 {@code volatile} 是为了后续演进时不引入可见性问题。
-     * </p>
-     */
-    private volatile long lastFireMs;
-
     SessionLifecycle(HsmsSessionRuntime host) {
         this.host = host;
     }
@@ -294,7 +285,6 @@ final class SessionLifecycle {
     private void startTicker() {
         /* 事件调度从"现在"起算，不补开以来的周期 */
         this.host.scheduler.start();
-        this.lastFireMs = this.host.clock.nowMs();
         this.host.ticker.start(this.host.clock instanceof ManualEngineClock, this.host::pumpNow);
     }
 

@@ -130,9 +130,12 @@ public class HsmsSsReplyMessageManager {
 		/** 登记这条 Pack 的主报文；exit 用它做引用比对。 */
 		private final HsmsSsMessage primary;
 		
-		/** 控制帧（SELECT/LINKTEST…）没有 stream/function，只能按 SystemBytes 匹配。 */
+		/** 控制帧（SELECT/LINKTEST…）没有 stream/function，按 SystemBytes + 期望应答 SType 匹配。 */
 		private final boolean control;
 		
+		/** 控制事务期望的应答类型（SELECT_REQ→SELECT_RSP…）；数据事务为 null。 */
+		private final HsmsSsMessageType replyType;
+
 		private final int stream;
 		
 		/** 期望的应答 function（primary + 1）。 */
@@ -144,26 +147,51 @@ public class HsmsSsReplyMessageManager {
 			final int stream = primary.getStream();
 			final int function = primary.getFunction();
 			if ( stream < 0 || function < 0 ) {
-				return new Pack(primary, true, -1, -1);
+				/* E37 §7.2/§7.4/§7.5：控制事务的应答类型由请求 SType 决定
+				   （SELECT_REQ→SELECT_RSP、DESELECT_REQ→DESELECT_RSP、LINKTEST_REQ→LINKTEST_RSP），
+				   登记期望类型供 matches 校验；其他 SType 无应答，置 null 不匹配任何消息。 */
+				HsmsSsMessageType t = null;
+				switch ( HsmsSsMessageType.get(primary) ) {
+				case SELECT_REQ: {
+					t = HsmsSsMessageType.SELECT_RSP;
+					break;
+				}
+				case DESELECT_REQ: {
+					t = HsmsSsMessageType.DESELECT_RSP;
+					break;
+				}
+				case LINKTEST_REQ: {
+					t = HsmsSsMessageType.LINKTEST_RSP;
+					break;
+				}
+				default: {
+					break;
+				}
+				}
+				return new Pack(primary, true, -1, -1, t);
 			}
-			return new Pack(primary, false, stream, function + 1);
+			return new Pack(primary, false, stream, function + 1, null);
 		}
 		
 		boolean belongsTo(HsmsSsMessage msg) {
 			return this.primary == msg;
 		}
 		
-		private Pack(HsmsSsMessage primary, boolean control, int stream, int function) {
+		private Pack(HsmsSsMessage primary, boolean control, int stream, int function, HsmsSsMessageType replyType) {
 			this.primary = primary;
 			this.control = control;
 			this.stream = stream;
 			this.function = function;
+			this.replyType = replyType;
 			this.replyMsg = null;
 		}
 		
 		public boolean matches(HsmsSsMessage msg) {
 			if ( this.control ) {
-				return true;
+				/* E37 §8.1.4.6：SystemBytes 相同还须"对应"成立——应答 SType 必须与
+				   请求配对，否则撞号的偶数 function 数据帧会被当成控制应答吞掉
+				   （原来恒 true）。 */
+				return this.replyType != null && HsmsSsMessageType.get(msg) == this.replyType;
 			}
 			return msg.getStream() == this.stream && msg.getFunction() == this.function;
 		}

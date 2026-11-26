@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useVisibilityInterval } from '../../../state/useVisibilityInterval';
 import { Panel } from '../../../shared/ui/Panel';
 import { FieldLabel } from '../../../shared/ui/FieldLabel';
 import type { CollectorState } from '../../../api';
@@ -37,21 +38,23 @@ export function HostOverviewPanel({ hostId, hosts, readOnly, client }: PanelArgs
     }
   }, [host, loadedFor]);
 
-  /* 采集概览：S1F3 采集器的运行状态是活数据，2 秒刷一次。 */
+  /* 采集概览：S1F3 采集器的运行状态是活数据，2 秒刷一次（N6：后台标签页跳过）。 */
   useEffect(() => {
     if (client === null) {
       return;
     }
     let cancelled = false;
-    const load = () => {
-      void client.hostInstanceCollector(hostId)
-        .then((body) => { if (!cancelled) { setCollector(body); } })
-        .catch(() => undefined);
-    };
-    load();
-    const timer = window.setInterval(load, 2_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    void client.hostInstanceCollector(hostId)
+      .then((body) => { if (!cancelled) { setCollector(body); } })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
   }, [client, hostId]);
+  useVisibilityInterval(() => {
+    if (client === null) {
+      return;
+    }
+    void client.hostInstanceCollector(hostId).then(setCollector).catch(() => undefined);
+  }, 2_000);
 
   if (host === null) {
     return <p className="hint">主机不存在。</p>;

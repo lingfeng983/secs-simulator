@@ -1,0 +1,725 @@
+{
+  "ok": false,
+  "quality_ok": false,
+  "delivery_allowed": true,
+  "handoff_status": "partial",
+  "validator": "research-synthesis",
+  "route": "C",
+  "topic": "code-review-2026-11-24",
+  "research_dir": "E:\\ai\\secs-simulator\\research",
+  "min_dimensions": 8,
+  "dimension_count": 8,
+  "wide_count": 0,
+  "coverage": {
+    "actual_dimensions": 8,
+    "recommended_dimensions": 8,
+    "dimension_ratio": 1.0,
+    "wide_required": false,
+    "wide_present": false
+  },
+  "files_checked": [
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_cross_verification.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim01.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim02.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim03.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim04.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim05.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim06.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim07.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_dim08.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_evidence.json",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_file_analysis.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_final.md",
+    "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_insight.md"
+  ],
+  "issues": [
+    "code-review-2026-11-24_dim06.md: contains footnote markers but no definitions",
+    "code-review-2026-11-24_dim08.md: contains footnote markers but no definitions",
+    "code-review-2026-11-24_final.md: contains footnote markers but no definitions"
+  ],
+  "warnings": [
+    "code-review-2026-11-24_evidence.json: evidence.20: status=unverified; excluded from downstream verified evidence",
+    "code-review-2026-11-24_evidence.json: no verified evidence for target entity 'dim02 Q-1'",
+    "code-review-2026-11-24_dim06.md: missing footnote definitions for A-Za-z0-9_-",
+    "code-review-2026-11-24_final.md: missing footnote definitions for A-Za-z0-9_-"
+  ],
+  "presentation_handoff": {
+    "schema_version": 1,
+    "delivery_mode": "partial",
+    "verified_facts": [
+      {
+        "id": "fact_48802d153d1dc29b",
+        "entity": "ArchitectureTest.java",
+        "aliases": [
+          "ArchitectureTest.java",
+          "ArchitectureTest",
+          "coreNeverDependsOnOuterLayers",
+          "allowEmptyShould"
+        ],
+        "claim": "ArchitectureTest 规则 allowEmptyShould(true) 后 check(MAIN_CLASSES)。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-runtime/src/test/java/com/shimizukenta/secssim/arch/ArchitectureTest.java#L28-L39",
+        "canonical": "ArchitectureTest.java | ArchitectureTest 规则 allowEmptyShould(true) 后 check(MAIN_CLASSES)。 | user_input | file:secs-simulator-service/secs-runtime/src/test/java/com/shimizukenta/secssim/arch/ArchitectureTest.java#L28-L39",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_50ecb9b9a5716d3e",
+        "entity": "pom.xml",
+        "aliases": [
+          "pom.xml",
+          "maven.compiler.release",
+          "asm.version"
+        ],
+        "claim": "父 POM 设置 maven.compiler.release 为 25，ASM 版本钉为 9.11。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/pom.xml#L37-L40",
+        "canonical": "pom.xml | 父 POM 设置 maven.compiler.release 为 25，ASM 版本钉为 9.11。 | user_input | file:secs-simulator-service/pom.xml#L37-L40",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_3a773de1d17350ef",
+        "entity": "AbstractHsmsSsCommunicator.java",
+        "aliases": [
+          "AbstractHsmsSsCommunicator.java",
+          "SELECT_REQ",
+          "LINKTEST_REQ",
+          "HsmsSsMessageType"
+        ],
+        "claim": "send switch 的 case 只有 SELECT_REQ 与 LINKTEST_REQ。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/AbstractHsmsSsCommunicator.java#L481-L544",
+        "canonical": "AbstractHsmsSsCommunicator.java | send switch 的 case 只有 SELECT_REQ 与 LINKTEST_REQ。 | user_input | file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/AbstractHsmsSsCommunicator.java#L481-L544",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_2b43c2c8f5eddc58",
+        "entity": "HsmsSsReplyMessageManager.java",
+        "aliases": [
+          "HsmsSsReplyMessageManager.java",
+          "matches",
+          "control"
+        ],
+        "claim": "HsmsSsReplyMessageManager 的 matches 对 control 分支直接 return true。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/HsmsSsReplyMessageManager.java#L164-L169",
+        "canonical": "HsmsSsReplyMessageManager.java | HsmsSsReplyMessageManager 的 matches 对 control 分支直接 return true。 | user_input | file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/HsmsSsReplyMessageManager.java#L164-L169",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_857bfc69408f6824",
+        "entity": "BoundedValueSource.java",
+        "aliases": [
+          "BoundedValueSource.java",
+          "Bounds",
+          "F4",
+          "F8"
+        ],
+        "claim": "Bounds.of 对 F4 与 F8 共用 Double.MAX_VALUE，未按 Float.MAX_VALUE 收紧。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/value/BoundedValueSource.java#L123",
+        "canonical": "BoundedValueSource.java | Bounds.of 对 F4 与 F8 共用 Double.MAX_VALUE，未按 Float.MAX_VALUE 收紧。 | user_input | file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/value/BoundedValueSource.java#L123",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_4f80bec14edfad78",
+        "entity": "EquipmentCompiler.java",
+        "aliases": [
+          "EquipmentCompiler.java",
+          "reportByQualified",
+          "resolved"
+        ],
+        "claim": "reportByQualified.put 写入 unit.name() 与 def.slot() 拼出的键。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/compile/EquipmentCompiler.java#L255-L263",
+        "canonical": "EquipmentCompiler.java | reportByQualified.put 写入 unit.name() 与 def.slot() 拼出的键。 | user_input | file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/compile/EquipmentCompiler.java#L255-L263",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_5700dc5598fda26a",
+        "entity": "RuntimeApi.java",
+        "aliases": [
+          "RuntimeApi.java",
+          "launcher.reload",
+          "persister.restore",
+          "ConfigException"
+        ],
+        "claim": "RuntimeApi 重载失败回滚只 catch ConfigException 与 IOException。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/RuntimeApi.java#L481-L490",
+        "canonical": "RuntimeApi.java | RuntimeApi 重载失败回滚只 catch ConfigException 与 IOException。 | user_input | file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/RuntimeApi.java#L481-L490",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_ea45a1e2eb223af8",
+        "entity": "SessionLauncher.java",
+        "aliases": [
+          "SessionLauncher.java",
+          "sources.remove",
+          "opened.close",
+          "RuntimeException"
+        ],
+        "claim": "SessionLauncher 注册失败 catch RuntimeException 后 sources.remove 并 opened.close。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/SessionLauncher.java#L213-L224",
+        "canonical": "SessionLauncher.java | SessionLauncher 注册失败 catch RuntimeException 后 sources.remove 并 opened.close。 | user_input | file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/SessionLauncher.java#L213-L224",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_f17ba0a50df4bba1",
+        "entity": "PlanExecutionRepository.java",
+        "aliases": [
+          "PlanExecutionRepository.java",
+          "runtime_plan_state",
+          "INSERT",
+          "fire_count"
+        ],
+        "claim": "PlanExecutionRepository 向 runtime_plan_state 的 INSERT VALUES 把 enabled 硬编码为 1。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/PlanExecutionRepository.java#L224-L225",
+        "canonical": "PlanExecutionRepository.java | PlanExecutionRepository 向 runtime_plan_state 的 INSERT VALUES 把 enabled 硬编码为 1。 | user_input | file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/PlanExecutionRepository.java#L224-L225",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_756ac8416af46253",
+        "entity": "RuntimeStateRepository.java",
+        "aliases": [
+          "RuntimeStateRepository.java",
+          "runtime_svid_pin",
+          "runtime_plan_override",
+          "runtime_catalog_edit"
+        ],
+        "claim": "clearRuntimeEdits 只清 runtime_svid_pin、runtime_plan_override、runtime_catalog_edit 三张表，不清 runtime_plan_state。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/RuntimeStateRepository.java#L525-L539",
+        "canonical": "RuntimeStateRepository.java | clearRuntimeEdits 只清 runtime_svid_pin、runtime_plan_override、runtime_catalog_edit 三张表，不清 runtime_plan_state。 | user_input | file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/RuntimeStateRepository.java#L525-L539",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_a0d640417a2103f6",
+        "entity": "DeviceOpsPanel.tsx",
+        "aliases": [
+          "DeviceOpsPanel.tsx",
+          "backend.saveConfig",
+          "targetConfig"
+        ],
+        "claim": "DeviceOpsPanel 批量同步调用 backend.saveConfig(targetConfig, text, null)。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-ui/src/features/panels/DeviceOpsPanel.tsx#L186",
+        "canonical": "DeviceOpsPanel.tsx | DeviceOpsPanel 批量同步调用 backend.saveConfig(targetConfig, text, null)。 | user_input | file:secs-simulator-ui/src/features/panels/DeviceOpsPanel.tsx#L186",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_df61df5afe1c53e4",
+        "entity": "configs.ts",
+        "aliases": [
+          "configs.ts",
+          "If-Match",
+          "expectedModifiedMs"
+        ],
+        "claim": "前端 saveConfig 只在 expectedModifiedMs 非空时携带 If-Match 头。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-ui/src/api/configs.ts#L201-L205",
+        "canonical": "configs.ts | 前端 saveConfig 只在 expectedModifiedMs 非空时携带 If-Match 头。 | user_input | file:secs-simulator-ui/src/api/configs.ts#L201-L205",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_92b0bc14ed52c52f",
+        "entity": "useBackend.ts",
+        "aliases": [
+          "useBackend.ts",
+          "matched.length",
+          "sessions",
+          "targets"
+        ],
+        "claim": "useBackend 的 targets 在 matched.length 为 0 时取全部 sessions。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-ui/src/state/useBackend.ts#L434-L437",
+        "canonical": "useBackend.ts | useBackend 的 targets 在 matched.length 为 0 时取全部 sessions。 | user_input | file:secs-simulator-ui/src/state/useBackend.ts#L434-L437",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_e2bacaa3d85378d0",
+        "entity": "useServerOps.ts",
+        "aliases": [
+          "useServerOps.ts",
+          "setTimeout",
+          "burstStatus"
+        ],
+        "claim": "burst 轮询 for (;;) 每 500ms setTimeout 后查 burstStatus，status.running 非 true 才返回。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-ui/src/state/useServerOps.ts#L70-L91",
+        "canonical": "useServerOps.ts | burst 轮询 for (;;) 每 500ms setTimeout 后查 burstStatus，status.running 非 true 才返回。 | user_input | file:secs-simulator-ui/src/state/useServerOps.ts#L70-L91",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_5422e90649e59bbc",
+        "entity": "openapi.yaml",
+        "aliases": [
+          "openapi.yaml",
+          "openapi"
+        ],
+        "claim": "openapi.yaml 共 71 个 path，$ref 全部可解析。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/scripts/openapi.yaml#paths",
+        "canonical": "openapi.yaml | openapi.yaml 共 71 个 path，$ref 全部可解析。 | user_input | file:secs-simulator-service/scripts/openapi.yaml#paths",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_d7a65e2c654a0f13",
+        "entity": "DeviceRuntimeHandler.java",
+        "aliases": [
+          "DeviceRuntimeHandler.java",
+          "apply-sections",
+          "parts"
+        ],
+        "claim": "parts.length == 2 且 parts[1] equals apply-sections 时进入该分支。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-service/secs-api-http/src/main/java/com/shimizukenta/secssim/api/http/DeviceRuntimeHandler.java#L67-L172",
+        "canonical": "DeviceRuntimeHandler.java | parts.length == 2 且 parts[1] equals apply-sections 时进入该分支。 | user_input | file:secs-simulator-service/secs-api-http/src/main/java/com/shimizukenta/secssim/api/http/DeviceRuntimeHandler.java#L67-L172",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_3b92754866c20ed1",
+        "entity": "README.md",
+        "aliases": [
+          "README.md",
+          "secs-store",
+          "sqlite-jdbc"
+        ],
+        "claim": "README 模块表把 secs-store 的依赖写为 core + json + sqlite-jdbc。",
+        "source_type": "user_input",
+        "source_url": "file:README.md#L29",
+        "canonical": "README.md | README 模块表把 secs-store 的依赖写为 core + json + sqlite-jdbc。 | user_input | file:README.md#L29",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_345931da70211be0",
+        "entity": "main.rs",
+        "aliases": [
+          "main.rs",
+          "CommandExt"
+        ],
+        "claim": "main.rs 使用 std::os::windows::process::CommandExt 的 creation_flags。",
+        "source_type": "user_input",
+        "source_url": "file:secs-simulator-gui/src-tauri/src/main.rs#L292-L295",
+        "canonical": "main.rs | main.rs 使用 std::os::windows::process::CommandExt 的 creation_flags。 | user_input | file:secs-simulator-gui/src-tauri/src/main.rs#L292-L295",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_d3b17925ced8af0e",
+        "entity": "backend-mvn-test.log",
+        "aliases": [
+          "backend-mvn-test.log",
+          "MVN_EXIT",
+          "mvn"
+        ],
+        "claim": "MVN_EXIT=0，BUILD SUCCESS。",
+        "source_type": "user_input",
+        "source_url": "file:research/qa/backend-mvn-test.log#module-summaries",
+        "canonical": "backend-mvn-test.log | MVN_EXIT=0，BUILD SUCCESS。 | user_input | file:research/qa/backend-mvn-test.log#module-summaries",
+        "evidence_basis": "user_input"
+      },
+      {
+        "id": "fact_da926797c0d79b28",
+        "entity": "ui-vitest.log",
+        "aliases": [
+          "ui-vitest.log",
+          "Tests",
+          "Vitest"
+        ],
+        "claim": "Vitest 门禁 Tests 258 passed。",
+        "source_type": "user_input",
+        "source_url": "file:research/qa/ui-vitest.log#summary",
+        "canonical": "ui-vitest.log | Vitest 门禁 Tests 258 passed。 | user_input | file:research/qa/ui-vitest.log#summary",
+        "evidence_basis": "user_input"
+      }
+    ],
+    "gaps": [
+      "code-review-2026-11-24_dim06.md: contains footnote markers but no definitions",
+      "code-review-2026-11-24_dim08.md: contains footnote markers but no definitions",
+      "code-review-2026-11-24_final.md: contains footnote markers but no definitions",
+      "code-review-2026-11-24_evidence.json: evidence.20: status=unverified; excluded from downstream verified evidence",
+      "code-review-2026-11-24_evidence.json: no verified evidence for target entity 'dim02 Q-1'",
+      "code-review-2026-11-24_dim06.md: missing footnote definitions for A-Za-z0-9_-",
+      "code-review-2026-11-24_final.md: missing footnote definitions for A-Za-z0-9_-"
+    ],
+    "quality_summary": {
+      "quality_ok": false,
+      "issue_count": 3,
+      "warning_count": 4,
+      "actual_dimensions": 8,
+      "recommended_dimensions": 8
+    },
+    "context_files": [
+      "code-review-2026-11-24_cross_verification.md",
+      "code-review-2026-11-24_dim01.md",
+      "code-review-2026-11-24_dim02.md",
+      "code-review-2026-11-24_dim03.md",
+      "code-review-2026-11-24_dim04.md",
+      "code-review-2026-11-24_dim05.md",
+      "code-review-2026-11-24_dim06.md",
+      "code-review-2026-11-24_dim07.md",
+      "code-review-2026-11-24_dim08.md",
+      "code-review-2026-11-24_evidence.json",
+      "code-review-2026-11-24_file_analysis.md",
+      "code-review-2026-11-24_final.md",
+      "code-review-2026-11-24_insight.md"
+    ]
+  },
+  "evidence_schema_version": 1,
+  "evidence_file": "E:\\ai\\secs-simulator\\research\\code-review-2026-11-24_evidence.json",
+  "target_entity_count": 21,
+  "evidence_count": 21,
+  "verified_evidence_count": 20,
+  "conflicting_evidence_count": 0,
+  "unverified_evidence_count": 1,
+  "first_party_entity_count": 0,
+  "verified_evidence": [
+    {
+      "id": "fact_48802d153d1dc29b",
+      "entity": "ArchitectureTest.java",
+      "aliases": [
+        "ArchitectureTest.java",
+        "ArchitectureTest",
+        "coreNeverDependsOnOuterLayers",
+        "allowEmptyShould"
+      ],
+      "claim": "ArchitectureTest 规则 allowEmptyShould(true) 后 check(MAIN_CLASSES)。",
+      "source_url": "file:secs-simulator-service/secs-runtime/src/test/java/com/shimizukenta/secssim/arch/ArchitectureTest.java#L28-L39",
+      "source_type": "user_input",
+      "evidence_excerpt": "@Test\n    void coreNeverDependsOnOuterLayers() {\n        noClasses()\n                .that().resideInAPackage(\"com.shimizukenta.secssim.core..\")\n                .should().dependOnClassesThat().resideInAnyPackage(OUTER_LAYERS)\n                .allowEmptyShould(true)\n                .check(MAIN_CLASSES);\n    }",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "ArchitectureTest.java | ArchitectureTest 规则 allowEmptyShould(true) 后 check(MAIN_CLASSES)。 | user_input | file:secs-simulator-service/secs-runtime/src/test/java/com/shimizukenta/secssim/arch/ArchitectureTest.java#L28-L39",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_50ecb9b9a5716d3e",
+      "entity": "pom.xml",
+      "aliases": [
+        "pom.xml",
+        "maven.compiler.release",
+        "asm.version"
+      ],
+      "claim": "父 POM 设置 maven.compiler.release 为 25，ASM 版本钉为 9.11。",
+      "source_url": "file:secs-simulator-service/pom.xml#L37-L40",
+      "source_type": "user_input",
+      "evidence_excerpt": "<maven.compiler.release>25</maven.compiler.release>\n    <junit.version>5.11.4</junit.version>\n    <archunit.version>1.5.1</archunit.version>\n    <asm.version>9.11</asm.version>",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "pom.xml | 父 POM 设置 maven.compiler.release 为 25，ASM 版本钉为 9.11。 | user_input | file:secs-simulator-service/pom.xml#L37-L40",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_3a773de1d17350ef",
+      "entity": "AbstractHsmsSsCommunicator.java",
+      "aliases": [
+        "AbstractHsmsSsCommunicator.java",
+        "SELECT_REQ",
+        "LINKTEST_REQ",
+        "HsmsSsMessageType"
+      ],
+      "claim": "send switch 的 case 只有 SELECT_REQ 与 LINKTEST_REQ。",
+      "source_url": "file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/AbstractHsmsSsCommunicator.java#L481-L544",
+      "source_type": "user_input",
+      "evidence_excerpt": "switch ( HsmsSsMessageType.get(msg) ) {\n\t\t\tcase SELECT_REQ:\n\t\t\tcase LINKTEST_REQ: {\n\t\t\t\t\n\t\t\t\ttry {\n\t\t\t\t\tthis.replyMgr.entry(msg);\n\t\t\t\t\t\n\t\t\t\t\tthis.innerSend(msg);\n\t\t\t\t\t\n\t\t\t\t\tfinal HsmsSsMessage r = replyMgr.reply(\n\t\t\t\t\t\t\tmsg,\n\t\t\t\t\t\t\thsmsSsConfig().timeout().t6()\n\t\t\t\t\t\t\t).orElse(null);\n\t\t\t\t\t\n\t\t\t\t\tif ( r == null ) {\n\t\t\t\t\t\tthrow new HsmsSsTimeoutT6Exception(msg);\n\t\t\t\t\t} else {\n\t\t\t\t\t\treturn Optional.of(r);\n\t\t\t\t\t}",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "AbstractHsmsSsCommunicator.java | send switch 的 case 只有 SELECT_REQ 与 LINKTEST_REQ。 | user_input | file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/AbstractHsmsSsCommunicator.java#L481-L544",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_2b43c2c8f5eddc58",
+      "entity": "HsmsSsReplyMessageManager.java",
+      "aliases": [
+        "HsmsSsReplyMessageManager.java",
+        "matches",
+        "control"
+      ],
+      "claim": "HsmsSsReplyMessageManager 的 matches 对 control 分支直接 return true。",
+      "source_url": "file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/HsmsSsReplyMessageManager.java#L164-L169",
+      "source_type": "user_input",
+      "evidence_excerpt": "public boolean matches(HsmsSsMessage msg) {\n\t\t\tif ( this.control ) {\n\t\t\t\treturn true;\n\t\t\t}",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "HsmsSsReplyMessageManager.java | HsmsSsReplyMessageManager 的 matches 对 control 分支直接 return true。 | user_input | file:secs-simulator-service/secs-protocol/src/main/java/com/shimizukenta/secs/hsmsss/HsmsSsReplyMessageManager.java#L164-L169",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_857bfc69408f6824",
+      "entity": "BoundedValueSource.java",
+      "aliases": [
+        "BoundedValueSource.java",
+        "Bounds",
+        "F4",
+        "F8"
+      ],
+      "claim": "Bounds.of 对 F4 与 F8 共用 Double.MAX_VALUE，未按 Float.MAX_VALUE 收紧。",
+      "source_url": "file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/value/BoundedValueSource.java#L123",
+      "source_type": "user_input",
+      "evidence_excerpt": "static Bounds of(ValueType type) {\n            return switch (type) {\n                case U1 -> new Bounds(0.0, 255.0);\n                case U2 -> new Bounds(0.0, 65_535.0);\n                case U4 -> new Bounds(0.0, 4_294_967_295.0);\n                case U8 -> new Bounds(0.0, Math.nextDown((double) Long.MAX_VALUE));\n                case I1 -> new Bounds(-128.0, 127.0);\n                case I2 -> new Bounds(-32_768.0, 32_767.0);\n                case I4 -> new Bounds(-2_147_483_648.0, 2_147_483_647.0);\n                case I8 -> new Bounds((double) Long.MIN_VALUE, Math.nextDown((double) Long.MAX_VALUE));\n                case F4, F8 -> new Bounds(-Double.MAX_VALUE, Double.MAX_VALUE);\n                case ASCII, BOOLEAN, BINARY -> null;\n            };\n        }",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "BoundedValueSource.java | Bounds.of 对 F4 与 F8 共用 Double.MAX_VALUE，未按 Float.MAX_VALUE 收紧。 | user_input | file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/value/BoundedValueSource.java#L123",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_4f80bec14edfad78",
+      "entity": "EquipmentCompiler.java",
+      "aliases": [
+        "EquipmentCompiler.java",
+        "reportByQualified",
+        "resolved"
+      ],
+      "claim": "reportByQualified.put 写入 unit.name() 与 def.slot() 拼出的键。",
+      "source_url": "file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/compile/EquipmentCompiler.java#L255-L263",
+      "source_type": "user_input",
+      "evidence_excerpt": "ResolvedReport previous = this.reports.putIfAbsent(id, resolved);\n\n            if (previous != null) {\n                this.issues.add(Issue.error(\"DUPLICATE_REPORT\",\n                        \"RPTID \" + id + \" 重复: \" + previous.owner() + \".\" + previous.slot()\n                                + \" 与 \" + unit.name() + \".\" + def.slot()));\n            }\n\n            this.reportByQualified.put(unit.name() + \".\" + def.slot(), resolved);\n            this.reportByShort.computeIfAbsent(def.slot(), k -> new ArrayList<>()).add(resolved);",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "EquipmentCompiler.java | reportByQualified.put 写入 unit.name() 与 def.slot() 拼出的键。 | user_input | file:secs-simulator-service/secs-core/src/main/java/com/shimizukenta/secssim/core/compile/EquipmentCompiler.java#L255-L263",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_5700dc5598fda26a",
+      "entity": "RuntimeApi.java",
+      "aliases": [
+        "RuntimeApi.java",
+        "launcher.reload",
+        "persister.restore",
+        "ConfigException"
+      ],
+      "claim": "RuntimeApi 重载失败回滚只 catch ConfigException 与 IOException。",
+      "source_url": "file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/RuntimeApi.java#L481-L490",
+      "source_type": "user_input",
+      "evidence_excerpt": "this.launcher.reload(sessionId);\n            } catch (ConfigException | IOException failure) {\n                this.persister.restore(deviceId, before);",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "RuntimeApi.java | RuntimeApi 重载失败回滚只 catch ConfigException 与 IOException。 | user_input | file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/RuntimeApi.java#L481-L490",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_ea45a1e2eb223af8",
+      "entity": "SessionLauncher.java",
+      "aliases": [
+        "SessionLauncher.java",
+        "sources.remove",
+        "opened.close",
+        "RuntimeException"
+      ],
+      "claim": "SessionLauncher 注册失败 catch RuntimeException 后 sources.remove 并 opened.close。",
+      "source_url": "file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/SessionLauncher.java#L213-L224",
+      "source_type": "user_input",
+      "evidence_excerpt": "} catch (RuntimeException e) {\n                this.sources.remove(id);\n                opened.close();",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "SessionLauncher.java | SessionLauncher 注册失败 catch RuntimeException 后 sources.remove 并 opened.close。 | user_input | file:secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/SessionLauncher.java#L213-L224",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_f17ba0a50df4bba1",
+      "entity": "PlanExecutionRepository.java",
+      "aliases": [
+        "PlanExecutionRepository.java",
+        "runtime_plan_state",
+        "INSERT",
+        "fire_count"
+      ],
+      "claim": "PlanExecutionRepository 向 runtime_plan_state 的 INSERT VALUES 把 enabled 硬编码为 1。",
+      "source_url": "file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/PlanExecutionRepository.java#L224-L225",
+      "source_type": "user_input",
+      "evidence_excerpt": "\"INSERT INTO runtime_plan_state(device_id, plan_id, enabled, start_at, last_fire_at, \"\n                        + \"fire_count, skipped_count, last_error) VALUES(?,?,1,?,?,?,?,?) \"",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "PlanExecutionRepository.java | PlanExecutionRepository 向 runtime_plan_state 的 INSERT VALUES 把 enabled 硬编码为 1。 | user_input | file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/PlanExecutionRepository.java#L224-L225",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_756ac8416af46253",
+      "entity": "RuntimeStateRepository.java",
+      "aliases": [
+        "RuntimeStateRepository.java",
+        "runtime_svid_pin",
+        "runtime_plan_override",
+        "runtime_catalog_edit"
+      ],
+      "claim": "clearRuntimeEdits 只清 runtime_svid_pin、runtime_plan_override、runtime_catalog_edit 三张表，不清 runtime_plan_state。",
+      "source_url": "file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/RuntimeStateRepository.java#L525-L539",
+      "source_type": "user_input",
+      "evidence_excerpt": "for (String table : new String[] {\n                    \"runtime_svid_pin\", \"runtime_plan_override\", \"runtime_catalog_edit\" }) {",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "RuntimeStateRepository.java | clearRuntimeEdits 只清 runtime_svid_pin、runtime_plan_override、runtime_catalog_edit 三张表，不清 runtime_plan_state。 | user_input | file:secs-simulator-service/secs-store/src/main/java/com/shimizukenta/secssim/store/RuntimeStateRepository.java#L525-L539",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_a0d640417a2103f6",
+      "entity": "DeviceOpsPanel.tsx",
+      "aliases": [
+        "DeviceOpsPanel.tsx",
+        "backend.saveConfig",
+        "targetConfig"
+      ],
+      "claim": "DeviceOpsPanel 批量同步调用 backend.saveConfig(targetConfig, text, null)。",
+      "source_url": "file:secs-simulator-ui/src/features/panels/DeviceOpsPanel.tsx#L186",
+      "source_type": "user_input",
+      "evidence_excerpt": "const saved = await backend.saveConfig(targetConfig, text, null);",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "DeviceOpsPanel.tsx | DeviceOpsPanel 批量同步调用 backend.saveConfig(targetConfig, text, null)。 | user_input | file:secs-simulator-ui/src/features/panels/DeviceOpsPanel.tsx#L186",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_df61df5afe1c53e4",
+      "entity": "configs.ts",
+      "aliases": [
+        "configs.ts",
+        "If-Match",
+        "expectedModifiedMs"
+      ],
+      "claim": "前端 saveConfig 只在 expectedModifiedMs 非空时携带 If-Match 头。",
+      "source_url": "file:secs-simulator-ui/src/api/configs.ts#L201-L205",
+      "source_type": "user_input",
+      "evidence_excerpt": "async saveConfig(name, text, expectedModifiedMs) {\n    const headers: Record<string, string> = { 'Content-Type': 'text/plain; charset=utf-8' };\n    /* 快照带回来的 modifiedMs 经 If-Match 回去：期间被别人改过就 409，不静默覆盖 */\n    if (expectedModifiedMs != null) {\n      headers['If-Match'] = String(expectedModifiedMs);\n    }\n    const response = await request(apiUrl(`/api/v1/configs/${encodeURIComponent(name)}`), {\n      method: 'PUT',\n      headers,\n      body: text,",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "configs.ts | 前端 saveConfig 只在 expectedModifiedMs 非空时携带 If-Match 头。 | user_input | file:secs-simulator-ui/src/api/configs.ts#L201-L205",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_92b0bc14ed52c52f",
+      "entity": "useBackend.ts",
+      "aliases": [
+        "useBackend.ts",
+        "matched.length",
+        "sessions",
+        "targets"
+      ],
+      "claim": "useBackend 的 targets 在 matched.length 为 0 时取全部 sessions。",
+      "source_url": "file:secs-simulator-ui/src/state/useBackend.ts#L434-L437",
+      "source_type": "user_input",
+      "evidence_excerpt": "const targets = matched.length > 0 ? matched : sessions;",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "useBackend.ts | useBackend 的 targets 在 matched.length 为 0 时取全部 sessions。 | user_input | file:secs-simulator-ui/src/state/useBackend.ts#L434-L437",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_e2bacaa3d85378d0",
+      "entity": "useServerOps.ts",
+      "aliases": [
+        "useServerOps.ts",
+        "setTimeout",
+        "burstStatus"
+      ],
+      "claim": "burst 轮询 for (;;) 每 500ms setTimeout 后查 burstStatus，status.running 非 true 才返回。",
+      "source_url": "file:secs-simulator-ui/src/state/useServerOps.ts#L70-L91",
+      "source_type": "user_input",
+      "evidence_excerpt": "for (;;) {\n        await new Promise((resolve) => setTimeout(resolve, 500));\n        const status = await client.burstStatus(sessionId);\n        if (status.running !== true) {\n          return {\n            sent: status.sent ?? 0,\n            failed: status.failed ?? 0,\n            durationMs: status.durationMs ?? 0,\n            latencyP50: status.latencyP50 ?? 0,\n            latencyP95: status.latencyP95 ?? 0,\n            latencyMax: status.latencyMax ?? 0,\n          };\n        }\n        if (Date.now() > deadline) {\n          throw new Error('压测仍未结束（服务端可能仍在执行，可稍后重试或查看服务端日志）');\n        }\n      }",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "useServerOps.ts | burst 轮询 for (;;) 每 500ms setTimeout 后查 burstStatus，status.running 非 true 才返回。 | user_input | file:secs-simulator-ui/src/state/useServerOps.ts#L70-L91",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_5422e90649e59bbc",
+      "entity": "openapi.yaml",
+      "aliases": [
+        "openapi.yaml",
+        "openapi"
+      ],
+      "claim": "openapi.yaml 共 71 个 path，$ref 全部可解析。",
+      "source_url": "file:secs-simulator-service/scripts/openapi.yaml#paths",
+      "source_type": "user_input",
+      "evidence_excerpt": "[OK] E:\\ai\\secs-simulator\\secs-simulator-service\\scripts\\openapi.yaml: 71 个 path，$ref 全部可解析",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "openapi.yaml | openapi.yaml 共 71 个 path，$ref 全部可解析。 | user_input | file:secs-simulator-service/scripts/openapi.yaml#paths",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_d7a65e2c654a0f13",
+      "entity": "DeviceRuntimeHandler.java",
+      "aliases": [
+        "DeviceRuntimeHandler.java",
+        "apply-sections",
+        "parts"
+      ],
+      "claim": "parts.length == 2 且 parts[1] equals apply-sections 时进入该分支。",
+      "source_url": "file:secs-simulator-service/secs-api-http/src/main/java/com/shimizukenta/secssim/api/http/DeviceRuntimeHandler.java#L67-L172",
+      "source_type": "user_input",
+      "evidence_excerpt": "if (parts.length == 2 && \"apply-sections\".equals(parts[1]) && !parts[0].isBlank()) {\n            this.handleApplySectionsV2(ex, parts[0]);\n            return;",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "DeviceRuntimeHandler.java | parts.length == 2 且 parts[1] equals apply-sections 时进入该分支。 | user_input | file:secs-simulator-service/secs-api-http/src/main/java/com/shimizukenta/secssim/api/http/DeviceRuntimeHandler.java#L67-L172",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_3b92754866c20ed1",
+      "entity": "README.md",
+      "aliases": [
+        "README.md",
+        "secs-store",
+        "sqlite-jdbc"
+      ],
+      "claim": "README 模块表把 secs-store 的依赖写为 core + json + sqlite-jdbc。",
+      "source_url": "file:README.md#L29",
+      "source_type": "user_input",
+      "evidence_excerpt": "含 2.x JSON 的一次性迁移 | core + json + sqlite-jdbc |",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "README.md | README 模块表把 secs-store 的依赖写为 core + json + sqlite-jdbc。 | user_input | file:README.md#L29",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_345931da70211be0",
+      "entity": "main.rs",
+      "aliases": [
+        "main.rs",
+        "CommandExt"
+      ],
+      "claim": "main.rs 使用 std::os::windows::process::CommandExt 的 creation_flags。",
+      "source_url": "file:secs-simulator-gui/src-tauri/src/main.rs#L292-L295",
+      "source_type": "user_input",
+      "evidence_excerpt": "use std::os::windows::process::CommandExt;\n        command.creation_flags(0x0800_0000);",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "main.rs | main.rs 使用 std::os::windows::process::CommandExt 的 creation_flags。 | user_input | file:secs-simulator-gui/src-tauri/src/main.rs#L292-L295",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_d3b17925ced8af0e",
+      "entity": "backend-mvn-test.log",
+      "aliases": [
+        "backend-mvn-test.log",
+        "MVN_EXIT",
+        "mvn"
+      ],
+      "claim": "MVN_EXIT=0，BUILD SUCCESS。",
+      "source_url": "file:research/qa/backend-mvn-test.log#module-summaries",
+      "source_type": "user_input",
+      "evidence_excerpt": "MVN_EXIT=0\n[INFO] BUILD SUCCESS",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "backend-mvn-test.log | MVN_EXIT=0，BUILD SUCCESS。 | user_input | file:research/qa/backend-mvn-test.log#module-summaries",
+      "evidence_basis": "user_input"
+    },
+    {
+      "id": "fact_da926797c0d79b28",
+      "entity": "ui-vitest.log",
+      "aliases": [
+        "ui-vitest.log",
+        "Tests",
+        "Vitest"
+      ],
+      "claim": "Vitest 门禁 Tests 258 passed。",
+      "source_url": "file:research/qa/ui-vitest.log#summary",
+      "source_type": "user_input",
+      "evidence_excerpt": "Tests 258 passed (258)",
+      "confidence": "high",
+      "status": "verified",
+      "canonical": "ui-vitest.log | Vitest 门禁 Tests 258 passed。 | user_input | file:research/qa/ui-vitest.log#summary",
+      "evidence_basis": "user_input"
+    }
+  ]
+}

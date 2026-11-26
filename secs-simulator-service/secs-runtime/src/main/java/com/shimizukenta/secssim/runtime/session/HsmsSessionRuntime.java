@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.shimizukenta.secs.SecsCommunicator;
@@ -39,17 +38,8 @@ import com.shimizukenta.secssim.core.value.ValueSource;
 import com.shimizukenta.secssim.core.value.ValueStore;
 
 /**
- * 用 HSMS-SS 实现一个设备会话。
- *
- * <p>能力边界：</p>
- * <ul>
- *   <li>S1F1 → S1F2（链路自检）</li>
- *   <li>S1F3 → S1F4（按 SVID 列表取当前值，值来自 {@link ValueSource}）</li>
- *   <li>S6F11（主动上报采集事件，可手动触发，也可按编排表自动触发）</li>
- * </ul>
- *
- * <p>设备级限流与"单飞"都在这里：某个单元剧本配错时，不能把主机打爆。
- * </p>
+ * 用 HSMS-SS 实现一个设备会话：S1F1→S1F2、S1F3→S1F4（值来自 {@link ValueSource}）、
+ * S6F11 主动上报（手动/编排触发）。设备级限流与"单飞"在这里——单元剧本配错不能把主机打爆。
  */
 public final class HsmsSessionRuntime implements SessionRuntime {
     private static final long RATE_WINDOW_MS = 1_000L;
@@ -84,12 +74,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /** 保护一次 pump 的完整状态推进，见 {@link #pumpNow()}。 */
     private final Object pumpLock = new Object();
 
-    /**
-     * 设备常量（ECV）当前值，按 ECID 索引。
-     *
-     * <p>初值来自配置；主机 S2F15 写入后这里是"新值"，并由 {@link #constantSaver}
-     * 写回配置文件，所以重载/重启后仍然保留。</p>
-     */
+    /** 设备常量（ECV）当前值：初值来自配置，S2F15 写入后经 constantSaver 落盘，重载/重启保留。 */
     private final Map<Integer, EquipmentConstantDef> constants;
 
     /** 主机侧报文（S2 家族）的协议翻译协作者。 */
@@ -157,8 +142,6 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     private final Rng eventRng;
 
     final AtomicReference<SessionState> state = new AtomicReference<>(SessionState.CREATED);
-    private final AtomicLong emitted = new AtomicLong();
-    private final AtomicLong wbitDropped = new AtomicLong();
 
     volatile SecsCommunicator communicator;
     private volatile boolean s6f11Wbit;
@@ -167,12 +150,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     volatile ExecutorService ackSender;
     /** 单线程串行等 S6F2：Trace 采样不能被 ACK 阻塞。 */
     volatile ExecutorService traceAckSender;
-    /**
-     * 单线程串行等 S5F2：报警的 ACK 等待必须与 S6F11 分开。
-     *
-     * <p>共用一个 ACK 线程时，主机不回 S5F2 会让后续所有 S6F11 的 W 位发送排队，
-     * 队列满后成批丢弃采集事件——一条报警就能把事件流堵死。</p>
-     */
+    /** 单线程串行等 S5F2：与 S6F11 分池——共用时主机不回 S5F2 会把事件流堵死。 */
     volatile ExecutorService alarmAckSender;
 
     /** 诊断信息：lastError 与 overview 事件速率。 */
@@ -203,38 +181,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this(spec, model, EngineClock.system(), null);
     }
 
-    /**
-     * 创建会话。
-     *
-     * @param spec  会话参数
-     * @param model 已解析的设备模型
-     * @param clock 仿真时钟（测试可注入手动时钟以获得确定性）
-     */
+    /** 创建会话；clock 可注入手动时钟以获得确定性（测试用）。 */
     public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock) {
         this(spec, model, clock, null);
     }
 
-    /**
-     * 创建会话，并指定值来源（例如用模板 DAG 驱动）。
-     *
-     * @param spec   会话参数
-     * @param model  已解析的设备模型
-     * @param clock  仿真时钟
-     * @param values 值来源；传 {@code null} 表示用默认曲线
-     */
+    /** 创建会话并指定值来源；values 传 null 用默认曲线。 */
     public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock, ValueSource values) {
         this(spec, model, clock, values, spec.traceLimits());
     }
 
-    /**
-     * 创建会话（全参数）。
-     *
-     * @param spec        会话参数
-     * @param model       已解析的设备模型
-     * @param clock       仿真时钟
-     * @param values      值来源；传 {@code null} 表示用默认曲线
-     * @param traceLimits Trace 容量限制（{@code null} 用默认）
-     */
+    /** 创建会话（带 Trace 容量限制；traceLimits 传 null 用默认）。 */
     public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock,
                               ValueSource values,
                               TraceLimits traceLimits) {
@@ -242,17 +199,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 创建会话（全参数 + 工艺周期）。
-     *
-     * @param spec           会话参数
-     * @param model          已解析的设备模型
-     * @param clock          仿真时钟
-     * @param values         值来源；传 {@code null} 表示用默认曲线
-     * @param traceLimits    Trace 容量限制（{@code null} 用默认）
-     * @param cycle          cycle 配置段（{@code null} = 没有 cycle 段，周期无从启动）
-     * @param lifecycleClock 生命周期周期时钟——必须与 {@code values} 内部用的是<b>同一个实例</b>，
-     *                       值随周期启停（2026-11-16 设计 §5.2）；传 {@code null} 时
-     *                       runner 用独立的直通时钟（仅状态展示，不影响值）
+     * 创建会话（全参数 + 工艺周期）。cycle 传 null = 没有 cycle 段；
+     * lifecycleClock 必须与 values 内部用的是<b>同一个实例</b>（值随周期启停，设计 §5.2），
+     * 传 null 时 runner 用独立直通时钟（仅状态展示，不影响值）。
      */
     public HsmsSessionRuntime(SessionSpec spec, ResolvedEquipment model, EngineClock clock,
                               ValueSource values,
@@ -349,32 +298,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.ticker = new EventTicker("events-" + spec.id());
         this.edits = new RuntimeEditsFacade(this.catalog, () -> this.model, () -> this.pinnedValues);
         this.constantStore = new ConstantStore(this.constants);
-        this.metrics = new SessionMetrics(
-                () -> this.eventReporter.emitted(),
-                () -> this.scheduler.rejectedCount(),
-                () -> this.scheduler.skippedCount(),
-                () -> this.eventReporter.wbitDropped(),
-                () -> this.tracePump.wbitDropped(),
-                () -> this.terminalInbox == null ? 0L : this.terminalInbox.received(),
-                () -> this.alarmReporter.alarmsSent(),
-                () -> this.alarmReporter.alarmDropped(),
-                () -> (long) this.alarmReporter.alarms().size(),
-                () -> this.tracePump.framesSent(),
-                () -> this.tracePump.activeCount(),
-                () -> (long) this.hostReports.reportCount(),
-                () -> (long) this.hostReports.linkCount(),
-                () -> this.dispatcher == null ? 0L : this.dispatcher.s9Replies(),
-                () -> this.spec.id(),
-                () -> this.state().name(),
-                () -> this.control.state().name(),
-                () -> this.control.communicatable(),
-                () -> this.model.name(),
-                () -> this.spec.equipment().units().size(),
-                () -> this.spec.port(),
-                () -> this.msgRate.countInWindow(System.currentTimeMillis()),
-                () -> this.diagnostics.eventRate().countInWindow(System.currentTimeMillis()),
-                () -> this.diagnostics.lastEventAtMs(),
-                () -> this.openedAtMs);
+        this.metrics = SessionMetricsWiring.create(this);
         this.svidReader = new SvidReader(() -> this.model,
                 () -> this.values,
                 () -> this.communicator,
@@ -429,12 +353,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 设置 S6F11 是否带 W 位并等待 S6F12。
-     *
-     * <p>默认 {@code false}：多数设备不要求主机逐条 ACK，带 W 位会让每次上报
-     * 阻塞到 S6F12 或 T3。开启后发送放到单线程队列，不占用事件心跳。</p>
-     *
-     * @param enabled 是否启用
+     * S6F11 是否带 W 位等 S6F12（默认 false：逐条 ACK 会阻塞到 T3；开启走单线程队列）。
+     * W 位变化 = 参数变化 → 全停（设计 D6）。
      */
     public void collectionEventWbit(boolean enabled) {
         boolean previous = this.s6f11Wbit;
@@ -445,14 +365,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
     }
 
-    /**
-     * 设置 S6F1 是否带 W 位并等待 S6F2。
-     *
-     * <p>与 S6F11 相同的取舍：默认 {@code false}，开启后发送放到独立单线程队列，
-     * 不阻塞 Trace 采样与 100ms 心跳。</p>
-     *
-     * @param enabled 是否启用
-     */
+    /** S6F1 是否带 W 位等 S6F2（取舍同 S6F11：默认 false，开启走独立队列不阻塞采样）。 */
     public void traceWbit(boolean enabled) {
         boolean previous = this.s6f1Wbit;
         this.tracePump.s6f1Wbit(enabled);
@@ -462,41 +375,22 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
     }
 
-    /**
-     * 值存储（诊断与测试用）。
-     *
-     * @return 值存储
-     */
+    /** 值存储（诊断与测试用）。 */
     public ValueStore valueStore() {
         return this.store;
     }
 
-    /**
-     * 已解析的设备模型。
-     *
-     * @return 模型
-     */
+    /** 已解析的设备模型。 */
     public ResolvedEquipment model() {
         return this.model;
     }
 
-    /**
-     * 值来源（诊断与预览用）。
-     *
-     * @return 值来源
-     */
+    /** 值来源（诊断与预览用）。 */
     public ValueSource valueSource() {
         return this.values;
     }
 
-    /**
-     * 曲线预览：分桶 min/max 包络 + avg 线。计算与序列化在 {@link PreviewSupport}。
-     *
-     * @param fromMs  起始时刻
-     * @param toMs    结束时刻
-     * @param buckets 桶数（1..500）
-     * @return JSON 文本
-     */
+    /** 曲线预览：分桶 min/max 包络 + avg 线（buckets 1..500）；计算与序列化在 {@link PreviewSupport}。 */
     @Override
     public String previewJson(long fromMs, long toMs, int buckets) {
         return previewJson(fromMs, toMs, buckets, java.util.Set.of(), true);
@@ -521,14 +415,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 手动发送一条 SML 报文。
-     *
-     * <p>解析失败是调用方的问题（400），会话没有对端是设备状态（409），
-     * 协议层发送失败才是 500。三者不能混成一个 "send failed"。</p>
-     *
-     * @param sml SML 文本
-     * @return 发送结果 JSON
-     * @throws IOException 发送失败
+     * 手动发送一条 SML 报文：解析失败 400、没有对端 409、协议层发送失败 500，
+     * 三者不能混成一个 "send failed"。
      */
     @Override
     public String sendSml(String sml) throws IOException {
@@ -545,11 +433,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.notifier.noticeBus(bus);
     }
 
-    /**
-     * 迁移控制状态并在变化时发布通知。
-     *
-     * @param next 新状态
-     */
+    /** 迁移控制状态并在变化时发布通知；离开 ONLINE 一律全停（设计 §2.1-4/5）。 */
     void changeControlState(EquipmentControlState next) {
         this.control.change(next);
         /* 生命周期全停（2026-11-16 设计 §2.1-4/5）：离开 ONLINE 一律全停——
@@ -561,11 +445,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 全停钩子（2026-11-16 设计 §2.1）：事件编排计划与工艺周期一律回到 stopped。
-     *
-     * <p>清单：会话新建 / 配置重建（经 enableSchedule）、热重载、控制状态离开 ONLINE、
-     * 链路相位脱离 SELECTED、参数变化（W 位 / 限流 / 主机 S2F15 写设备常量 /
-     * 界面钉值与取消钉值）。清启用态、去抖进度、延迟链；cycle 回第 0 片待启动。</p>
+     * 全停钩子（设计 §2.1）：计划与工艺周期回 stopped。触发面：新建/重建/热重载/
+     * 离开 ONLINE/脱离 SELECTED/参数变化（W 位、限流、S2F15、钉值）。清启用态/去抖/延迟链。
      */
     public void stopAllPlans() {
         this.scheduler.stopAll();
@@ -578,14 +459,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 接入 v7 数据模型：晶圆属性表 + 设备常量取值器。
-     *
-     * <p>装配器持有的是引用而不是快照：热生效时整体替换这两份，
-     * S6F11 下一次组装立刻用新的属性/常量，不必重建会话。</p>
-     *
-     * @param context 晶圆属性表
-     * @param ecids   设备常量取值器
-     * @return this
+     * 接入 v7 数据模型（晶圆属性表 + 设备常量取值器）：装配器持有引用而非快照，
+     * 热生效整体替换后下一次 S6F11 立刻用新值，不必重建会话。
      */
     public HsmsSessionRuntime dataModel(com.shimizukenta.secssim.core.context.ContextTable context,
                                         EcidValues ecids) {
@@ -598,23 +473,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.scheduler.enableSchedule(schedule, maxEventsPerSec);
     }
 
-    /** 运行时编排表视图（界面用）。 */
+    /** 运行时编排表视图（界面用）；计划归属按设备模型反查（ceidOwner）。 */
     public String eventsJson() {
-        /* 计划的归属 = 它引用的 CEID 的归属：按设备模型反查，不另存一份 */
         return this.scheduler.eventsJson(this::ceidOwner);
     }
 
-    /**
-     * 编排表 + 运行统计（v2 计划页：倒计时与「启用后确实在跑」的证据）。
-     *
-     * @param stats planId → 运行统计；null = 不带统计
-     * @return JSON 文本
-     */
+    /** 编排表 + 运行统计（v2 计划页：倒计时与「启用后确实在跑」的证据）；stats 为 null 不带统计。 */
     public String eventsJson(java.util.Map<String, PlanRuntimeStat> stats) {
         return this.scheduler.eventsJson(this::ceidOwner, stats);
     }
 
-    /** CEID → 归属单元名；查不到（被主机的 S2F33 覆盖掉、或模型已换）返回空串。 */
+    /** CEID → 归属单元名；查不到（被主机 S2F33 覆盖、或模型已换）返回空串。 */
     private String ceidOwner(int ceid) {
         ResolvedEquipment current = this.model;
         ResolvedCeid resolved = current == null ? null : current.ceids().get(ceid);
@@ -622,11 +491,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 运行时启停一个计划（2026-11-16 设计 §2.2）。
-     *
-     * <p>启用方向有 ONLINE 门控：链路 SELECTED 且控制状态 ONLINE 才允许，
-     * 否则 {@link PlanEnableOutcome#NOT_ONLINE}（HTTP 409 not-online）。
-     * 启用成功时周期计划立即触发一次（锚点 = 此刻）。</p>
+     * 运行时启停一个计划（2026-11-16 设计 §2.2）：启用方向有 ONLINE 门控
+     * （SELECTED 且 ONLINE 才允许，否则 NOT_ONLINE → HTTP 409）；启用成功周期计划立即触发一次。
      */
     public PlanEnableOutcome setEventEnabled(String planId, boolean enabled) {
         if (enabled && !this.control.canSendUnsolicited()) {
@@ -641,32 +507,17 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.scheduler.nextFireAt(planId);
     }
 
-    /**
-     * 工艺周期是否正在跑。
-     *
-     * <p>分段保存的守卫用它：只有运行中的周期才需要保护被其 CEID 引用的
-     * SVID / 晶圆属性（2026-11-18 设计 §3.1 守卫 B）。</p>
-     *
-     * @return true = {@code RUNNING}
-     */
+    /** 工艺周期是否 RUNNING（分段保存守卫 B 用：运行中的周期才保护被引用项）。 */
     public boolean cycleRunning() {
         return this.cycleRunner != null && this.cycleRunner.running();
     }
 
-    /**
-     * 工艺周期运行态 JSON（cycle 页运行卡）。
-     *
-     * @return {@code {"state","startedAt","waferIndex","phaseMs","totalWafers","firedCount","hasCycle"}}
-     */
+    /** 工艺周期运行态 JSON（cycle 页运行卡）。 */
     public String cycleJson() {
         return this.cycleRunner.stateJson();
     }
 
-    /**
-     * 启动工艺周期（ONLINE 门控同计划启停；锚点 = 点击时刻）。
-     *
-     * @return NOT_ONLINE = 设备离线；NO_CYCLE = 配置里没有 cycle 段
-     */
+    /** 启动工艺周期（ONLINE 门控同计划启停；锚点 = 点击时刻）；NOT_ONLINE / NO_CYCLE 见返回值。 */
     public PlanEnableOutcome cycleStart() {
         if (!this.control.canSendUnsolicited()) {
             return PlanEnableOutcome.NOT_ONLINE;
@@ -680,7 +531,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.cycleRunner.stop();
     }
 
-    /** 运行时编排表视图（界面用）。 */
+    /** 运行时新增编排计划（不写回配置）。 */
     public synchronized boolean addEventPlan(EventPlan plan) {
         return this.scheduler.addEventPlan(plan);
     }
@@ -709,17 +560,9 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * 不断连热生效（2026-11-16 设计全量签名）。
-     *
-     * <p>编排 / 限流 / W 位 / 设备模型 / 值来源之外，再把晶圆属性表、设备常量
-     * 取值器（修 P0：热路径丢弃新编译结果）与工艺周期（配置 + 生命周期时钟）
-     * 一起换掉；值来源重建后时钟回 STOPPED——热重载本身就是全停事件（§2.1-3），
-     * 计划启用态经 enableSchedule 清空，cycle 待手动启动。</p>
-     *
-     * @param contextTable   新晶圆属性表；{@code null} = 保持现状（兼容旧调用方）
-     * @param ecidValues     新设备常量取值器；{@code null} = 保持现状
-     * @param cycle          新 cycle 配置；{@code null} = 配置里没有 cycle 段
-     * @param lifecycleClock 新生命周期时钟（与 {@code values} 同实例）
+     * 不断连热生效（全量签名）：编排/限流/W 位/模型/值来源 + 晶圆属性表/常量取值器/工艺周期
+     * 一起换；热重载是全停事件（§2.1-3），cycle 待手动启动。
+     * contextTable/ecidValues 传 null = 保持现状；lifecycleClock 与 values 同实例。
      */
     public void applyHot(EventSchedule schedule, int maxEventsPerSec,
                          boolean s6f11Wbit, boolean s6f1Wbit,
@@ -728,92 +571,41 @@ public final class HsmsSessionRuntime implements SessionRuntime {
                          EcidValues ecidValues,
                          CycleConfig cycle,
                          LifecycleCycleClock lifecycleClock) {
-        ValueSource next = this.hotReloader.apply(schedule, maxEventsPerSec,
-                s6f11Wbit, s6f1Wbit, model, values, contextTable, ecidValues);
-        /* 热重载换掉值来源时，「设定」随旧配置一起失效：新来源没有设定层。
-           评审 HIGH-3：apply 内部已把裸来源 set 进读路径句柄——这里必须把
-           「设定」包装器重新 set 回去，否则热重载后钉值写进没人读的实例 */
-        PinnedValueSource pinned = next instanceof PinnedValueSource p
-                ? p : new PinnedValueSource(next);
-        this.pinnedValues = pinned;
-        this.values.set(pinned);
-        /* cycle 配置与生命周期时钟一起换：装载即回 STOPPED，与"热重载全停"同构（D12） */
-        this.cycleRunner.reconfigure(cycle, lifecycleClock != null
-                ? lifecycleClock
-                : new LifecycleCycleClock(
-                        com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
-                        LifecycleCycleClock.State.RUNNING));
+        /* 多步替换与心跳共用 pumpLock（评审 2026-11-24 P2-1）：各步独立加锁时，
+           一个 tick 可能拿到新组装器+旧值来源的混合快照；整段持锁让替换原子可见。 */
+        synchronized (this.pumpLock) {
+            ValueSource next = this.hotReloader.apply(schedule, maxEventsPerSec,
+                    s6f11Wbit, s6f1Wbit, model, values, contextTable, ecidValues);
+            /* 热重载换掉值来源时，「设定」随旧配置一起失效：新来源没有设定层。
+               评审 HIGH-3：apply 内部已把裸来源 set 进读路径句柄——这里必须把
+               「设定」包装器重新 set 回去，否则热重载后钉值写进没人读的实例 */
+            PinnedValueSource pinned = next instanceof PinnedValueSource p
+                    ? p : new PinnedValueSource(next);
+            this.pinnedValues = pinned;
+            this.values.set(pinned);
+            /* cycle 配置与生命周期时钟一起换：装载即回 STOPPED，与"热重载全停"同构（D12） */
+            this.cycleRunner.reconfigure(cycle, lifecycleClock != null
+                    ? lifecycleClock
+                    : new LifecycleCycleClock(
+                            com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
+                            LifecycleCycleClock.State.RUNNING));
+        }
     }
 
-    /**
-     * 这次分段保存要动哪些运行态部件。
-     *
-     * <p>关键区分（2026-11-18 真机验守卫 B 后收紧）：</p>
-     * <ul>
-     *   <li>{@code structure}——单元/号段变了，旧编排、旧视图、旧引用全部不再成立，
-     *       只有这一档要求"全停"；</li>
-     *   <li>{@code catalog}——变量 / 报告 / 事件目录变了，要换模型视图、重建值来源与编排，
-     *       但计划与周期可以照跑（未被引用的项按口径「可热改」）。</li>
-     * </ul>
-     *
-     * <p>引用完整性不靠这里兜：删掉/改名被报告、周期、计划引用的对象，
-     * 整份编译会在写盘前就 422 拦下，走不到 apply。</p>
-     *
-     * @param changed 实际变化的段
-     */
+    /** 分段生效判定（从本类抽到 SectionApplySupport；此处保留别名兼容既有引用）。 */
     record SectionEffects(
-            boolean structure,
-            boolean catalog,
-            boolean values,
-            boolean schedule,
-            boolean throttle,
-            boolean data,
-            boolean cycle) {
-
+            boolean structure, boolean catalog, boolean values,
+            boolean schedule, boolean throttle, boolean data, boolean cycle) {
         static SectionEffects of(java.util.Set<com.shimizukenta.secssim.runtime.ConfigSection> changed) {
-            boolean structure = changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.STRUCTURE);
-            boolean catalog = changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.SVIDS)
-                    || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.REPORTS)
-                    || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CEIDS);
-            boolean views = structure || catalog;
-            return new SectionEffects(
-                    structure,
-                    catalog,
-                    /* 值来源与工艺周期共享同一个生命周期时钟：只改周期配置也必须重建值来源，
-                       否则周期停了、曲线还在走（设计 §5.2）。钉值按 SVID 迁移，删掉的丢弃。 */
-                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CYCLE),
-                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.PLANS),
-                    views || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.THROTTLE),
-                    views
-                            || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CONTEXT)
-                            || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CONSTANTS),
-                    structure || changed.contains(com.shimizukenta.secssim.runtime.ConfigSection.CYCLE));
+            SectionApplySupport.SectionEffects fx = SectionApplySupport.SectionEffects.of(changed);
+            return new SectionEffects(fx.structure(), fx.catalog(), fx.values(),
+                    fx.schedule(), fx.throttle(), fx.data(), fx.cycle());
         }
     }
 
     /**
-     * 按配置段最小生效（2026-11-18 设计 §4、§8）。
-     *
-     * <p>与 {@link #applyHot} 的区别：那个是「重建会话 / 模型换了」的全量替换，
-     * 一律全停；这里只动真正变化的段——只改事件计划时，没改过的计划保留启用态
-     * 与锚点、周期照跑；只改工艺周期时，周期回停止但计划、钉值、计数不动。</p>
-     *
-     * <p>设备结构段变化才做全量热重置：单元/号段换了，旧视图、旧编排、旧引用都不再有效。
-     * 变量 / 报告 / 事件目录变化只换模型视图、重建值来源与编排，计划与周期照跑
-     * （口径「未被引用的项可热改」）。</p>
-     *
-     * @param model          新设备模型
-     * @param values         新值来源；{@code null} = 回落设备默认曲线
-     * @param schedule       新编排表
-     * @param maxPerSec      新限流
-     * @param s6f11Wbit      S6F11 W 位
-     * @param s6f1Wbit       S6F1 W 位
-     * @param contextTable   新晶圆属性表；{@code null} = 保持现状
-     * @param ecidValues     新设备常量取值器；{@code null} = 保持现状
-     * @param cycle          新 cycle 配置；{@code null} = 配置里没有 cycle 段
-     * @param lifecycleClock 新生命周期时钟（与 values 同实例）
-     * @param changed        实际变化的段（由保存结果给出）
-     * @return 这次动了哪些东西
+     * 按配置段最小生效（设计 §4/§8）；实现在 {@link SectionApplySupport}。
+     * 与 applyHot（全量替换一律全停）不同：只动真正变化的段（评审 2026-11-24 A1 拆分）。
      */
     public SectionApplyOutcome applySections(
             ResolvedEquipment model, ValueSource values,
@@ -822,89 +614,12 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             EcidValues ecidValues, CycleConfig cycle,
             LifecycleCycleClock lifecycleClock,
             java.util.Set<com.shimizukenta.secssim.runtime.ConfigSection> changed) {
-
-        SectionEffects fx = SectionEffects.of(changed);
-        boolean modelChanged = fx.structure();
-        boolean catalogChanged = fx.catalog();
-        boolean valuesChanged = fx.values();
-        boolean scheduleChanged = fx.schedule();
-        boolean throttleChanged = fx.throttle();
-        boolean dataChanged = fx.data();
-        boolean cycleChanged = fx.cycle();
-
-        /* --- 1. 模型与视图：结构变了先全停；只是目录（变量/报告/事件）变则换视图、运行不动 --- */
-        if (modelChanged || catalogChanged) {
-            this.model = model;
-            this.modelViews.refresh(model);
-        }
-        if (modelChanged) {
-            this.stopAllPlans();
-        }
-
-        /* --- 2. 值来源：重建后把钉值搬过去（只搬新模型里还存在的 SVID） --- */
-        int pinsDropped = 0;
-        if (valuesChanged) {
-            ValueSource base = values;
-            if (base == null) {
-                DefaultCurves.bind(this.store, this.spec.equipment(), model);
-                base = new CurveValueSource(this.store);
-            }
-            java.util.Map<Integer, Double> pins = this.pinnedValues == null
-                    ? java.util.Map.of() : this.pinnedValues.pins();
-            PinnedValueSource next = new PinnedValueSource(base);
-            for (java.util.Map.Entry<Integer, Double> entry : pins.entrySet()) {
-                if (base.svids().contains(entry.getKey())) {
-                    next.pin(entry.getKey(), entry.getValue());
-                } else {
-                    pinsDropped += 1;
-                }
-            }
-            this.pinnedValues = next;
-            this.values.set(next);
-        }
-
-        /* --- 3. 编排：模型换了走全停装载；只改计划则保留未改动计划的启用态 --- */
-        int plansKept = 0;
-        if (scheduleChanged) {
-            if (modelChanged) {
-                this.scheduler.enableSchedule(schedule, maxPerSec);
-            } else {
-                this.scheduler.replaceSchedulePreservingState(schedule, maxPerSec);
-                plansKept = this.scheduler.enabledCount();
-            }
-        } else if (throttleChanged) {
-            this.scheduler.maxPerSec(maxPerSec);
-        }
-
-        /* --- 4. W 位 --- */
-        if (throttleChanged) {
-            this.collectionEventWbit(s6f11Wbit);
-            this.traceWbit(s6f1Wbit);
-        }
-
-        /* --- 5. 晶圆属性 / 设备常量：装配器持有引用，换掉下一次 S6F11 就生效 --- */
-        if (dataChanged && contextTable != null && ecidValues != null) {
-            this.modelViews.dataModel(contextTable, ecidValues);
-        }
-
-        /* --- 6. 工艺周期：配置换了就回 STOPPED，等操作员手动重新启动 --- */
-        if (cycleChanged) {
-            this.cycleRunner.reconfigure(cycle, lifecycleClock != null
-                    ? lifecycleClock
-                    : new LifecycleCycleClock(
-                            com.shimizukenta.secssim.core.cycle.CycleClock.passthrough(),
-                            LifecycleCycleClock.State.RUNNING));
-        }
-
-        return new SectionApplyOutcome(modelChanged, catalogChanged, valuesChanged, scheduleChanged,
-                throttleChanged, dataChanged, cycleChanged, pinsDropped, plansKept);
+        return SectionApplySupport.applySections(this.sectionParts,
+                model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit,
+                contextTable, ecidValues, cycle, lifecycleClock, changed);
     }
 
-    /**
-     * 「设定」一个状态变量的值：钉住,覆盖曲线与事件效果,直到取消设定或热重载。
-     *
-     * <p>钉值 = 参数变化 → 全停（2026-11-16 设计 D6 清单第 6 条）。</p>
-     */
+    /** 「设定」状态变量：钉住覆盖曲线，直到取消或热重载；钉值 = 参数变化 → 全停（D6）。 */
     public boolean pinSvidValue(int svid, double value) {
         boolean pinned = this.edits.pinSvidValue(svid, value);
         if (pinned) {
@@ -971,56 +686,31 @@ public final class HsmsSessionRuntime implements SessionRuntime {
 
     
 
-    /**
-     * 已上报的 S6F11 条数。
-     *
-     * @return 条数
-     */
+    /** 已上报的 S6F11 条数。 */
     public long emittedCount() {
         return this.eventReporter.emitted();
     }
 
-    /**
-     * 因限流被丢弃的条数。
-     *
-     * @return 条数
-     */
+    /** 因限流被丢弃的条数。 */
     public long rejectedCount() {
         return this.scheduler.rejectedCount();
     }
 
-    /**
-     * 已发送的 S6F1 报文数。
-     *
-     * @return 条数
-     */
+    /** 已发送的 S6F1 报文数。 */
     public long traceFramesSent() {
         return this.tracePump.framesSent();
     }
 
-    /**
-     * 活跃的 Trace 数量。
-     *
-     * @return 数量
-     */
+    /** 活跃的 Trace 数量。 */
     public int activeTraces() {
         return this.tracePump.activeCount();
     }
 
     /**
-     * 立即处理一次到期的工作（事件上报 + Trace 采样）。
+     * 立即处理一次到期工作（事件上报 + Trace 采样）；100ms 心跳驱动，测试可确定性步进。
      *
-     * <p>正常情况下由 100ms 心跳驱动；暴露出来是为了让测试与"确定性步进"场景
-     * 能精确控制推进节奏，而不是靠 sleep 赌时序。
-     * </p>
-     *
-     * <p><b>整体互斥</b>：心跳线程与外部线程（测试、确定性步进）可能同时调用本方法。
-     * 它要改 {@code lastFireMs}、条件去抖状态、延迟队列——这些状态彼此关联，
-     * 分开加锁挡不住交错。典型症状是"到点却没发"：心跳线程先推进了去抖状态，
-     * 外部线程再来时看到已触发，于是谁都没发。</p>
-     *
-     * <p>锁内只做状态推进与投递，不做等待式 IO：S6F11 的 W 位等待走独立 ACK 队列，
-     * 不会把心跳卡在 T3 上。</p>
+     * <p><b>整体互斥</b>：去抖状态/延迟队列彼此关联，分开加锁挡不住交错（"到点却没发"）。
+     * 锁内只做状态推进与投递，不做等待式 IO——W 位等待走独立 ACK 队列，不卡心跳。</p>
      */
     public void pumpNow() {
         synchronized (this.pumpLock) {
@@ -1037,12 +727,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         }
     }
 
-    /**
-     * 手动上报一个采集事件（不受限流约束：这是操作员的显式动作）。
-     *
-     * @param ceid CEID
-     * @throws IOException 会话未打开或发送失败
-     */
+    /** 手动上报一个采集事件（操作员显式动作，不受限流约束）。 */
     public void emitCeid(int ceid) throws IOException {
         /* 手动触发没有计划上下文：效果取该 CEID 全部启用计划的并集 */
         this.eventReporter.emit(ceid, null);
@@ -1053,32 +738,21 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         this.eventReporter.emit(ceid, planId);
     }
 
-    /**
-     * 单步试跑计划（3.0 v2 {@code runtime/plans/{planId}/step}）。
-     *
-     * @param planId 计划 id
-     * @throws IOException 计划不存在或发送失败
-     */
+    /** 单步试跑计划（v2 runtime/plans/{planId}/step）；计划不存在或发送失败抛 IOException。 */
     public void stepPlan(String planId) throws IOException {
         this.eventReporter.step(planId);
     }
 
     /**
-     * 上报/清除一个报警（S5F1）。
-     *
-     * <p>S5F1 默认带 W 位并等待 S5F2；发送放到 ACK 队列，HTTP 请求不会阻塞到 T3。
-     * ALCD 高位置 1 表示置位、清 0 表示清除，低 3 位是类别。</p>
+     * 上报/清除报警（S5F1，默认带 W 等 S5F2，走 ACK 队列不阻塞 HTTP 到 T3）；
+     * ALCD 高位 1=置位 0=清除，低 3 位类别。
      */
     @Override
     public void emitAlarm(int alid, boolean set, String text, int category) throws IOException {
         this.alarmReporter.emit(alid, set, text, category);
     }
 
-    /**
-     * 当前处于置位状态的报警。
-     *
-     * @return 快照
-     */
+    /** 当前处于置位状态的报警（快照）。 */
     public List<AlarmState> alarms() {
         return this.alarmReporter.alarms();
     }
@@ -1088,14 +762,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return SessionJsonViews.alarmsJson(this.alarms());
     }
 
-    /**
-     * 一条活动报警。
-     *
-     * @param alid     ALID
-     * @param text     报警文本
-     * @param category 类别 0..7
-     * @param atMillis 置位时刻（墙钟）
-     */
+    /** 一条活动报警（category 0..7，atMillis 为置位墙钟）。 */
     public record AlarmState(int alid, String text, int category, long atMillis) {
     }
 
@@ -1107,11 +774,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /** 编排台账落地(3.0 需求 5);Bootstrap 装配时接入。 */
     private volatile PlanExecutor planExecutor;
 
-    /**
-     * 挂编排执行器(每次触发落一条台账并计入 runtime_plan_state)。
-     *
-     * @param executor 执行器
-     */
+    /** 挂编排执行器（每次触发落台账并计入 runtime_plan_state）。 */
     public void planExecutor(PlanExecutor executor) {
         this.planExecutor = executor;
         this.eventReporter.planExecutor(executor);
@@ -1123,11 +786,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         executor.actionResolver(this::resolvePlanAction);
     }
 
-    /**
-     * 把一条计划动作解析成可发送报文（设计 §2.7.1 的五种类型）。
-     *
-     * <p>具体组装规则见 {@link PlanActionResolver}。</p>
-     */
+    /** 把计划动作解析成可发送报文（设计 §2.7.1 五种类型）；规则见 {@link PlanActionResolver}。 */
     private SmlParser.Message resolvePlanAction(PlanAction action, int ceid, long atMs)
             throws Exception {
         return this.planActions.resolve(action, ceid, atMs);
@@ -1173,38 +832,21 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.spec.equipment().units().size();
     }
 
-    /**
-     * 常量落盘回调：把当前常量表交给上层写回配置文件。
-     *
-     * <p>实现方负责"写到哪个文件 + 原子替换"；会话层只保证传出的是一份快照。</p>
-     */
+    /** 常量落盘回调：实现方负责写哪个文件+原子替换；会话层只保证传出快照。 */
     @FunctionalInterface
     public interface ConstantSaver {
 
-        /**
-         * 保存常量。
-         *
-         * @param constants ECID → 常量
-         * @throws IOException 写盘失败
-         */
+        /** 保存常量（ECID → 常量）；写盘失败抛 IOException。 */
         void save(Map<Integer, EquipmentConstantDef> constants) throws IOException;
     }
 
-    /**
-     * 设置常量落盘回调（由 {@code SessionLauncher} 在启动会话时接入）。
-     *
-     * @param saver 回调；{@code null} 表示不落盘
-     */
+    /** 设置常量落盘回调（SessionLauncher 启动时接入）；null 表示不落盘。 */
     public void constantSaver(ConstantSaver saver) {
         /* 协作者负责协议翻译，落盘这一下交给会话层——它才知道写哪个文件 */
         this.hostSide.constantSaver(saver::save);
     }
 
-    /**
-     * 当前设备常量快照（按 ECID 升序）。
-     *
-     * @return 常量列表
-     */
+    /** 当前设备常量快照（按 ECID 升序）。 */
     public List<EquipmentConstantDef> constants() {
         return this.constantStore.snapshot();
     }
@@ -1271,13 +913,8 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-
-     * 记下一条会话级错误（含协议层日志里的异常）。
-     *
-     * <p>协议层把 bind 失败、连接被拒、超时等都塞进日志队列；没有监听者时这些信息
-     * 会直接消失。HsmsConnector 把其中的 Throwable 转到这里，界面与 lastError 才看得见。</p>
-     *
-     * @param e 错误
+     * 记下会话级错误（含协议层日志里的异常）：协议层把 bind 失败/超时塞进日志队列，
+     * HsmsConnector 把 Throwable 转到这里，界面与 lastError 才看得见。
      */
     void recordFailure(Throwable e) {
         this.diagnostics.recordFailure(e);
@@ -1288,13 +925,7 @@ public final class HsmsSessionRuntime implements SessionRuntime {
         return this.diagnostics.lastError();
     }
 
-    /**
-     * 把报文发布到事件总线。
-     *
-     * <p>只发布<b>数据报文</b>（stream ≥ 0）：HSMS 的 select/deselect 之类控制帧
-     * 对使用者没有意义，混进报文面板只会造成噪音。
-     * </p>
-     */
+    /** 把报文发布到事件总线；只发数据报文（stream ≥ 0），控制帧不进报文面板。 */
     void publish(String direction, SecsMessage message) {
         this.notifier.publish(direction, message);
     }
@@ -1319,13 +950,37 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     }
 
     /**
-     * S1F3 请求一组 SVID，S1F4 必须按<b>同样的顺序与个数</b>返回。
-     *
-     * <p>E5 允许空列表表示"全部 SVID"。自动发现型主机常用它一次拿全，
-     * 这里与 S1F11 的空列表语义保持一致。</p>
+     * S1F3 请求一组 SVID，S1F4 按同样顺序与个数返回；E5 空列表 = 全部 SVID
+     * （与 S1F11 空列表语义一致）。
      */
     void replyS1F4(SecsMessage primary) throws Exception {
         this.svidReader.replyS1F4(primary);
     }
 
+
+    /** 分段生效的部件访问器（SectionApplySupport；一次装配，语义同拆分前内联实现）。 */
+    private final SectionApplySupport.Parts sectionParts = new SectionApplySupport.Parts() {
+        @Override public ResolvedEquipment model() { return HsmsSessionRuntime.this.model; }
+        @Override public void model(ResolvedEquipment next) { HsmsSessionRuntime.this.model = next; }
+        @Override public SessionModelViews modelViews() { return HsmsSessionRuntime.this.modelViews; }
+        @Override public ValueStore store() { return HsmsSessionRuntime.this.store; }
+        @Override public SessionSpec spec() { return HsmsSessionRuntime.this.spec; }
+        @Override public PinnedValueSource pinnedValues() { return HsmsSessionRuntime.this.pinnedValues; }
+        @Override public void pinnedValues(PinnedValueSource next) { HsmsSessionRuntime.this.pinnedValues = next; }
+        @Override public ValueSourceHandle values() { return HsmsSessionRuntime.this.values; }
+        @Override public EventScheduler scheduler() { return HsmsSessionRuntime.this.scheduler; }
+        @Override public CycleRunner cycleRunner() { return HsmsSessionRuntime.this.cycleRunner; }
+        @Override public void stopAllPlans() { HsmsSessionRuntime.this.stopAllPlans(); }
+        @Override public void collectionEventWbit(boolean enabled) { HsmsSessionRuntime.this.collectionEventWbit(enabled); }
+        @Override public void traceWbit(boolean enabled) { HsmsSessionRuntime.this.traceWbit(enabled); }
+    };
+
+    /* 指标装配用的包内访问器（SessionMetricsWiring；评审 2026-11-24 A1 拆分） */
+    AlarmReporter alarmReporter() { return this.alarmReporter; }
+    SessionDiagnostics diagnostics() { return this.diagnostics; }
+    PrimaryDispatcher dispatcher() { return this.dispatcher; }
+    EventReporter eventReporter() { return this.eventReporter; }
+    RateTracker msgRate() { return this.msgRate; }
+    long openedAtMs() { return this.openedAtMs; }
+    TerminalInbox terminalInbox() { return this.terminalInbox; }
 }

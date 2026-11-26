@@ -32,10 +32,40 @@ import {
   DEVICE_CONFIG_PAGE_LABELS,
   DEVICE_RUNTIME_PAGES,
   DEVICE_RUNTIME_PAGE_LABELS,
+  HOST_CONFIG_PAGES,
   HOST_CONFIG_PAGE_LABELS,
+  HOST_RUNTIME_PAGES,
   HOST_RUNTIME_PAGE_LABELS,
+  type DeviceConfigPage,
+  type DeviceRuntimePage,
+  type HostConfigPage,
+  type HostRuntimePage,
 } from './router';
 import { MessageMonitorDrawer, type MonitorScope, type MonitorTarget } from '../features/panels/MessageMonitorDrawer';
+
+/* 路由解析已保证 page 属于对应 zone 的清单；这里用类型谓词收窄，
+   替代原来的 `as never` 双重断言（评审 2026-11-24 P3-8）。 */
+function devicePageLabel(zone: DeviceZone, page: DevicePage): string {
+  if (zone === 'config') {
+    return DEVICE_CONFIG_PAGES.includes(page as DeviceConfigPage)
+      ? DEVICE_CONFIG_PAGE_LABELS[page as DeviceConfigPage]
+      : '';
+  }
+  return DEVICE_RUNTIME_PAGES.includes(page as DeviceRuntimePage)
+    ? DEVICE_RUNTIME_PAGE_LABELS[page as DeviceRuntimePage]
+    : '';
+}
+
+function hostPageLabel(zone: HostZone, page: HostPage): string {
+  if (zone === 'config') {
+    return HOST_CONFIG_PAGES.includes(page as HostConfigPage)
+      ? HOST_CONFIG_PAGE_LABELS[page as HostConfigPage]
+      : '';
+  }
+  return HOST_RUNTIME_PAGES.includes(page as HostRuntimePage)
+    ? HOST_RUNTIME_PAGE_LABELS[page as HostRuntimePage]
+    : '';
+}
 
 /* ---------- 路由级分包 ----------
    每个页面按需加载：首屏只带外壳（顶栏 / 导航 / 页签 / 轮询），
@@ -555,7 +585,7 @@ export function App(): JSX.Element {
     ? deviceTabLabel(route.sessionId, backend.sessions, backend.configList)
     : '';
   const devicePageDescription = route.name === 'device'
-    ? (route.zone === 'config' ? DEVICE_CONFIG_PAGE_LABELS : DEVICE_RUNTIME_PAGE_LABELS)[route.page as never]
+    ? devicePageLabel(route.zone, route.page)
     : '';
   /* 顶栏只显示一行紧凑路径：当前对象 › 区域 / 子页。
      分组名（设备清单 / 主机清单）与长说明都不再占位置。 */
@@ -565,8 +595,8 @@ export function App(): JSX.Element {
       const host = hostV2.find(route.hostId);
       const label = host === null ? route.hostId : `${host.name} · ${host.id}`;
       const page = route.zone === 'config'
-        ? HOST_CONFIG_PAGE_LABELS[route.page as never]
-        : HOST_RUNTIME_PAGE_LABELS[route.page as never];
+        ? hostPageLabel('config', route.page)
+        : hostPageLabel('runtime', route.page);
       return { group: '', label, description: `${zoneLabel(route.zone)} / ${page}` };
     })()
     : null;

@@ -210,6 +210,38 @@ class EquipmentCompilerTest {
     }
 
     @Test
+    void duplicateUnitNameIsError() {
+        /* 单元名是限定报告引用的寻址键：重名必须 ERROR 阻断启动（C2 升级），
+           而不是 WARNING 放行后引用结果取决于声明顺序。 */
+        EquipmentSpec spec = new EquipmentSpec("E", 1,
+                List.of(chamber("CH1", 1), chamber("CH1", 2)),
+                List.of(), List.of(), IdSpacePolicy.defaults());
+
+        CompilationResult result = EquipmentCompiler.compile(spec);
+
+        assertFalse(result.ok(), "重名单元必须编译失败");
+        assertTrue(result.errors().stream().anyMatch(i -> i.code().equals("DUPLICATE_UNIT_NAME")),
+                () -> "DUPLICATE_UNIT_NAME 必须是 ERROR：" + result.issues());
+    }
+
+    @Test
+    void qualifiedReportReferenceIsFirstWinsOnDuplicateUnitName() {
+        /* putIfAbsent：限定索引保留先编译单元的报告（3001），
+           后编译的同名单元（3101）不得静默覆盖（C2）。 */
+        EquipmentSpec spec = new EquipmentSpec("E", 1,
+                List.of(chamber("CH1", 1), chamber("CH1", 2)),
+                List.of(),
+                List.of(new GlobalCeidDef(1001, "CONTROL_STATE_CHANGE", List.of("CH1.STATUS"))),
+                IdSpacePolicy.defaults());
+
+        CompilationResult result = EquipmentCompiler.compile(spec);
+
+        assertTrue(codes(result).contains("DUPLICATE_UNIT_NAME"));
+        assertEquals(List.of(3001), result.equipment().ceids().get(1001).reportIds(),
+                "限定引用必须解析到先编译单元的报告（first-wins）");
+    }
+
+    @Test
     void equipmentWithoutUnitsIsRejected() {
         CompilationResult result = EquipmentCompiler.compile(
                 new EquipmentSpec("E", 1, List.of(), List.of(), List.of(), IdSpacePolicy.defaults()));

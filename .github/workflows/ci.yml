@@ -56,9 +56,34 @@ jobs:
           cache-dependency-path: secs-simulator-ui/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # 界面文案门禁：与本地 check.ps1 第 3 步同源（该脚本失败时自己 exit 1）
+      - name: check-ui-words.ps1（界面文案）
+        shell: pwsh
+        run: ./scripts/check-ui-words.ps1
       - run: npm test -- --run
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+
+  gui:
+    name: 桌面壳（Rust）
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: secs-simulator-gui/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      # tauri 的 generate_context! 在编译期内嵌 frontendDist（../../secs-simulator-ui/dist），
+      # cargo check 也需要该目录存在。这里不构建真前端（那是 frontend job 的事），
+      # 只放一个占位 index.html 满足编译期资产收集；不跑 tauri build（太重）。
+      - name: 占位前端 dist（仅供 cargo check）
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'secs-simulator-ui/dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Set-Content -Path (Join-Path $dist 'index.html') -Value '<!doctype html><title>placeholder</title>' -Encoding utf8
+      # windows runner 自带 Rust 工具链（Cargo.toml 要求 rust-version 1.90，runner 版本更新）
+      - name: cargo check
+        run: cargo check --locked
 
   contract:
     name: 契约检查
@@ -69,7 +94,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install pyyaml
-      - name: openapi 重复键
+      - name: openapi 契约（重复键/$ref/快照/前缀覆盖）
         run: python secs-simulator-service/scripts/check-openapi.py
       # 含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM（PowerShell 5.1 会把无 BOM 的
       # UTF-8 按 ANSI 读，中文乱码）。原 scripts/check-bom.ps1 已并入这里。
@@ -78,7 +103,7 @@ jobs:
         run: |
           $bad = @(); $n = 0
           Get-ChildItem -Path . -Recurse -Filter *.ps1 -File |
-            Where-Object { $_.FullName -notmatch '\\(node_modules|target|package|dist)\\' } |
+            Where-Object { $_.FullName -notmatch '[\\/](node_modules|target|package|dist)[\\/]' } |
             ForEach-Object {
               $n++
               $bytes = [System.IO.File]::ReadAllBytes($_.FullName)

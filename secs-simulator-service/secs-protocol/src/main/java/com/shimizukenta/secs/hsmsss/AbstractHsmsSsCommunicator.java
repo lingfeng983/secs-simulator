@@ -480,7 +480,10 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 			
 			switch ( HsmsSsMessageType.get(msg) ) {
 			case SELECT_REQ:
+			case DESELECT_REQ:
 			case LINKTEST_REQ: {
+				/* E37 §7.4：Deselect.req 的发起方同样要等 Deselect.rsp（T6 控制事务），
+				   超时按 §9.2 抛 T6 异常断开；原来 DESELECT_REQ 落 default 发完即返回。 */
 				
 				try {
 					this.replyMgr.entry(msg);

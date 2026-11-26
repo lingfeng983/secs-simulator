@@ -85,8 +85,8 @@ public final class EquipmentCompiler {
      * <p><b>first-wins 语义</b>：{@code globalSvidByName} 以 {@code putIfAbsent} 注册，
      * 因此当多个 global 定义<b>重名</b>时，以先注册的模板为准，后到的同名定义被静默忽略
      * （既不报错也不覆盖）。这是刻意取舍：名字只是供人引用的别名，真正保证"一个 SVID 只有
-     * 一个生产者"的是 <b>ID 唯一性</b>——重复 ID 会在上方以 {@code DUPLICATE_SVID} 显式报出；
-     * 此外运行期模板图构建也会以单写者规则（{@code DUPLICATE_SVID}）拒绝重复绑定，作为兜底。
+     * 一个生产者"的是 <b>ID 唯一性</b>——重复 ID 会在上方以 {@code DUPLICATE_SVID} 显式报出。
+     * （v7 已无运行期模板图构建；旧注释提到的"单写者兜底"随 ADR-0020 移除。）
      * </p>
      */
     private void collectGlobalSvids() {
@@ -124,7 +124,11 @@ public final class EquipmentCompiler {
             this.issues.add(Issue.error("DUPLICATE_UNIT_ID", "unitId 重复: " + unit.unitId().value()));
         }
         if (!this.unitNamesSeen.add(unit.name())) {
-            this.issues.add(Issue.warning("DUPLICATE_UNIT_NAME", "单元名重复: " + unit.name()));
+            /* 单元名是限定报告引用（单元名.报告名）的寻址键：重名时后编译单元会悄悄
+               覆盖限定索引，全局 CEID 引用到哪个单元的报告取决于声明顺序。WARNING
+               不阻断启动，所以必须升级为 ERROR，让带重名单元的配置无法启动。 */
+            this.issues.add(Issue.error("DUPLICATE_UNIT_NAME", "单元名重复: " + unit.name()
+                    + "（限定报告引用 单元名.报告名 会歧义）"));
         }
 
         unit.duplicatedSvidSlots().forEach(slot -> this.issues.add(Issue.error("DUPLICATE_SLOT",
@@ -260,7 +264,9 @@ public final class EquipmentCompiler {
                                 + " 与 " + unit.name() + "." + def.slot()));
             }
 
-            this.reportByQualified.put(unit.name() + "." + def.slot(), resolved);
+            /* first-wins 兜底：与 ceids/reports 主表一致，重名键保留先注册者，
+               不让后编译单元静默覆盖限定引用（重名本身已在上方报 DUPLICATE_UNIT_NAME） */
+            this.reportByQualified.putIfAbsent(unit.name() + "." + def.slot(), resolved);
             this.reportByShort.computeIfAbsent(def.slot(), k -> new ArrayList<>()).add(resolved);
         }
 
@@ -290,7 +296,8 @@ public final class EquipmentCompiler {
                                 + " 与 " + unit.name() + "." + def.slot()));
             }
 
-            this.unitByCeid.put(id, unit.name());
+            /* 与 ceids 主表同为 first-wins：CEID 重复时归属不能一边先者一边后者 */
+            this.unitByCeid.putIfAbsent(id, unit.name());
         }
     }
 
@@ -323,7 +330,7 @@ public final class EquipmentCompiler {
                                 + " 与 " + ResolvedSvid.GLOBAL_OWNER + "." + def.name()));
             }
 
-            this.unitByCeid.put(def.id(), ResolvedSvid.GLOBAL_OWNER);
+            this.unitByCeid.putIfAbsent(def.id(), ResolvedSvid.GLOBAL_OWNER);
         }
     }
 

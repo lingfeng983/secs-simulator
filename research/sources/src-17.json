@@ -1,0 +1,6 @@
+{
+ "reader": "local_file_slice",
+ "final_url": "file:README.md#L20-L36",
+ "text": "## 模块\n\n（均在 `secs-simulator-service/` 下）\n\n| 模块 | 职责 | 依赖约束 |\n|---|---|---|\n| `secs-json` | 无反射 JSON 读写 | 仅依赖 JDK |\n| `secs-protocol` | HSMS-SS / SECS-I / SECS-II / SML / GEM 报文层（**冻结**，极少改动） | 仅依赖 JDK |\n| `secs-core` | 领域模型、ID 规划、曲线、值引擎、编排（无 I/O、无 JSON） | 仅依赖 JDK |\n| `secs-store` | 持久化层：`config.db`（设备/主机/模板/计划动作/报告/报警）与 `runtime.db`（钉值/计划启用态/目录编辑/链路相位/执行台账），含 2.x JSON 的一次性迁移 | core + json + sqlite-jdbc |\n| `secs-app` | 应用服务：会话、配置、日志、SML 文本层（`app.sml`） | core + json + protocol |\n| `secs-api-http` | REST + SSE + JSON 曲线预览 | app + json + `com.sun.net.httpserver` |\n| `secs-runtime` | 装配与生命周期：INTEGRATED / SERVER / PROBE；会话的协议实现 | 以上全部 |\n| `secs-cli` | 进程入口 `CliMain` 与端到端测试宿主 | runtime |\n\n依赖方向由 `ArchitectureTest` 强制，越界即构建失败。\n",
+ "title": "README.md"
+}

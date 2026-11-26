@@ -12,7 +12,6 @@ import com.shimizukenta.secssim.api.http.SessionOutcome;
 import com.shimizukenta.secssim.app.log.Log;
 import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.app.session.SessionManager;
-import com.shimizukenta.secssim.app.session.HsmsConnectionTarget;
 import com.shimizukenta.secssim.app.session.SessionRuntime;
 import com.shimizukenta.secssim.runtime.hostsim.HostSimulator;
 import com.shimizukenta.secssim.store.HostRepository;
@@ -21,7 +20,9 @@ import com.shimizukenta.secssim.store.RuntimeStateRepository;
 /**
  * 主机模拟器注册表（3.0：主机是与设备完全无关的独立实体，设计 §2.4）。
  *
- * <p>实例按持久 hostId 全局唯一寻址，数量不设上限，多台可指向同一地址；
+ * <p>实例按持久 hostId 全局唯一寻址，上限 {@value #MAX_HOST_INSTANCES} 台（每个实例
+ * 各持连接与调度线程，无上限会让资源随实例数线性膨胀——评审 2026-11-24 P2-2），
+ * 多台可指向同一地址；
  * 不再有 {@code hostsBySession} 反向索引、不再有「一台设备一个本机主机」检查、
  * 设备断开/删除不再触碰主机。实例的持久行在 {@code host} 表（HostRepository），
  * 链路相位在 {@code host_link} 表（RuntimeStateRepository）。</p>
@@ -42,6 +43,9 @@ final class HostSimRegistry {
 
     /** 主机实例注册表：hostId → 模拟器。 */
     private final ConcurrentMap<String, HostSimulator> hostSims = new ConcurrentHashMap<>();
+
+    /** 主机实例上限：每个实例各持连接与调度线程，超限拒绝新建（评审 2026-11-24 P2-2）。 */
+    static final int MAX_HOST_INSTANCES = 64;
 
     HostSimRegistry(SessionManager sessions, com.shimizukenta.secssim.app.event.EventBus eventBus,
                     HostRepository hosts, RuntimeStateRepository linkState,
@@ -79,6 +83,11 @@ final class HostSimRegistry {
      */
     synchronized CreateResult open(String name, HsmsConnectionTarget target, boolean autoReconnect,
                                    boolean connect) {
+        if (this.hostSims.size() >= MAX_HOST_INSTANCES) {
+            /* 先拒再建：持久行也不写，避免留下一个永远装不回来的孤儿实例 */
+            Log.warn("主机实例已达上限 " + MAX_HOST_INSTANCES + "，拒绝新建: " + name);
+            return new CreateResult(null, SessionOutcome.FAILED);
+        }
         String id = this.hosts.create(name, target.bindHost(), target.port(), target.deviceId(),
                 "{}", autoReconnect, "");
         HostSimulator sim = attach(id);
@@ -453,6 +462,12 @@ final class HostSimRegistry {
         for (HostRepository.HostView view : this.hosts.list()) {
             if (this.hostSims.containsKey(view.id())) {
                 continue;
+            }
+            if (this.hostSims.size() >= MAX_HOST_INSTANCES) {
+                /* 持久行可能比上限多（历史数据）：装不下的留在库里，日志说明，
+                   删除旧实例后重启即可装回 */
+                LOG.warn("主机实例装回已达上限 {}，其余持久实例本次不装配", MAX_HOST_INSTANCES);
+                break;
             }
             attach(view.id());
         }

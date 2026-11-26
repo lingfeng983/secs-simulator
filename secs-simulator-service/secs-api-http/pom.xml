@@ -14,7 +14,7 @@
   <artifactId>secs-api-http</artifactId>
   <packaging>jar</packaging>
   <name>SECS Simulator HTTP API</name>
-  <description>The only module allowed to touch com.sun.net.httpserver: REST + WebSocket + binary series</description>
+  <description>The only module allowed to touch com.sun.net.httpserver: REST + SSE + binary series</description>
 
   <dependencies>
       <dependency>

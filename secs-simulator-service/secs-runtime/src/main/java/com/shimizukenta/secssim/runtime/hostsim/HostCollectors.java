@@ -48,7 +48,7 @@ final class HostCollectors {
     }
 
     /** 下发（或更新）某个计划的配置：只影响这一份，其它计划照常在采。 */
-    synchronized void apply(String planId, HostSimulator.CollectorConfig config) {
+    synchronized void apply(String planId, HostCollectorTypes.CollectorConfig config) {
         String key = key(planId);
         HostCollector collector = this.byPlan.get(key);
         if (collector == null) {
@@ -175,12 +175,12 @@ final class HostCollectors {
         JsonHubBuilder b = JsonHub.getBuilder();
         List<JsonHub> items = new ArrayList<>();
         for (HostCollector collector : this.snapshot()) {
-            HostSimulator.CollectorConfig config = collector.currentConfig();
+            HostCollectorTypes.CollectorConfig config = collector.currentConfig();
             if (config == null) {
                 continue;
             }
             List<JsonHub> svids = new ArrayList<>();
-            for (HostSimulator.CollectorSvid svid : config.svids()) {
+            for (HostCollectorTypes.CollectorSvid svid : config.svids()) {
                 svids.add(b.object(
                         b.pair("id", svid.id()),
                         b.pair("name", svid.name()),

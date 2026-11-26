@@ -480,7 +480,10 @@ final class RuntimeApi {
             this.persister.clearEdits(deviceId);
             try {
                 this.launcher.reload(sessionId);
-            } catch (ConfigException | IOException failure) {
+            } catch (IOException | RuntimeException failure) {
+                /* RuntimeException 也要回滚：注册失败等路径抛的是 RuntimeException
+                   （ConfigException 是其子类），只接 ConfigException|IOException 会漏掉
+                   "编辑已清却不恢复"的缺口（评审 2026-11-24 R1）。 */
                 this.persister.restore(deviceId, before);
                 this.sessions.find(sessionId).ifPresent(session -> {
                     if (session instanceof HsmsSessionRuntime hsms) {
@@ -499,6 +502,10 @@ final class RuntimeApi {
             return SessionOutcome.FAILED;
         } catch (IOException e) {
             Log.error("重载失败（端口绑定）: " + e.getMessage(), null);
+            return SessionOutcome.FAILED;
+        } catch (RuntimeException e) {
+            /* 注册失败等运行时异常：launcher 已尽量用旧快照拉回，这里如实报告 */
+            Log.error("重载失败（运行时，已尝试恢复旧会话）: " + e.getMessage(), e);
             return SessionOutcome.FAILED;
         }
     }
@@ -533,84 +540,7 @@ final class RuntimeApi {
 
     String configPreviewJson(String text, long fromMs, long toMs, int buckets,
                              java.util.Set<Integer> svids, boolean withEvents) {
-        /* 与 validate 同一条编译路径:失败返回 null,界面显示校验问题而不是半张图 */
-        try {
-            java.nio.file.Path temp = java.nio.file.Files.createTempFile("secs-preview-", ".json");
-            try {
-                java.nio.file.Files.writeString(temp, text, java.nio.charset.StandardCharsets.UTF_8);
-                com.shimizukenta.secssim.app.config.SessionConfig config =
-                        com.shimizukenta.secssim.app.config.SessionConfigJson.read(temp);
-                com.shimizukenta.secssim.core.compile.CompilationResult compiled = config.compile();
-                if (!compiled.ok()) {
-                    return null;
-                }
-                /* 值来源统一走 ValueSources:草稿预览与真实启动必须是同一套语义 */
-                com.shimizukenta.secssim.core.value.ValueSource values =
-                        com.shimizukenta.secssim.app.config.ValueSources.of(config, compiled.equipment());
-                java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> events =
-                java.util.List.of();
-                java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> cycleEvents =
-                java.util.List.of();
-                /* cycle 已从编排表拆出（M3）：草稿预览的事件时间线 = 手写计划模拟
-                   ∪ CycleRunner.simulateFires（锚 = 窗口起点，"如果现在启动"）；
-                   值曲线的草稿时间线也从窗口起点起算，预览与实跑同锚（M3 追加 3） */
-                com.shimizukenta.secssim.core.event.EventSchedule schedule = config.schedule();
-                if (withEvents) {
-                    /* 草稿没有真实锚点：计划统一按「窗口起点启动」求值（设计 §2.4） */
-                    java.util.Map<String, Long> previewAnchors = schedule.plans().stream()
-                            .collect(java.util.stream.Collectors.toMap(
-                                    com.shimizukenta.secssim.core.event.EventPlan::id,
-                                    plan -> fromMs,
-                                    (a, b) -> a));
-                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> planMarks =
-                            com.shimizukenta.secssim.runtime.session.EventSimulator.simulate(
-                                            schedule, values, config.spec().seed(), fromMs, toMs,
-                                            com.shimizukenta.secssim.runtime.session.EventSimulator.DEFAULT_MAX_EVENTS,
-                                            previewAnchors)
-                                    .stream()
-                                    .map(fire -> new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
-                                            fire.atMs(), fire.ceid(), fire.planId()))
-                                    .toList();
-                    /* 工艺周期标记独立一袋：周期预览与事件计划预览各算各的（2026-11-17 拆分） */
-                    java.util.List<com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent> cycleMarks =
-                            new java.util.ArrayList<>();
-                    if (config.cycle() != null) {
-                        for (long[] mark : com.shimizukenta.secssim.runtime.session.CycleRunner.simulateFires(
-                                config.cycle(), config.spec().seed(), fromMs, fromMs, toMs)) {
-                            cycleMarks.add(new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewEvent(
-                                    mark[0], (int) mark[1], "cycle"));
-                        }
-                    }
-                    events = java.util.List.copyOf(planMarks);
-                    cycleEvents = java.util.List.copyOf(cycleMarks);
-                }
-                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData computed =
-                        com.shimizukenta.secssim.runtime.session.PreviewSupport.compute(
-                                values, compiled.equipment(), fromMs, toMs, buckets, svids, events);
-                /* 曲线之外把两袋标记原样带回：周期预览用 cycleEvents、事件计划预览用 events */
-                com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData data =
-                        new com.shimizukenta.secssim.runtime.session.PreviewSupport.PreviewData(
-                                computed.fromMs(), computed.toMs(), computed.buckets(), computed.bucketMs(),
-                                computed.svidTotal(), computed.series(), events, cycleEvents);
-                return com.shimizukenta.secssim.runtime.session.PreviewSupport.toJson(data);
-            } finally {
-                java.nio.file.Files.deleteIfExists(temp);
-            }
-        } catch (IllegalArgumentException e) {
-            /* 参数类问题（分桶数、时间窗等）：界面按"草稿非法"展示（HTTP 422） */
-            Log.error("配置草稿预览参数无效: " + e.getMessage(), e);
-            return null;
-        } catch (com.shimizukenta.secssim.app.config.ConfigException
-                | com.shimizukenta.secssim.core.template.ExpressionException e) {
-            /* 草稿的语法/字段/表达式错误都属于用户输入，继续映射为 null（422）。
-               表达式里的 p.* 引用只在求值期才暴露（解析期不校验），必须一起接住，
-               否则用户写错一个参数会看到 500 而不是"配置非法" */
-            Log.error("配置草稿预览失败: " + e.getMessage(), e);
-            return null;
-        } catch (java.io.IOException e) {
-            /* 临时文件读写失败是环境问题：上抛成 500，不再伪装成"草稿非法" */
-            throw new IllegalStateException("配置草稿预览失败", e);
-        }
+        return ConfigPreviewApi.configPreviewJson(text, fromMs, toMs, buckets, svids, withEvents);
     }
 
     String configsJson() {
@@ -651,221 +581,6 @@ final class RuntimeApi {
 
     /** 分段保存的响应：HTTP 状态 + JSON 正文。 */
     record SectionsSave(int status, String json) {
-    }
-
-    /**
-     * 分段保存（2026-11-18 设计 §4.3）：
-     * 按段替换 → 整份编译 → 三道守卫 → 落盘，返回实际变化的段与影响级别。
-     *
-     * <p>守卫（§3.1）：A 结构变更要求下线；B 运行中周期引用的 SVID / 晶圆属性禁改；
-     * C 常量覆盖需要确认。前两道拒绝保存，第三道返回 409 等前端确认后带
-     * {@code confirmOverwrite=1} 重试。</p>
-     *
-     * @param name              文件名
-     * @param body              {@code {"sections":{...}}}
-     * @param expectedModifiedMs If-Match 带回的修改时间
-     * @param confirmOverwrite  已确认覆盖运行时常量
-     * @return 状态码 + JSON
-     */
-    SectionsSave saveSections(String name, String body, Long expectedModifiedMs, boolean confirmOverwrite) {
-        Map<ConfigSection, JsonHub> payload;
-        try {
-            payload = ConfigSectionPatcher.parsePayload(body);
-        } catch (IllegalArgumentException e) {
-            return new SectionsSave(400, sectionsError("bad-sections", e.getMessage()));
-        }
-
-        String old;
-        try {
-            old = this.configs.read(name);
-        } catch (ConfigException | IOException e) {
-            return new SectionsSave(404, sectionsError("not-found", "配置不存在: " + name));
-        }
-
-        String next;
-        Map<ConfigSection, String> before;
-        Map<ConfigSection, String> after;
-        List<ConfigSection> changed;
-        try {
-            next = ConfigSectionPatcher.apply(old, payload);
-            before = ConfigSectionPatcher.fingerprints(old);
-            after = ConfigSectionPatcher.fingerprints(next);
-            changed = ConfigSectionPatcher.changed(before, after);
-        } catch (RuntimeException e) {
-            return new SectionsSave(422, problemsJson(List.of(String.valueOf(e.getMessage()))));
-        }
-
-        Long revision = this.configs.revision(name);
-        if (changed.isEmpty()) {
-            /* 提交了但内容没变：幂等返回，不 +1 版本、不触发应用 */
-            return new SectionsSave(200, "{\"ok\":true,\"revision\":" + (revision == null ? 0 : revision)
-                    + ",\"modifiedMs\":" + number(this.configs.modifiedMs(name))
-                    + ",\"changed\":[],\"effect\":\"hot\",\"warnings\":[]}");
-        }
-
-        List<SessionRuntime> using = this.sessionsUsing(name);
-
-        /* 2026-11-21 用户要求：结构段不再要求先停设备——随时可保存落盘，
-           运行中的设备继续跑旧模型，applySections 对启动中的设备跳过 structure
-           （前端据此提示"重启设备后生效"），不再有 not-offline 守卫。
-           只保留守卫 B：运行中周期正在引用的 SVID / 晶圆属性仍禁改。 */
-        /* 守卫 B：被运行中周期引用的 SVID / 晶圆属性禁改 */
-        for (SessionRuntime session : using) {
-            if (session instanceof HsmsSessionRuntime hsms && hsms.cycleRunning()) {
-                List<ConfigSectionGuards.Conflict> conflicts =
-                        ConfigSectionGuards.cycleRefConflicts(old, payload, changed);
-                if (!conflicts.isEmpty()) {
-                    return new SectionsSave(409, conflictsJson(conflicts));
-                }
-            }
-        }
-
-        /* 守卫 C：常量覆盖提示（需要二次确认） */
-        String warnings = "[]";
-        if (changed.contains(ConfigSection.CONSTANTS)) {
-            List<ConfigSectionGuards.ConstantOverwrite> overwrites = this.constantOverwrites(using, payload);
-            if (!overwrites.isEmpty()) {
-                warnings = overwritesJson(overwrites);
-                if (!confirmOverwrite) {
-                    return new SectionsSave(409, "{\"ok\":false,\"error\":\"ecv-overwrite\",\"warnings\":"
-                            + warnings + "}");
-                }
-            }
-        }
-
-        String note = "section:" + changed.stream().map(ConfigSection::wire).reduce((a, b2) -> a + "," + b2).orElse("");
-        ConfigResult result = this.configs.saveSections(name, next, expectedModifiedMs, note);
-        Long newRevision = this.configs.revision(name);
-        switch (result.outcome()) {
-            case OK:
-                this.announceSectionSave(name, changed);
-                return new SectionsSave(200, "{\"ok\":true,\"revision\":" + (newRevision == null ? 0 : newRevision)
-                        + ",\"modifiedMs\":" + number(this.configs.modifiedMs(name))
-                        + ",\"changed\":" + sectionsJson(changed)
-                        + ",\"effect\":\"" + ConfigSection.effectOf(changed).wire() + "\""
-                        + ",\"warnings\":" + warnings + "}");
-            case INVALID:
-                return new SectionsSave(422, problemsJson(result.problems()));
-            case CONFLICT:
-                return new SectionsSave(409, sectionsError("revision-conflict",
-                        "配置在编辑期间被其他窗口修改过，请重新载入"));
-            case NOT_FOUND:
-                return new SectionsSave(400, sectionsError("not-found", "配置不存在: " + name));
-            default:
-                return new SectionsSave(500, sectionsError("save-failed",
-                        result.problems().isEmpty() ? "保存失败" : String.join("; ", result.problems())));
-        }
-    }
-
-    /** 分段生效的响应：HTTP 状态 + JSON 正文。 */
-    record SectionsApply(int status, String json) {
-    }
-
-    /**
-     * 分段生效（2026-11-18 设计 §4.4）：把刚保存的段应用到正在跑的这台设备。
-     *
-     * <p>只动变化的段：只改事件计划 → 未改动的计划保留启用态；只改工艺周期 →
-     * 周期回停止、计划与钉值不动。设备模型段（结构/变量/报告/事件）变化才做
-     * 全量热重置；连接段变化直接转重载（断链重建，运行态全清）。</p>
-     *
-     * @param deviceId 设备（会话）标识
-     * @param sections 变化段名（来自分段保存的响应）
-     * @return 状态码 + JSON
-     */
-    SectionsApply applySections(String deviceId, List<String> sections) {
-        if (this.sessions.find(deviceId).isEmpty()) {
-            return new SectionsApply(404, sectionsError("unknown-session", "设备不存在: " + deviceId));
-        }
-        if (this.launcher.sourceOf(deviceId).isEmpty()) {
-            return new SectionsApply(409, sectionsError("not-reloadable", "这台设备没有配置来源（演示会话）"));
-        }
-
-        List<ConfigSection> changed = new ArrayList<>();
-        for (String wire : sections) {
-            java.util.Optional<ConfigSection> section = ConfigSection.of(wire);
-            if (section.isEmpty()) {
-                return new SectionsApply(400, sectionsError("bad-section", "未知配置段: " + wire));
-            }
-            if (!changed.contains(section.get())) {
-                changed.add(section.get());
-            }
-        }
-        if (changed.isEmpty()) {
-            /* 保存时没有段变化：没什么可应用的，也不要无端触发一次重置 */
-            return new SectionsApply(200, "{\"ok\":true,\"effect\":\"hot\",\"changed\":[],"
-                    + "\"reset\":[],\"preserved\":[],\"plansKept\":0,\"pinsDropped\":0}");
-        }
-
-        /* 连接段：端口/Device ID 变了只能断链重建（运行态全清，设计 §2.2） */
-        if (changed.contains(ConfigSection.SESSION)) {
-            SessionOutcome outcome = this.reloadSession(deviceId);
-            if (outcome != SessionOutcome.OK) {
-                return new SectionsApply(409, sectionsError("reconnect-failed",
-                        "连接参数已保存，但重建会话失败（端口被占或配置非法）：" + outcome));
-            }
-            return new SectionsApply(200, "{\"ok\":true,\"effect\":\"reconnect\",\"changed\":"
-                    + sectionsJson(changed)
-                    + ",\"reset\":[\"link\",\"plans\",\"cycle\",\"pins\",\"edits\",\"counters\"],"
-                    + "\"preserved\":[],\"plansKept\":0,\"pinsDropped\":0}");
-        }
-
-        try {
-            com.shimizukenta.secssim.runtime.session.SectionApplyOutcome outcome =
-                    this.launcher.applySections(deviceId, changed);
-            if (outcome == null) {
-                return new SectionsApply(409, sectionsError("not-running",
-                        "这台设备当前没有可应用的运行实例（未启动或正在重启）"));
-            }
-            return new SectionsApply(200, "{\"ok\":true,\"effect\":\""
-                    + ConfigSection.effectOf(changed).wire() + "\",\"changed\":" + sectionsJson(changed)
-                    + ",\"reset\":" + resetJson(outcome) + ",\"preserved\":" + preservedJson(outcome)
-                    + ",\"plansKept\":" + outcome.plansKept()
-                    + ",\"pinsDropped\":" + outcome.pinsDropped() + "}");
-        } catch (ConfigException e) {
-            return new SectionsApply(422, problemsJson(List.of(String.valueOf(e.getMessage()))));
-        } catch (IOException e) {
-            return new SectionsApply(500, sectionsError("apply-failed", String.valueOf(e.getMessage())));
-        }
-    }
-
-    /** 这次被重置的运行态项（界面提示用）。 */
-    private static String resetJson(com.shimizukenta.secssim.runtime.session.SectionApplyOutcome outcome) {
-        List<String> items = new ArrayList<>();
-        /* 只有结构变了才会丢视图与目录编辑；变量/报告/事件的改动是换视图、不动运行态 */
-        if (outcome.modelChanged()) {
-            items.add("model");
-            items.add("trace");
-            items.add("edits");
-        }
-        if (outcome.valuesChanged()) {
-            items.add("values");
-        }
-        /* 计划只有在"结构变更 → 全停装载"时才真被重置；
-           目录变更走保留态换表，哪怕当前 0 条启用也不能说成"被重置" */
-        if (outcome.scheduleChanged() && outcome.modelChanged()) {
-            items.add("plans");
-        }
-        if (outcome.cycleChanged()) {
-            items.add("cycle");
-        }
-        return jsonStrings(items);
-    }
-
-    /** 这次被保留的运行态项。 */
-    private static String preservedJson(com.shimizukenta.secssim.runtime.session.SectionApplyOutcome outcome) {
-        List<String> items = new ArrayList<>();
-        /* 计划只在结构变更时全停；其余情况换表都保留启用态与锚点 */
-        if (!outcome.modelChanged()) {
-            items.add("plans");
-        }
-        if (!outcome.valuesChanged()) {
-            items.add("pins");
-        }
-        if (!outcome.cycleChanged()) {
-            items.add("cycle");
-        }
-        items.add("counters");
-        return jsonStrings(items);
     }
 
     /** 使用这份配置的会话（按 launcher 的记录反查）。 */
@@ -918,112 +633,181 @@ final class RuntimeApi {
         }
     }
 
-    private static String problemsJson(List<String> problems) {
-        StringBuilder sb = new StringBuilder("{\"ok\":false,\"error\":\"config-invalid\",\"problems\":[");
-        for (int i = 0; i < problems.size(); i += 1) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append('"').append(escape(problems.get(i))).append('"');
+    /**
+     * 分段保存（2026-11-18 设计 §4.3）：
+     * 按段替换 → 整份编译 → 三道守卫 → 落盘，返回实际变化的段与影响级别。
+     *
+     * <p>守卫（§3.1）：A 结构变更要求下线；B 运行中周期引用的 SVID / 晶圆属性禁改；
+     * C 常量覆盖需要确认。前两道拒绝保存，第三道返回 409 等前端确认后带
+     * {@code confirmOverwrite=1} 重试。</p>
+     *
+     * @param name              文件名
+     * @param body              {@code {"sections":{...}}}
+     * @param expectedModifiedMs If-Match 带回的修改时间
+     * @param confirmOverwrite  已确认覆盖运行时常量
+     * @return 状态码 + JSON
+     */
+    SectionsSave saveSections(String name, String body, Long expectedModifiedMs, boolean confirmOverwrite) {
+        Map<ConfigSection, JsonHub> payload;
+        try {
+            payload = ConfigSectionPatcher.parsePayload(body);
+        } catch (IllegalArgumentException e) {
+            return new SectionsSave(400, SectionsJson.sectionsError("bad-sections", e.getMessage()));
         }
-        return sb.append("]}").toString();
-    }
 
-    private static String sectionsError(String code, String detail) {
-        return "{\"ok\":false,\"error\":\"" + code + "\",\"detail\":\"" + escape(detail) + "\"}";
-    }
-
-    private static String conflictsJson(List<ConfigSectionGuards.Conflict> conflicts) {
-        StringBuilder sb = new StringBuilder("{\"ok\":false,\"error\":\"cycle-running-guard\",\"detail\":[");
-        boolean first = true;
-        for (ConfigSectionGuards.Conflict conflict : conflicts) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append("{\"kind\":\"").append(conflict.kind())
-                    .append("\",\"name\":\"").append(escape(conflict.name()))
-                    .append("\",\"ceids\":[");
-            for (int i = 0; i < conflict.ceids().size(); i += 1) {
-                if (i > 0) {
-                    sb.append(',');
-                }
-                sb.append(conflict.ceids().get(i));
-            }
-            sb.append("]}");
+        String old;
+        try {
+            old = this.configs.read(name);
+        } catch (ConfigException | IOException e) {
+            return new SectionsSave(404, SectionsJson.sectionsError("not-found", "配置不存在: " + name));
         }
-        return sb.append("]}").toString();
-    }
 
-    private static String overwritesJson(List<ConfigSectionGuards.ConstantOverwrite> overwrites) {
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
-        for (ConfigSectionGuards.ConstantOverwrite item : overwrites) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append("{\"ecid\":").append(item.ecid())
-                    .append(",\"runtime\":").append(item.runtime())
-                    .append(",\"config\":").append(item.config()).append('}');
+        String next;
+        Map<ConfigSection, String> before;
+        Map<ConfigSection, String> after;
+        List<ConfigSection> changed;
+        try {
+            next = ConfigSectionPatcher.apply(old, payload);
+            before = ConfigSectionPatcher.fingerprints(old);
+            after = ConfigSectionPatcher.fingerprints(next);
+            changed = ConfigSectionPatcher.changed(before, after);
+        } catch (RuntimeException e) {
+            return new SectionsSave(422, SectionsJson.problemsJson(List.of(String.valueOf(e.getMessage()))));
         }
-        return sb.append(']').toString();
-    }
 
-    /** 一组字符串 → JSON 数组（reset / preserved 用）。 */
-    private static String jsonStrings(List<String> items) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < items.size(); i += 1) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append('"').append(escape(items.get(i))).append('"');
+        Long revision = this.configs.revision(name);
+        if (changed.isEmpty()) {
+            /* 提交了但内容没变：幂等返回，不 +1 版本、不触发应用 */
+            return new SectionsSave(200, "{\"ok\":true,\"revision\":" + (revision == null ? 0 : revision)
+                    + ",\"modifiedMs\":" + SectionsJson.number(this.configs.modifiedMs(name))
+                    + ",\"changed\":[],\"effect\":\"hot\",\"warnings\":[]}");
         }
-        return sb.append(']').toString();
-    }
 
-    private static String sectionsJson(List<ConfigSection> sections) {
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
-        for (ConfigSection section : sections) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append('"').append(section.wire()).append('"');
-        }
-        return sb.append(']').toString();
-    }
+        List<SessionRuntime> using = this.sessionsUsing(name);
 
-    private static String number(Long value) {
-        return value == null ? "0" : String.valueOf(value);
-    }
-
-    /** JSON 字符串转义（本类只拼小对象，不引第三方）。 */
-    private static String escape(String value) {
-        if (value == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < value.length(); i += 1) {
-            char ch = value.charAt(i);
-            switch (ch) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> {
-                    if (ch < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) ch));
-                    } else {
-                        sb.append(ch);
-                    }
+        /* 2026-11-21 用户要求：结构段不再要求先停设备——随时可保存落盘，
+           运行中的设备继续跑旧模型，applySections 对启动中的设备跳过 structure
+           （前端据此提示"重启设备后生效"），不再有 not-offline 守卫。
+           只保留守卫 B：运行中周期正在引用的 SVID / 晶圆属性仍禁改。 */
+        /* 守卫 B：被运行中周期引用的 SVID / 晶圆属性禁改 */
+        for (SessionRuntime session : using) {
+            if (session instanceof HsmsSessionRuntime hsms && hsms.cycleRunning()) {
+                List<ConfigSectionGuards.Conflict> conflicts =
+                        ConfigSectionGuards.cycleRefConflicts(old, payload, changed);
+                if (!conflicts.isEmpty()) {
+                    return new SectionsSave(409, SectionsJson.conflictsJson(conflicts));
                 }
             }
         }
-        return sb.toString();
+
+        /* 守卫 C：常量覆盖提示（需要二次确认） */
+        String warnings = "[]";
+        if (changed.contains(ConfigSection.CONSTANTS)) {
+            List<ConfigSectionGuards.ConstantOverwrite> overwrites = this.constantOverwrites(using, payload);
+            if (!overwrites.isEmpty()) {
+                warnings = SectionsJson.overwritesJson(overwrites);
+                if (!confirmOverwrite) {
+                    return new SectionsSave(409, "{\"ok\":false,\"error\":\"ecv-overwrite\",\"warnings\":"
+                            + warnings + "}");
+                }
+            }
+        }
+
+        String note = "section:" + changed.stream().map(ConfigSection::wire).reduce((a, b2) -> a + "," + b2).orElse("");
+        ConfigResult result = this.configs.saveSections(name, next, expectedModifiedMs, note);
+        Long newRevision = this.configs.revision(name);
+        switch (result.outcome()) {
+            case OK:
+                this.announceSectionSave(name, changed);
+                return new SectionsSave(200, "{\"ok\":true,\"revision\":" + (newRevision == null ? 0 : newRevision)
+                        + ",\"modifiedMs\":" + SectionsJson.number(this.configs.modifiedMs(name))
+                        + ",\"changed\":" + SectionsJson.sectionsJson(changed)
+                        + ",\"effect\":\"" + ConfigSection.effectOf(changed).wire() + "\""
+                        + ",\"warnings\":" + warnings + "}");
+            case INVALID:
+                return new SectionsSave(422, SectionsJson.problemsJson(result.problems()));
+            case CONFLICT:
+                return new SectionsSave(409, SectionsJson.sectionsError("revision-conflict",
+                        "配置在编辑期间被其他窗口修改过，请重新载入"));
+            case NOT_FOUND:
+                return new SectionsSave(400, SectionsJson.sectionsError("not-found", "配置不存在: " + name));
+            default:
+                return new SectionsSave(500, SectionsJson.sectionsError("save-failed",
+                        result.problems().isEmpty() ? "保存失败" : String.join("; ", result.problems())));
+        }
     }
+
+    /** 分段生效的响应：HTTP 状态 + JSON 正文。 */
+    record SectionsApply(int status, String json) {
+    }
+
+    /**
+     * 分段生效（2026-11-18 设计 §4.4）：把刚保存的段应用到正在跑的这台设备。
+     *
+     * <p>只动变化的段：只改事件计划 → 未改动的计划保留启用态；只改工艺周期 →
+     * 周期回停止、计划与钉值不动。设备模型段（结构/变量/报告/事件）变化才做
+     * 全量热重置；连接段变化直接转重载（断链重建，运行态全清）。</p>
+     *
+     * @param deviceId 设备（会话）标识
+     * @param sections 变化段名（来自分段保存的响应）
+     * @return 状态码 + JSON
+     */
+    SectionsApply applySections(String deviceId, List<String> sections) {
+        if (this.sessions.find(deviceId).isEmpty()) {
+            return new SectionsApply(404, SectionsJson.sectionsError("unknown-session", "设备不存在: " + deviceId));
+        }
+        if (this.launcher.sourceOf(deviceId).isEmpty()) {
+            return new SectionsApply(409, SectionsJson.sectionsError("not-reloadable", "这台设备没有配置来源（演示会话）"));
+        }
+
+        List<ConfigSection> changed = new ArrayList<>();
+        for (String wire : sections) {
+            java.util.Optional<ConfigSection> section = ConfigSection.of(wire);
+            if (section.isEmpty()) {
+                return new SectionsApply(400, SectionsJson.sectionsError("bad-section", "未知配置段: " + wire));
+            }
+            if (!changed.contains(section.get())) {
+                changed.add(section.get());
+            }
+        }
+        if (changed.isEmpty()) {
+            /* 保存时没有段变化：没什么可应用的，也不要无端触发一次重置 */
+            return new SectionsApply(200, "{\"ok\":true,\"effect\":\"hot\",\"changed\":[],"
+                    + "\"reset\":[],\"preserved\":[],\"plansKept\":0,\"pinsDropped\":0}");
+        }
+
+        /* 连接段：端口/Device ID 变了只能断链重建（运行态全清，设计 §2.2） */
+        if (changed.contains(ConfigSection.SESSION)) {
+            SessionOutcome outcome = this.reloadSession(deviceId);
+            if (outcome != SessionOutcome.OK) {
+                return new SectionsApply(409, SectionsJson.sectionsError("reconnect-failed",
+                        "连接参数已保存，但重建会话失败（端口被占或配置非法）：" + outcome));
+            }
+            return new SectionsApply(200, "{\"ok\":true,\"effect\":\"reconnect\",\"changed\":"
+                    + SectionsJson.sectionsJson(changed)
+                    + ",\"reset\":[\"link\",\"plans\",\"cycle\",\"pins\",\"edits\",\"counters\"],"
+                    + "\"preserved\":[],\"plansKept\":0,\"pinsDropped\":0}");
+        }
+
+        try {
+            com.shimizukenta.secssim.runtime.session.SectionApplyOutcome outcome =
+                    this.launcher.applySections(deviceId, changed);
+            if (outcome == null) {
+                return new SectionsApply(409, SectionsJson.sectionsError("not-running",
+                        "这台设备当前没有可应用的运行实例（未启动或正在重启）"));
+            }
+            return new SectionsApply(200, "{\"ok\":true,\"effect\":\""
+                    + ConfigSection.effectOf(changed).wire() + "\",\"changed\":" + SectionsJson.sectionsJson(changed)
+                    + ",\"reset\":" + SectionsJson.resetJson(outcome) + ",\"preserved\":" + SectionsJson.preservedJson(outcome)
+                    + ",\"plansKept\":" + outcome.plansKept()
+                    + ",\"pinsDropped\":" + outcome.pinsDropped() + "}");
+        } catch (ConfigException e) {
+            return new SectionsApply(422, SectionsJson.problemsJson(List.of(String.valueOf(e.getMessage()))));
+        } catch (IOException e) {
+            return new SectionsApply(500, SectionsJson.sectionsError("apply-failed", String.valueOf(e.getMessage())));
+        }
+    }
+
 
 
     Long configModifiedMs(String name) {
@@ -1103,120 +887,10 @@ final class RuntimeApi {
         return result;
     }
 
-    /**
-     * 批量新建设备：一台一份配置，设备名 = 批次前缀 + 序号。
-     *
-     * <p>先把整批名字算出来查一遍重名：建到第 4 台才发现撞名，留下三台半成品
-     * 让人自己收拾，是最糟的结果。重名就整批拒绝，一台都不建。</p>
-     *
-     * <p>逐台建配置 + 按需启动会话：配置建失败的那台记进 {@code failed} 继续下一台
-     * （端口被占是单台的事）；会话起不来不影响设备本身——设备已经建好，
-     * 界面里以「停止」态出现，点「启动」还能再试。</p>
-     *
-     * @param request 模板、前缀、起始序号、台数、端口段与启动开关
-     * @return 逐台结果
-     */
+    /** 批量新建设备；实现在 {@link DeviceBatchCreate}（评审 2026-11-24 A2 千行拆分）。 */
     DeviceBatch.Result createDevicesBatch(DeviceBatch.Request request) {
-        String prefix = request.prefix() == null ? "" : request.prefix().trim();
-        List<String> problems = DeviceBatchPlan.problems(
-                prefix, request.start(), request.count(), request.portBase());
-        if (!problems.isEmpty()) {
-            /* 入参错不是"名字撞了"：分开装，HTTP 层才能分别映射成 400 与 409 */
-            return new DeviceBatch.Result(List.of(), List.of(), List.of(), problems);
-        }
-        int count = request.count();
-        int start = request.start();
-        int portBase = request.portBase();
-
-        List<String> devices = DeviceBatchPlan.deviceNames(prefix, start, count);
-        List<String> names = DeviceBatchPlan.configNames(prefix, start, count);
-        List<String> taken = new ArrayList<>();
-        for (ConfigStore.Entry entry : this.configs.list()) {
-            taken.add(entry.name());
-        }
-        /* 名字唯一是硬要求：撞上的话整批拒绝，一台都不建 */
-        List<String> conflicts = DeviceBatchPlan.conflicts(names, taken);
-        if (!conflicts.isEmpty()) {
-            return new DeviceBatch.Result(List.of(), List.of(), conflicts);
-        }
-
-        /* 端口占用只看活会话：配置里写了端口但设备没启动的，端口本来就是空的，
-           起新会话不会撞 */
-        java.util.Set<Integer> usedPorts = new java.util.HashSet<>();
-        for (SessionRuntime session : this.sessions.list()) {
-            com.shimizukenta.secssim.app.session.HsmsConnectionTarget target = session.hostTarget();
-            if (target != null && target.port() > 0) {
-                usedPorts.add(target.port());
-            }
-        }
-
-        String templateId = request.templateId() == null || request.templateId().isBlank()
-                ? DeviceTemplates.BARE_ID : request.templateId().trim();
-        String custom = this.templates.customText(templateId).orElse(null);
-        String bindHost = request.bindHost() == null || request.bindHost().isBlank()
-                ? "0.0.0.0" : request.bindHost().trim();
-
-        List<DeviceBatch.Created> created = new ArrayList<>(count);
-        List<DeviceBatch.Failed> failed = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            String name = names.get(i);
-            String deviceName = devices.get(i);
-            int port = portBase + i;
-            /* 批量新建的 device-id 恒为 0：这一批是同一角色下的多台设备，
-               逐台编 device-id 只会让现场对着主机侧配置多改一遍 */
-            int deviceId = 0;
-            if (usedPorts.contains(port)) {
-                failed.add(new DeviceBatch.Failed(name, "port-in-use",
-                        "端口 " + port + " 已被其他设备占用"));
-                continue;
-            }
-            ConfigResult result = custom == null
-                    ? this.configs.createNamed(name, templateId, deviceName,
-                            port, bindHost, request.passive(), deviceId)
-                    : this.createNamedFromText(name, custom, templateId, deviceName,
-                            port, bindHost, request.passive(), deviceId);
-            if (result.outcome() != ConfigOutcome.OK) {
-                failed.add(new DeviceBatch.Failed(name, outcomeCode(result.outcome()),
-                        result.problems().isEmpty() ? "新建失败" : String.join("；", result.problems())));
-                continue;
-            }
-            usedPorts.add(port);
-            String sessionId = "";
-            String sessionError = "";
-            if (request.startNow()) {
-                SessionCreated started = this.createSession(
-                        new SessionCreateRequest(name, bindHost, port, deviceId));
-                if (started.outcome() == SessionOutcome.OK) {
-                    sessionId = started.sessionId();
-                } else {
-                    /* 配置已经建好，会话起不来只是这一台暂时不能用：
-                       记进结果，界面显示「停止」，点「启动」还能再试 */
-                    sessionError = started.outcome().name().toLowerCase(java.util.Locale.ROOT);
-                    Log.warn("批量新建的设备 " + name + " 已建好，但会话没起来: " + sessionError);
-                }
-            }
-            created.add(new DeviceBatch.Created(name, deviceName, port, deviceId, sessionId, sessionError));
-        }
-        return new DeviceBatch.Result(created, failed, List.of());
-    }
-
-    /** 自定义模板路径下的「按模板建一台带名字的设备」：把模板正文改成这台设备的样子。 */
-    private ConfigResult createNamedFromText(String name, String custom, String templateId,
-                                             String deviceName, int port, String bindHost,
-                                             boolean passive, int deviceId) {
-        String patched = ConfigStore.rewriteConnection(custom, name.replaceAll("\\.json$", ""),
-                deviceName, port, bindHost, passive, deviceId);
-        return this.configs.createFromText(name, patched, templateId);
-    }
-
-    /** 结果码 → 批量响应里的 error 字段。 */
-    private static String outcomeCode(ConfigOutcome outcome) {
-        return switch (outcome) {
-            case CONFLICT -> "conflict";
-            case INVALID -> "invalid";
-            case NOT_FOUND -> "bad-name";
-            default -> "failed";
-        };
+        return DeviceBatchCreate.createDevicesBatch(request,
+                this.configs, this.templates, this.sessions, this::createSession);
     }
 
     /**

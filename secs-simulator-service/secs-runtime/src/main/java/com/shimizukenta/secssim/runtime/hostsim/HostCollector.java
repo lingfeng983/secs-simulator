@@ -42,7 +42,7 @@ final class HostCollector {
     /** 采集计划标识（界面方案库的 id）：一台主机可以同时挂多份，靠它区分。 */
     private final String planId;
 
-    private volatile HostSimulator.CollectorConfig config;
+    private volatile HostCollectorTypes.CollectorConfig config;
     private volatile boolean armed;
     private volatile boolean running;
     private volatile long startedAt;
@@ -91,7 +91,7 @@ final class HostCollector {
     }
 
     /** 当前配置；未下发过返回 null。 */
-    HostSimulator.CollectorConfig currentConfig() {
+    HostCollectorTypes.CollectorConfig currentConfig() {
         return this.config;
     }
 
@@ -99,12 +99,12 @@ final class HostCollector {
      * 停旧采集并换配置；换掉之后不在新列表里的 SVID 队列没有消费者也没有出口，
      * 必须一并丢弃，否则反复改配置会让内存只增不减。
      */
-    synchronized void applyConfig(HostSimulator.CollectorConfig next) {
+    synchronized void applyConfig(HostCollectorTypes.CollectorConfig next) {
         this.standby("配置更新");
         this.config = next;
 
         Set<Integer> keep = new HashSet<>();
-        for (HostSimulator.CollectorSvid svid : next.svids()) {
+        for (HostCollectorTypes.CollectorSvid svid : next.svids()) {
             keep.add(svid.id());
         }
         this.data.keySet().retainAll(keep);
@@ -128,7 +128,7 @@ final class HostCollector {
      * 链路未建立时不报错，状态保持 armed=false / running=false。
      */
     void startManual() {
-        HostSimulator.CollectorConfig current = this.config;
+        HostCollectorTypes.CollectorConfig current = this.config;
         if (current == null) {
             throw new IllegalStateException("采集器还没有配置");
         }
@@ -172,7 +172,7 @@ final class HostCollector {
     }
 
     private synchronized void start(String cause) {
-        HostSimulator.CollectorConfig current = this.config;
+        HostCollectorTypes.CollectorConfig current = this.config;
         if (current == null || this.running || !this.owner.linkOpen()) {
             return;
         }
@@ -222,14 +222,14 @@ final class HostCollector {
             return;
         }
         try {
-            HostSimulator.CollectorConfig current = this.config;
+            HostCollectorTypes.CollectorConfig current = this.config;
             SecsCommunicator comm = this.owner.currentCommunicator();
             if (current == null || comm == null) {
                 return;
             }
 
             List<Secs2> items = new ArrayList<>();
-            for (HostSimulator.CollectorSvid svid : current.svids()) {
+            for (HostCollectorTypes.CollectorSvid svid : current.svids()) {
                 items.add(Secs2.getBuilder().uint4(svid.id()));
             }
             Secs2 body = Secs2.getBuilder().list(items);
@@ -254,7 +254,7 @@ final class HostCollector {
     }
 
     /** S1F4 应答按位置解码；目录里声明过的类型优先，未声明按应答项格式码探测。 */
-    private void decodeS1f4(HostSimulator.CollectorConfig current, SecsMessage reply) {
+    private void decodeS1f4(HostCollectorTypes.CollectorConfig current, SecsMessage reply) {
         Secs2 body = reply.secs2();
         long now = System.currentTimeMillis();
 
@@ -264,7 +264,7 @@ final class HostCollector {
         }
 
         for (int i = 0; i < current.svids().size(); i++) {
-            HostSimulator.CollectorSvid svid = current.svids().get(i);
+            HostCollectorTypes.CollectorSvid svid = current.svids().get(i);
             Double value;
             try {
                 value = decodeScalar(body.get(i), svid.id());
@@ -339,7 +339,7 @@ final class HostCollector {
      * 链路正在建立时 open 可能还没置位，但帧已经到了，早退会白白丢掉这次触发。</p>
      */
     void onS6f11(SecsMessage message) {
-        HostSimulator.CollectorConfig current = this.config;
+        HostCollectorTypes.CollectorConfig current = this.config;
         if (current == null) {
             return;
         }
@@ -390,7 +390,7 @@ final class HostCollector {
     /** 采集器状态与数据（未配置时 configured=false）。 */
     JsonHub toJsonHub() {
         JsonHubBuilder b = JsonHub.getBuilder();
-        HostSimulator.CollectorConfig current = this.config;
+        HostCollectorTypes.CollectorConfig current = this.config;
 
         if (current == null) {
             return b.object(
@@ -402,7 +402,7 @@ final class HostCollector {
         List<JsonHub> svids = new ArrayList<>();
         List<JsonHub> series = new ArrayList<>();
         boolean truncated = false;
-        for (HostSimulator.CollectorSvid svid : current.svids()) {
+        for (HostCollectorTypes.CollectorSvid svid : current.svids()) {
             svids.add(b.object(
                     b.pair("id", svid.id()),
                     b.pair("name", svid.name()),
@@ -444,7 +444,7 @@ final class HostCollector {
         /* 变量目录里声明过但已移除的 SVID 标 stale（数据停止追加） */
         List<JsonHub> stale = new ArrayList<>();
         if (!this.owner.catalogEmpty()) {
-            for (HostSimulator.CollectorSvid svid : current.svids()) {
+            for (HostCollectorTypes.CollectorSvid svid : current.svids()) {
                 if (!this.owner.catalogContainsSvid(svid.id())) {
                     stale.add(b.number(svid.id()));
                 }

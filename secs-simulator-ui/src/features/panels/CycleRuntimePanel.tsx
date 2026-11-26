@@ -1,4 +1,5 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useVisibilityInterval} from '../../state/useVisibilityInterval';
 import type {PanelBaseProps} from './types';
 import {CycleRunCard, type CycleDefinition} from './CyclePanel';
 import {PlanExecutionTimeline} from './PlanExecutionTimeline';
@@ -89,6 +90,7 @@ export function CycleRuntimePanel({backend, notifier, liveEvents}: PanelBaseProp
  */
 function useCycleConfig(backend: BackendController, configName: string): CycleConfig {
     const [config, setConfig] = useState<CycleConfig>({definition: null, root: null});
+    const loadRef = useRef<(() => Promise<void>) | null>(null);
 
     useEffect(() => {
         if (configName === '') {
@@ -129,12 +131,15 @@ function useCycleConfig(backend: BackendController, configName: string): CycleCo
         };
 
         void load();
-        const timer = window.setInterval(() => void load(), DEFINITION_POLL_MS);
+        loadRef.current = load;
         return () => {
             cancelled = true;
-            window.clearInterval(timer);
+            loadRef.current = null;
         };
     }, [backend, configName]);
+
+    /* 后台标签页暂停轮询（N6）；恢复可见立即补跑一次 */
+    useVisibilityInterval(() => loadRef.current?.(), DEFINITION_POLL_MS, configName !== '');
 
     return config;
 }

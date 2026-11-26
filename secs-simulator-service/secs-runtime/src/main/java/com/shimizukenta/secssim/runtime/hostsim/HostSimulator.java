@@ -36,12 +36,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * 主机模拟器：以<b>主机角色</b>连到一台 SECS 设备，补上 S2F33/35/37
  * 这类"只有主机能发"的报文的界面入口。
  *
- * <p>连接目标（schema v6）：默认是同进程的设备会话（{@code hostTarget()}）；
+ * <p>连接目标（schema v7）：默认是同进程的设备会话（{@code hostTarget()}）；
  * 也可以指定远程 SECS（host/port/deviceId 手填）——远程模式没有本地
  * catalog，SVID/CEID 相关的配置全部由调用方手填，采集值按应答项
  * 自带的格式码解码（零元数据可画图）。</p>
  *
- * <p>S1F3 采集器（v6）：收到 startCeid 的 S6F11 开始按 intervalMs 轮询
+ * <p>S1F3 采集器：收到 startCeid 的 S6F11 开始按 intervalMs 轮询
  * 配置的 SVID，收到 stopCeid 停止；数据按时间戳入环形队列供前端画图。
  * 与 FDC Trace（S2F23 设备侧推送）互补——一条是主机拉、一条是设备推。</p>
  *
@@ -629,43 +629,6 @@ public final class HostSimulator {
 
     /* ===== S1F3 采集器 ===== */
 
-    /** 采集目标 SVID（远程模式 name/unit 可空）。 */
-    public record CollectorSvid(int id, String name, String unit) {
-
-        /** 校验并创建。 */
-        public CollectorSvid {
-            if (id < 1) {
-                throw new IllegalArgumentException("collector svid must be >= 1 but was " + id);
-            }
-            name = name == null ? "" : name;
-            unit = unit == null ? "" : unit;
-        }
-    }
-
-    /** 采集器配置。 */
-    public record CollectorConfig(int startCeid, int stopCeid, long intervalMs, List<CollectorSvid> svids) {
-
-        /** 校验并创建。 */
-        public CollectorConfig {
-            if (startCeid < 1 || stopCeid < 1) {
-                throw new IllegalArgumentException("startCeid/stopCeid 必须 >= 1");
-            }
-            if (startCeid == stopCeid) {
-                throw new IllegalArgumentException("startCeid 与 stopCeid 不能相同: " + startCeid);
-            }
-            if (intervalMs < MIN_INTERVAL_MS) {
-                throw new IllegalArgumentException("intervalMs 必须 >= " + MIN_INTERVAL_MS + " 但为 " + intervalMs);
-            }
-            svids = List.copyOf(svids);
-            if (svids.isEmpty()) {
-                throw new IllegalArgumentException("采集 SVID 列表不能为空");
-            }
-            if (svids.size() > MAX_COLLECTOR_SVIDS) {
-                throw new IllegalArgumentException("采集 SVID 最多 " + MAX_COLLECTOR_SVIDS
-                        + " 个，当前 " + svids.size() + " 个");
-            }
-        }
-    }
 
     /**
      * 下发一份采集配置（可在连接前后随时调用；只影响这一份，其它计划照常采）。
@@ -689,20 +652,20 @@ public final class HostSimulator {
         long intervalMs = JsonFieldReader.longField(root, "intervalMs", 1_000L);
         JsonHub svidsJson = JsonFieldReader.arrayField(root, "svids");
 
-        List<CollectorSvid> svids = new ArrayList<>();
+        List<HostCollectorTypes.CollectorSvid> svids = new ArrayList<>();
         for (int i = 0; i < svidsJson.length(); i++) {
             JsonHub item = svidsJson.get(i);
             int id = JsonFieldReader.intField(item, "id");
-            svids.add(new CollectorSvid(id,
+            svids.add(new HostCollectorTypes.CollectorSvid(id,
                     JsonFieldReader.stringField(item, "name"),
                     JsonFieldReader.stringField(item, "unit")));
         }
 
-        CollectorConfig config = new CollectorConfig(startCeid, stopCeid, intervalMs, svids);
+        HostCollectorTypes.CollectorConfig config = new HostCollectorTypes.CollectorConfig(startCeid, stopCeid, intervalMs, svids);
 
         /* 变量目录非空时做存在性校验（目录为空 = 手动填写形态，不校验） */
         if (!this.variableCatalog.isEmpty()) {
-            for (CollectorSvid svid : svids) {
+            for (HostCollectorTypes.CollectorSvid svid : svids) {
                 if (!this.variableCatalog.containsKey(svid.id())) {
                     throw new IllegalArgumentException("采集 SVID " + svid.id() + " 不在变量目录里（可先从目标读取变量）");
                 }

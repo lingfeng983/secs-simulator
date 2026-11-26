@@ -94,6 +94,49 @@ class BoundedValueSourceTest {
     }
 
     @Test
+    void f4ClampsToFloatRange() {
+        /* F4 是 4 字节浮点：1e100 / ±Inf 必须钳到 ±Float.MAX_VALUE，NaN 归 0，
+           不能放行到协议编码层才失败（C1 修复的回归锚点）。 */
+        ValueSource raw = new ValueSource() {
+            @Override
+            public OptionalDouble valueAt(int svid, long tMs) {
+                return switch (svid) {
+                    case 1 -> OptionalDouble.of(1e100);
+                    case 2 -> OptionalDouble.of(-1e100);
+                    case 3 -> OptionalDouble.of(Double.NaN);
+                    case 4 -> OptionalDouble.of(Double.POSITIVE_INFINITY);
+                    case 5 -> OptionalDouble.of(Double.NEGATIVE_INFINITY);
+                    case 6 -> OptionalDouble.of((double) Float.MAX_VALUE);
+                    default -> OptionalDouble.empty();
+                };
+            }
+
+            @Override
+            public java.util.Set<Integer> svids() {
+                return java.util.Set.of(1, 2, 3, 4, 5, 6);
+            }
+        };
+        Map<Integer, ResolvedSvid> svids = Map.of(
+                1, new ResolvedSvid(1, "CH1", "F4_OVER", ValueType.F4, ""),
+                2, new ResolvedSvid(2, "CH1", "F4_UNDER", ValueType.F4, ""),
+                3, new ResolvedSvid(3, "CH1", "F4_NAN", ValueType.F4, ""),
+                4, new ResolvedSvid(4, "CH1", "F4_POS_INF", ValueType.F4, ""),
+                5, new ResolvedSvid(5, "CH1", "F4_NEG_INF", ValueType.F4, ""),
+                6, new ResolvedSvid(6, "CH1", "F4_EDGE", ValueType.F4, ""));
+
+        BoundedValueSource bounded = new BoundedValueSource(raw, svids);
+
+        double f4Max = (double) Float.MAX_VALUE;
+        assertEquals(f4Max, bounded.valueAt(1, 0L).orElseThrow(), 0.0, "1e100 必须钳到 Float.MAX_VALUE");
+        assertEquals(-f4Max, bounded.valueAt(2, 0L).orElseThrow(), 0.0, "-1e100 必须钳到 -Float.MAX_VALUE");
+        assertEquals(0.0, bounded.valueAt(3, 0L).orElseThrow(), 0.0, "NaN 归 0");
+        assertEquals(f4Max, bounded.valueAt(4, 0L).orElseThrow(), 0.0, "+Inf 钳到上界");
+        assertEquals(-f4Max, bounded.valueAt(5, 0L).orElseThrow(), 0.0, "-Inf 钳到下界");
+        assertEquals(f4Max, bounded.valueAt(6, 0L).orElseThrow(), 0.0, "恰在上界的值原样放行");
+        assertEquals(5L, bounded.clampedCount(), "五次越界/非有限值应被计数，边界值不计");
+    }
+
+    @Test
     void passesThroughUnknownAndNonNumeric() {
         ValueSource raw = new ValueSource() {
             @Override

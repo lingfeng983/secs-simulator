@@ -137,6 +137,33 @@ class SchemaVersionTest {
         }
     }
 
+    /**
+     * P2-4：备份彻底失败（VACUUM INTO 与文件复制都不行）时，异常链必须保留
+     * VACUUM INTO 的真实失败原因，而不是只报复制的 IOException。
+     *
+     * <p>构造法：dbPath 的父路径是一个普通文件（{@code blocker/child.db}，
+     * blocker 是文件不是目录）——备份目标 {@code blocker/child.db.bak.<ts>}
+     * 无法创建：VACUUM INTO 报 SQLException，Files.copy 也报 IOException。</p>
+     */
+    @Test
+    void backupFailureKeepsVacuumCauseInExceptionChain() throws Exception {
+        Path metaDb = this.workDir.resolve("meta.db");
+        seedVersion(metaDb, 999);
+        Path blocker = this.workDir.resolve("blocker");
+        Files.writeString(blocker, "not a directory");
+        Path fakeDb = blocker.resolve("child.db");
+
+        try (Connection connection = open(metaDb)) {
+            StoreException e = assertThrows(StoreException.class,
+                    () -> Schema.apply(connection, true, fakeDb, true));
+            assertTrue(e.getMessage().contains("拒绝继续重建"), e.getMessage());
+            Throwable io = e.getCause();
+            assertTrue(io instanceof java.io.IOException, "cause 应是复制失败的 IOException: " + io);
+            assertTrue(io.getCause() instanceof SQLException,
+                    "IOException 的 cause 应保留 VACUUM INTO 的 SQLException: " + io.getCause());
+        }
+    }
+
     /* ---------- 工具 ---------- */
 
     private Connection open(Path dbFile) throws Exception {

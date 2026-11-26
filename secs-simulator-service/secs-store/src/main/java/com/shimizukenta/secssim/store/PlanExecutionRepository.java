@@ -220,9 +220,13 @@ public final class PlanExecutionRepository implements Closeable {
             return;
         }
         long now = System.currentTimeMillis();
+        /* INSERT 分支 enabled 恒为 0：行不存在说明设备已销毁/被对账清掉，
+           在途计数 flush 重建的行不能视为"已启用"——真正的启用态只由
+           RuntimeStateRepository.savePlanState 写入。行已存在时走 UPDATE
+           分支，不碰 enabled，正常路径语义不变。 */
         try (PreparedStatement st = connection.prepareStatement(
                 "INSERT INTO runtime_plan_state(device_id, plan_id, enabled, start_at, last_fire_at, "
-                        + "fire_count, skipped_count, last_error) VALUES(?,?,1,?,?,?,?,?) "
+                        + "fire_count, skipped_count, last_error) VALUES(?,?,0,?,?,?,?,?) "
                         + "ON CONFLICT(device_id, plan_id) DO UPDATE SET "
                         + "last_fire_at=excluded.last_fire_at, "
                         + "fire_count=fire_count+excluded.fire_count, "
@@ -242,6 +246,16 @@ public final class PlanExecutionRepository implements Closeable {
         } catch (SQLException err) {
             throw new StoreException("计划触发计数落库失败: " + err.getMessage(), err);
         }
+    }
+
+    /** 队列满丢弃的累计条数（供上层接日志/指标；store 层不认识日志门面，只把事实带出去）。 */
+    public long droppedCount() {
+        return this.dropped.get();
+    }
+
+    /** 批写失败的累计次数（非 0 说明台账与实际执行已经对不上；供上层接日志/指标）。 */
+    public long flushFailureCount() {
+        return this.flushFailures.get();
     }
 
     /** 批内聚合累加器。 */

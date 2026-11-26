@@ -98,6 +98,11 @@ public sealed interface DataSource
      * @param clock 时钟
      */
     record ExprSource(Map<String, Curve> vars, Expression expr, Clock clock) implements DataSource {
+
+        /** 防御性拷贝：vars 可空（视为无局部变量），拷贝后不可变，避免调用方后续改动泄漏进来。 */
+        public ExprSource {
+            vars = vars == null ? Map.of() : Map.copyOf(vars);
+        }
     }
 
     /**

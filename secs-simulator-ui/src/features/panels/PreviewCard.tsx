@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { EventCurveChart } from '../charts/EventCurveChart';
 import { MultiSelect } from '../../shared/ui/MultiSelect';
 import { HintTitle } from '../../shared/ui/FieldLabel';
+import { useVisibilityInterval } from '../../state/useVisibilityInterval';
 import type { PreviewData } from '../../api';
 
 /** 图上可选的一个参数（配置草稿的 SVID、运行态目录的 SVID 都长这样）。 */
@@ -216,19 +217,9 @@ export function PreviewCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, auto, source.key, source.refreshMs]);
 
-  /* 运行态：按固定节奏跟着跑（页面在后台时不打扰后端） */
-  useEffect(() => {
-    if (!auto || source.refreshMs === undefined) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) {
-        return;
-      }
-      void load();
-    }, source.refreshMs);
-    return () => window.clearInterval(timer);
-  }, [load, auto, source.refreshMs]);
+  /* 运行态：按固定节奏跟着跑（页面在后台时不打扰后端；恢复可见补跑一次，N6） */
+  useVisibilityInterval(() => void load(), source.refreshMs ?? 5_000,
+      auto && source.refreshMs !== undefined);
 
   /* 按口径过滤：周期页只看片内事件、事件计划页只看计划触发 */
   const scoped = useMemo<PreviewData | null>(() => {

@@ -9,7 +9,7 @@
 | [`reports/`](reports/) | 里程碑验收（M0–M9）、全量审计 / 代码评审、实机测试、未完成清单 | **归档**，只追加不修改 |
 | [`examples/`](examples/) | `sml/`（39 个主机/设备侧 SML 报文样例）、`config-v7-example.json` | 示例素材，供手动发送与配置编写参考 |
 | [`reference/`](reference/) | SEMI E4/E5/E30/E37 中文整理、项目对照表；`pdf/` 为付费标准原文（不入库） | 参考资料 |
-| [`../secs-simulator-service/scripts/openapi.yaml`](../secs-simulator-service/scripts/openapi.yaml) | HTTP API 机器可读契约（OpenAPI 3.0.3），由 `secs-simulator-service/scripts/check-openapi.py` 校验重复键 | 契约，改接口必须同步 |
+| [`../secs-simulator-service/scripts/openapi.yaml`](../secs-simulator-service/scripts/openapi.yaml) | HTTP API 机器可读契约（OpenAPI 3.0.3），由 `secs-simulator-service/scripts/check-openapi.py` 校验重复键、$ref、path 操作、path 清单快照与注册前缀覆盖 | 契约，改接口必须同步（快照用 `--snapshot` 再生成） |
 
 ## guides
 

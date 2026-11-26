@@ -117,7 +117,8 @@ public final class LifecycleCycleClock implements CycleClock {
      */
     public void finish(long nowMs) {
         this.frozenIndex = this.compiled.count() - 1;
-        this.frozenPhase = this.compiled.durationOf(this.compiled.count() - 1);
+        // 相位区间右开 [0, duration)：冻结在末片最后一个合法相位 duration - 1，而非右开端点本身。
+        this.frozenPhase = this.compiled.durationOf(this.compiled.count() - 1) - 1L;
         this.frozenElapsed = this.compiled.endMs();
         this.state = State.FINISHED;
     }

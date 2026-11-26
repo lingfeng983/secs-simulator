@@ -40,7 +40,7 @@ import { useLogLevel } from './useLogLevel';
 const INTERVAL = {
   /** 健康与会话：变化快，盯得紧。 */
   session: 2000,
-  /** 报警 / 终端消息 / 目录 / 事件：2 秒。 */
+  /** 报警 / 终端消息 / 目录 / 事件已拆走，这里实际只剩目录与事件计划：2 秒。 */
   sessionDetail: 2000,
   /**
    * 不在设备页时的明细节奏。
@@ -52,6 +52,8 @@ const INTERVAL = {
   sessionDetailIdle: 20_000,
   /** 审计：低频。 */
   audit: 5000,
+  /** 工作台聚合：低频（与审计同节奏，但各自独立可调）。 */
+  overview: 5000,
   /** 配置目录：低频。 */
   config: 5000,
 } as const;
@@ -185,13 +187,7 @@ export interface BackendController {
   overview: OverviewRow[];
   refreshOverview: () => Promise<void>;
   /** 服务端压测(v6)。 */
-  burst: (sessionId: string, request: BurstRequest) => Promise<BurstResult>;
-  /** 主机模拟 S1F3 采集器状态与数据(v6)。 */
-  collectorState: (sessionId: string) => Promise<CollectorState | null>;
-  /** 下发采集器配置;返回错误文案或 null。 */
-  saveCollector: (sessionId: string, config: CollectorConfigInput) => Promise<string | null>;
-  /** 手动启停采集器。 */
-  collectorCommand: (sessionId: string, start: boolean) => Promise<string | null>;
+  burst: (sessionId: string, request: BurstRequest, signal?: AbortSignal) => Promise<BurstResult>;
 }
 
 /**
@@ -364,7 +360,7 @@ export function useBackend(
         void refreshConfigs();
       }
       if (now >= due.overview) {
-        due.overview = now + INTERVAL.audit;
+        due.overview = now + INTERVAL.overview;
         void serverOps.refreshOverview();
       }
     };
@@ -417,10 +413,10 @@ export function useBackend(
   /**
    * 保存配置后让相关会话生效：对每个运行中会话调一次重载。
    *
-   * <p>sessions JSON 不带配置来源，界面无法精确匹配"哪些会话用这份文件"；
-   * 重载对每个会话都按<b>它自己的来源</b>重读——用的是同一份磁盘目录，
-   * 保存过的改动自然被带上；演示会话回 not-reloadable，被安静跳过。
-   * 连接标识没变的会话走热生效不断连，变化了才重建。</p>
+   * <p>按 sessions 里的 config 字段精确匹配"哪些会话用这份文件"；只有老版本
+   * JSON 整体缺该字段时才退回全部重载。重载对每个会话都按<b>它自己的来源</b>
+   * 重读——用的是同一份磁盘目录，保存过的改动自然被带上；演示会话回
+   * not-reloadable，被安静跳过。连接标识没变的会话走热生效不断连，变化了才重建。</p>
    */
   const notifierRef = useRef(notifier);
   notifierRef.current = notifier;
@@ -429,12 +425,16 @@ export function useBackend(
       if (client === null) {
         return;
       }
-      /* 只重载用这份配置的会话。老版本 sessions JSON 没有 config 字段，
-         这时退回"全部重载"以保持行为不变。 */
+      /* 只重载用这份配置的会话。"没匹配到"要分两种情况：
+         ① 老版本 sessions JSON 整体没有 config 字段——无法精确匹配，
+            退回"全部重载"以保持旧行为；
+         ② 字段存在但确实没人用这份配置（新建/未启动设备的配置）——
+            谁都不需要重载，不能把全部运行中设备拖着重启一遍。 */
       const matched = configName === ''
         ? []
         : sessions.filter((session) => session.config === configName);
-      const targets = matched.length > 0 ? matched : sessions;
+      const hasConfigField = sessions.some((session) => session.config !== undefined);
+      const targets = matched.length > 0 ? matched : (hasConfigField ? [] : sessions);
 
       let hot = 0;
       let failed = 0;
@@ -496,9 +496,6 @@ export function useBackend(
       overview: serverOps.overview,
       refreshOverview: serverOps.refreshOverview,
       burst: serverOps.burst,
-      collectorState: serverOps.collectorState,
-      saveCollector: serverOps.saveCollector,
-      collectorCommand: serverOps.collectorCommand,
     }),
     [
       sessionCommands,
@@ -528,9 +525,6 @@ export function useBackend(
       serverOps.overview,
       serverOps.refreshOverview,
       serverOps.burst,
-      serverOps.collectorState,
-      serverOps.saveCollector,
-      serverOps.collectorCommand,
     ],
   );
 }

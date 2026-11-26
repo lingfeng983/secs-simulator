@@ -97,6 +97,79 @@ class HsmsSsReplyMessageManagerTest {
         assertTrue(mgr.put(selectReq).isPresent());
     }
 
+    /** 控制帧（pType=0，sType 由参数给定），SystemBytes 撞号场景用。 */
+    private static HsmsSsMessage controlMessage(int sType, int systemBytes) {
+        return new HsmsSsMessage(new byte[] {
+                (byte) 0xFF, (byte) 0xFF, 0, 0, 0, (byte) sType,
+                (byte)(systemBytes >> 24),
+                (byte)(systemBytes >> 16),
+                (byte)(systemBytes >> 8),
+                (byte)(systemBytes)
+        });
+    }
+
+    /**
+     * P2-2 回归：等 Select.rsp 期间收到同 SystemBytes 的偶数 function 数据帧，
+     * 不得被控制事务当成应答吞掉。
+     *
+     * <p>原来控制 Pack 的 matches 恒 true：16 位 SystemBytes 回绕撞号时，
+     * 一条 S1F2 会被当成 Select.rsp 交给等待方，解析成 NOT_SELECT_RSP 导致
+     * 建链误判失败，而真正的数据应答凭空消失。</p>
+     */
+    @Test
+    @DisplayName("a data secondary colliding with a waiting SELECT transaction is not consumed")
+    void collidingDataSecondaryIsNotConsumedByControlPack() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage selectReq = controlMessage(1, 7);
+        mgr.entry(selectReq);
+
+        assertTrue(mgr.put(functionMessage(1, 2, 7)).isPresent(),
+                "同 SystemBytes 的数据 secondary 必须留在接收路径上，不得当 Select.rsp");
+        assertTrue(mgr.reply(selectReq, 100L, TimeUnit.MILLISECONDS).isEmpty(),
+                "数据帧不得满足控制事务的应答等待");
+
+        assertTrue(mgr.put(controlMessage(2, 7)).isEmpty(), "真正的 Select.rsp 仍要被消费");
+        assertTrue(mgr.reply(selectReq, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
+    /**
+     * P2-2 回归：控制事务之间也要校验 SType——等 Linktest.rsp 时收到同
+     * SystemBytes 的 Select.rsp（或其他控制应答）不得被消费。
+     */
+    @Test
+    @DisplayName("a control reply of a different S-Type is not consumed by a control pack")
+    void mismatchedControlSTypeIsNotConsumed() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage linktestReq = controlMessage(5, 9);
+        mgr.entry(linktestReq);
+
+        assertTrue(mgr.put(controlMessage(2, 9)).isPresent(), "Select.rsp 不是 Linktest 的应答");
+        assertTrue(mgr.put(controlMessage(4, 9)).isPresent(), "Deselect.rsp 不是 Linktest 的应答");
+        assertTrue(mgr.reply(linktestReq, 100L, TimeUnit.MILLISECONDS).isEmpty());
+
+        assertTrue(mgr.put(controlMessage(6, 9)).isEmpty(), "真正的 Linktest.rsp 仍要被消费");
+        assertTrue(mgr.reply(linktestReq, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
+    /** P2-1/P2-2 配套：Deselect 事务按 SystemBytes + DESELECT_RSP 匹配。 */
+    @Test
+    @DisplayName("DESELECT transaction consumes only DESELECT.rsp with the same system-bytes")
+    void deselectReplyMatchesBySType() throws InterruptedException {
+        HsmsSsReplyMessageManager mgr = new HsmsSsReplyMessageManager();
+
+        HsmsSsMessage deselectReq = controlMessage(3, 11);
+        mgr.entry(deselectReq);
+
+        assertTrue(mgr.put(functionMessage(1, 2, 11)).isPresent(), "数据帧不是 Deselect.rsp");
+        assertTrue(mgr.put(controlMessage(2, 11)).isPresent(), "Select.rsp 不是 Deselect.rsp");
+        assertTrue(mgr.reply(deselectReq, 100L, TimeUnit.MILLISECONDS).isEmpty());
+
+        assertTrue(mgr.put(controlMessage(4, 11)).isEmpty(), "真正的 Deselect.rsp 仍要被消费");
+        assertTrue(mgr.reply(deselectReq, 100L, TimeUnit.MILLISECONDS).isPresent());
+    }
+
     /**
      * 同 SystemBytes 的两条事务：先结束的那条不能把后一条的 Pack 删掉。
      *

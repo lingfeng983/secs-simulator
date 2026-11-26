@@ -356,11 +356,23 @@ public final class Schema {
     private static Path backup(Connection connection, Path dbPath) {
         Path target = dbPath.resolveSibling(dbPath.getFileName()
                 + ".bak." + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")));
+        SQLException vacuumFailure;
         try (Statement st = connection.createStatement()) {
             st.execute("VACUUM INTO '" + target.toString().replace("'", "''") + "'");
             return target;
         } catch (SQLException e) {
-            /* VACUUM INTO 不可用（版本过旧 / 目标已存在）→ 退化为文件复制 */
+            /* VACUUM INTO 失败（版本过旧不支持 / 目标已存在 / 磁盘或权限错误）→
+               退化为文件复制兜底，但真实原因不能吞：挂在后续失败异常的 cause 上。 */
+            vacuumFailure = e;
+        }
+        try {
+            /* 复制前把 WAL 收进主文件：WAL 活跃时裸复制 db+wal+shm 可能不一致 */
+            try (Statement st = connection.createStatement()) {
+                st.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+            }
+        } catch (SQLException e) {
+            /* checkpoint 失败不阻断复制兜底，原因随 vacuumFailure 一起带出去 */
+            vacuumFailure.addSuppressed(e);
         }
         try {
             Files.copy(dbPath, target, StandardCopyOption.REPLACE_EXISTING);
@@ -371,6 +383,7 @@ public final class Schema {
                 }
             }
         } catch (IOException e) {
+            e.initCause(vacuumFailure);
             throw new StoreException("schema 版本不匹配，备份数据库失败（拒绝继续重建）: "
                     + target + ": " + e.getMessage(), e);
         }
