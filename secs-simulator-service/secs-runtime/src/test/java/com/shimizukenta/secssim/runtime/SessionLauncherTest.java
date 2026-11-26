@@ -250,6 +250,37 @@ class SessionLauncherTest {
     }
 
     /**
+     * R1b 故障注入（UP-04）：新会话已经打开、旧会话已经关闭，注册这一步失败时
+     * 必须用 lastGood 快照把旧配置拉回来，不能让设备凭空消失或停在新端口上。
+     */
+    @Test
+    void reloadRestoresOldSessionWhenRegistrationFails() throws Exception {
+        int oldPort = freePort();
+        int newPort = freePort();
+        while (newPort == oldPort) {
+            newPort = freePort();
+        }
+        write("line1.json", configWithPort("line1", "V1", oldPort));
+        String id = this.launcher.create("line1.json");
+        assertEquals(oldPort, this.sessions.find(id).orElseThrow().hostTarget().port());
+
+        write("line1.json", configWithPort("line1", "V2", newPort));
+        this.launcher.registerFailureHook = runtime -> {
+            throw new IllegalStateException("注入：注册失败");
+        };
+        try {
+            assertThrows(IllegalStateException.class, () -> this.launcher.reload(id));
+            com.shimizukenta.secssim.app.session.SessionRuntime restored =
+                    this.sessions.find(id).orElseThrow(
+                            () -> new AssertionError("重载失败后设备不能消失"));
+            assertEquals(SessionState.OPEN, restored.state(), "回滚后的会话必须仍在运行");
+            assertEquals(oldPort, restored.hostTarget().port(), "回滚后仍监听旧端口");
+        } finally {
+            this.launcher.registerFailureHook = null;
+        }
+    }
+
+    /**
      * 部署期覆盖：端口/deviceId 只作用于运行中的会话，不写回配置文件。
      *
      * <p>覆盖只在启动期生效（不写回文件），重载时会原样再套一遍。</p>

@@ -66,9 +66,9 @@ class ContextTableTest {
     }
 
     @Test
-    void numericSourceSilentlyYieldsEmptyTextForNow() {
-        /* P2 现状锁定：Context 配了数值型 source 会静默得到空串。
-           core 不改行为；config 层校验补上后此测试应改为断言拒绝。 */
+    void numericSourceFallsBackToEmptyTextAtCore() {
+        /* core 兜底：Context 配了数值型 source 仍返回空串，但正常配置不会走到这里——
+           SessionConfig.compile() 已在 config 层以 CONTEXT_SOURCE_TYPE_MISMATCH 拒绝。 */
         ContextTable table = new ContextTable(List.of(
                 new ContextTable.Def("BAD_NUM", ValueType.F4,
                         new DataSource.CurveSource(new ConstantCurve(3.0), DataSource.Clock.PHASE, null)),

@@ -76,10 +76,10 @@ public final class SourceEvaluator {
             case DataSource.Text text -> text.value();
             case DataSource.CycleText text -> text.textAt(clock.indexAt(tMs));
             case DataSource.Const constant -> format(constant.value());
-            /* P2 现状说明（不改行为）：CurveSource / ExprSource / CycleNumber 等数值型来源
-               落到这里返回空串——Context 数值 source 会被静默编码成空 ASCII。
-               该配置属于 config 层校验职责（跨模块），core 保持现状；
-               待 config 层加「Context 项禁止数值型 source」校验后收紧。 */
+            /* core 兜底（不改行为）：CurveSource / ExprSource / CycleNumber 等数值型来源
+               落到这里返回空串。正常配置不会走到这里——SessionConfig.compile() 已在
+               config 层用 CONTEXT_SOURCE_TYPE_MISMATCH 拒绝不相容的组合；这里只防
+               直接构造 ContextTable.Def 的调用方。 */
             default -> "";
         };
     }

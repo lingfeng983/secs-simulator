@@ -2,6 +2,7 @@ package com.shimizukenta.secssim.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,7 +10,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.CleanupMode;
@@ -64,6 +71,54 @@ class ConfigRepositoryTest {
         StoreException e = assertThrows(StoreException.class,
                 () -> this.repo.saveDocument("line1", BODY_V1 + " ", 99L, "test", ""));
         assertEquals(StoreException.Kind.CONFLICT, e.kind());
+    }
+
+    /**
+     * S3 故障注入（UP-04）：多个 S2F15 写基于同一 revision 并发提交，
+     * 只能有一个成功；其余必须显式冲突，不能靠"后写覆盖"静默丢数据。
+     */
+    @Test
+    void concurrentConstantWritesBasedOnSameRevisionOnlyOneWins() throws Exception {
+        setUp();
+        this.repo.createDevice("line1", "etch", BODY_V1, true, "test");
+        int writers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(writers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<String>> results = new ArrayList<>(writers);
+        try {
+            for (int i = 0; i < writers; i++) {
+                String body = BODY_V1 + " /* writer-" + i + " */";
+                results.add(pool.submit(() -> {
+                    start.await();
+                    try {
+                        this.repo.updateConstants("line1", body, 1L, "device");
+                        return "ok:" + body;
+                    } catch (StoreException e) {
+                        assertEquals(StoreException.Kind.CONFLICT, e.kind(), "并发写必须报冲突");
+                        return "conflict";
+                    }
+                }));
+            }
+            start.countDown();
+            String winner = null;
+            int conflicts = 0;
+            for (Future<String> future : results) {
+                String result = future.get(10L, TimeUnit.SECONDS);
+                if (result.startsWith("ok:")) {
+                    winner = result.substring(3);
+                } else {
+                    conflicts++;
+                }
+            }
+            assertNotNull(winner, "必须恰有一个写成功");
+            assertEquals(writers - 1, conflicts, "其余写都要显式冲突");
+            assertEquals(winner, this.repo.readDocument("line1").orElseThrow().body(),
+                    "落库正文必须是成功那一版");
+            assertEquals(2L, this.repo.findDevice("line1").orElseThrow().revision(),
+                    "并发写只升一次版本");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

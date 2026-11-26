@@ -56,6 +56,12 @@ public final class SessionLauncher {
     private final ConcurrentMap<String, SessionSource> sources = new ConcurrentHashMap<>();
 
     /**
+     * 包内测试注入点（UP-04）：在注册新会话之前抛异常，复现 R1b「关旧之后注册失败」。
+     * 生产恒为 null；不改 SessionManager 的可见性，也不给 API 层开新口子。
+     */
+    java.util.function.Consumer<com.shimizukenta.secssim.app.session.SessionRuntime> registerFailureHook;
+
+    /**
      * 创建/重载/关闭的串行锁。
      *
      * <p>{@code find → 端口检查 → open → register} 必须是原子的：
@@ -215,6 +221,9 @@ public final class SessionLauncher {
                 this.close(id);
                 /* 来源先于注册写入：注册观察者要靠它把会话 id 换算成设备 id */
                 this.sources.put(id, source.withLastGood(prepared, fingerprint));
+                if (this.registerFailureHook != null) {
+                    this.registerFailureHook.accept(opened);
+                }
                 this.sessions.register(opened);
             } catch (RuntimeException e) {
                 this.sources.remove(id);

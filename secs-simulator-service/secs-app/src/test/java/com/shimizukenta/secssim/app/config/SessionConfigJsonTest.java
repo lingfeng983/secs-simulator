@@ -21,6 +21,10 @@ import com.shimizukenta.secssim.app.session.HsmsTimeouts;
 import com.shimizukenta.secssim.app.session.TraceLimits;
 import com.shimizukenta.secssim.core.compile.CompilationResult;
 import com.shimizukenta.secssim.core.compile.Issue;
+import com.shimizukenta.secssim.core.context.ContextTable;
+import com.shimizukenta.secssim.core.curve.ConstantCurve;
+import com.shimizukenta.secssim.core.template.Expression;
+import com.shimizukenta.secssim.core.value.DataSource;
 import com.shimizukenta.secssim.core.domain.CeidDef;
 import com.shimizukenta.secssim.core.domain.EquipmentSpec;
 import com.shimizukenta.secssim.core.domain.GlobalSvidDef;
@@ -61,6 +65,49 @@ class SessionConfigJsonTest {
                 new EventPlan("start", 2001, new Trigger.Periodic(5_000L, 200L)),
                 new EventPlan("once", 2101, new Trigger.At(1_000L))));
         return new SessionConfig(spec, schedule, 20);
+    }
+
+    private static SessionConfig configWithContext(ContextTable.Def... defs) {
+        SessionSpec spec = new SessionSpec("ctx-test", true, "127.0.0.1", 5000, 100, 20240601L, twoChambers());
+        return new SessionConfig(spec, EventSchedule.empty(), 20,
+                false, false, null, List.of(defs), Map.of(), Map.of());
+    }
+
+    @Test
+    void contextSourceMustMatchValueType() {
+        CompilationResult result = configWithContext(
+                new ContextTable.Def("LOTID", ValueType.ASCII,
+                        new DataSource.CurveSource(new ConstantCurve(3.0), DataSource.Clock.PHASE, null)),
+                new ContextTable.Def("WAFER", ValueType.ASCII,
+                        new DataSource.CycleNumber(1L, 1L, 1L)),
+                new ContextTable.Def("TEMP", ValueType.F4, new DataSource.Text("x")),
+                new ContextTable.Def("STEP", ValueType.U2,
+                        new DataSource.CycleText(null, "W{03}", null, 1L, 1L))
+        ).compile();
+
+        assertEquals(Set.of("CONTEXT_SOURCE_TYPE_MISMATCH"),
+                result.errors().stream().map(Issue::code).collect(Collectors.toSet()));
+        assertEquals(4, result.errors().size(), "每条不相容属性都要单独报错");
+        assertTrue(result.errors().stream().anyMatch(e -> e.message().contains("LOTID")),
+                "错误要指出具体属性名");
+    }
+
+    @Test
+    void compatibleContextSourcesCompile() {
+        CompilationResult result = configWithContext(
+                new ContextTable.Def("LOTID", ValueType.ASCII, new DataSource.Text("LOT")),
+                new ContextTable.Def("WAFER", ValueType.ASCII,
+                        new DataSource.CycleText(null, "W{03}", null, 1L, 1L)),
+                new ContextTable.Def("RCP", ValueType.ASCII, new DataSource.Const(7.0)),
+                new ContextTable.Def("TEMP", ValueType.F4, new DataSource.Const(3.0)),
+                new ContextTable.Def("CURVE", ValueType.F4,
+                        new DataSource.CurveSource(new ConstantCurve(3.0), DataSource.Clock.PHASE, null)),
+                new ContextTable.Def("EXPR", ValueType.F4,
+                        new DataSource.ExprSource(Map.of(), Expression.parse("t"), DataSource.Clock.PHASE)),
+                new ContextTable.Def("STEP", ValueType.U2, new DataSource.CycleNumber(1L, 1L, 1L))
+        ).compile();
+
+        assertTrue(result.ok(), () -> "相容组合不应报错: " + result.errors());
     }
 
     @Test

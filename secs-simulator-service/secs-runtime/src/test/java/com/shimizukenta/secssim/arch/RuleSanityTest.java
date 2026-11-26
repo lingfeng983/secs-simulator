@@ -38,6 +38,14 @@ class RuleSanityTest {
     }
 
     @Test
+    void everyGuardedPackageIsImported() {
+        ArchitectureTest.MIN_CLASSES.forEach((pkg, min) -> org.junit.jupiter.api.Assertions.assertTrue(
+                MAIN.that(com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage(pkg))
+                        .size() >= min,
+                "守门包未导入或过少: " + pkg + "（下限 " + min + "）"));
+    }
+
+    @Test
     void violatingDependencyIsDetected() {
         assertThrows(AssertionError.class, () -> noClasses()
                 .that().resideInAPackage("fixtures.core..")

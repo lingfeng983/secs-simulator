@@ -1,7 +1,14 @@
 package com.shimizukenta.secssim.runtime.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +44,34 @@ class ControlStateHolderTest {
         holder.change(EquipmentControlState.ONLINE);
         holder.communicatable(false);
         assertFalse(holder.canSendUnsolicited(), "链路断开后必须停发");
+    }
+
+    /**
+     * UP-03：change() 的 synchronized 不只是可见性——同一目标状态被并发提交时
+     * 只能通知一次。没有原子 check-then-set 时，N 条线程都可能看到旧状态再各发一次通知。
+     */
+    @Test
+    void concurrentTransitionsToSameStateNotifyOnce() throws Exception {
+        AtomicInteger notifications = new AtomicInteger();
+        ControlStateHolder holder = new ControlStateHolder(state -> notifications.incrementAndGet());
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            for (int i = 0; i < 100; i++) {
+                pool.submit(() -> {
+                    start.await();
+                    holder.change(EquipmentControlState.ONLINE);
+                    return null;
+                });
+            }
+            start.countDown();
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(5L, TimeUnit.SECONDS), "并发迁移不应卡住");
+        } finally {
+            pool.shutdownNow();
+        }
+        assertEquals(1, notifications.get(), "同一目标状态只发一次通知");
+        assertEquals(EquipmentControlState.ONLINE, holder.state());
     }
 
     @Test

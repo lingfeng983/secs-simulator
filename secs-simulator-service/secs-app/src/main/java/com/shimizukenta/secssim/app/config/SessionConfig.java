@@ -245,6 +245,13 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
             if (def.type() == ValueType.BINARY) {
                 issues.add(Issue.error("CONTEXT_TYPE_MISMATCH",
                         "晶圆属性 " + def.id() + " 不支持 BINARY（报文里没有可读语义）"));
+            } else if (!sourceMatchesType(def.type(), def.source())) {
+                /* 不在这里拦住，SourceEvaluator.text() 会把数值型来源静默编码成空 ASCII
+                   （或把文本来源编码成空数值），报文里只看到空字段，极难定位。 */
+                issues.add(Issue.error("CONTEXT_SOURCE_TYPE_MISMATCH",
+                        "晶圆属性 " + def.id() + "（" + def.type() + "）的值来源 "
+                                + def.source().getClass().getSimpleName()
+                                + " 不相容：ASCII 用文本来源，数值型用数值来源"));
             }
         }
 
@@ -270,6 +277,25 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
         }
 
         return new CompilationResult(model, issues);
+    }
+
+    /**
+     * 晶圆属性的类型与值来源是否相容。
+     *
+     * <p>ASCII 可写文本来源，也允许 {@link DataSource.Const}（按同一套格式化规则
+     * 转成字符串，既有配置大量这么写）；曲线/表达式/片号阶跃没有文本语义，
+     * 落到 {@code SourceEvaluator.text()} 会静默变空串，必须在这里拦下。
+     * 数值型反过来只接受数值来源，文本来源同样会得到空值。</p>
+     */
+    private static boolean sourceMatchesType(ValueType type, DataSource source) {
+        boolean text = source instanceof DataSource.Text || source instanceof DataSource.CycleText;
+        boolean numeric = source instanceof DataSource.Const
+                || source instanceof DataSource.CurveSource
+                || source instanceof DataSource.ExprSource
+                || source instanceof DataSource.CycleNumber;
+        return type == ValueType.ASCII
+                ? text || source instanceof DataSource.Const
+                : numeric;
     }
 
     /**

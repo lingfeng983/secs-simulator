@@ -2,9 +2,13 @@ package com.shimizukenta.secssim.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -123,6 +127,42 @@ class HsmsSessionRuntimeTest {
         org.junit.jupiter.api.Assertions.assertTrue(session.scheduler.isDisabled("beat"),
                 "钉值 = 参数变化 → 全停（D6）：计划回到 stopped");
         org.junit.jupiter.api.Assertions.assertTrue(session.isSvidPinned(svid), "钉值本身生效");
+    }
+
+    /**
+     * UP-02：分段应用与 100ms 心跳必须互斥，且两段替换不能在交错中产生混合快照。
+     * 另一个线程持续 pump，主线程连续应用两套编排并断言每次读到的都是完整的一套。
+     */
+    @Test
+    void applySectionsAndHeartbeatDoNotInterleave() throws Exception {
+        HsmsSessionRuntime session = runtime(new ManualEngineClock(0L), "sect-lock", "V1");
+        session.open();
+        EventSchedule a = schedule("planA", 1_000L);
+        EventSchedule b = schedule("planB", 2_000L);
+        AtomicBoolean stop = new AtomicBoolean(false);
+        Thread pump = new Thread(() -> {
+            while (!stop.get()) {
+                session.pumpNow();
+            }
+        }, "test-heartbeat");
+        pump.start();
+        try {
+            assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+                for (int i = 0; i < 100; i++) {
+                    EventSchedule next = i % 2 == 0 ? a : b;
+                    session.applySections(session.model, session.valueSource(), next, 20,
+                            false, false, null, null, null, null,
+                            Set.of(com.shimizukenta.secssim.runtime.ConfigSection.PLANS));
+                    String json = session.eventsJson();
+                    assertTrue(json.contains("planA") || json.contains("planB"),
+                            "每次都要看到完整的一套编排: " + json);
+                }
+            });
+        } finally {
+            stop.set(true);
+            pump.join(2_000L);
+        }
+        assertEquals(SessionState.OPEN, session.state(), "分段生效不重建会话");
     }
 
     /* ---------- helpers ---------- */

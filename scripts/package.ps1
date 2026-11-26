@@ -336,8 +336,12 @@ function Invoke-LinuxPackage {
     # 漏了它打包脚本自己能跑通、启动时才 NoClassDefFoundError
     $modules = 'secs-cli','secs-runtime','secs-api-http','secs-app','secs-store','secs-core','secs-protocol','secs-json'
     foreach ($module in $modules) {
-        if (-not (Test-Path (Join-Path $service "$module/target/$module-$version.jar"))) {
+        $jar = Join-Path $service "$module/target/$module-$version.jar"
+        if (-not (Test-Path $jar)) {
             throw "缺少 $module-$version.jar（先构建，或去掉 -SkipJars）"
+        }
+        if ($SkipJars) {
+            Test-ArtifactFreshness -Artifact $jar -SourceDir $service -Label "模块 jar $module"
         }
     }
 

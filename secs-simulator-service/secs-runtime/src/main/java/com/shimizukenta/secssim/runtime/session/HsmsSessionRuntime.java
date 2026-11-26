@@ -606,6 +606,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
     /**
      * 按配置段最小生效（设计 §4/§8）；实现在 {@link SectionApplySupport}。
      * 与 applyHot（全量替换一律全停）不同：只动真正变化的段（评审 2026-11-24 A1 拆分）。
+     *
+     * <p>与 applyHot / pumpNow 共用 {@code pumpLock}（后续升级 UP-02）：分段替换同样
+     * 是多步写入（视图 → 值来源 → 编排 → 数据 → 周期），不持锁时心跳可能读到
+     * 新编排 + 旧值来源的混合快照。锁顺序固定为调用方的 lifecycleLock → 本类 pumpLock，
+     * 反向获取不存在（pumpNow 不回调 SessionLauncher）。</p>
      */
     public SectionApplyOutcome applySections(
             ResolvedEquipment model, ValueSource values,
@@ -614,9 +619,11 @@ public final class HsmsSessionRuntime implements SessionRuntime {
             EcidValues ecidValues, CycleConfig cycle,
             LifecycleCycleClock lifecycleClock,
             java.util.Set<com.shimizukenta.secssim.runtime.ConfigSection> changed) {
-        return SectionApplySupport.applySections(this.sectionParts,
-                model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit,
-                contextTable, ecidValues, cycle, lifecycleClock, changed);
+        synchronized (this.pumpLock) {
+            return SectionApplySupport.applySections(this.sectionParts,
+                    model, values, schedule, maxPerSec, s6f11Wbit, s6f1Wbit,
+                    contextTable, ecidValues, cycle, lifecycleClock, changed);
+        }
     }
 
     /** 「设定」状态变量：钉住覆盖曲线，直到取消或热重载；钉值 = 参数变化 → 全停（D6）。 */

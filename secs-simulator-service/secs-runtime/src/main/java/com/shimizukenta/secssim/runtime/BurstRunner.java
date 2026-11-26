@@ -493,9 +493,12 @@ final class BurstRunner {
                 + "}";
     }
 
-    /** 压测节奏：按起始时刻对齐间隔，且不越过总时长预算；长 sleep 分片以便及时响应取消（评审 P3-8）。 */
-    private static boolean pace(long intervalMs, long startedAt, int index, long deadline,
-                                BooleanSupplier cancelled) {
+    /**
+     * 压测节奏：按起始时刻对齐间隔，且不越过总时长预算；长 sleep 分片以便及时响应取消（评审 P3-8）。
+     * 包级可见供 {@code BurstRunnerTest} 直接验证亚秒级取消，不改变生产调用面。
+     */
+    static boolean pace(long intervalMs, long startedAt, int index, long deadline,
+                        BooleanSupplier cancelled) {
         if (intervalMs <= 0L) {
             return System.currentTimeMillis() < deadline;
         }

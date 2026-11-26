@@ -36,28 +36,32 @@ class ArchitectureTest {
             .importPackages("com.shimizukenta");
 
     /**
-     * 哨兵：导入器必须真的看见类（评审 2026-11-24 F-ARCH-1）。
+     * 哨兵：导入器必须真的看见类（评审 2026-11-24 F-ARCH-1，UP-05 扩包）。
      *
      * <p>ArchUnit 用 ASM 解析 class 文件；JDK 升级后旧 ASM 会静默跳过所有类，
-     * 叠加各规则的 allowEmptyShould(true)，整套门禁会空转全绿。这里断言
-     * 导入总量与各关键包非空，让"门禁自己失效"变成显式失败。</p>
+     * 叠加各规则的 allowEmptyShould(true)，整套门禁会空转全绿。这里对每条规则
+     * 涉及的包逐一设下限，让"门禁自己失效"变成显式失败。cli 不在本模块
+     * classpath，由 secs-cli 模块的 CliArchitectureTest 单独守。</p>
      */
+    static final java.util.Map<String, Integer> MIN_CLASSES = java.util.Map.of(
+            "com.shimizukenta.secssim.core..", 50,
+            "com.shimizukenta.secssim.app..", 30,
+            "com.shimizukenta.secssim.api..", 30,
+            "com.shimizukenta.secssim.runtime..", 100,
+            "com.shimizukenta.secssim.store..", 20,
+            "com.shimizukenta.secs..", 150,
+            "com.shimizukenta.jsonhub..", 20);
+
     @Test
     void importerActuallySeesClasses() {
         org.junit.jupiter.api.Assertions.assertTrue(MAIN_CLASSES.size() > 300,
                 "导入类数异常偏少（" + MAIN_CLASSES.size() + "）：ASM 版本可能与 JDK 不匹配，分层规则正在空转");
-        for (String pkg : new String[] {
-                "com.shimizukenta.secssim.core..",
-                "com.shimizukenta.secssim.app..",
-                "com.shimizukenta.secssim.api..",
-                "com.shimizukenta.secssim.runtime..",
-                "com.shimizukenta.secssim.store.." }) {
-            org.junit.jupiter.api.Assertions.assertFalse(
-                    MAIN_CLASSES.that(com.tngtech.archunit.base.DescribedPredicate.alwaysTrue())
-                            .that(com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage(pkg))
-                            .isEmpty(),
-                    "关键包为空: " + pkg + "（classpath 或导入器异常）");
-        }
+        MIN_CLASSES.forEach((pkg, min) -> org.junit.jupiter.api.Assertions.assertTrue(
+                MAIN_CLASSES.that(com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage(pkg))
+                        .size() >= min,
+                "关键包类数异常偏少: " + pkg + "（当前 "
+                        + MAIN_CLASSES.that(com.tngtech.archunit.core.domain.JavaClass.Predicates
+                                .resideInAPackage(pkg)).size() + "，下限 " + min + "）"));
     }
 
     /** app 不得反向依赖装配层/适配器/存储（此前只写在 POM 注释里，评审 2026-11-24 补门禁）。 */
@@ -113,7 +117,6 @@ class ArchitectureTest {
         noClasses()
                 .that().resideInAPackage("com.shimizukenta.secssim.core..")
                 .should().dependOnClassesThat().resideInAnyPackage(OUTER_LAYERS)
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 
@@ -123,7 +126,6 @@ class ArchitectureTest {
                 .that().resideInAPackage("com.shimizukenta.secssim.core..")
                 .should().dependOnClassesThat()
                 .resideInAnyPackage("com.shimizukenta.jsonhub..", "com.shimizukenta.secs..")
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 
@@ -132,7 +134,6 @@ class ArchitectureTest {
         noClasses()
                 .that().resideOutsideOfPackage("com.shimizukenta.secssim.api.http..")
                 .should().dependOnClassesThat().resideInAPackage("com.sun.net.httpserver..")
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 
@@ -142,7 +143,6 @@ class ArchitectureTest {
                 .that().resideInAPackage("com.shimizukenta.secs..")
                 .should().onlyDependOnClassesThat()
                 .resideInAnyPackage("java..", "javax..", "com.shimizukenta.secs..")
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 
@@ -152,7 +152,6 @@ class ArchitectureTest {
                 .that().resideInAPackage("com.shimizukenta.jsonhub..")
                 .should().onlyDependOnClassesThat()
                 .resideInAnyPackage("java..", "javax..", "com.shimizukenta.jsonhub..")
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 
@@ -162,7 +161,8 @@ class ArchitectureTest {
      * <p>口径说明（评审 2026-11-24 P3）：store 的 {@code Class.forName("org.sqlite.JDBC")}
      * 是 JDBC 驱动加载的惯用法，属条文豁免——本规则只查 java.lang.reflect 依赖，
      * 不覆盖 Class.forName；store 也不在名单内。若将来要收紧，应同时覆盖
-     * java.lang.invoke 并为驱动加载写明豁免。</p>
+     * java.lang.invoke 并为驱动加载写明豁免。cli 不在本模块 classpath，
+     * 由 secs-cli 模块的 CliArchitectureTest 单独守，避免本规则恒空。</p>
      */
     @Test
     void newCodeNeverUsesReflection() {
@@ -171,10 +171,8 @@ class ArchitectureTest {
                         "com.shimizukenta.secssim.core..",
                         "com.shimizukenta.secssim.app..",
                         "com.shimizukenta.secssim.api..",
-                        "com.shimizukenta.secssim.runtime..",
-                        "com.shimizukenta.secssim.cli..")
+                        "com.shimizukenta.secssim.runtime..")
                 .should().dependOnClassesThat().resideInAPackage("java.lang.reflect..")
-                .allowEmptyShould(true)
                 .check(MAIN_CLASSES);
     }
 }
