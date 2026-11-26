@@ -15,7 +15,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,19 +35,20 @@ class HttpApiServerTest {
 
     private HttpApiServer server;
     private String base;
-    private final List<String> triggered = new ArrayList<>();
-    private final List<String> alarms = new ArrayList<>();
-    private final List<String> batchRequests = new ArrayList<>();
+    private final List<String> triggered = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> alarms = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> batchRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
     private TriggerOutcome outcome = TriggerOutcome.OK;
-    private final List<String> created = new ArrayList<>();
-    private final List<String> disconnected = new ArrayList<>();
-    private final List<String> reloaded = new ArrayList<>();
-    private final List<String> messageQueries = new ArrayList<>();
-    private final List<String> sentSml = new ArrayList<>();
-    private final List<String> auditEntries = new ArrayList<>();
+    private final List<String> created = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> disconnected = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> reloaded = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> messageQueries = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> sentSml = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<String> auditEntries = new java.util.concurrent.CopyOnWriteArrayList<>();
     private SessionOutcome createResult = SessionOutcome.OK;
     private boolean messagesAvailable = true;
-    private int shutdownCalls;
+    /* 服务端线程自增、测试线程读取：必须可见，否则偶发读到 0（CI 上实证） */
+    private volatile int shutdownCalls;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -251,7 +251,7 @@ class HttpApiServerTest {
                     return new DeviceBatch.Result(List.of(), List.of(), List.of(),
                             List.of("批次前缀不能含空白、斜杠或引号"));
                 }
-                List<DeviceBatch.Created> created = new ArrayList<>();
+                List<DeviceBatch.Created> created = new java.util.concurrent.CopyOnWriteArrayList<>();
                 for (int i = 0; i < request.count(); i++) {
                     String name = request.prefix() + (request.start() + i) + ".json";
                     created.add(new DeviceBatch.Created(name, request.prefix() + (request.start() + i),
