@@ -589,6 +589,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1 -Target Linux
 - [ADR 0018 · 内网工具全放行](docs/adr/0018-intranet-open-access.md) — 监听 0.0.0.0、移除 Host/Origin 防护（2026-11-14）
 - [结构收敛验收报告 2026-11-09](docs/reports/refactor-2026-11-09.md)
 - [前端代码与页面功能分析 2026-11-23](docs/reports/frontend-analysis-2026-11-23.md) — 规模/分层/数据流、页面功能清单、17 条问题与四批次改进建议；第八节是实施记录（已全部落地）
+- [3.5.2 发布说明](docs/reports/release-notes-3.5.2.md) — 缺陷修复版：值来源校验收口、分段保存与心跳锁一致、P0 专项测试与门禁自证
 - [3.5.1 发布说明](docs/reports/release-notes-3.5.1.md) — 缺陷修复版：并发与一致性加固、S2F15 乐观锁、SSE 载荷校验、E2E/native 门禁补齐
 - [3.5.0 发布说明](docs/reports/release-notes-3.5.0.md) — 质量版：命令面板三处跳转修正、全量配置与结构化页共用同一份草稿（不再互相 409）、批量同步逐台回报失败原因、首屏 562 kB → 264 kB
 - [3.4.0 发布说明](docs/reports/release-notes-3.4.0.md) — 功能版：配置区分段保存与行内确认即落盘、三个页签改名（链接配置/结构配置/全量配置）、结构改动不再要求先停设备、事件与报告页合并成三张表
