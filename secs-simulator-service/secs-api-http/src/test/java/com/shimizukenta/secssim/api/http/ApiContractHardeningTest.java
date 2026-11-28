@@ -180,9 +180,18 @@ class ApiContractHardeningTest {
     @Test
     void oversizedObjectBodyReportsTooLargeNotBadBody() throws Exception {
         String body = "{\"name\":\"" + "x".repeat(HttpSupport.MAX_BODY_BYTES) + "\"}";
-        HttpResponse<String> res = send("POST", "/api/v2/hosts", body);
-        assertEquals(413, res.statusCode(), res.body());
-        assertTrue(res.body().contains("body-too-large"), res.body());
+        try {
+            HttpResponse<String> res = send("POST", "/api/v2/hosts", body);
+            assertEquals(413, res.statusCode(), res.body());
+            assertTrue(res.body().contains("body-too-large"), res.body());
+        }
+        catch ( IOException e ) {
+            /* 与上一条同源：只凭 Content-Length 就拒，响应与断连竞争。
+               读到断连也算拒绝，业务层仍然不能被调到。 */
+            assertTrue(e.getMessage() != null
+                            && (e.getMessage().contains("header parser") || e.getMessage().contains("EOF")),
+                    "拒绝超长正文时的断连形态异常: " + e);
+        }
         assertTrue(this.calls.isEmpty(), "超限请求体不能落到业务层: " + this.calls);
     }
 

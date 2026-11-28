@@ -28,6 +28,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # 依赖走 Maven Central：偶发 429 时默认重试不够，会把一次限流变成一次"红"。
+    # 用 MAVEN_OPTS 而不是命令行 -D：Windows runner 上命令行属性会被截断成
+    # "Unknown lifecycle phase .connector..."（见 46106468779），JVM 属性没这个问题。
+    env:
+      MAVEN_OPTS: >-
+        -Daether.connector.http.retryHandler.count=5
+        -Daether.connector.http.retryHandler.interval=2000
     defaults:
       run:
         working-directory: secs-simulator-service
@@ -39,9 +46,7 @@ jobs:
           java-version: '25'
           cache: maven
       - name: mvn -B test
-        # 依赖走 Maven Central：偶发 429 时默认重试不够，会把一次限流变成一次"红"。
-        # 这两个属性是 resolver 的传输层重试，取不到也不影响构建（未知属性被忽略）。
-        run: mvn -B -ntp -Daether.connector.http.retryHandler.count=5 -Daether.connector.http.retryHandler.interval=2000 test
+        run: mvn -B -ntp test
 
   frontend:
     name: 前端

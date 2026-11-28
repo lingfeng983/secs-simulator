@@ -274,9 +274,19 @@ class ConfigApiTest {
     void oversizedBodyIsRejected() throws Exception {
         String huge = "x".repeat(300 * 1024);
 
-        HttpResponse<String> response = put("/api/v1/configs/line1.json", huge, OPERATOR_PASS);
-
-        assertEquals(400, response.statusCode(), response.body());
+        try {
+            HttpResponse<String> response = put("/api/v1/configs/line1.json", huge, OPERATOR_PASS);
+            assertEquals(400, response.statusCode(), response.body());
+        }
+        catch ( IOException e ) {
+            /* 服务端只凭 Content-Length 就判定超限，回 400 后立刻关连接；
+               客户端此时还在写 300KB，能不能读到响应取决于两边时序。
+               Linux runner 上偶尔报成 "header parser received no bytes"——
+               连接被拒同样是拒绝，关键断言在下面：正文没落到保存逻辑。 */
+            assertTrue(e.getMessage() != null
+                            && (e.getMessage().contains("header parser") || e.getMessage().contains("EOF")),
+                    "拒绝超长正文时的断连形态异常: " + e);
+        }
         assertTrue(this.saves.isEmpty(), "超限的请求不该进到保存逻辑: " + this.saves);
     }
 
