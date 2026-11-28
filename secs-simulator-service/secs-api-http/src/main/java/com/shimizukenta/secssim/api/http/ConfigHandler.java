@@ -126,6 +126,9 @@ final class ConfigHandler extends HttpSupport {
      * </p>
      */
     void handleConfigs(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.CONFIGS)) {
+            return;
+        }
         if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.VIEWER)) {
                 return;

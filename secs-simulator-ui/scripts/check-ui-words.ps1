@@ -247,6 +247,12 @@ foreach ($file in $files) {
     }
 }
 
+if ($scanned -eq 0) {
+    # 扫到 0 个文件通常意味着 src 路径被改/挪走了，门禁会整体空转并打印 [OK]
+    Write-Host "[FAIL] 界面文案检查没有扫到任何文件：src 路径可能变了，门禁不能空转" -ForegroundColor Red
+    exit 1
+}
+
 if ($violations.Count -eq 0) {
     Write-Host "[OK] 界面文案检查通过：$scanned 个文件 / $checked 段文案" -ForegroundColor Green
     exit 0

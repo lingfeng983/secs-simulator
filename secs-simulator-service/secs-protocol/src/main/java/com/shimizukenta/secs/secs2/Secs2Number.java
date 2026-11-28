@@ -184,7 +184,9 @@ abstract public class Secs2Number<T extends Number> extends AbstractSecs2 {
 					.collect(Collectors.joining(",", "[", "]"));
 		}
 		catch ( Secs2Exception e ) {
-			return "false";
+			/* 曾经返回字面量 false，产出 {"f":"I4","v":false}——"v 恒为数组"的契约被打破，
+			   前端按数组处理时整段报文都渲染不出来。按 JSON 惯例用 null。 */
+			return "null";
 		}
 	}
 	

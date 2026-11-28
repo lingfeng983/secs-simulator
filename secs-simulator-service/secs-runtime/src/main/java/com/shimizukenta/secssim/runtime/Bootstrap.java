@@ -236,6 +236,29 @@ public final class Bootstrap {
             Log.info("启动对账把 " + reset + " 台设备的链路相位收敛为已断开");
         }
 
+        /* 台账必须定时裁剪，不能只在启动跑一次：计划周期最低 1ms，一台设备跑几周就能
+           把 plan_execution 写满，link_event 更是重连一次加一条。磁盘写满之后所有
+           写事务（包括配置保存）都会失败，而现象看起来是"保存坏了"，离真实原因很远。
+           放在 daemon 线程里，停机时由 cleanup 关掉。 */
+        final java.util.concurrent.ScheduledExecutorService housekeeping =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "ledger-housekeeping");
+                    t.setDaemon(true);
+                    return t;
+                });
+        housekeeping.scheduleWithFixedDelay(() -> {
+            try {
+                planExecutions.trim();
+                long trimmed = linkState.trimLinkEvents();
+                if (trimmed > 0) {
+                    Log.info("台账定时裁剪 " + trimmed + " 行链路事件");
+                }
+            } catch (RuntimeException e) {
+                /* 裁剪失败不该拖垮服务，但必须留证据：下一个周期会重试 */
+                Log.error("台账定时裁剪失败（下个周期重试）", e);
+            }
+        }, 1L, 1L, java.util.concurrent.TimeUnit.HOURS);
+
         /* 配置读写与建会话共用同一个目录，"编辑完就能建会话"才成立 */
 
         if (options.configFile() != null) {
@@ -319,6 +342,7 @@ public final class Bootstrap {
             closeMessageLog(readySubscription, readyMessageLog);
             closeAuditLog(readyAuditLog);
             planFired.close();
+            housekeeping.shutdownNow();
             closeStorage(db, planExecutions);
         };
 

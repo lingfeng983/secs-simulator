@@ -202,7 +202,14 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
         List<Issue> issues = new ArrayList<>(compiled.issues());
         ResolvedEquipment model = compiled.equipment();
 
+        /* 计划 id 必须唯一：运行态按 id 记账（启用态、触发计数、last_error），
+           重名会让两条计划互相覆盖，界面上还看不出哪条真的在跑。 */
+        Set<String> planIds = new HashSet<>();
         for (EventPlan plan : this.schedule.plans()) {
+            if (!planIds.add(plan.id())) {
+                issues.add(Issue.error("DUPLICATE_PLAN_ID",
+                        "事件计划 id 重复：" + plan.id() + "（运行态按 id 记账，重名会互相覆盖）"));
+            }
             if (!model.ceids().containsKey(plan.ceid())) {
                 issues.add(Issue.error("UNKNOWN_CEID",
                         "事件计划 " + plan.id() + " 引用的 CEID " + plan.ceid()
@@ -210,6 +217,9 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
             }
             checkTrigger(plan, this.schedule, model, issues);
         }
+
+        /* afterEvent 链不能成环：A 触发 B、B 又触发 A 时两条都永远不会触发 */
+        checkAfterEventCycles(this.schedule, issues);
 
         /* 每个 SVID 一份 source，必须是数值型且编号存在 */
         for (Map.Entry<Integer, DataSource> entry : this.svidSources.entrySet()) {
@@ -225,6 +235,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
                 issues.add(Issue.error("SOURCE_TYPE_MISMATCH",
                         "SVID " + svid + "（" + resolved.type() + "）没有数值语义，不能配置曲线式值定义"));
             }
+            checkSourceVariables("SVID " + svid, entry.getValue(), issues);
         }
 
         /* 设备常量也可以是时间函数，但编号必须存在 */
@@ -234,6 +245,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
                 issues.add(Issue.error("UNKNOWN_SOURCE_ECID",
                         "值定义引用了不存在的设备常量 ECID " + entry.getKey()));
             }
+            checkSourceVariables("ECID " + entry.getKey(), entry.getValue(), issues);
         }
 
         /* 晶圆属性的名字不能重复，类型不能是不支持编码的 */
@@ -253,6 +265,7 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
                                 + def.source().getClass().getSimpleName()
                                 + " 不相容：ASCII 用文本来源，数值型用数值来源"));
             }
+            checkSourceVariables("晶圆属性 " + def.id(), def.source(), issues);
         }
 
         /* 报告里的 ctx.<名> 必须真有这个属性（写错了报文里就是空串，很难发现） */
@@ -361,5 +374,77 @@ public record SessionConfig(SessionSpec spec, EventSchedule schedule, int maxEve
      */
     public boolean hasSources() {
         return !this.svidSources.isEmpty();
+    }
+
+    /**
+     * 校验值来源里的表达式变量名都能解析到实际取值。
+     *
+     * <p>写错变量名（{@code {V}} 写成 {@code {v2}}、局部变量名拼错）以前能保存、能启动，
+     * 到运行期每次求值都抛 {@code ExpressionException}，值恒错却只在日志里留一行。
+     * 这里在编译期拦住。</p>
+     *
+     * @param label  出错时用于定位的标签（SVID/ECID/晶圆属性）
+     * @param source 值定义
+     * @param issues 问题收集
+     */
+    private static void checkSourceVariables(String label, DataSource source, List<Issue> issues) {
+        if (source instanceof DataSource.CurveSource curve && curve.transform() != null) {
+            for (String name : curve.transform().variables()) {
+                if (!"V".equals(name) && !"v".equals(name) && !"t".equals(name)) {
+                    issues.add(Issue.error("UNKNOWN_SOURCE_VARIABLE",
+                            label + " 的值变换引用了 " + name + "，只允许 V（曲线输出）与 t（秒）"));
+                }
+            }
+        }
+        if (source instanceof DataSource.ExprSource expr) {
+            for (String name : expr.expr().variables()) {
+                if ("t".equals(name)) {
+                    continue;
+                }
+                if (!expr.vars().containsKey(name)) {
+                    issues.add(Issue.error("UNKNOWN_SOURCE_VARIABLE",
+                            label + " 的表达式引用了未定义的变量 " + name
+                                    + "（已定义：" + String.join(", ", expr.vars().keySet())
+                                    + "；时间变量是 t）"));
+                }
+            }
+        }
+    }
+
+    /**
+     * 检测 {@code afterEvent} 链里的环（A→B→A）。
+     *
+     * <p>成环时链上每条计划都在等前一条，谁先触发都无从开始——表现是"配了计划但永不触发"。</p>
+     *
+     * @param schedule 事件编排
+     * @param issues   问题收集
+     */
+    private static void checkAfterEventCycles(EventSchedule schedule, List<Issue> issues) {
+        Map<String, String> next = new java.util.HashMap<>();
+        for (EventPlan plan : schedule.plans()) {
+            if (plan.trigger() instanceof Trigger.AfterEvent after) {
+                next.put(plan.id(), after.sourcePlan());
+            }
+        }
+        Set<String> reported = new HashSet<>();
+        for (String start : next.keySet()) {
+            if (reported.contains(start)) {
+                continue;
+            }
+            java.util.LinkedHashSet<String> path = new java.util.LinkedHashSet<>();
+            String current = start;
+            while (current != null && next.containsKey(current) && path.add(current)) {
+                current = next.get(current);
+            }
+            if (current != null && path.contains(current)) {
+                /* 从环的入口开始截，报出来的链首尾相接才读得懂 */
+                List<String> cycle = new ArrayList<>(path);
+                cycle = cycle.subList(cycle.indexOf(current), cycle.size());
+                reported.addAll(cycle);
+                issues.add(Issue.error("AFTER_EVENT_CYCLE",
+                        "事件计划的 afterEvent 形成环：" + String.join(" → ", cycle)
+                                + " → " + current + "（环上的计划永远不会触发）"));
+            }
+        }
     }
 }

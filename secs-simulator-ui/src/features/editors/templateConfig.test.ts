@@ -109,6 +109,7 @@ describe('collect*', () => {
 
   it('collectEcids 读设备常量', () => {
     const parsed = parseConfigDocument(CONFIG);
+    expect(parsed.ok, '示例配置必须能被解析').toBe(true);
     if (parsed.ok) {
       expect(collectEcids(parsed.config.root)).toEqual([{ id: 501, name: 'TEMP_LIMIT', type: 'F4' }]);
     }
@@ -116,6 +117,7 @@ describe('collect*', () => {
 
   it('collectSvids 按号段算出绝对 id', () => {
     const parsed = parseConfigDocument(CONFIG);
+    expect(parsed.ok, '示例配置必须能被解析').toBe(true);
     if (parsed.ok) {
       expect(collectSvids(parsed.config.root)).toEqual([{ svid: 1001, owner: 'CH1', slot: 'TEMP' }]);
     }

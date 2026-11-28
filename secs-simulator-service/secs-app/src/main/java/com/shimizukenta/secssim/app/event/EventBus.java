@@ -38,8 +38,11 @@ public final class EventBus {
         for (Consumer<MessageEvent> listener : this.listeners) {
             try {
                 listener.accept(event);
-            } catch (RuntimeException e) {
-                    LOG.warn("事件订阅者失败（已忽略）", e);
+            } catch (Throwable t) {
+                    /* 捕 Throwable 而不只是 RuntimeException：某个订阅者抛 Error
+                       （OOM 之外的 AssertionError、NoClassDefFoundError）会中断
+                       后面的订阅者，报文分发这一条链路就整个停在半路。 */
+                    LOG.warn("事件订阅者失败（已忽略）", t);
             }
         }
     }

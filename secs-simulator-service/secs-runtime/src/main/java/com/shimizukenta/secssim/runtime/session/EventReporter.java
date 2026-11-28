@@ -231,15 +231,26 @@ final class EventReporter {
             return;
         }
 
+        /* 非 W 位同样入队。它虽然不等回复，但写 socket 仍可能被对端零窗口堵到 T6；
+           这段代码跑在事件心跳的 pumpLock 内，同步写会让锁被占数秒，
+           把会话创建/关闭/重载一起拖住。入队后锁内只做投递，队列满则显式报错。 */
         try {
-            comm.send(6, 11, false, body);
-            this.emitted.incrementAndGet();
-            this.recordFire.run();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("发送 S6F11 被中断: " + ceid, e);
-        } catch (Exception e) {
-            throw new IOException("发送 S6F11 失败: " + ceid, e);
+            this.ackSender.get().execute(() -> {
+                try {
+                    comm.send(6, 11, false, body);
+                    this.emitted.incrementAndGet();
+                    this.recordFire.run();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    this.errorSink.accept(new IllegalStateException("发送 S6F11 被中断: " + ceid));
+                } catch (Exception e) {
+                    this.errorSink.accept(e);
+                    Log.error("会话 " + this.sessionId + " 发送 S6F11 失败: " + ceid, e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            this.wbitDropped.incrementAndGet();
+            throw new IOException("S6F11 发送队列已满: " + ceid, e);
         }
     }
 

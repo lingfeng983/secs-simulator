@@ -39,6 +39,16 @@ abstract class HttpSupport {
     static final int MAX_SML_BYTES = 64 * 1024;
 
     /**
+     * 读完一个请求体的时间上限。
+     *
+     * <p>防慢速正文攻击：声明 1 字节、然后每秒发 1 字节，只靠
+     * {@code Content-Length} 预检是拦不住的。每读一块就检查一次总耗时，
+     * 超了直接按「正文不可用」处理。对端完全不动的情形由服务器层的
+     * 单请求 deadline 兜底（HttpExchange 不暴露 socket，设不了 SO_TIMEOUT）。</p>
+     */
+    private static final long READ_DEADLINE_NANOS = 15_000L * 1_000_000L;
+
+    /**
      * 单次曲线预览窗口的最大跨度（24 小时）。
      *
      * <p>{@code EventSimulator} 按 100ms 步长推进，窗口越大推进次数越多；
@@ -211,7 +221,7 @@ abstract class HttpSupport {
      * @throws IOException 读失败
      */
     protected static String readBody(HttpExchange ex, int limit) throws IOException {
-        /* 先看声明的长度：Content-Length 巨大 + 每秒 1 字节是打满 4/8 个请求线程的标准手法，
+        /* 先看声明的长度：Content-Length 巨大 + 每秒 1 字节是打满请求线程的标准手法，
            不预检就会一直阻塞在 readNBytes 上。 */
         String declared = ex.getRequestHeaders().getFirst("Content-Length");
         if (declared != null && !declared.isBlank()) {
@@ -223,13 +233,33 @@ abstract class HttpSupport {
                 /* 非法 Content-Length 交给下面的读取与 JDK 处理 */
             }
         }
+        /* 声明值不可信（而且 chunked 请求根本没有 Content-Length），所以自己分块读，
+           每读一块检查一次总耗时——否则「声明 1 字节、每秒发 1 字节」能把一个
+           请求线程占满整整 120 秒的服务器 deadline。 */
+        long deadline = System.nanoTime() + READ_DEADLINE_NANOS;
+        byte[] buffer = new byte[8192];
+        java.io.ByteArrayOutputStream collected = new java.io.ByteArrayOutputStream();
         try (InputStream in = ex.getRequestBody()) {
-            byte[] bytes = in.readNBytes(limit + 1);
-            if (bytes.length > limit) {
-                return null;
+            while (collected.size() <= limit) {
+                int want = Math.min(buffer.length, limit + 1 - collected.size());
+                int read = in.read(buffer, 0, want);
+                if (read < 0) {
+                    break;
+                }
+                if (read == 0) {
+                    continue;
+                }
+                collected.write(buffer, 0, read);
+                if (System.nanoTime() > deadline) {
+                    return null;
+                }
             }
-            return new String(bytes, StandardCharsets.UTF_8);
         }
+        byte[] bytes = collected.toByteArray();
+        if (bytes.length > limit) {
+            return null;
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /** 读请求体，空正文视为非法。 */
@@ -297,7 +327,7 @@ abstract class HttpSupport {
             /* readBody 只在超过上限时返回 null（空正文返回的是空串），
                所以这里能精确报"太大"而不是含糊的 bad-body——客户端据此
                知道该减小载荷，而不是去检查自己到底发了什么。 */
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            respond(ex, 413, "{\"ok\":false,\"error\":\"body-too-large\"}");
             return null;
         }
         if (raw.isBlank()) {
@@ -451,6 +481,27 @@ abstract class HttpSupport {
     /** 清掉状态记录，避免线程池复用时串到下一个请求上。 */
     protected static void clearLastStatus() {
         LAST_STATUS.remove();
+    }
+
+    /**
+     * 集合端点必须精确匹配路径，否则回 404。
+     *
+     * <p>{@code com.sun.net.httpserver} 按前缀匹配：注册 {@code /api/v1/sessions}
+     * 之后，{@code /api/v1/sessionsabc} 也会进这个处理器并拿到 200 的集合。
+     * 结果是拼错的端点永远看不到 404，调用方会把错路径当成成功。
+     * 集合入口先断言精确相等。</p>
+     *
+     * @param ex       交换
+     * @param expected 期望路径
+     * @return 精确匹配返回 true；否则已写 404 并返回 false
+     * @throws IOException 写响应失败
+     */
+    protected static boolean requireExactPath(HttpExchange ex, String expected) throws IOException {
+        if (expected.equals(ex.getRequestURI().getPath())) {
+            return true;
+        }
+        respond(ex, 404, "{\"ok\":false,\"error\":\"not-found\"}");
+        return false;
     }
 
     /** 回 JSON 正文。405 统一带 Allow 头由调用方补充（方法分发处最清楚允许哪些方法）。 */

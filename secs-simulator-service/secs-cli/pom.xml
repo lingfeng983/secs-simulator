@@ -16,9 +16,13 @@
   <name>SECS Simulator CLI</name>
   <description>Headless command line and self-test harness</description>
 
-  <!-- 原生镜像路径：默认指向构建产物，可被 -Dsecs.smoke.exe=... 覆盖 -->
+  <!-- 原生镜像路径：默认指向构建产物，可被 -Dsecs.smoke.exe=... 覆盖。
+       产物名随平台不同——GraalVM 只在 Windows 上加 .exe，Linux/macOS 是无后缀的
+       secs-sim。写死 .exe 会让 Linux 上的 failsafe 找不到文件，而
+       NativeRuntimeIT 又用 assumeTrue 把「找不到」降级成 skip，夜间 Ubuntu 腿就
+       会在零覆盖的情况下亮绿灯。后缀由下面的 os profile 补齐。 -->
   <properties>
-    <secs.smoke.exe>${project.build.directory}/secs-sim.exe</secs.smoke.exe>
+    <secs.smoke.exe>${project.build.directory}/secs-sim</secs.smoke.exe>
   </properties>
 
   <dependencies>
@@ -108,7 +112,7 @@
                 <include>**/NativeRuntimeIT.java</include>
               </includes>
               <systemPropertyVariables>
-                <secs.smoke.exe>${project.build.directory}/secs-sim.exe</secs.smoke.exe>
+                <secs.smoke.exe>${secs.smoke.exe}</secs.smoke.exe>
               </systemPropertyVariables>
             </configuration>
             <executions>
@@ -123,6 +127,19 @@
           </plugin>
         </plugins>
       </build>
+    </profile>
+
+    <!-- GraalVM 只在 Windows 给产物加 .exe；其余平台沿用上面的无后缀默认值。 -->
+    <profile>
+      <id>native-windows-suffix</id>
+      <activation>
+        <os>
+          <family>windows</family>
+        </os>
+      </activation>
+      <properties>
+        <secs.smoke.exe>${project.build.directory}/secs-sim.exe</secs.smoke.exe>
+      </properties>
     </profile>
   </profiles>
 </project>

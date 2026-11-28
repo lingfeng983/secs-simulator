@@ -336,10 +336,10 @@ test('命令面板可打开并关闭', async ({ page }) => {
   await page.goto('/#/workbench');
   await page.keyboard.press('Control+k');
   const palette = page.locator('.command-palette, [role="dialog"]').first();
-  if (await palette.isVisible()) {
-    await page.keyboard.press('Escape');
-    await expect(palette).toHaveCount(0);
-  }
+  /* 打不开就是回归：以前这里写成 if (visible) { ... }，Ctrl+K 失效也照样通过 */
+  await expect(palette, 'Ctrl+K 必须打开命令面板').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
 });
 
 /* ─────────────────── 6. 按钮扫荡：只点不破坏的 ─────────────────── */

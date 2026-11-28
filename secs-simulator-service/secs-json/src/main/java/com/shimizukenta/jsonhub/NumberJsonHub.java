@@ -105,12 +105,60 @@ public class NumberJsonHub extends AbstractJsonHub {
 	
 	@Override
 	public OptionalInt optionalInt() {
-		return OptionalInt.of(num.intValue());
+		/* 越界必须返回 empty 而不是静默截断：{"port":4294967301} 曾变成 5，
+		   端口/条数的范围校验被绕过，而且没有任何地方看得出发生了截断。
+		   整型按类型精确判断，浮点才退化成范围比较（避免 double 舍入把
+		   Integer.MAX_VALUE 判成越界）。 */
+		if ( num instanceof Long || num instanceof Integer
+				|| num instanceof Short || num instanceof Byte ) {
+			long value = num.longValue();
+			if ( value < Integer.MIN_VALUE || value > Integer.MAX_VALUE ) {
+				return OptionalInt.empty();
+			}
+			return OptionalInt.of((int) value);
+		}
+		if ( num instanceof java.math.BigInteger big ) {
+			return big.bitLength() < 32 ? OptionalInt.of(big.intValue()) : OptionalInt.empty();
+		}
+		if ( num instanceof java.math.BigDecimal decimal ) {
+			try {
+				return OptionalInt.of(decimal.intValueExact());
+			}
+			catch ( ArithmeticException e ) {
+				return OptionalInt.empty();
+			}
+		}
+		/* 浮点按既有约定截断（2.9 → 2），只在真的越界时返回 empty */
+		double value = num.doubleValue();
+		if ( value < Integer.MIN_VALUE || value > Integer.MAX_VALUE ) {
+			return OptionalInt.empty();
+		}
+		return OptionalInt.of((int) value);
 	}
 	
 	@Override
 	public OptionalLong optionalLong() {
-		return OptionalLong.of(num.longValue());
+		if ( num instanceof Long || num instanceof Integer
+				|| num instanceof Short || num instanceof Byte ) {
+			return OptionalLong.of(num.longValue());
+		}
+		if ( num instanceof java.math.BigInteger big ) {
+			/* bitLength 63 位以内才装得进 signed long */
+			return big.bitLength() < 64 ? OptionalLong.of(big.longValue()) : OptionalLong.empty();
+		}
+		if ( num instanceof java.math.BigDecimal decimal ) {
+			try {
+				return OptionalLong.of(decimal.longValueExact());
+			}
+			catch ( ArithmeticException e ) {
+				return OptionalLong.empty();
+			}
+		}
+		double value = num.doubleValue();
+		if ( value < -9.223372036854775808E18 || value >= 9.223372036854775808E18 ) {
+			return OptionalLong.empty();
+		}
+		return OptionalLong.of((long) value);
 	}
 	
 	@Override

@@ -73,9 +73,11 @@ class SessionEventControlTest {
             JsonHub started = JsonHub.fromJson(session.eventsJson());
             assertTrue(started.get("events").get(0).get("enabled").booleanValue(), "启动后应显示运行中");
 
-            /* D2：周期计划启动即触发一条（过限流走台账） */
-            assertEquals(1L, session.emittedCount());
+            /* D2：周期计划启动即触发一条（过限流走台账）。
+               发送是入队的，计数在队列线程里自增——先等收到报文，再断言计数，
+               否则会读到「已入队但还没发出去」的 0。 */
             assertNotNull(events.poll(5L, TimeUnit.SECONDS), "启动即发一条");
+            assertEquals(1L, session.emittedCount());
 
             clock.advanceMs(1_000L);
             session.pumpNow();
@@ -99,6 +101,12 @@ class SessionEventControlTest {
             clock.advanceMs(1_000L);
             session.pumpNow();
             assertNotNull(events.poll(5L, TimeUnit.SECONDS), "重启周期后 enabledAt + period 再触发");
+            /* 这一次会同时产生两条（启动即触发 + period）：发送入队后计数异步，
+               等到 4 再断言，避免读到队列还没消费完的中间值 */
+            long deadline = System.currentTimeMillis() + 5_000L;
+            while (session.emittedCount() < 4L && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L);
+            }
             assertEquals(4L, session.emittedCount());
         } finally {
             session.close();

@@ -28,6 +28,9 @@ final class OpsHandler extends HttpSupport {
      * GET /api/v1/overview：全部会话的工作台聚合（schema v6）。
      */
     void handleOverview(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.OVERVIEW)) {
+            return;
+        }
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
@@ -48,6 +51,9 @@ final class OpsHandler extends HttpSupport {
      * JSON Lines，方便丢给 jq / Select-String。</p>
      */
     void handleMessages(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.MESSAGES)) {
+            return;
+        }
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
@@ -131,6 +137,9 @@ final class OpsHandler extends HttpSupport {
      * 比报文历史更敏感；viewer/operator 不应看到别人的操作轨迹。</p>
      */
     void handleAudit(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.AUDIT)) {
+            return;
+        }
         if (!requireRole(ex, ApiRole.ADMIN)) {
             return;
         }

@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -311,27 +312,37 @@ class PlanExecutorTest {
 
     /** 动作 wbit=false 反过来覆盖解析器的 true，且不进 ACK 队列。 */
     @Test
-    void actionWbitFalseForcesPlainSend() throws Exception {
+    void actionWbitFalseAlsoUsesSendQueue() throws Exception {
+        /* 非 W 位不再同步发送：写 socket 同样可能被对端零窗口堵到 T6，而这段代码
+           跑在事件心跳的 pumpLock 内，同步写会把会话创建/关闭/重载一起拖住。
+           现在两类发送都入队，锁内只做投递。 */
         Recorder rec = new Recorder();
         List<String> sends = new CopyOnWriteArrayList<>();
         List<String> threads = new CopyOnWriteArrayList<>();
-        AtomicInteger queuedTasks = new AtomicInteger();
+        CountDownLatch sent = new CountDownLatch(1);
+        ExecutorService queue = Executors.newSingleThreadExecutor();
         PlanExecutor executor = new PlanExecutor(DEVICE, rec);
         executor.actionResolver((action, ceid, atMs) -> new SmlParser.Message(6, 11, true, null));
-        executor.ackSender(() -> {
-            queuedTasks.incrementAndGet();
-            return Executors.newSingleThreadExecutor();
-        });
+        executor.ackSender(() -> queue);
 
-        executor.execute(plan("p", 2001,
-                        List.of(new PlanAction(PlanAction.KIND_S6F11, null, null, false, null, Map.of())),
-                        EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_KEEP),
-                "p", 2001, AT, comm(sends, null, args -> threads.add(Thread.currentThread().getName())),
-                true, (ceid, at) -> null, false);
+        try {
+            executor.execute(plan("p", 2001,
+                            List.of(new PlanAction(PlanAction.KIND_S6F11, null, null, false, null, Map.of())),
+                            EventPlan.OFFLINE_SKIP, EventPlan.FAILURE_KEEP),
+                    "p", 2001, AT, comm(sends, null, args -> {
+                        threads.add(Thread.currentThread().getName());
+                        sent.countDown();
+                    }),
+                    true, (ceid, at) -> null, false);
 
-        assertEquals(List.of("S6F11:w=false"), sends);
-        assertEquals(List.of(Thread.currentThread().getName()), threads);
-        assertEquals(0, queuedTasks.get(), "无 W 位不该占用 ACK 队列");
+            assertTrue(sent.await(2, TimeUnit.SECONDS), "非 W 位发送应在队列线程里完成");
+            assertEquals(List.of("S6F11:w=false"), sends);
+            assertEquals(1, threads.size());
+            assertNotEquals(Thread.currentThread().getName(), threads.get(0),
+                    "发送必须离开调用线程（pumpLock 内不做阻塞 IO）");
+        } finally {
+            queue.shutdownNow();
+        }
     }
 
     /** ACK 队列被拒绝 → 该动作 FAILED 并在台账写明队列已满。 */
@@ -350,7 +361,7 @@ class PlanExecutorTest {
                 (ceid, at) -> null, true);
 
         assertEquals("FAILED", rec.ledger.get(0).status());
-        assertTrue(rec.ledger.get(0).error().contains("ACK 队列已满"));
+        assertTrue(rec.ledger.get(0).error().contains("队列已满"), rec.ledger.get(0).error());
         assertEquals(List.of(Boolean.TRUE), rec.immediate);
     }
 

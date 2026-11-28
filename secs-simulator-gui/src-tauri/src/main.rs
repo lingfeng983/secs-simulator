@@ -46,14 +46,62 @@ struct AppState {
 }
 
 impl AppState {
+    /// 停掉本机后端：先请求优雅退出，超时才强杀。
+    ///
+    /// <p>原来直接 {@code kill()}（TerminateProcess），后端来不及落盘配置与
+    /// 最后一批台账。现在先 POST /api/v1/shutdown 并等最多 3 秒；后端自己
+    /// 关会话、刷盘、退出。等不到才 kill。</p>
     fn stop_backend(&self) {
-        if let Ok(mut guard) = self.backend.lock() {
-            if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+        let mut guard = match self.backend.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let Some(mut child) = guard.take() else {
+            return;
+        };
+
+        if let Some(url) = self.local_url() {
+            let _ = request_shutdown(&url);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    _ => break,
+                }
             }
         }
+
+        let _ = child.kill();
+        let _ = child.wait();
     }
+
+    /// 当前连接如果是本机后端，返回它的 URL（远程模式返回 None）。
+    fn local_url(&self) -> Option<String> {
+        let guard = match self.connection.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.clone().filter(|info| info.mode == "local").map(|info| info.url)
+    }
+}
+
+/// 发一个最小的 HTTP POST 到本机后端的关机端点。
+///
+/// <p>只为发一个不需要读响应的请求，不值得引入 HTTP 客户端依赖。</p>
+fn request_shutdown(url: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let trimmed = url.trim_end_matches('/');
+    let authority = trimmed.strip_prefix("http://").unwrap_or(trimmed);
+    let mut stream = std::net::TcpStream::connect(authority)?;
+    stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
+    let request = format!(
+        "POST /api/v1/shutdown HTTP/1.1\r\nHost: {authority}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes())
 }
 
 fn main() {
@@ -417,11 +465,18 @@ fn switch_backend(
                 }
             }
         }
-        state.stop_backend();
+        // 先拉起新后端（--port=0 用随机端口，不会和旧进程抢），成功后再停旧的。
+        // 原来的顺序是「先停旧 → 再拉起」，任何一步失败都会留下
+        // "旧后端已停、connection 还指着它"的死状态：界面显示本机模式，
+        // 所有请求却连不上，用户只能再切换一次。
         let (child, url) = spawn_local(&app)?;
+        state.stop_backend();
         *state.backend.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(child);
         let next = ConnectionInfo { mode: "local", url };
-        save_config(&app, &Persisted::Local)?;
+        // 持久化失败不影响本次连接：只影响下次启动时的默认地址，记下来即可
+        if let Err(error) = save_config(&app, &Persisted::Local) {
+            eprintln!("保存连接配置失败（本次连接仍可用）: {error}");
+        }
         *state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(next.clone());
         Ok(next)
     } else {
@@ -435,8 +490,9 @@ fn switch_backend(
                 return Ok(current);
             }
         }
-        state.stop_backend();
+        // 先落配置再停旧后端：写配置失败时旧后端仍在跑，切换整体失败但状态一致
         save_config(&app, &Persisted::Remote { url: trimmed.clone() })?;
+        state.stop_backend();
         let next = ConnectionInfo { mode: "remote", url: trimmed };
         *state.connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(next.clone());
         Ok(next)

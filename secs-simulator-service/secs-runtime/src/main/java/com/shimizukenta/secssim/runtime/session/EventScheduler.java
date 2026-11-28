@@ -78,6 +78,13 @@ final class EventScheduler {
         return byTime != 0 ? byTime : a.planId().compareTo(b.planId());
     });
 
+    /** 延迟链的容量上限；超了淘汰最早到期的条目。 */
+    private static final int MAX_PENDING_FIRES = 10_000;
+
+    /** 因延迟链满而被淘汰的条数（排障用）。 */
+    private final java.util.concurrent.atomic.AtomicLong pendingDropped =
+            new java.util.concurrent.atomic.AtomicLong();
+
     /** 条件去抖器：每个 OnCondition 计划一个。 */
     private final Map<String, ConditionDebouncer> conditionDebouncers = new ConcurrentHashMap<>();
 
@@ -721,6 +728,13 @@ final class EventScheduler {
                 if (!this.disabledPlans.contains(plan.id())
                         && plan.trigger() instanceof Trigger.AfterEvent after
                         && after.sourcePlan().equals(planId)) {
+                    /* 有界：AfterEvent 延迟配得大、上游又高频时，条目数会按
+                       「速率 × 延迟」增长。满了先淘汰最早到期的（它最可能已经过期），
+                       再入队，避免内存被一条链拖垮。 */
+                    if (this.pendingFires.size() >= MAX_PENDING_FIRES) {
+                        this.pendingFires.poll();
+                        this.pendingDropped.incrementAndGet();
+                    }
                     this.pendingFires.add(new PendingFire(atMs + after.delayMs(), plan.id(), plan.ceid()));
                 }
             }
@@ -743,8 +757,11 @@ final class EventScheduler {
             }
 
             if (++guard > 64) {
-                recordError(new IllegalStateException("AfterEvent 链超过 64 跳，疑似环: " + next.planId()));
-                Log.error("会话 " + this.sessionId + " 事件上报失败", null);
+                IllegalStateException loop = new IllegalStateException(
+                        "AfterEvent 链超过 64 跳，疑似环: " + next.planId());
+                recordError(loop);
+                /* 把异常对象传进去：以前传 null，现场只剩一行没有堆栈的日志 */
+                Log.error("会话 " + this.sessionId + " 的 AfterEvent 链疑似成环", loop);
                 return;
             }
 

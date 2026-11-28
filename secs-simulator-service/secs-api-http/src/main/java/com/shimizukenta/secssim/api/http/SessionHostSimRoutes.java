@@ -78,7 +78,7 @@ final class SessionHostSimRoutes extends HttpSupport {
             if (targetBody == null) {
                 /* 超限被 readBody 吞成 null：以前这里落到"空体"，于是一个超大的
                    远程目标请求被静默当成"连本机设备"，连到了完全不同的地方 */
-                respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+                respond(ex, 413, "{\"ok\":false,\"error\":\"body-too-large\"}");
                 return true;
             }
             if (targetBody.isBlank()) {

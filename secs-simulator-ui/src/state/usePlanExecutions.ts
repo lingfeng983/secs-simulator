@@ -94,11 +94,16 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
   const [includeDryRun, setIncludeDryRun] = useState(false);
   const [limit, setLimit] = useState(100);
 
+  /* 3 秒轮询与 plan-fired 触发的刷新会同时在飞；没有序号时晚到的旧台账
+     会盖掉刚触发的执行，看起来"台账漏了一条"。 */
+  const refreshSeq = useRef(0);
+
   const refresh = useCallback(async () => {
     if (deviceId === '') {
       setRows([]);
       return;
     }
+    const seq = ++refreshSeq.current;
     const query = new URLSearchParams({ limit: String(limit), dryRun: includeDryRun ? 'all' : '0' });
     if (planId !== undefined && planId !== '') {
       query.set('planId', planId);
@@ -107,9 +112,15 @@ export function usePlanExecutions(deviceId: string, liveEvents: NoticeWire[] | u
       const body = await readJson<{ items?: WireRow[] }>(
         await request(apiUrl(`/api/v2/devices/${encodeURIComponent(deviceId)}/runtime/executions?${query}`)),
       );
+      if (seq !== refreshSeq.current) {
+        return;
+      }
       setRows((body.items ?? []).map(normalize));
       setError('');
     } catch (cause) {
+      if (seq !== refreshSeq.current) {
+        return;
+      }
       setError((cause as Error).message);
     }
   }, [deviceId, includeDryRun, limit, planId]);

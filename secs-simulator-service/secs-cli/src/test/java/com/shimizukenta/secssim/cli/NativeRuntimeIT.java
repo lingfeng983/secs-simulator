@@ -2,7 +2,7 @@ package com.shimizukenta.secssim.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -29,12 +29,15 @@ import com.shimizukenta.secs.hsmsss.HsmsSsCommunicatorConfig;
 import com.shimizukenta.secs.hsmsss.HsmsSsProtocol;
 
 /**
- * 原生镜像的端到端测试（默认跳过，需显式指定 {@code -Dsecs.smoke.exe}）。
+ * 原生镜像的端到端测试（由 {@code mvn -Pnative verify} 启用）。
  *
  * <p>覆盖：进程启动握手、健康检查、鉴权、SSE 首帧、HSMS-SS 异步收发、优雅停机。
  * 它用 JVM 侧的主动连接去打原生镜像的被动端口，因此真正验证了
  * {@code AsynchronousSocketChannel} 在 native 下的能力；只连上端口是测不出这个的。
  * </p>
+ *
+ * <p><b>缺产物一律失败，不跳过。</b>跳过会让夜间矩阵在零覆盖的情况下变绿，
+ * 而这套用例正是原生链路的唯一覆盖。</p>
  */
 class NativeRuntimeIT {
 
@@ -44,10 +47,7 @@ class NativeRuntimeIT {
      */
     @Test
     void nativeImageOpensSqliteDatabases() throws Exception {
-        String exe = System.getProperty("secs.smoke.exe", "");
-        assumeTrue(!exe.isBlank(), "skip: -Dsecs.smoke.exe not set");
-        Path exePath = Path.of(exe);
-        assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
+        Path exePath = requireExe();
 
         Path workDir = Files.createTempDirectory("secs-sim-dbspike-");
         Process process = new ProcessBuilder(
@@ -89,10 +89,7 @@ class NativeRuntimeIT {
 
     @Test
     void nativeRuntimeServesApiAndSecs() throws Exception {
-        String exe = System.getProperty("secs.smoke.exe", "");
-        assumeTrue(!exe.isBlank(), "skip: -Dsecs.smoke.exe not set");
-        Path exePath = Path.of(exe);
-        assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
+        Path exePath = requireExe();
 
         int hsmsPort = freePort();
         Path workDir = Files.createTempDirectory("secs-sim-");
@@ -146,10 +143,7 @@ class NativeRuntimeIT {
 
     @Test
     void nativeSessionAnswersS1F3FromValueEngine() throws Exception {
-        String exe = System.getProperty("secs.smoke.exe", "");
-        assumeTrue(!exe.isBlank(), "skip: -Dsecs.smoke.exe not set");
-        Path exePath = Path.of(exe);
-        assumeTrue(Files.isRegularFile(exePath), "skip: not a file: " + exe);
+        Path exePath = requireExe();
 
         Path workDir = Files.createTempDirectory("secs-sim-demo-");
         /* 演示设备的 SECS 口写死在 JSON 里（15730，测试专用段） */
@@ -160,11 +154,16 @@ class NativeRuntimeIT {
         /* failsafe 的 basedir 是 secs-cli，上一级才是 secs-simulator-service */
         Path demoConfig = Path.of("..", "secs-runtime", "target", "classes",
                 "defaults", "demo-etch.json").toAbsolutePath().normalize();
-        assumeTrue(Files.isRegularFile(demoConfig), "skip: demo-etch.json not built: " + demoConfig);
+        if (!Files.isRegularFile(demoConfig)) {
+            fail("演示配置不存在: " + demoConfig + "（先构建 secs-runtime 的 resources）");
+        }
 
-        /* 前端产物：先在 secs-simulator-ui/ 里 npm run build；没构建就跳过这条用例 */
+        /* 前端产物：先在 secs-simulator-ui/ 里 npm run build。
+           缺产物不再是「跳过」——夜间链路会构建，缺了就说明门禁没覆盖到，必须红。 */
         Path webRoot = Path.of("..", "..", "secs-simulator-ui", "dist").toAbsolutePath().normalize();
-        assumeTrue(Files.isDirectory(webRoot), "skip: secs-simulator-ui not built: " + webRoot);
+        if (!Files.isDirectory(webRoot)) {
+            fail("前端产物不存在: " + webRoot + "（先在 secs-simulator-ui 里 npm run build）");
+        }
 
         Process process = new ProcessBuilder(
                 exePath.toString(),
@@ -250,6 +249,29 @@ class NativeRuntimeIT {
         } finally {
             process.destroyForcibly();
         }
+    }
+
+    /**
+     * 取原生镜像路径；不存在直接失败而不是跳过。
+     *
+     * <p>曾经的 {@code assumeTrue(Files.isRegularFile(...))} 会把「产物名写错」
+     * 和「镜像没构建」都变成 skip，于是 Linux 夜间腿在零覆盖的情况下始终绿灯
+     * （GraalVM 在 Linux 上的产物是无后缀的 {@code secs-sim}，而 failsafe 传的是
+     * {@code secs-sim.exe}）。门禁必须能变红，所以这里失败。</p>
+     *
+     * @return 可执行文件路径
+     */
+    private static Path requireExe() {
+        String exe = System.getProperty("secs.smoke.exe", "");
+        if (exe.isBlank()) {
+            fail("未设置 -Dsecs.smoke.exe：原生集成测试不能静默跳过（用 mvn -Pnative verify 运行）");
+        }
+        Path exePath = Path.of(exe);
+        if (!Files.isRegularFile(exePath)) {
+            fail("原生产物不存在: " + exePath
+                    + "（先执行 mvn -Pnative package 构建镜像；Linux/macOS 的产物名不带 .exe）");
+        }
+        return exePath;
     }
 
     /** 从会话列表正文里取第一个会话 id（B1：id 是 ses_ ULID，不是配置名）。 */

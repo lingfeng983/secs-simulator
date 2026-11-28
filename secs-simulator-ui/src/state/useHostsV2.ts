@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiClient, HostV2, SentMessageResult } from '../api';
 import type { CollectPlan, TracePlan } from './hostPlans';
 import {
@@ -48,13 +48,27 @@ export function useHostsV2(client: ApiClient | null) {
   const [templates, setTemplates] = useState<HostTemplate[]>([...BUILTIN_HOST_TEMPLATES]);
   const [loading, setLoading] = useState(false);
 
+  /**
+   * 刷新请求的序号。
+   *
+   * <p>详情页 2 秒轮询、动作后的 refresh、SSE 相位更新会同时在飞。
+   * 没有序号时，先发后到的旧快照会把刚连上的相位盖回"未连接"，
+   * 看起来像"点了连接又弹回去"。</p>
+   */
+  const refreshSeq = useRef(0);
+
   const refresh = useCallback(async () => {
     if (client === null) {
       return;
     }
+    const seq = ++refreshSeq.current;
     setLoading(true);
     try {
       const [list, rows] = await Promise.all([client.hostsV2(), client.hostTemplatesV2()]);
+      if (seq !== refreshSeq.current) {
+        /* 已经有更新的请求发出（或 SSE 就地改过）：这份快照已经过期，丢弃 */
+        return;
+      }
       setHosts(list);
       const builtinIds = new Set(BUILTIN_HOST_TEMPLATES.map((item) => item.id));
       setTemplates([
@@ -66,7 +80,9 @@ export function useHostsV2(client: ApiClient | null) {
     } catch {
       /* 后端不可达时保留现有数据（SSE/下一次轮询会补） */
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) {
+        setLoading(false);
+      }
     }
   }, [client]);
 
@@ -90,6 +106,8 @@ export function useHostsV2(client: ApiClient | null) {
     if (!isHostPhase(phase)) {
       return;
     }
+    /* 作废在途的列表快照：它是在这次相位变化之前发出的，回来会把相位盖回去 */
+    refreshSeq.current += 1;
     setHosts((previous) => {
       const index = previous.findIndex((host) => host.id === hostId);
       /* 找不到或相位没变：返回原数组，避免无谓重渲染 */

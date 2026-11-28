@@ -111,7 +111,9 @@ public final class AuditLog implements AutoCloseable {
             this.writer.write(json);
             this.writer.newLine();
             this.writer.flush();
-            this.bytes += json.length() + 1L;
+            /* 按 UTF-8 字节而不是字符数计：中文 detail 一个字符 3 字节，
+               按 length() 记会让轮转阈值形同虚设（实际文件是 3 倍大）。 */
+            this.bytes += json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1L;
             this.writeFailed = false;
         } catch (IOException e) {
             if (!this.writeFailed) {

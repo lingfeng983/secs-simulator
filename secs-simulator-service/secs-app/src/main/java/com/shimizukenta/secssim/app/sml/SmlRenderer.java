@@ -87,6 +87,9 @@ public final class SmlRenderer {
                 case FLOAT8 -> String.valueOf(value.getDouble(index));
                 case BINARY -> String.format(java.util.Locale.ROOT, "0x%02X", value.getByte(index) & 0xFF);
                 case BOOLEAN -> value.getBoolean(index) ? "0x01" : "0x00";
+                /* U8 是无符号 64 位：走 getLong 会把 ≥2^63 的值渲染成负数
+                   （18446744073709551615 变 -1），回填时又被 SmlParser 的值域判非法。 */
+                case UINT8 -> value.getBigInteger(index).toString();
                 default -> String.valueOf(value.getLong(index));
             };
         } catch (Secs2Exception | RuntimeException e) {

@@ -896,18 +896,22 @@ class HttpApiServerTest {
     }
 
     /**
-     * 任意来源的写请求照常执行（内网工具，无跨站限制）。
+     * 跨站写请求必须被拒。
+     *
+     * <p>服务端不设凭据是内网工具的定位，但浏览器端是另一回事：用户打开任意
+     * 恶意页面，它就能 POST 到 {@code http://localhost:PORT} 关停服务或改配置
+     * （没有凭据可校验、预检也放行）。读仍然全放行，写按来源拒绝。</p>
      */
     @Test
-    void writeFromAnyOriginIsExecuted() throws Exception {
+    void crossSiteWriteIsRejected() throws Exception {
         HttpResponse<String> response = send(
                 HttpRequest.newBuilder(URI.create(this.base + "/api/v1/shutdown"))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .header("Origin", "https://evil.example"),
                 null);
 
-        assertEquals(200, response.statusCode(), response.body());
-        assertEquals(1, this.shutdownCalls, "写请求不受来源限制");
+        assertEquals(403, response.statusCode(), response.body());
+        assertEquals(0, this.shutdownCalls, "跨站写请求不能被执行");
     }
 
     /** 没有 Origin 的客户端（curl/脚本/桌面壳首跳）不受影响：它不是浏览器发起的跨站请求。 */

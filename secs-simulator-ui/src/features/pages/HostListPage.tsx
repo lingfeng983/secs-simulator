@@ -238,7 +238,9 @@ export function HostListPage({
               disabled={busy}
               onClick={() => {
                 setBusy(true);
-                void hosts.disconnect(row.id).finally(() => setBusy(false));
+                hosts.disconnect(row.id)
+                  .catch((e: Error) => setError(e.message))
+                  .finally(() => setBusy(false));
               }}
             >
               断开

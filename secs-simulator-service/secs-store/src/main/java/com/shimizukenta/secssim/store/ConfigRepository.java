@@ -162,7 +162,8 @@ public final class ConfigRepository {
             long next = currentRevision + 1;
             try (PreparedStatement st = connection.prepareStatement(
                     "UPDATE config_document SET body=?, schema_version=?, revision=?, content_sha256=?, "
-                            + "updated_at=?, updated_by=?, change_note=? WHERE device_id=?")) {
+                            + "updated_at=?, updated_by=?, change_note=? "
+                            + "WHERE device_id=? AND revision=?")) {
                 st.setString(1, body);
                 st.setInt(2, Schema.VERSION);
                 st.setLong(3, next);
@@ -171,7 +172,14 @@ public final class ConfigRepository {
                 st.setString(6, actor == null ? "local" : actor);
                 st.setString(7, note == null ? "" : note);
                 st.setString(8, device.id());
-                st.executeUpdate();
+                /* CAS 条件同时写进 UPDATE：以前只靠上面那次 SELECT 比对，
+                   完全依赖「Db 只有一个写者」这个隐含前提。哪天出现第二个写者
+                   （连接池、外部进程、只读副本转写），就是标准的读后写丢更新。
+                   0 行说明有人在 SELECT 与 UPDATE 之间改过，按冲突返回。 */
+                st.setLong(9, currentRevision);
+                if (st.executeUpdate() == 0) {
+                    throw StoreException.conflict("配置在保存过程中被其他写入修改过，请重新载入后再保存");
+                }
             }
             insertRevisionSnapshot(connection, device.id(), next, body, sha, actor, note);
             trimRevisions(connection, device.id());
@@ -303,14 +311,27 @@ public final class ConfigRepository {
     public boolean deleteDevice(String key) {
         Objects.requireNonNull(key, "key");
         return this.db.writeConfig(connection -> {
+            /* 先按与读路径相同的语义解析出唯一一台设备，再按 id 删。
+               原写法是 `WHERE name=? OR id=?` 一次可能命中两行：设备名恰好等于
+               另一台设备的 dev_ 前缀 id 时，删一台会连带把另一台也软删掉。 */
+            DeviceRow device;
+            try {
+                device = findLiveDevice(connection, key);
+            } catch (StoreException e) {
+                if (e.kind() == StoreException.Kind.NOT_FOUND) {
+                    return false;
+                }
+                throw e;
+            } catch (SQLException e) {
+                throw new StoreException("删除设备失败: " + e.getMessage(), e);
+            }
             long now = System.currentTimeMillis();
             try (PreparedStatement st = connection.prepareStatement(
                     "UPDATE device SET deleted_at=?, updated_at=? "
-                            + "WHERE deleted_at IS NULL AND (name=? OR id=?)")) {
+                            + "WHERE deleted_at IS NULL AND id=?")) {
                 st.setLong(1, now);
                 st.setLong(2, now);
-                st.setString(3, key);
-                st.setString(4, key);
+                st.setString(3, device.id());
                 return st.executeUpdate() > 0;
             } catch (SQLException e) {
                 throw new StoreException("删除设备失败: " + e.getMessage(), e);

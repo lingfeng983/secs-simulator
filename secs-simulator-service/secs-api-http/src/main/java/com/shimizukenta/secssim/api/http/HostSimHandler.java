@@ -29,6 +29,9 @@ final class HostSimHandler extends HttpSupport {
      * （各连各的：可以是本机设备，也可以是不同远程 SECS）。</p>
      */
     void handleHostSims(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.HOST_SIMS)) {
+            return;
+        }
         String method = ex.getRequestMethod().toUpperCase(Locale.ROOT);
         if ("GET".equals(method)) {
             /* 实例列表含会话名、远程主机/端口与 lastError：与 collector 端点同级，至少 VIEWER */

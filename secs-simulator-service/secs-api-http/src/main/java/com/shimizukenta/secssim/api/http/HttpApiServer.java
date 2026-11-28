@@ -101,6 +101,18 @@ public final class HttpApiServer {
 
     private final HttpServer server;
     private final ExecutorService executor;
+
+    /**
+     * 同时在处理的请求数上限。
+     *
+     * <p>虚拟线程模式下"每请求一个任务"没有天然上限：海量 keep-alive 连接
+     * 或慢速正文各自占一个请求上下文，堆会跟着涨。超限直接 503，
+     * 让客户端看到明确的"忙"而不是把服务拖死。</p>
+     */
+    private static final int MAX_IN_FLIGHT = 512;
+
+    private final java.util.concurrent.Semaphore inFlight =
+            new java.util.concurrent.Semaphore(MAX_IN_FLIGHT);
     private final ApiContext context;
     private final AccessControl access;
     private final AuditSink audit;
@@ -433,7 +445,9 @@ public final class HttpApiServer {
      * 健康检查：直连访问，直接给出完整运行信息（探针、启动脚本与界面都靠它握手）。
      */
     private void handleHealth(HttpExchange ex) throws IOException {
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+        boolean head = "HEAD".equalsIgnoreCase(ex.getRequestMethod());
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod()) && !head) {
+            ex.getResponseHeaders().set("Allow", "GET, HEAD");
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
         }
@@ -485,7 +499,11 @@ public final class HttpApiServer {
      * </p>
      */
     private void handleStatic(HttpExchange ex) throws IOException {
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+        /* 读类资源接受 HEAD：探测存在性/大小是标准用法，之前一律 405。
+           405 必须带 Allow 头，否则客户端不知道这个路径支持什么方法。 */
+        boolean head = "HEAD".equalsIgnoreCase(ex.getRequestMethod());
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod()) && !head) {
+            ex.getResponseHeaders().set("Allow", "GET, HEAD");
             respond(ex, 405, "{\"ok\":false,\"error\":\"method-not-allowed\"}");
             return;
         }
@@ -623,6 +641,15 @@ public final class HttpApiServer {
                 return;
             }
 
+            /* 浏览器侧的跨站写拦截。服务端不设凭据是既定定位，但「打开任意恶意网页
+               就能 POST 到 localhost 关停服务或改配置」是另一回事：没有凭据可校验、
+               预检也放行，浏览器不会替我们挡。这里按 Origin / Sec-Fetch-Site 拒绝
+               跨站写请求；curl、脚本、SDK 这类没有 Origin 的客户端不受影响。 */
+            if (isCrossSiteWrite(ex)) {
+                respond(ex, 403, "{\"ok\":false,\"error\":\"cross-origin-write-blocked\"}");
+                return;
+            }
+
             if (isSlowRequest(ex)) {
                 /* 慢路由交给专用池：请求线程立刻返回，health/轮询/取票不再排在它们后面。 */
                 try {
@@ -647,6 +674,15 @@ public final class HttpApiServer {
      * 以及慢请求第一次可见。</p>
      */
     private void invokeLogged(HttpHandler handler, HttpExchange ex) {
+        /* 全局并发门：超过上限立刻 503，不排队占内存 */
+        if (!this.inFlight.tryAcquire()) {
+            try {
+                respond(ex, 503, "{\"ok\":false,\"error\":\"busy\"}");
+            } catch (IOException e) {
+                ex.close();
+            }
+            return;
+        }
         long startNanos = System.nanoTime();
         String method = ex.getRequestMethod();
         String path = ex.getRequestURI().getPath();
@@ -654,6 +690,7 @@ public final class HttpApiServer {
             HttpSupport.clearLastStatus();
             invokeHandler(handler, ex);
         } finally {
+            this.inFlight.release();
             long millis = (System.nanoTime() - startNanos) / 1_000_000L;
             int status = HttpSupport.lastStatus();
             if (millis >= SLOW_REQUEST_MS) {
@@ -693,6 +730,78 @@ public final class HttpApiServer {
                     deadline.cancel(false);
                 }
             }
+    }
+
+    /**
+     * 是否是浏览器发起的跨站写请求。
+     *
+     * <p>服务端是内部工具、不设凭据，但浏览器端的跨站请求仍会被发出去：
+     * 恶意页面可以对 {@code http://localhost:PORT} 发简单请求（预检也被放行），
+     * 无凭据可校验就无从拒绝。这里只挡写操作——读是公开状态，挡了反而影响排障。</p>
+     *
+     * @param ex 交换
+     * @return 跨站写返回 true
+     */
+    private static boolean isCrossSiteWrite(HttpExchange ex) {
+        String method = ex.getRequestMethod();
+        if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)
+                || "OPTIONS".equalsIgnoreCase(method)) {
+            return false;
+        }
+        String origin = ex.getRequestHeaders().getFirst("Origin");
+        if (origin == null || origin.isBlank()) {
+            /* curl / 脚本 / SDK 没有 Origin：本工具的常规用法，放行 */
+            return false;
+        }
+        if (isTrustedOrigin(origin, ex)) {
+            return false;
+        }
+        String site = ex.getRequestHeaders().getFirst("Sec-Fetch-Site");
+        /* Sec-Fetch-Site 明确不是跨站时（same-origin / same-site）给一次豁免，
+           应对个别环境里 Origin 与 Host 端口写法不一致的情况 */
+        return site == null || !"same-origin".equalsIgnoreCase(site);
+    }
+
+    /**
+     * 判断 Origin 是否可信：同主机，或桌面壳的 webview 来源。
+     *
+     * @param origin Origin 头
+     * @param ex     交换（取 Host）
+     * @return 可信返回 true
+     */
+    private static boolean isTrustedOrigin(String origin, HttpExchange ex) {
+        String lower = origin.trim().toLowerCase(Locale.ROOT);
+        if ("null".equals(lower)) {
+            /* file:// 页面或 sandbox iframe：不能当同源 */
+            return false;
+        }
+        /* Tauri 的 webview 来源（Windows 用 http(s)://tauri.localhost，其余 tauri://localhost） */
+        if (lower.equals("tauri://localhost")
+                || lower.startsWith("http://tauri.localhost")
+                || lower.startsWith("https://tauri.localhost")) {
+            return true;
+        }
+        String host = ex.getRequestHeaders().getFirst("Host");
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(origin.trim());
+            String originHost = uri.getHost();
+            if (originHost == null) {
+                return false;
+            }
+            /* 只比主机名：本机工具里端口可能被代理/端口转发改写，
+               比 host:port 会把正常用法误判成跨站 */
+            String requestHost = host.trim().toLowerCase(Locale.ROOT);
+            int colon = requestHost.lastIndexOf(':');
+            if (colon > 0 && requestHost.indexOf(']') < colon) {
+                requestHost = requestHost.substring(0, colon);
+            }
+            return originHost.equalsIgnoreCase(requestHost);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     /** 慢路由：等 T3、建连、编译、大历史序列化。 */

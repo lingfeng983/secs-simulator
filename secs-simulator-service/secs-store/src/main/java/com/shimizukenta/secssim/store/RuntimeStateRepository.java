@@ -427,6 +427,37 @@ public final class RuntimeStateRepository {
 
     /* ---------- link_event ---------- */
 
+    /** 每个实体保留的链路事件行数。 */
+    private static final int LINK_RETENTION_ROWS = 2_000;
+
+    /** 链路事件的保留时长。 */
+    private static final long LINK_RETENTION_MS = 7L * 24L * 3600L * 1000L;
+
+    /**
+     * 裁剪链路事件：每实体保留最近 {@value #LINK_RETENTION_ROWS} 条，且不超过 7 天。
+     *
+     * <p>{@code link_event} 以前完全没有裁剪路径——只在启动时清了一次没人管它，
+     * 一台设备反复重连、跑上几周就能把 runtime.db 撑到磁盘写满，
+     * 之后所有写事务（含配置保存）都会失败。由 {@code Bootstrap} 的小时级任务调用。</p>
+     *
+     * @return 删除行数
+     */
+    public int trimLinkEvents() {
+        return this.db.writeRuntime(connection -> {
+            try (var st = connection.createStatement()) {
+                /* 与 plan_execution 用同一种写法：子查询里先算行号，避免把多行结果当标量 */
+                int byRows = st.executeUpdate("DELETE FROM link_event WHERE id IN ("
+                        + "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY entity_id "
+                        + "ORDER BY id DESC) AS rn FROM link_event) WHERE rn > " + LINK_RETENTION_ROWS + ")");
+                int byAge = st.executeUpdate("DELETE FROM link_event WHERE at < "
+                        + (System.currentTimeMillis() - LINK_RETENTION_MS));
+                return byRows + byAge;
+            } catch (SQLException e) {
+                throw new StoreException("链路事件裁剪失败: " + e.getMessage(), e);
+            }
+        });
+    }
+
     /** 追加一条链路事件。 */
     public void appendLinkEvent(String entity, String entityId, String fromPhase,
                                 String toPhase, String detail) {

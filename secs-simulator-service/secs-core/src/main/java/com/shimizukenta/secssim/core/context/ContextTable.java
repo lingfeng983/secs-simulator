@@ -107,7 +107,9 @@ public final class ContextTable {
         if (def == null) {
             return Optional.empty();
         }
-        return Optional.of(SourceEvaluator.text(def.source(), tMs, this.clock));
+        /* 用 ofNullable：文本来源为 null 时（直接构造 Text(null)，或上层漏了默认值）
+           过去这里抛 NPE，把一次「值缺失」放大成整条报文组装失败。 */
+        return Optional.ofNullable(SourceEvaluator.text(def.source(), tMs, this.clock));
     }
 
     /**

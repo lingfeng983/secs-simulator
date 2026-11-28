@@ -93,8 +93,13 @@ final class TracePump {
     /** 会话 id（错误日志用）。 */
     private String sessionId = "";
 
-    /** S6F1 是否带 W 位。 */
-    private boolean s6f1Wbit;
+    /**
+     * S6F1 是否带 W 位。
+     *
+     * <p>写方是热重载/HTTP 线程，读方是事件心跳线程：非 volatile 时读方可能
+     * 长期看到旧值（改完开关不生效），也违反 JMM 的可见性约定。</p>
+     */
+    private volatile boolean s6f1Wbit;
 
     TracePump(TraceManager traces, java.util.function.Supplier<ExecutorService> ackSenders,
               java.util.function.LongSupplier clock) {
@@ -283,7 +288,25 @@ final class TracePump {
                         }
                     });
                 } else {
-                    this.sendTraceFrame(body, false);
+                    /* 非 W 位也入队：写 socket 可能被对端零窗口堵到 T6，而这段在
+                       pumpLock 内执行，同步写会把生命周期操作一起拖住。 */
+                    ExecutorService pool = this.ackSenders.get();
+                    if (pool == null || pool.isShutdown()) {
+                        this.wbitDropped.incrementAndGet();
+                        Log.warn("会话 " + this.sessionId + " S6F1 发送队列不可用（链路已断），丢弃一帧抓取");
+                        continue;
+                    }
+                    pool.execute(() -> {
+                        try {
+                            this.sendTraceFrame(body, false);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            recordError(new IllegalStateException("发送 S6F1 被中断: TRID " + frame.trid()));
+                        } catch (Exception e) {
+                            recordError(e);
+                            Log.error("会话 " + this.sessionId + " 发送 S6F1 失败", e);
+                        }
+                    });
                 }
             } catch (RejectedExecutionException e) {
                 this.wbitDropped.incrementAndGet();

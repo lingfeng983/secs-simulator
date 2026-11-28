@@ -59,8 +59,7 @@ export interface HostTemplateRow {
   note?: string;
 }
 
-type HostsV2Api = Pick<
-  ApiClient,
+type HostsV2Api = Pick<  ApiClient,
   | 'hostsV2'
   | 'createHostV2'
   | 'deleteHostV2'
@@ -76,6 +75,27 @@ type HostsV2Api = Pick<
   | 'saveHostPlanV2'
   | 'deleteHostPlanV2'
 >;
+
+/**
+ * 删除 / 断开这类"无返回正文"的端点：非 2xx 必须抛错。
+ *
+ * <p>以前直接返回 {@code response.ok}，409/500 被当成成功——界面提示
+ * "已删除 3 台"，刷新后行还在，而且没有任何原因提示。这里把后端给的
+ * {@code error} 带出来，让调用方能原样展示。</p>
+ */
+async function assertOk(response: Response, fallback: string): Promise<void> {
+  if (response.ok) {
+    return;
+  }
+  let detail = '';
+  try {
+    const body = await readJson<{ error?: string }>(response);
+    detail = typeof body.error === 'string' ? body.error : '';
+  } catch {
+    /* 响应不是 JSON（代理返回的 HTML 错误页等）：只报状态码 */
+  }
+  throw new Error(detail === '' ? `${fallback}（HTTP ${response.status}）` : `${fallback}：${detail}`);
+}
 
 export const hostsV2Api: HostsV2Api = {
   async hostsV2() {
@@ -97,7 +117,8 @@ export const hostsV2Api: HostsV2Api = {
   },
   async deleteHostV2(hostId) {
     const response = await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}`), { method: 'DELETE' });
-    return response.ok;
+    await assertOk(response, '删除主机失败');
+    return true;
   },
   async saveHostV2(hostId, req) {
     const body = await readJson<{
@@ -133,7 +154,8 @@ export const hostsV2Api: HostsV2Api = {
     }
   },
   async disconnectHostV2(hostId) {
-    await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/disconnect`), { method: 'POST' });
+    const response = await request(apiUrl(`/api/v2/hosts/${encodeURIComponent(hostId)}/disconnect`), { method: 'POST' });
+    await assertOk(response, '断开主机失败');
   },
   async applyHostV2(hostId) {
     const body = await readJson<{ ok?: boolean; error?: string }>(
@@ -173,7 +195,8 @@ export const hostsV2Api: HostsV2Api = {
   },
   async deleteHostTemplateV2(id) {
     const response = await request(apiUrl(`/api/v2/host-templates/${encodeURIComponent(id)}`), { method: 'DELETE' });
-    return response.ok;
+    await assertOk(response, '删除模板失败');
+    return true;
   },
   async listHostPlansV2(hostId, kind) {
     const body = await readJson<Record<string, unknown>[]>(

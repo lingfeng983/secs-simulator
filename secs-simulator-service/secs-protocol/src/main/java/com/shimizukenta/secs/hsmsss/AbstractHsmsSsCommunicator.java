@@ -934,6 +934,10 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		private void resetLinktesting() {
 			synchronized ( this.syncLinktesting ) {
 				this.linktestResetted = true;
+				/* 必须唤醒：链路测试的语义是「收到报文就重新计时」。只置标志的话，
+				   正在 wait(period) 的线程要等满整个周期才会看到它——周期配得长
+				   （如 60s）时 linktest 会在明明有流量的链路上照样发出去。 */
+				this.syncLinktesting.notifyAll();
 			}
 		}
 		

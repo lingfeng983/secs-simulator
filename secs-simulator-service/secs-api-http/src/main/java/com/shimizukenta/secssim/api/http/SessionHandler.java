@@ -42,6 +42,9 @@ final class SessionHandler extends HttpSupport {
 
 
     void handleSessions(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.SESSIONS)) {
+            return;
+        }
         if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.VIEWER)) {
                 return;
@@ -492,7 +495,7 @@ final class SessionHandler extends HttpSupport {
     void sendSml(HttpExchange ex, String sessionId) throws IOException {
         String sml = readBody(ex, MAX_SML_BYTES);
         if (sml == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            respond(ex, 413, "{\"ok\":false,\"error\":\"body-too-large\"}");
             return;
         }
         if (sml.isBlank()) {

@@ -159,24 +159,47 @@ export function setDraftText(name: string, text: string): void {
 }
 
 /**
- * 某些段保存成功：只把这几段的基线推进到当前值。
+ * 某些段保存成功：只把这几段的基线推进到<b>实际提交的那份内容</b>。
  *
  * <p>其它段保持原基线，所以「别的页面还有未保存改动」这件事不会被
  * 一次本页保存抹掉。</p>
+ *
+ * <p>关键点：基线必须取发请求那一刻的快照 {@code submitted}，不能读
+ * {@code snapshot.current}。保存请求在途时用户继续输入的内容不在这次请求里，
+ * 若拿当前值当基线，这些输入会被误判成「已保存」——页签的未保存标记消失，
+ * 下次保存回「本页没有改动」，输入就这么静默丢了。</p>
+ *
+ * @param name          配置名
+ * @param sections      服务端确认写入的段
+ * @param submitted     发起请求时的段快照
+ * @param submittedText 发起请求时的配置原文
  */
-export function markSectionsSaved(name: string, sections: readonly ConfigSectionName[]): void {
+export function markSectionsSaved(
+  name: string,
+  sections: readonly ConfigSectionName[],
+  submitted: SectionMap,
+  submittedText: string,
+): void {
   const entry = entryOf(name);
   const baseline: SectionMap = { ...entry.snapshot.baseline };
   for (const section of sections) {
-    baseline[section] = entry.snapshot.current[section];
+    baseline[section] = submitted[section];
   }
-  commit(name, { baseline });
+  commit(name, { baseline, baselineText: submittedText });
 }
 
-/** 整份保存成功（配置原文页）：所有段一起推进。 */
-export function markAllSaved(name: string): void {
+/**
+ * 整份保存成功（配置原文页）：所有段一起推进到实际提交的原文。
+ *
+ * @param name          配置名
+ * @param submittedText 发起请求时的配置原文
+ */
+export function markAllSaved(name: string, submittedText: string): void {
   const entry = entryOf(name);
-  commit(name, { baseline: entry.snapshot.current, baselineText: entry.snapshot.text });
+  commit(name, {
+    baseline: sectionsFromText(submittedText).canonicals,
+    baselineText: submittedText,
+  });
 }
 
 /** 保存后拿到新的 modifiedMs（下一次 If-Match 用它）；不动正文。 */

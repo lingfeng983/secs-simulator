@@ -259,6 +259,15 @@ class HsmsSsIntegrationTest {
         }
     }
 
+    /**
+     * 已建链的会话要能跨越 activeCircuit() 的 1000ms 等待 tick 继续存活。
+     *
+     * <p>这也是「主动回路通知不丢失」的回归覆盖：曾把结束条件写成
+     * {@code synchronized (channel) { channel.wait(); }}，完成回调先于等待进入时
+     * 通知丢失，回路线程永久阻塞、不再重连。回滚这段修复会让本用例在
+     * 超时内观察不到后续报文而失败。原先那个只断言 JDK wait/notify 语义的
+     * {@code ActiveCircuitWaitPatternTest} 已删除——它不碰生产代码，回滚修复照样通过。</p>
+     */
     @Test
     @DisplayName("a selected session stays alive across the 1000ms circuit-wait tick")
     void longLivedSessionSurvivesCircuitWaitTick() throws Exception {

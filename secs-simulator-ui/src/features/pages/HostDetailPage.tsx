@@ -64,7 +64,9 @@ export function HostDetailPage({
   const disconnectHost = () => {
     setBusy(true);
     setError('');
-    hosts.disconnect(hostId).finally(() => setBusy(false));
+    hosts.disconnect(hostId)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
   };
   const applySettings = () => {
     setBusy(true);

@@ -166,7 +166,7 @@ class ApiContractHardeningTest {
         body.append("\"}");
         try {
             HttpResponse<String> res = send("POST", "/api/v1/sessions/s1/host-sim", body.toString());
-            assertEquals(400, res.statusCode(), "超长正文应回 400: " + res.body());
+            assertEquals(413, res.statusCode(), "超长正文应回 413（Payload Too Large）: " + res.body());
         } catch (IOException e) {
             /* Windows runner 上 JDK HttpClient 偶尔把"服务端拒收后提前断连"报成 EOF
                （header parser received no bytes）。连接被拒同样是拒绝，关键是下面
@@ -181,7 +181,7 @@ class ApiContractHardeningTest {
     void oversizedObjectBodyReportsTooLargeNotBadBody() throws Exception {
         String body = "{\"name\":\"" + "x".repeat(HttpSupport.MAX_BODY_BYTES) + "\"}";
         HttpResponse<String> res = send("POST", "/api/v2/hosts", body);
-        assertEquals(400, res.statusCode(), res.body());
+        assertEquals(413, res.statusCode(), res.body());
         assertTrue(res.body().contains("body-too-large"), res.body());
         assertTrue(this.calls.isEmpty(), "超限请求体不能落到业务层: " + this.calls);
     }

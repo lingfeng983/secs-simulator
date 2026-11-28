@@ -69,11 +69,34 @@ describe('configDraftStore', () => {
     expect(changedSections(snap.current, snap.baseline)).toEqual(['cycle', 'plans']);
 
     /* 保存「工艺周期」页：只推进 cycle */
-    markSectionsSaved(name, ['cycle']);
+    const submitted = getDraftSnapshot(name);
+    markSectionsSaved(name, ['cycle'], submitted.current, submitted.text);
     snap = getDraftSnapshot(name);
     expect(changedSections(snap.current, snap.baseline)).toEqual(['plans']);
     /* 页签上「事件计划」还应为脏 */
     expect(changedSections(snap.current, snap.baseline, ['plans', 'throttle'])).toEqual(['plans']);
+  });
+
+  it('保存请求在途时的输入不会被当成已保存', async () => {
+    const name = nameOf();
+    await loadDraft(name, async () => ({ text: BASE, modifiedMs: 1 }));
+    setDraftText(name, BASE.replace('180000', '240000'));
+
+    /* 发请求那一刻的快照 */
+    const submitted = getDraftSnapshot(name);
+
+    /* 请求还在路上，用户继续输入（把同一段再改一次） */
+    setDraftText(name, BASE.replace('180000', '300000'));
+
+    /* 响应回来：服务端确认写入的是 submitted 那一版 */
+    markSectionsSaved(name, ['cycle'], submitted.current, submitted.text);
+
+    const snap = getDraftSnapshot(name);
+    expect(changedSections(snap.current, snap.baseline)).toEqual(['cycle']);
+    /* 基线停在提交的那一版，当前仍是 300000 那一版——差值是真实未保存改动 */
+    expect(snap.current.cycle).not.toBe(snap.baseline.cycle);
+    expect(snap.baselineText).toBe(submitted.text);
+    expect(snap.text).not.toBe(snap.baselineText);
   });
 
   it('改回原值就不脏了（不是"改过就一直脏"）', async () => {
@@ -89,7 +112,7 @@ describe('configDraftStore', () => {
     const name = nameOf();
     await loadDraft(name, async () => ({ text: BASE, modifiedMs: 1 }));
     setDraftText(name, BASE.replace('180000', '240000').replace('"p1"', '"p9"'));
-    markAllSaved(name);
+    markAllSaved(name, getDraftSnapshot(name).text);
     const snap = getDraftSnapshot(name);
     expect(changedSections(snap.current, snap.baseline)).toEqual([]);
     expect(snap.baselineText).toBe(snap.text);

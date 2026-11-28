@@ -192,16 +192,17 @@ class SessionControlStateTest {
 
             /* 手动启动：周期计划启动即触发一次（D2），过限流走台账 */
             assertEquals(PlanEnableOutcome.OK, f.session.setEventEnabled("beat", true));
-            assertEquals(1L, f.session.counters().get("emitted"), "启动即触发一条");
+            f.awaitEmitted(1L);
 
             f.tick();
-            assertEquals(2L, f.session.counters().get("emitted"), "enabledAt + period 触发下一条");
+            f.awaitEmitted(2L);
 
             /* 手动下线（等价主机发 S1F15）= 全停：计划回 stopped */
             assertTrue(f.session.setOnline(false));
             assertEquals(EquipmentControlState.OFFLINE, f.session.controlState());
 
             f.tick();
+            /* 下线是全停，队列里不该再有新条目：立刻读（不等）才有意义 */
             assertEquals(2L, f.session.counters().get("emitted"), "下线后不得继续上报");
 
             /* 路径二：主机自己把设备拉上线——计划仍是 stopped（不回放，D4） */
@@ -215,7 +216,7 @@ class SessionControlStateTest {
             /* 再手动启动：锚点 = 此刻，启动即触发一条 */
             assertEquals(PlanEnableOutcome.OK, f.session.setEventEnabled("beat", true));
             f.tick();
-            assertEquals(4L, f.session.counters().get("emitted"), "启动即触发一条 + enabledAt + period");
+            f.awaitEmitted(4L);
         }
     }
 
@@ -249,6 +250,33 @@ class SessionControlStateTest {
         void tick() {
             this.clock.advanceMs(1_000L);
             this.session.pumpNow();
+        }
+
+        /**
+         * 等 emitted 涨到期望值。
+         *
+         * <p>S6F11 的发送是入队的（pumpLock 内不做阻塞 IO），计数在队列线程里
+         * 自增，所以「启动即触发一条」不能在 {@code setEventEnabled()} 之后
+         * 立刻同步断言。</p>
+         *
+         * @param expected 期望的已发条数
+         */
+        void awaitEmitted(long expected) {
+            long deadline = System.currentTimeMillis() + 5_000L;
+            while (System.currentTimeMillis() < deadline) {
+                Long value = this.session.counters().get("emitted");
+                if (value != null && value == expected) {
+                    return;
+                }
+                try {
+                    Thread.sleep(10L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            assertEquals(expected, this.session.counters().get("emitted"),
+                    "等待 emitted=" + expected + " 超时");
         }
 
         SecsMessage send(int stream, int function, Secs2 body) throws Exception {

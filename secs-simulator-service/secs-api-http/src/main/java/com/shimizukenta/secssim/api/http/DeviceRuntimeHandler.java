@@ -273,7 +273,7 @@ final class DeviceRuntimeHandler extends HttpSupport {
         }
         String sml = readBody(ex, MAX_SML_BYTES);
         if (sml == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            respond(ex, 413, "{\"ok\":false,\"error\":\"body-too-large\"}");
             return;
         }
         if (sml.isBlank()) {
@@ -345,7 +345,7 @@ final class DeviceRuntimeHandler extends HttpSupport {
         String categoryRaw = query.getOrDefault("category", "1");
         String body = readBody(ex);
         if (body == null) {
-            respond(ex, 400, "{\"ok\":false,\"error\":\"body-too-large\"}");
+            respond(ex, 413, "{\"ok\":false,\"error\":\"body-too-large\"}");
             return;
         }
         if (!body.isBlank()) {

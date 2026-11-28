@@ -22,6 +22,9 @@ final class ConfigTemplateHandler extends HttpSupport {
      * 字段的取值，label/description 给界面显示。</p>
      */
     void handleConfigTemplates(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.CONFIG_TEMPLATES)) {
+            return;
+        }
         if (!requireRole(ex, ApiRole.VIEWER)) {
             return;
         }
@@ -34,6 +37,9 @@ final class ConfigTemplateHandler extends HttpSupport {
 
     /** GET /api/v1/templates：内置 + 自定义模板；POST 新建自定义模板。 */
     void handleTemplates(HttpExchange ex) throws IOException {
+        if (!requireExactPath(ex, ApiPaths.TEMPLATES)) {
+            return;
+        }
         if ("GET".equalsIgnoreCase(ex.getRequestMethod())) {
             if (!requireRole(ex, ApiRole.VIEWER)) {
                 return;
@@ -52,8 +58,15 @@ final class ConfigTemplateHandler extends HttpSupport {
             }
             try {
                 com.shimizukenta.jsonhub.JsonHub root = com.shimizukenta.jsonhub.JsonHub.fromJson(body);
-                String id = root.get("id").optionalString().orElse("").trim();
-                String text = root.get("text").optionalString().orElse("");
+                /* 用 str() 而不是 root.get("id").optionalString()：缺 id 时 get 返回 null，
+                   旧写法直接 NPE，被外层 catch 收成 400 bad-json——用户看到的是
+                   "JSON 坏了"，实际只是漏了个字段。 */
+                String id = str(root, "id").trim();
+                String text = str(root, "text");
+                if (id.isEmpty()) {
+                    respond(ex, 400, "{\"ok\":false,\"error\":\"missing-id\"}");
+                    return;
+                }
                 ConfigResult result = this.context.saveTemplate(id, text);
                 this.templateResult(ex, id, result);
             } catch (RuntimeException e) {

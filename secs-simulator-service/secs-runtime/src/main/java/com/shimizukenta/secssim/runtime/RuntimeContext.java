@@ -245,6 +245,10 @@ final class RuntimeContext implements ApiContext, AutoCloseable {
 
     @Override
     public SessionOutcome reloadSession(String sessionId) {
+        /* 重载会换掉会话的通信器与值来源，正在跑的压测还抓着旧的：
+           继续发报只会打到一个已关闭的会话上，统计也会和新的互相覆盖。
+           先取消（cancel 是幂等的，没有在跑直接返回）。 */
+        this.bursts.cancel(sessionId);
         return this.api.reloadSession(sessionId);
     }
 

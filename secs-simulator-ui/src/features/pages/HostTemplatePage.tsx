@@ -169,7 +169,15 @@ export function HostTemplatePage({
         onClose={() => setDeleteId(null)}
         onConfirm={() => {
           if (deleteId !== null) {
-            void hosts.deleteTemplate(deleteId);
+            const target = deleteId;
+            setDeleteId(null);
+            setBusy(true);
+            setError('');
+            hosts.deleteTemplate(target)
+              .then(() => notifier.success('已删除模板', target))
+              .catch((e: Error) => setError(e.message))
+              .finally(() => setBusy(false));
+            return;
           }
           setDeleteId(null);
         }}

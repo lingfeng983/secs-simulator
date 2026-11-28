@@ -284,20 +284,52 @@ public final class Schema {
                         + " 再重启（运行态库可直接删；配置库删除后需重新导入设备配置）。"
                         + " 确认要自动重建请加 --allow-schema-reset。");
             }
+            /* 备份是文件级操作，必须在事务之外完成（VACUUM INTO 自己会开读事务） */
             backupPath = backup(connection, dbPath);
-            RESET.reset(connection, dbPath, found, VERSION);
         }
-        createAll(connection, configDatabase);
-        writeVersion(connection, VERSION);
+
+        /* DROP + CREATE + 写版本必须是一个事务。原先四步各自自动提交，
+           在 --allow-schema-reset 升级途中断电会留下一个空库：下次启动
+           readVersion 返回 0，被当成全新库直接建空表，设备配置就这么静默没了。 */
+        boolean begun = false;
+        try {
+            exec(connection, "BEGIN IMMEDIATE");
+            begun = true;
+            if (backupPath != null) {
+                RESET.reset(connection, dbPath, found, VERSION);
+            }
+            createAll(connection, configDatabase);
+            writeVersion(connection, VERSION);
+            exec(connection, "COMMIT");
+            begun = false;
+        } finally {
+            if (begun) {
+                try {
+                    exec(connection, "ROLLBACK");
+                } catch (SQLException suppressed) {
+                    /* 回滚失败不掩盖原始异常 */
+                }
+            }
+        }
         return backupPath;
     }
 
+    private static void exec(Connection connection, String sql) throws SQLException {
+        try (Statement st = connection.createStatement()) {
+            st.executeUpdate(sql);
+        }
+    }
+
     /**
-     * 读 schema 版本；meta 表不存在（首次启动）或键不存在都返回 0。
+     * 读 schema 版本；meta 表不存在（首次启动）返回 0。
+     *
+     * <p>「meta 表存在但没有 schema_version」不再当成 0：那说明库是坏的
+     * （建表建到一半、或被外部改过），当成全新库会直接建空表并写版本，
+     * 把用户的设备配置静默清掉。宁可启动失败并给出删库提示。</p>
      *
      * @param connection 目标库连接
      * @return 库里的版本号，未初始化返回 0
-     * @throws SQLException 查询失败或版本值不是整数
+     * @throws SQLException 查询失败、版本值不是整数，或库结构不完整
      */
     static int readVersion(Connection connection) throws SQLException {
         if (!tableExists(connection, "meta")) {
@@ -307,7 +339,9 @@ public final class Schema {
                 "SELECT value FROM meta WHERE key='schema_version'");
              ResultSet rs = st.executeQuery()) {
             if (!rs.next()) {
-                return 0;
+                throw new SQLException(
+                        "meta 表存在但缺少 schema_version：库结构不完整（可能是上一次建表中途失败）。"
+                        + "请备份后删除该库文件再启动。");
             }
             String raw = rs.getString(1);
             try {
@@ -366,13 +400,16 @@ public final class Schema {
             vacuumFailure = e;
         }
         try {
-            /* 复制前把 WAL 收进主文件：WAL 活跃时裸复制 db+wal+shm 可能不一致 */
+            /* 复制前必须把 WAL 收进主文件：WAL 活跃时裸复制 db+wal+shm 可能不一致。
+               这里失败就中止——拿着一个缺最近提交的备份去 DROP 全库，
+               等于用坏备份换掉真数据，比直接报错更糟。 */
             try (Statement st = connection.createStatement()) {
                 st.execute("PRAGMA wal_checkpoint(TRUNCATE)");
             }
         } catch (SQLException e) {
-            /* checkpoint 失败不阻断复制兜底，原因随 vacuumFailure 一起带出去 */
-            vacuumFailure.addSuppressed(e);
+            e.addSuppressed(vacuumFailure);
+            throw new StoreException("schema 版本不匹配，备份前 WAL checkpoint 失败"
+                    + "（拒绝在数据可能丢失的情况下重建）: " + dbPath + ": " + e.getMessage(), e);
         }
         try {
             Files.copy(dbPath, target, StandardCopyOption.REPLACE_EXISTING);

@@ -14,7 +14,8 @@ import com.shimizukenta.secs.secs2.Secs2Builder;
  * 工程师写的 SML 变回 {@link Secs2}，所以这里实现一个<b>受控子集</b>：</p>
  *
  * <ul>
- *   <li>报文头：{@code S1F1}、{@code S1F1 W}、{@code S1F1 W.}</li>
+ *   <li>报文头：{@code S1F1}、{@code S1F1 W}、{@code S1F1 W.}、
+ *       {@code S6F11 NW}（primary 但不要回复，wbit=false）</li>
  *   <li>列表：{@code <L [n] ...>} / {@code <L ...>}</li>
  *   <li>ASCII：{@code <A "TEXT">}，支持 {@code \\ \" \n \r \t}</li>
  *   <li>二进制：{@code <B 0x81 0x00>}</li>
@@ -88,9 +89,18 @@ public final class SmlParser {
 
             skipSpaces();
             /* 系统默认：primary（奇数 function）带 W 等回复，secondary（偶数）永远不带。
-               显式写 W 仍可覆盖（secondary 写 W 会报错）。 */
+               这是 SECS 的惯例默认值，但并非所有 primary 都需要回复——因此补一个
+               显式关闭的写法 {@code NW}（no wait）：S6F11 NW 发出的报文 wbit=false。
+               在此之前语法上没有任何方式表达「不带 W 的 primary」，
+               手工/计划里写 S6F11 只能被迫等满 T3。 */
             boolean wbit = function % 2 == 1;
-            if (peekIgnoreCase('W')) {
+            if (matchesIgnoreCase("NW")) {
+                if (function % 2 == 0) {
+                    throw error("secondary 报文（偶数 function）本来就不带 W 位，不需要 NW");
+                }
+                wbit = false;
+                skipSpaces();
+            } else if (peekIgnoreCase('W')) {
                 pos++;
                 wbit = true;
                 if (function % 2 == 0) {
@@ -419,6 +429,31 @@ public final class SmlParser {
 
         private boolean peekIgnoreCase(char expected) {
             return !atEnd() && Character.toUpperCase(this.src.charAt(pos)) == Character.toUpperCase(expected);
+        }
+
+        /**
+         * 大小写不敏感地匹配并吃掉一个关键字（必须整词，后面不能紧跟字母数字）。
+         *
+         * @param keyword 关键字
+         * @return 是否匹配并已推进 pos
+         */
+        private boolean matchesIgnoreCase(String keyword) {
+            int end = pos + keyword.length();
+            if (end > this.src.length()) {
+                return false;
+            }
+            if (!this.src.regionMatches(true, pos, keyword, 0, keyword.length())) {
+                return false;
+            }
+            /* 整词匹配：避免把 S6F11NWXYZ 吃成 S6F11NW */
+            if (end < this.src.length()) {
+                char next = this.src.charAt(end);
+                if (Character.isLetterOrDigit(next) || next == '_') {
+                    return false;
+                }
+            }
+            pos = end;
+            return true;
         }
 
         private void expect(char expected, String message) throws SmlParseException {

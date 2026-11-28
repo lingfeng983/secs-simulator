@@ -193,6 +193,10 @@ export function useConfigDraft(
         return;
       }
       const payload = sectionPayload(owned, parsed.config.root);
+      /* 提交快照：请求在途期间用户可能继续输入，成功后只能用这一份推进基线，
+         否则那些新输入会被当成已保存（静默丢失） */
+      const submitted = snap.current;
+      const submittedText = snap.text;
       const result = await backend.saveConfigSections(targetName, payload, snap.modifiedMs, confirmOverwrite);
       if (result === null || configNameRef.current !== targetName) {
         return;
@@ -201,7 +205,7 @@ export function useConfigDraft(
       if (result.status === 200) {
         setProblems([]);
         /* 只推进服务端判定为"确实写入了"的那几段，别页的脏保持原样 */
-        markSectionsSaved(targetName, result.changed);
+        markSectionsSaved(targetName, result.changed, submitted, submittedText);
         await refreshModifiedMs(targetName);
         setConfirm(null);
         /* 成功不写页面内提示：右下角已经有 toast。下面只在"有东西被重置"时补一句，
@@ -235,7 +239,7 @@ export function useConfigDraft(
     }
     if (result.status === 200) {
       setProblems([]);
-      markAllSaved(targetName);
+      markAllSaved(targetName, text);
       await refreshModifiedMs(targetName);
       /* 目录里的文件大小/修改时间要跟着变，否则概览与清单还挂着旧值 */
       await backendRef.current.refreshConfigs();

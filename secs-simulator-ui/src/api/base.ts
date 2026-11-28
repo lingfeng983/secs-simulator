@@ -146,7 +146,13 @@ export async function readJson<T>(response: Response): Promise<T> {
      （"Unexpected token '<'"），那东西弹到界面上等于没提示。 */
   const text = await response.text();
   if (text.trim() === '') {
-    return undefined as T;
+    /* 以前返回 undefined as T，调用方随后 body.sessions 直接抛
+       "Cannot read properties of undefined"，用户看到的是 TypeError 而不是
+       "响应为空"。空正文只对 204/205 合法，其余按协议错误处理。 */
+    if (response.status === 204 || response.status === 205) {
+      return undefined as T;
+    }
+    throw new ApiError(response.status, 'empty-body', `${response.status} 响应为空（不是预期的接口数据）`);
   }
   try {
     return JSON.parse(text) as T;

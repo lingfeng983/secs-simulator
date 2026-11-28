@@ -121,3 +121,32 @@ jobs:
             }
           if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Host "缺 UTF-8 BOM: $_" }; exit 1 }
           Write-Host "BOM 检查通过 ($n 个 .ps1)"
+
+      # 版本号散落在 9 个 pom、BuildInfo、两个 package.json/lock、tauri.conf.json、
+      # Cargo.toml/lock 共 16 处。发版靠人工同步，漏一处只有到打包或运行时才发现。
+      # 这里做一次轻量一致性校验：以内核 pom 为准，其余声明必须与它相等。
+      - name: 版本号一致性
+        shell: bash
+        run: |
+          set -euo pipefail
+          V=$(grep -m1 -oP '(?<=<version>)[^<]+' secs-simulator-service/pom.xml)
+          echo "基准版本（secs-simulator-service/pom.xml）: $V"
+          fail=0
+          check() {
+            if [ "$2" != "$V" ]; then
+              echo "::error file=$1::版本不一致，期望 $V，实际 $2"
+              fail=1
+            fi
+          }
+          for pom in secs-simulator-service/secs-*/pom.xml; do
+            check "$pom" "$(grep -m1 -oP '(?<=<version>)[^<]+' "$pom")"
+          done
+          check secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/BuildInfo.java \
+            "$(grep -oP '(?<=VERSION = ")[^"]+' secs-simulator-service/secs-runtime/src/main/java/com/shimizukenta/secssim/runtime/BuildInfo.java)"
+          for pkg in secs-simulator-ui/package.json secs-simulator-gui/package.json secs-simulator-gui/src-tauri/tauri.conf.json; do
+            check "$pkg" "$(grep -m1 -oP '(?<="version": ")[^"]+' "$pkg")"
+          done
+          check secs-simulator-gui/src-tauri/Cargo.toml \
+            "$(grep -m1 -oP '(?<=^version = ")[^"]+' secs-simulator-gui/src-tauri/Cargo.toml)"
+          [ "$fail" -eq 0 ] && echo "版本号一致：$V"
+          exit "$fail"

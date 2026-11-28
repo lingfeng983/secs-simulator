@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.core.curve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Locale;
@@ -31,8 +32,20 @@ class CurveGoldenTest {
     }
 
     @Test
-    void fingerprintIsLongEnoughToBeMeaningful() {
-        assertTrue(fingerprint().length() >= 8, "指纹过短，不足以发现问题");
+    void fingerprintHasFixedWidthHexShape() {
+        /* 曾经的断言是 length() >= 8，而 %08x 恒为 8 字符——永远真。
+           改成校验形状 + 非零，哈希退化成常量或格式被改短都会红。 */
+        String actual = fingerprint();
+        assertTrue(actual.matches("[0-9a-f]{8}"),
+                "指纹必须是 8 位小写十六进制，实际: " + actual);
+        assertNotEquals("00000000", actual, "指纹不能是全零（哈希没覆盖到内容）");
+    }
+
+    @Test
+    void fingerprintChangesWhenSeedChanges() {
+        /* 防「哈希退化为常量」：换随机种子后指纹必须变，否则说明哈希没覆盖到值。 */
+        assertNotEquals(fingerprint(20240601L), fingerprint(20240602L),
+                "换随机种子后指纹必须变化，否则哈希没有覆盖值");
     }
 
     /**
@@ -41,7 +54,17 @@ class CurveGoldenTest {
      * @return 十六进制指纹
      */
     static String fingerprint() {
-        Rng rng = new Rng(20240601L);
+        return fingerprint(20240601L);
+    }
+
+    /**
+     * 用指定随机种子计算场景指纹。
+     *
+     * @param seed 随机种子
+     * @return 十六进制指纹
+     */
+    static String fingerprint(long seed) {
+        Rng rng = new Rng(seed);
 
         Curve ramp = new RampCurve(25.0, 180.0, 45_000L, false);
         Curve walk = new RandomWalkCurve(180.0, 0.0, 1.5, 2_000L, 3, 150.0, 210.0, BoundPolicy.REFLECT);

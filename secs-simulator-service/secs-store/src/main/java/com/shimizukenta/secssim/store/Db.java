@@ -279,6 +279,11 @@ public final class Db implements AutoCloseable {
         } catch (RuntimeException e) {
             rollbackQuietly(writer, e);
             throw e;
+        } catch (Error e) {
+            /* Error 也要回滚：写连接一旦卡在事务里，之后每条 BEGIN IMMEDIATE
+               都会报 "within a transaction"，整个写路径永久失效。 */
+            rollbackQuietly(writer, e);
+            throw e;
         }
     }
 
@@ -289,7 +294,7 @@ public final class Db implements AutoCloseable {
     }
 
     /** 回滚（尽力而为：失败挂在主异常上，不掩盖原始错误）。 */
-    private static void rollbackQuietly(Connection writer, Exception primary) {
+    private static void rollbackQuietly(Connection writer, Throwable primary) {
         try {
             exec(writer, "ROLLBACK");
         } catch (SQLException suppressed) {

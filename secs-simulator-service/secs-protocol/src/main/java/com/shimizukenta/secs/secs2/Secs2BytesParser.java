@@ -94,6 +94,16 @@ public class Secs2BytesParser {
 			
 			byte[] bs = pack.get(size);
 			
+			/* 字节数必须能整除元素宽度。以前只校验「够不够读」，I4 给 3 字节、
+			   F4 给 6 字节都会原样建出对象进接收队列，等到取值时才 BufferUnderflow；
+			   而 size() 又把异常吞成 -1，现场只剩一个"报文怪怪的"。
+			   在 parse 阶段拒绝，能走 S9F7 让对端知道是它发错了。 */
+			int width = elementWidth(s2i);
+			if ( width > 1 && (size % width) != 0 ) {
+				throw new Secs2BytesParseException(
+						"item " + s2i + " has " + size + " bytes, not a multiple of " + width);
+			}
+
 			switch ( s2i ) {
 			case ASCII: {
 				return new Secs2Ascii(bs);
@@ -162,6 +172,39 @@ public class Secs2BytesParser {
 		}
 	}
 	
+	/**
+	 * 单个元素的字节宽度；0 表示长度按字节解释（ASCII / BINARY）。
+	 *
+	 * @param item 数据项类型
+	 * @return 元素宽度
+	 */
+	private static int elementWidth(Secs2Item item) {
+		switch ( item ) {
+		case BOOLEAN:
+		case INT1:
+		case UINT1: {
+			return 1;
+		}
+		case INT2:
+		case UINT2: {
+			return 2;
+		}
+		case INT4:
+		case UINT4:
+		case FLOAT4: {
+			return 4;
+		}
+		case INT8:
+		case UINT8:
+		case FLOAT8: {
+			return 8;
+		}
+		default: {
+			return 0;
+		}
+		}
+	}
+
 	private static class BytesPack {
 		
 		/**

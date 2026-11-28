@@ -132,6 +132,8 @@ export interface BackendController {
   logLevel: string;
   /** 后端不可达的错误文案；空串 = 正常。 */
   backendError: string;
+  /** 配置目录读取失败的原因；空串 = 正常。 */
+  configError: string;
   /** 切换后端日志级别；返回是否成功。 */
   setLogLevel: (level: string) => Promise<boolean>;
   /** 新建一份配置；templateId 缺省是空骨架。返回 HTTP 状态码。 */
@@ -218,6 +220,8 @@ export function useBackend(
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [eventPlans, setEventPlans] = useState<EventPlanView[]>([]);
   const [configList, setConfigList] = useState<ConfigEntry[]>([]);
+  /** 配置目录读取失败的原因；空串 = 正常。侧栏与新建下拉为空时用它解释"为什么没有配置"。 */
+  const [configError, setConfigError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   /** 当前活跃会话的同步镜像：异步响应回来时判断"是不是已经切走了"。 */
@@ -256,8 +260,11 @@ export function useBackend(
     }
     try {
       setConfigList(await client.configs());
-    } catch {
-      /* 读不到目录先不打扰用户，下一轮再试 */
+      setConfigError('');
+    } catch (cause) {
+      /* 以前是空 catch：首次失败时侧栏"没有设备"、新建下拉为空，health 却正常，
+         用户完全看不到原因。记下来，界面上至少有一句可读的解释。 */
+      setConfigError((cause as Error).message || '读取配置目录失败');
     }
   }, [client]);
 
@@ -492,6 +499,7 @@ export function useBackend(
       refreshConfigs,
       logLevel: logLevel.level,
       backendError,
+      configError,
       setLogLevel: logLevel.set,
       overview: serverOps.overview,
       refreshOverview: serverOps.refreshOverview,
@@ -522,6 +530,7 @@ export function useBackend(
       logLevel.level,
       logLevel.set,
       backendError,
+      configError,
       serverOps.overview,
       serverOps.refreshOverview,
       serverOps.burst,

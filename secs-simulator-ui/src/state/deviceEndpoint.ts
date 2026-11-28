@@ -100,6 +100,9 @@ export function useDeviceEndpoint(
       setEndpoint(null);
       return;
     }
+    /* 换配置时先清掉旧端点：读取失败或还没回来时，继续返回上一台的
+       host/port 会让设备页的「监听」标签显示别的设备的地址。 */
+    setEndpoint(null);
     const hit = cache.get(configName);
     if (hit !== undefined && hit.modifiedMs === modifiedMs) {
       setEndpoint(hit);

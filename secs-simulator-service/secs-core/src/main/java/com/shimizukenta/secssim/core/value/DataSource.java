@@ -26,6 +26,14 @@ public sealed interface DataSource
                 DataSource.CycleNumber, DataSource.CycleText {
 
     /**
+     * {@code pattern} 里补零宽度的上限。
+     *
+     * <p>没有上限时 {@code {999999999}} 会让格式化先分配近 GB 的填充串，
+     * 一次采样就能打满堆。片号补到 32 位已经远超实际需要。</p>
+     */
+    int MAX_PATTERN_WIDTH = 32;
+
+    /**
      * 时间自变量。
      */
     enum Clock {
@@ -186,7 +194,14 @@ public sealed interface DataSource
             return fill(this.pattern, slot);
         }
 
-        /** 把 {@code {n}} / {@code {03}} 替换成补零后的片序。 */
+        /**
+         * 把 {@code {n}} / {@code {03}} 替换成补零后的片序。
+         *
+         * <p>宽度必须限幅：{@code {999999999}} 会让 String.format 先分配近 GB 的填充串，
+         * 一次采样就能把堆打满；{@code {0}} 之类的非法组合会抛未捕获的
+         * IllegalFormatException。超出范围或非数字一律按"不替换"处理，
+         * 保留原文让用户在界面上看出配置写错了。</p>
+         */
         private static String fill(String pattern, long slot) {
             int open = pattern.indexOf('{');
             int close = open < 0 ? -1 : pattern.indexOf('}', open);
@@ -200,8 +215,11 @@ public sealed interface DataSource
             } else {
                 try {
                     int width = Integer.parseInt(body);
+                    if (width < 1 || width > MAX_PATTERN_WIDTH) {
+                        return pattern;
+                    }
                     text = String.format("%0" + width + "d", slot);
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException | java.util.IllegalFormatException e) {
                     return pattern;
                 }
             }

@@ -781,6 +781,17 @@ export function App(): JSX.Element {
             </div>
           )}
 
+          {/* health 正常但配置目录读不到时，侧栏会是一片"没有设备"；
+              不给一句解释的话，用户只能怀疑是自己没建。 */}
+          {backend.backendError === '' && backend.configError !== '' && (
+            <div className="alert-bar" role="alert">
+              <span>读取配置目录失败：{backend.configError}</span>
+              <button type="button" onClick={() => void backend.refreshConfigs()} title="立即重试">
+                重试
+              </button>
+            </div>
+          )}
+
           <main className={`content${SINGLE_TABLE_PAGES.has(route.name) ? ' content--table-page' : ''}`}>
             <Suspense fallback={<PageLoading />}>
               {route.name === 'workbench' && <WorkbenchPage {...panelProps} />}

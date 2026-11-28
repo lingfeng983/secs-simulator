@@ -285,26 +285,32 @@ public final class PlanExecutor {
      */
     private void send(SecsCommunicator comm, SmlParser.Message message,
                       String ledgerPlanId, int ceid, long atMs, boolean dryRun) throws Exception {
-        if (message.wbit() && this.ackSender != null) {
+        /* 两类发送都走队列：W 位会阻塞到回复或 T3；非 W 位虽然不等回复，但写 socket
+           仍可能被对端零窗口堵到 T6。这段代码运行在事件心跳的 pumpLock 内，
+           同步写会让锁被占数秒，而会话创建/关闭/重载都要这把锁——一台设备卡住，
+           全进程的生命周期操作一起排队。入队后锁内只做投递。 */
+        if (this.ackSender != null) {
             ExecutorService pool = this.ackSender.get();
             if (pool == null) {
-                throw new IllegalStateException("W 位 ACK 队列不可用");
+                throw new IllegalStateException("发送队列不可用");
             }
+            final boolean wbit = message.wbit();
             try {
                 pool.execute(() -> {
                     try {
-                        comm.send(message.stream(), message.function(), true, message.body());
+                        comm.send(message.stream(), message.function(), wbit, message.body());
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         this.recordAckFailure(ledgerPlanId, ceid, atMs, dryRun,
-                                "等待 S" + message.stream() + "F" + message.function() + " 回复被中断");
+                                "等待 S" + message.stream() + "F" + message.function()
+                                        + (wbit ? " 回复" : " 发送完成") + "被中断");
                     } catch (Exception e) {
                         String error = e.getMessage() == null ? e.toString() : e.getMessage();
                         this.recordAckFailure(ledgerPlanId, ceid, atMs, dryRun, error);
                     }
                 });
             } catch (RejectedExecutionException e) {
-                throw new IOException("W 位 ACK 队列已满: S" + message.stream()
+                throw new IOException("发送队列已满: S" + message.stream()
                         + "F" + message.function(), e);
             }
             return;

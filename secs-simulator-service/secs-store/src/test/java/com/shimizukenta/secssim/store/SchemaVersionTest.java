@@ -96,21 +96,26 @@ class SchemaVersionTest {
     }
 
     @Test
-    void missingMetaTableOrVersionKeyIsTreatedAsFresh() throws Exception {
+    void missingMetaTableIsTreatedAsFresh() throws Exception {
         Path noMeta = this.workDir.resolve("no-meta.db").toAbsolutePath();
         try (Connection connection = open(noMeta)) {
             assertEquals(0, Schema.readVersion(connection));
             Schema.apply(connection, false, noMeta, false);
             assertEquals(Schema.VERSION, Schema.readVersion(connection));
         }
+    }
 
+    @Test
+    void metaWithoutVersionKeyIsRefusedInsteadOfTreatedAsFresh() throws Exception {
+        /* 旧行为是当成全新库直接建空表并写版本——那会把「建表建到一半」或
+           「被外部改过」的库静默当成新库，用户的设备配置就这么没了。
+           现在必须显式失败，让用户知道要备份后删库。 */
         Path noKey = this.workDir.resolve("no-key.db").toAbsolutePath();
         try (Connection connection = open(noKey);
              Statement st = connection.createStatement()) {
             st.executeUpdate("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-            assertEquals(0, Schema.readVersion(connection));
-            Schema.apply(connection, false, noKey, false);
-            assertEquals(Schema.VERSION, Schema.readVersion(connection));
+            assertThrows(java.sql.SQLException.class, () -> Schema.readVersion(connection),
+                    "meta 存在但缺 schema_version 时必须报错，不能当成全新库");
         }
     }
 
