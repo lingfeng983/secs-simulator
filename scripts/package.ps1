@@ -18,6 +18,21 @@ param(
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
+# Git Bash 启动的 PS 会同时带 Path/PATH/path 三个键；PS 5.1 的 Start-Process
+# 在构造子进程环境块时按大小写敏感判重，直接抛「已添加项。字典中的关键字:"Path"」。
+# 脚本里有三处 Start-Process（前端构建、Tauri 打包、原生冒烟），在入口统一收敛一次，
+# 避免每加一个 Start-Process 就要补一遍同样的处理。
+function Remove-DuplicatePathEnv {
+    $keys = @([Environment]::GetEnvironmentVariables().Keys | Where-Object { $_ -ieq 'path' })
+    if ($keys.Count -le 1) { return }
+    $keep = $keys | Where-Object { $_ -ceq 'Path' } | Select-Object -First 1
+    if (-not $keep) { $keep = $keys[0] }
+    foreach ($name in $keys) {
+        if ($name -cne $keep) { [Environment]::SetEnvironmentVariable($name, $null) }
+    }
+}
+Remove-DuplicatePathEnv
+
 $root = Split-Path $PSScriptRoot -Parent
 $service = Join-Path $root 'secs-simulator-service'
 $ui = Join-Path $root 'secs-simulator-ui'
@@ -162,14 +177,8 @@ function Test-NativeBackend {
     $outFile = Join-Path $work 'stdout.txt'
     $errFile = Join-Path $work 'stderr.txt'
 
-    # Git Bash 启动的 PowerShell 会同时带 Path/PATH/path 三个键，PS 5.1 的
-    # Start-Process 构造子进程环境字典时按大小写敏感判重，直接抛
-    #「已添加项。字典中的关键字:"Path"」。这里先合并成一个键再启动。
-    foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
-        if ($name -ieq 'path' -and $name -cne 'Path') {
-            [Environment]::SetEnvironmentVariable($name, $null)
-        }
-    }
+    # 入口已统一收敛 Path 的大小写变体，这里只需保证幂等
+    Remove-DuplicatePathEnv
 
     $process = Start-Process -FilePath $Exe `
         -ArgumentList @('--mode=integrated', '--port=0', "--work-dir=$work") `
