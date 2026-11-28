@@ -265,7 +265,8 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		};
 		
 		if ( wbit ) {
-			head[2] |= 0x80;
+			/* 位或的结果是 int，直接回写 byte 会触发窄化告警；显式收窄 */
+			head[2] = (byte)(head[2] | 0x80);
 		}
 		
 		return send(new HsmsSsMessage(head, secs2)).map(msg -> (SecsMessage)msg);
@@ -295,7 +296,8 @@ public abstract class AbstractHsmsSsCommunicator extends AbstractSecsCommunicato
 		};
 		
 		if ( wbit ) {
-			head[2] |= 0x80;
+			/* 位或的结果是 int，直接回写 byte 会触发窄化告警；显式收窄 */
+			head[2] = (byte)(head[2] | 0x80);
 		}
 		
 		return send(createHsmsSsMessage(head, secs2)).map(msg -> (SecsMessage)msg);

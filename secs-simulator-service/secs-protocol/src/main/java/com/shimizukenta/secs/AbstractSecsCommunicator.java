@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -78,14 +79,44 @@ public abstract class AbstractSecsCommunicator implements SecsCommunicator {
 		execServ.execute(createLoopTask(r));
 	}
 	
+	/**
+	 * 在线程池里跑一组任务，返回最先成功的结果。
+	 *
+	 * <p>线程池可能已经被 {@link #close()} 关掉：被动端 accept 的完成回调与 close
+	 * 天然并发，而回调跑在 NIO 的共享线程上。此时 {@code invokeAny} 抛
+	 * {@link RejectedExecutionException}——它是未受检异常，直接冒泡就成了回调线程上的
+	 * 未捕获异常（CI 会把它记成 failure 注解），同一线程上其它连接的收发也会被打断。
+	 * 这里统一转成受检的 {@link ExecutionException}，调用方本来就按"连接已终止"处理。</p>
+	 *
+	 * @param tasks 待执行任务
+	 * @param <T> 结果类型
+	 * @return 最先成功的结果
+	 * @throws InterruptedException 等待时被中断
+	 * @throws ExecutionException 全部失败，或线程池已随 close() 关闭
+	 */
 	protected <T> T executeInvokeAny(Collection<? extends Callable<T>> tasks)
 			throws InterruptedException, ExecutionException{
-		return execServ.invokeAny(tasks);
+		try {
+			return execServ.invokeAny(tasks);
+		}
+		catch ( RejectedExecutionException e ) {
+			throw closingException(e);
+		}
 	}
 	
 	protected <T> T executeInvokeAny(Collection<? extends Callable<T>> tasks, ReadOnlyTimeProperty timeout)
 			throws InterruptedException, ExecutionException, TimeoutException {
-		return execServ.invokeAny(tasks, timeout.getMilliSeconds(), TimeUnit.MILLISECONDS);
+		try {
+			return execServ.invokeAny(tasks, timeout.getMilliSeconds(), TimeUnit.MILLISECONDS);
+		}
+		catch ( RejectedExecutionException e ) {
+			throw closingException(e);
+		}
+	}
+
+	/** 线程池已关闭时的统一异常：带明确文案，便于日志里区分"关停"与"真失败"。 */
+	private static ExecutionException closingException(RejectedExecutionException cause) {
+		return new ExecutionException(new SecsException("communicator is closing", cause));
 	}
 	
 	

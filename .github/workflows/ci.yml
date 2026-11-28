@@ -39,7 +39,9 @@ jobs:
           java-version: '25'
           cache: maven
       - name: mvn -B test
-        run: mvn -B -ntp test
+        # 依赖走 Maven Central：偶发 429 时默认重试不够，会把一次限流变成一次"红"。
+        # 这两个属性是 resolver 的传输层重试，取不到也不影响构建（未知属性被忽略）。
+        run: mvn -B -ntp -Daether.connector.http.retryHandler.count=5 -Daether.connector.http.retryHandler.interval=2000 test
 
   frontend:
     name: 前端

@@ -28,7 +28,7 @@ public abstract class AbstractCollectionProperty<T>
 	@Override
 	public Collection<T> get() {
 		synchronized ( sync ) {
-			return vv.stream().map(v -> (T)v).collect(Collectors.toList());
+			return vv.stream().collect(Collectors.toList());
 		}
 	}
 	
@@ -141,7 +141,7 @@ public abstract class AbstractCollectionProperty<T>
 	@Override
 	public Iterator<T> iterator() {
 		synchronized ( sync ) {
-			return get().stream().map(x -> (T)x).iterator();
+			return get().stream().iterator();
 		}
 	}
 
@@ -236,21 +236,21 @@ public abstract class AbstractCollectionProperty<T>
 	@Override
 	public Spliterator<T> spliterator() {
 		synchronized ( sync ) {
-			return get().stream().map(x -> (T)x).spliterator();
+			return get().stream().spliterator();
 		}
 	}
 	
 	@Override
 	public Stream<T> stream() {
 		synchronized ( sync ) {
-			return get().stream().map(x -> (T)x);
+			return get().stream();
 		}
 	}
 	
 	@Override
 	public Stream<T> parallelStream() {
 		synchronized ( sync ) {
-			return get().parallelStream().map(x -> (T)x);
+			return get().parallelStream();
 		}
 	}
 	

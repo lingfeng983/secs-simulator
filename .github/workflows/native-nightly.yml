@@ -50,7 +50,8 @@ jobs:
           cache: maven
       - name: mvn -Pnative verify
         working-directory: secs-simulator-service
-        run: mvn -B -ntp -Pnative verify -pl secs-cli -am
+        # 同 ci.yml：对 Maven Central 的偶发限流做传输层重试，避免一次 429 变成一次假红。
+        run: mvn -B -ntp -Daether.connector.http.retryHandler.count=5 -Daether.connector.http.retryHandler.interval=2000 -Pnative verify -pl secs-cli -am
       - uses: actions/upload-artifact@v6
         if: success()
         with:

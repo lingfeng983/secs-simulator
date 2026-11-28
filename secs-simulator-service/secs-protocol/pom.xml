@@ -29,9 +29,17 @@
           <!--
             冻结模块（源自 secs4java8，229 个类保持原样）：只观察告警，不用 -Werror 阻断。
             需要改本模块时，先按父 POM 的零告警门禁自查后再改这里。
+
+            -serial / -this-escape 在此模块关闭，理由不是"看不见就不算"：
+            这些类实现 Serializable 只为沿用原库签名，运行期从不走 Java 序列化，
+            serial 告警指向的字段（监听器、队列）本来就是运行时对象，标 transient
+            反而会让反序列化得到半初始化实例；this-escape 则来自原库构造函数里
+            把 this 交给 Gem.newInstance 的固定写法，重构属于独立议题。
+            关闭这两类是为了让 CI 的 Checks 页只剩"真需要修"的信号，
+            其余 lint 类别（cast/fallthrough/overloads/...）仍在观察。
           -->
           <compilerArgs>
-            <arg>-Xlint:all,-missing-explicit-ctor</arg>
+            <arg>-Xlint:all,-missing-explicit-ctor,-serial,-this-escape</arg>
           </compilerArgs>
         </configuration>
       </plugin>
