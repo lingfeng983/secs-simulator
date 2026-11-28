@@ -88,7 +88,7 @@ class SessionAfterEventTest {
             clock.advanceMs(200L);
             session.pumpNow();
             assertEquals(2002, nextCeid(events), "t=1700 发 C");
-            assertEquals(3L, session.emittedCount());
+            SessionTestSupport.awaitEmitted(session, 3L);
         } finally {
             session.close();
         }

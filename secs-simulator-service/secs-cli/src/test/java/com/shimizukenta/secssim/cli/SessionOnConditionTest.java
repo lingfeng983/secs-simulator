@@ -101,7 +101,7 @@ class SessionOnConditionTest {
             clock.advanceMs(500L);
             session.pumpNow();
             assertNotNull(events.poll(3L, TimeUnit.SECONDS), "第二个条件周期应再次触发");
-            assertEquals(2L, session.emittedCount());
+            SessionTestSupport.awaitEmitted(session, 2L);
         } finally {
             session.close();
         }

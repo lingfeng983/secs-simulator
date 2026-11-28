@@ -1,6 +1,7 @@
 package com.shimizukenta.secssim.cli;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import com.shimizukenta.secssim.runtime.session.HsmsSessionRuntime;
 
@@ -25,6 +26,28 @@ final class SessionTestSupport {
     private static final long PEER_TIMEOUT_MS = 5_000L;
 
     private SessionTestSupport() {
+    }
+
+    /**
+     * 等待会话的发送计数达到期望值。
+     *
+     * <p>非 W 位发送同样是入队的：报文可能已经到达对端，队列线程随后才自增计数。
+     * 直接读 {@code emittedCount()} 会偶发读到"已发出但还没记账"的中间值——
+     * Windows runner 上真实出现过：客户端已收到 S6F11，计数仍是 0。</p>
+     *
+     * @param session 设备侧会话
+     * @param expected 期望的发送条数
+     * @throws InterruptedException 被中断
+     */
+    static void awaitEmitted(HsmsSessionRuntime session, long expected) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + PEER_TIMEOUT_MS;
+
+        while (session.emittedCount() < expected) {
+            if (System.currentTimeMillis() >= deadline) {
+                fail("等待 " + expected + " 条上报超时，实际 " + session.emittedCount());
+            }
+            Thread.sleep(10L);
+        }
     }
 
     /**

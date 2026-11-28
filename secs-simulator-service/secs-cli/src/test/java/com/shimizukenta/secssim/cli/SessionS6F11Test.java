@@ -70,7 +70,7 @@ class SessionS6F11Test {
             assertEquals(1, Secs2Read.asInt(values.get(0)), "单元号在首位");
             assertEquals(session.valueStore().valueAt(1001, 0L).orElseThrow(),
                     Secs2Read.asDouble(values.get(1)), 1e-3, "温度取自值引擎");
-            assertEquals(1L, session.emittedCount());
+            SessionTestSupport.awaitEmitted(session, 1L);
         } finally {
             session.close();
         }
